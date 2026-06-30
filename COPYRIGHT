@@ -1,0 +1,18 @@
+Copyright (C) 2026 Bambouville Inc.
+
+Tessera is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License, version 3, as published by the
+Free Software Foundation. The full license text is in the LICENSE file.
+
+Tessera links upstream Mosh and is therefore distributed under GPL-3.0.
+Distribution through Apple's App Store and TestFlight is covered by the
+additional permission granted by Bambouville Inc. under section 7 of the
+GPLv3, set out in COPYING.iOS.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+"Tessera", the Tessera app icon, and other Tessera brand assets are
+trademarks of Bambouville Inc. and are not licensed under the GPL; see the
+trademark reservation in COPYING.iOS.

@@ -1,0 +1,1084 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tessera §14.8 — keyboard customization mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:           #000000;
+  --panelBg:      #0A0A0A;
+  --inputBg:      #141414;
+  --inputBgSoft:  #1C1C1E;
+  --fg:           #FFFFFF;
+  --fgMuted:      rgba(235,235,245,0.60);
+  --fgDim:        rgba(235,235,245,0.35);
+  --fgFaint:      rgba(235,235,245,0.18);
+  --accent:       #5B9FFF;
+  --accentSoft:   rgba(91,159,255,0.14);
+  --accentHi:     rgba(91,159,255,0.32);
+  --green:        #30D158;
+  --amber:        #FF9F0A;
+  --red:          #FF453A;
+  --border:       rgba(255,255,255,0.08);
+  --borderStrong: rgba(255,255,255,0.14);
+
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #181818;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  max-width: 1340px;
+  margin: 0 auto;
+  padding: 48px 32px 96px;
+}
+
+.doc-h1 {
+  font-size: 28px;
+  font-weight: 500;
+  margin: 0 0 4px;
+  color: var(--fg);
+}
+.doc-sub {
+  font-size: 13px;
+  color: var(--fgMuted);
+  margin: 0 0 6px;
+}
+.doc-meta {
+  font-size: 12px;
+  color: var(--fgDim);
+  margin: 0 0 36px;
+}
+
+.section-h {
+  font-size: 18px;
+  font-weight: 500;
+  margin: 56px 0 14px;
+  letter-spacing: 0.2px;
+  color: var(--fg);
+}
+.section-h .num {
+  color: var(--accent);
+  margin-right: 10px;
+}
+.section-sub {
+  font-size: 12px;
+  color: var(--fgMuted);
+  margin: 0 0 20px;
+  max-width: 820px;
+  line-height: 1.6;
+}
+
+/* ===== research/decisions card ===== */
+.research {
+  background: #101010;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 24px 28px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px 36px;
+}
+.research h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  margin: 0 0 10px;
+  letter-spacing: 0.5px;
+}
+.research ul {
+  padding-left: 18px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--fgMuted);
+  line-height: 1.7;
+}
+.research ul li b {
+  color: var(--fg);
+  font-weight: 500;
+}
+.research .needs-decision {
+  border: 1px dashed var(--accentHi);
+  background: var(--accentSoft);
+  border-radius: 10px;
+  padding: 14px 16px;
+  font-size: 12px;
+  color: var(--fg);
+  line-height: 1.7;
+  grid-column: 1 / -1;
+}
+.research .needs-decision b { color: var(--accent); }
+
+/* ===== device frames ===== */
+.device {
+  border: 1px solid var(--borderStrong);
+  border-radius: 22px;
+  background: var(--bg);
+  overflow: hidden;
+  box-shadow: 0 30px 60px -30px rgba(0,0,0,0.6);
+}
+.device-bezel {
+  padding: 0;
+  background: #000;
+}
+
+/* ===== settings page ===== */
+.settings {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 720px;
+  background: var(--bg);
+}
+.settings-rail {
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  padding: 28px 8px 16px;
+}
+.settings-rail .title {
+  font-size: 20px;
+  font-weight: 500;
+  padding: 0 12px;
+  margin-bottom: 18px;
+}
+.rail-row {
+  font-size: 13px;
+  color: var(--fgMuted);
+  padding: 9px 12px;
+  border-radius: 8px;
+  margin-bottom: 2px;
+  cursor: default;
+}
+.rail-row.active {
+  color: var(--accent);
+  background: var(--accentSoft);
+}
+
+.settings-pane {
+  padding: 28px 40px 56px;
+  max-width: 700px;
+}
+.settings-h {
+  font-size: 22px;
+  font-weight: 500;
+  margin: 0 0 24px;
+}
+
+.field {
+  margin-bottom: 26px;
+}
+.field-label {
+  font-size: 11px;
+  color: var(--fgMuted);
+  margin-bottom: 8px;
+}
+.field-sub {
+  font-size: 11px;
+  color: var(--fgDim);
+  margin-top: 8px;
+  line-height: 1.55;
+}
+
+/* settings/keyboard sub-controls */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.toggle-row:last-child { border-bottom: none; }
+.toggle-row .left .t1 { color: var(--fg); font-size: 13px; }
+.toggle-row .left .t2 { color: var(--fgMuted); font-size: 11px; margin-top: 2px; }
+.switch {
+  width: 46px;
+  height: 28px;
+  border-radius: 14px;
+  position: relative;
+  background: var(--inputBgSoft);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 22px; height: 22px;
+  border-radius: 11px;
+  background: var(--fgMuted);
+  transition: all 0.2s;
+}
+.switch.on { background: var(--accent); border-color: var(--accent); }
+.switch.on::after { left: 22px; background: #fff; }
+
+/* live preview of accessory bar inside the settings page */
+.bar-preview {
+  background: var(--panelBg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 10px 12px;
+  margin-top: 4px;
+}
+.bar-preview .label {
+  font-size: 10px;
+  color: var(--fgFaint);
+  margin: 2px 0 8px 4px;
+  letter-spacing: 0.5px;
+}
+.bar-strip {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 4px 2px;
+  scrollbar-width: none;
+}
+.bar-strip::-webkit-scrollbar { display: none; }
+
+/* a single chip in any context */
+.chip {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 32px;
+  min-width: 36px;
+  padding: 0 10px;
+  border-radius: 7px;
+  background: var(--inputBg);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  user-select: none;
+}
+.chip.glyph {
+  font-size: 14px;
+}
+.chip.modifier { color: var(--fg); }
+.chip.macro {
+  color: var(--accent);
+  border-color: var(--accentHi);
+  background: rgba(91,159,255,0.06);
+}
+.chip.macro::before {
+  content: '⚡';
+  margin-right: 2px;
+  font-size: 9px;
+  opacity: 0.7;
+}
+.chip .secondary {
+  color: var(--fgFaint);
+  font-size: 9px;
+  font-weight: 400;
+  margin-left: 2px;
+}
+
+.chip.armed {
+  background: var(--accentSoft);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(91,159,255,0.18);
+}
+
+.chip.editing {
+  position: relative;
+}
+.chip.lifted {
+  transform: translateY(-6px) scale(1.08);
+  box-shadow: 0 12px 26px -8px rgba(0,0,0,0.7), 0 0 0 1px var(--accent);
+  background: var(--accentSoft) !important;
+  color: var(--accent) !important;
+  z-index: 5;
+}
+.chip.shifted-right { transform: translateX(8px); transition: transform 0.15s; }
+.chip-x {
+  position: absolute;
+  top: -6px; right: -6px;
+  width: 16px; height: 16px;
+  border-radius: 8px;
+  background: var(--red);
+  color: #fff;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #000;
+}
+.chip .drag {
+  color: var(--fgFaint);
+  font-size: 12px;
+  margin-right: 4px;
+  letter-spacing: -1px;
+}
+
+.chip.add {
+  border-style: dashed;
+  border-color: var(--borderStrong);
+  background: transparent;
+  color: var(--fgMuted);
+}
+.chip.dim { opacity: 0.4; }
+
+/* palette grid for chip picker */
+.palette {
+  margin-top: 18px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 4px 14px 14px;
+  background: var(--panelBg);
+}
+.palette-h {
+  font-size: 10px;
+  color: var(--fgFaint);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin: 14px 0 6px;
+}
+.palette-h:first-child { margin-top: 8px; }
+.palette-row { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* radio (segmented) for modifier behavior */
+.segmented {
+  display: inline-flex;
+  background: var(--inputBg);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 3px;
+  gap: 2px;
+}
+.seg {
+  font-size: 12px;
+  padding: 7px 14px;
+  border-radius: 6px;
+  color: var(--fgMuted);
+  cursor: default;
+}
+.seg.active {
+  background: var(--accentSoft);
+  color: var(--accent);
+}
+
+/* sliders */
+.slider-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 14px;
+  margin-top: 6px;
+}
+.slider-track {
+  position: relative;
+  height: 4px;
+  background: var(--inputBgSoft);
+  border-radius: 2px;
+}
+.slider-track .fill {
+  position: absolute;
+  top: 0; left: 0;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+}
+.slider-track .knob {
+  position: absolute;
+  top: 50%;
+  width: 16px; height: 16px;
+  border-radius: 8px;
+  background: #fff;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+}
+.slider-val {
+  font-size: 11px;
+  color: var(--fgMuted);
+  min-width: 64px;
+  text-align: right;
+}
+.repeat-test {
+  margin-top: 14px;
+  background: var(--inputBg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--fg);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.repeat-test .hint { color: var(--fgDim); font-size: 11px; }
+
+.macro-list {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panelBg);
+  overflow: hidden;
+}
+.macro-row {
+  display: grid;
+  grid-template-columns: 24px 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.macro-row:last-child { border-bottom: none; }
+.macro-row .check {
+  width: 16px; height: 16px;
+  border-radius: 4px;
+  border: 1.5px solid var(--borderStrong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.macro-row.on .check {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #000;
+  font-size: 11px;
+  font-weight: 700;
+}
+.macro-row .name { font-size: 13px; color: var(--fg); }
+.macro-row .desc { font-size: 11px; color: var(--fgDim); margin-top: 1px; }
+.macro-row .seq {
+  font-size: 11px;
+  color: var(--fgMuted);
+  background: var(--inputBg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 6px;
+}
+.macro-row .edit { color: var(--fgFaint); font-size: 11px; }
+
+.btn-row { display: flex; gap: 10px; margin-top: 14px; }
+.btn {
+  font-size: 12px;
+  padding: 8px 14px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--inputBg);
+  color: var(--fgMuted);
+}
+.btn.primary {
+  background: var(--accentSoft);
+  color: var(--accent);
+  border-color: var(--accentHi);
+}
+
+/* ===== terminal mockups ===== */
+.term-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 36px;
+}
+.term-shell {
+  position: relative;
+}
+.term-tag {
+  position: absolute;
+  top: -28px; left: 0;
+  font-size: 11px;
+  color: var(--fgMuted);
+  letter-spacing: 0.5px;
+}
+.term-tag b { color: var(--accent); font-weight: 500; }
+
+/* top bar v2 */
+.topbar {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border-bottom: 0.5px solid var(--border);
+  background: var(--bg);
+}
+.topbar .icon {
+  width: 28px; height: 24px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; color: var(--fgMuted);
+}
+.topbar .pill {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px;
+}
+.topbar .pill .dot { width: 7px; height: 7px; border-radius: 4px; background: var(--green); }
+.topbar .pill .name { color: var(--fg); font-weight: 500; }
+.topbar .pill .sep { color: var(--fgDim); }
+.topbar .pill .tag { color: var(--fgMuted); font-size: 10px; font-weight: 600; letter-spacing: 0.5px; }
+.topbar .tabs { display: flex; gap: 2px; }
+.topbar .tab {
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 9px; height: 24px;
+  border-radius: 6px;
+  font-size: 12px; color: var(--fgMuted);
+}
+.topbar .tab.active {
+  background: var(--accentSoft);
+  color: var(--fg);
+  font-weight: 500;
+}
+.topbar .tab .num { color: var(--fgFaint); font-size: 10.5px; }
+.topbar .tab.active .num { color: var(--accent); }
+.topbar .spacer { flex: 1; }
+.topbar .plus {
+  width: 22px; height: 22px;
+  border-radius: 11px;
+  border: 0.5px solid var(--borderStrong);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--fgMuted);
+  font-size: 12px;
+}
+
+/* terminal canvas content */
+.canvas {
+  background: var(--bg);
+  color: rgba(255,255,255,0.85);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 14px 18px;
+  height: 280px;
+  overflow: hidden;
+  white-space: pre;
+}
+.canvas .prompt { color: var(--green); }
+.canvas .cmd    { color: #FFD479; }
+.canvas .arg    { color: var(--accent); }
+.canvas .dir    { color: #b794f4; }
+.canvas .git    { color: var(--amber); }
+.canvas .cursor {
+  display: inline-block;
+  width: 7px; height: 13px;
+  background: var(--fg);
+  vertical-align: -2px;
+  animation: blink 1.05s step-end infinite;
+}
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+/* hint banner above the bar */
+.hint-banner {
+  background: var(--accentSoft);
+  border-top: 0.5px solid var(--accentHi);
+  border-bottom: 0.5px solid var(--accentHi);
+  color: var(--accent);
+  font-size: 11px;
+  padding: 6px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hint-banner .badge {
+  background: var(--accent);
+  color: #000;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+
+/* the actual accessory bar in the live preview */
+.accbar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  background: #1c1c1e;
+  border-top: 0.5px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+  align-items: center;
+}
+.accbar::-webkit-scrollbar { display: none; }
+.accbar .chip { background: rgba(60,60,67,0.6); color: var(--fg); border: none; height: 36px; }
+.accbar .chip.armed {
+  background: var(--accentSoft);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.accbar .chip.macro { background: rgba(91,159,255,0.12); color: var(--accent); border: none; }
+.accbar.editing .chip { background: rgba(60,60,67,0.45); }
+.accbar .done {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+/* fake software keyboard footer */
+.kbd {
+  background: linear-gradient(180deg, #2a2a2c 0%, #1c1c1e 100%);
+  height: 92px;
+  border-top: 0.5px solid var(--border);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.kbd .row {
+  display: flex; gap: 4px;
+}
+.kbd .key {
+  width: 26px; height: 18px;
+  border-radius: 4px;
+  background: rgba(120,120,128,0.4);
+}
+.kbd .key.wide { width: 64px; }
+.kbd .label {
+  position: absolute;
+  bottom: 6px; right: 12px;
+  font-size: 9px;
+  color: rgba(255,255,255,0.20);
+  letter-spacing: 0.5px;
+}
+
+/* legend */
+.legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--fgMuted);
+  flex-wrap: wrap;
+}
+.legend .swatch {
+  display: inline-block;
+  width: 10px; height: 10px; border-radius: 2px;
+  margin-right: 4px;
+  vertical-align: -1px;
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1 class="doc-h1">§14.8 — keyboard customization</h1>
+<p class="doc-sub">accessory bar editor · caps-lock-as-ctrl · key-repeat-rate</p>
+<p class="doc-meta">design pass · dark mode · blue accent · JetBrainsMono · scale 1× (top bar height = 32pt)</p>
+
+<!-- =============================================================== -->
+<h2 class="section-h"><span class="num">A</span>research + decisions to validate</h2>
+<p class="section-sub">
+  Six iPad terminals surveyed (Blink, Termius, Prompt 3, a-Shell, iSH, WebSSH). The patterns that pull their weight, plus the calls I want you to sign off on before I implement.
+</p>
+
+<div class="research">
+  <div>
+    <h3>WHAT TO STEAL</h3>
+    <ul>
+      <li><b>Termius's drag-to-reorder + add-from-palette.</b> Lowest cognitive load. We add a categorized palette (nav / mod / tmux / symbols) so users can <i>discover</i> chips, not just remember them.</li>
+      <li><b>Hardware-keyboard auto-hide.</b> Already wired via <code>GCKeyboard.coalesced</code>. Free win.</li>
+      <li><b>Sticky-vs-one-shot modifier toggle.</b> Termius shipped sticky but users hit lock-up bugs. Default to <b>one-shot</b> (Blink/Prompt convention) and let power users opt into sticky.</li>
+      <li><b>tmux operations stay native (⌘T / ⌘⇧W / ⌘1-9 / ⌘⇧[ / ⌘⇧]) and out of the chip system for v1.</b> Adding macros now would couple the bar editor to tmux semantics before we know what users actually want — easier to add later than to remove.</li>
+      <li><b>Live preview inside the editor.</b> Mirrors how Appearance shows top-bar-height changes — same metaphor, same trust.</li>
+    </ul>
+  </div>
+  <div>
+    <h3>WHAT TO SKIP</h3>
+    <ul>
+      <li><b>WebSSH-style config-file syntax.</b> Powerful but opaque. Hard pass.</li>
+      <li><b>Swipe-on-canvas-for-arrows</b> (Termius). Conflicts with our scroll dispatcher (§3.1) — pan recognizer already owns swipes for scrollback.</li>
+      <li><b>Per-host bar layouts.</b> Tempting, but 99% of users want one good default. Defer until someone asks.</li>
+      <li><b>Multi-page bars / page-jump tokens.</b> Horizontal scroll is enough for v1.</li>
+      <li><b>Remapping caps as <i>any</i> arbitrary key.</b> Just ship caps→ctrl since that's the well-known unix-developer pain point. Full key remap is a v2 feature.</li>
+    </ul>
+  </div>
+
+  <div class="needs-decision">
+    <b>NEEDS YOUR APPROVAL —</b>
+    (1) one-shot is the default modifier behavior, with sticky as opt-in;&nbsp;&nbsp;
+    (2) the chip palette is split into 4 categories: <i>nav</i>, <i>modifiers</i>, <i>F-keys</i>, <i>symbols</i> — no tmux macros for v1; ship native ⌘-shortcut coverage and revisit once we have feedback;&nbsp;&nbsp;
+    (3) caps→ctrl is a single global toggle, no per-host override;&nbsp;&nbsp;
+    (4) reorder is via <b>long-press → drag</b> on any chip — no separate "rearrange" mode button — with a one-line hint surfaced in the editor.
+  </div>
+</div>
+
+<!-- =============================================================== -->
+<h2 class="section-h"><span class="num">B</span>settings → keyboard</h2>
+<p class="section-sub">
+  Right pane of the existing settings shell. 220-pt rail unchanged on the left. Field rhythm + typography exactly matches AppearanceSettingsView so the new section feels native.
+</p>
+
+<div class="device">
+  <div class="settings">
+    <!-- LEFT RAIL -->
+    <div class="settings-rail">
+      <div class="title">settings</div>
+      <div class="rail-row">appearance</div>
+      <div class="rail-row">terminal</div>
+      <div class="rail-row">themes</div>
+      <div class="rail-row active">keyboard</div>
+      <div class="rail-row">security</div>
+      <div class="rail-row">sync</div>
+      <div class="rail-row">about</div>
+    </div>
+
+    <!-- RIGHT PANE -->
+    <div class="settings-pane">
+      <h2 class="settings-h">keyboard</h2>
+
+      <!-- 1. existing toggle (carried over from M4) -->
+      <div class="field">
+        <div class="toggle-row">
+          <div class="left">
+            <div class="t1">show accessory bar</div>
+            <div class="t2">row of special keys above the on-screen keyboard · auto-hidden when a hardware keyboard connects</div>
+          </div>
+          <div class="switch on"></div>
+        </div>
+      </div>
+
+      <!-- 2. accessory bar layout: live preview + palette -->
+      <div class="field">
+        <div class="field-label">accessory bar layout</div>
+
+        <!-- live preview of the bar -->
+        <div class="bar-preview">
+          <div class="label">PREVIEW</div>
+          <div class="bar-strip">
+            <div class="chip glyph">⎋</div>
+            <div class="chip">^</div>
+            <div class="chip">⌥</div>
+            <div class="chip glyph">⇥</div>
+            <div class="chip glyph">←</div>
+            <div class="chip glyph">↓</div>
+            <div class="chip glyph">↑</div>
+            <div class="chip glyph">→</div>
+            <div class="chip">F5</div>
+            <div class="chip">F12</div>
+            <div class="chip">|</div>
+            <div class="chip">~</div>
+            <div class="chip add">+ add</div>
+          </div>
+        </div>
+
+        <!-- palette of available chips, categorized -->
+        <div class="palette">
+          <div class="palette-h">navigation</div>
+          <div class="palette-row">
+            <div class="chip glyph dim">←</div>
+            <div class="chip glyph dim">↓</div>
+            <div class="chip glyph dim">↑</div>
+            <div class="chip glyph dim">→</div>
+            <div class="chip">home</div>
+            <div class="chip">end</div>
+            <div class="chip">pgup</div>
+            <div class="chip">pgdn</div>
+            <div class="chip glyph dim">⇥</div>
+          </div>
+
+          <div class="palette-h">modifiers</div>
+          <div class="palette-row">
+            <div class="chip glyph dim">⎋</div>
+            <div class="chip dim">^</div>
+            <div class="chip dim">⌥</div>
+            <div class="chip">⌘</div>
+            <div class="chip">⇧</div>
+            <div class="chip">fn</div>
+          </div>
+
+          <div class="palette-h">function keys</div>
+          <div class="palette-row">
+            <div class="chip">F1</div>
+            <div class="chip">F2</div>
+            <div class="chip">F3</div>
+            <div class="chip">F4</div>
+            <div class="chip dim">F5</div>
+            <div class="chip">F6</div>
+            <div class="chip">F7</div>
+            <div class="chip">F8</div>
+            <div class="chip">F9</div>
+            <div class="chip">F10</div>
+            <div class="chip">F11</div>
+            <div class="chip dim">F12</div>
+          </div>
+
+          <div class="palette-h">symbols</div>
+          <div class="palette-row">
+            <div class="chip dim">|</div>
+            <div class="chip">~</div>
+            <div class="chip">/</div>
+            <div class="chip">\</div>
+            <div class="chip">$</div>
+            <div class="chip">{</div>
+            <div class="chip">}</div>
+            <div class="chip">[</div>
+            <div class="chip">]</div>
+            <div class="chip">&lt;</div>
+            <div class="chip">&gt;</div>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <div class="btn">restore defaults</div>
+        </div>
+
+        <div class="field-sub">
+          tap a palette chip to add · <b style="color: var(--fgMuted);">long-press a chip in the preview bar to drag-reorder</b> · drop on × to remove · dimmed palette entries are already on the bar
+        </div>
+      </div>
+
+
+      <!-- 4. modifier behavior -->
+      <div class="field">
+        <div class="field-label">modifier behavior</div>
+        <div class="segmented">
+          <div class="seg active">one-shot</div>
+          <div class="seg">sticky</div>
+        </div>
+        <div class="field-sub">
+          one-shot: tap ⌃, then a key — modifier auto-clears after one press · sticky: tap to lock the modifier, tap again to release · armed modifiers tint accent
+        </div>
+      </div>
+
+      <!-- 5. caps lock as ctrl -->
+      <div class="field">
+        <div class="toggle-row">
+          <div class="left">
+            <div class="t1">caps lock acts as ctrl</div>
+            <div class="t2">remaps the hardware caps-lock key for any session · matches the unix convention</div>
+          </div>
+          <div class="switch on"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- =============================================================== -->
+<h2 class="section-h"><span class="num">C</span>terminal page · accessory bar states</h2>
+<p class="section-sub">
+  Three states of the live accessory bar in a session. Top bar v2 is unchanged. The bar replaces SwiftTerm's default <code>inputAccessoryView</code>. iPad chrome (status pill, home indicator, etc.) elided for clarity.
+</p>
+
+<div class="term-grid">
+
+  <!-- STATE 1: idle -->
+  <div class="term-shell">
+    <div class="term-tag"><b>state 1</b> &nbsp;·&nbsp; idle (default layout, no modifier armed)</div>
+    <div class="device">
+      <!-- top bar -->
+      <div class="topbar">
+        <div class="icon">☰</div>
+        <div class="pill">
+          <div class="dot"></div>
+          <div class="name">deploy-box</div>
+          <div class="sep">·</div>
+          <div class="tag">tmux</div>
+        </div>
+        <div class="tabs" style="margin-left: 8px;">
+          <div class="tab"><span>codex</span><span class="num">⌘1</span></div>
+          <div class="tab active"><span>build</span><span class="num">⌘2</span></div>
+          <div class="tab"><span>zsh</span><span class="num">⌘3</span></div>
+        </div>
+        <div class="spacer"></div>
+        <div class="plus">+</div>
+        <div class="icon">⌂</div>
+      </div>
+
+      <!-- canvas -->
+      <div class="canvas"><span class="prompt">user@server</span> <span class="dir">~/projects/tessera</span> <span class="git">main</span>
+<span class="prompt">$</span> <span class="cmd">git</span> <span class="arg">status</span>
+On branch main
+Your branch is up to date with 'origin/main'.
+
+Changes not staged for commit:
+  modified:   Tessera/Settings/KeyboardSettingsView.swift
+  modified:   Tessera/Design/AppearancePreferences.swift
+
+<span class="prompt">user@server</span> <span class="dir">~/projects/tessera</span> <span class="git">main</span>
+<span class="prompt">$</span> <span class="cursor"></span></div>
+
+      <!-- accessory bar -->
+      <div class="accbar">
+        <div class="chip glyph">⎋</div>
+        <div class="chip modifier">^</div>
+        <div class="chip modifier">⌥</div>
+        <div class="chip glyph">⇥</div>
+        <div class="chip glyph">←</div>
+        <div class="chip glyph">↓</div>
+        <div class="chip glyph">↑</div>
+        <div class="chip glyph">→</div>
+        <div class="chip">F5</div>
+        <div class="chip">F12</div>
+        <div class="chip">|</div>
+        <div class="chip">~</div>
+      </div>
+
+      <!-- soft keyboard -->
+      <div class="kbd">
+        <div class="row">
+          <div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div>
+        </div>
+        <div class="row">
+          <div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div>
+        </div>
+        <div class="row">
+          <div class="key wide"></div><div class="key"></div><div class="key wide"></div>
+        </div>
+        <div class="label">software keyboard (mocked)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STATE 2: ctrl armed -->
+  <div class="term-shell">
+    <div class="term-tag"><b>state 2</b> &nbsp;·&nbsp; <code>^</code> just tapped — modifier armed (one-shot mode)</div>
+    <div class="device">
+      <div class="topbar">
+        <div class="icon">☰</div>
+        <div class="pill">
+          <div class="dot"></div>
+          <div class="name">deploy-box</div>
+          <div class="sep">·</div>
+          <div class="tag">tmux</div>
+        </div>
+        <div class="tabs" style="margin-left: 8px;">
+          <div class="tab"><span>codex</span><span class="num">⌘1</span></div>
+          <div class="tab active"><span>build</span><span class="num">⌘2</span></div>
+          <div class="tab"><span>zsh</span><span class="num">⌘3</span></div>
+        </div>
+        <div class="spacer"></div>
+        <div class="plus">+</div>
+        <div class="icon">⌂</div>
+      </div>
+
+      <div class="canvas"><span class="prompt">user@server</span> <span class="dir">~/projects/tessera</span> <span class="git">main</span>
+<span class="prompt">$</span> <span class="cmd">tail</span> <span class="arg">-f /var/log/system.log</span>
+2026-04-28 14:02:11 deploy-box launchd[1]: com.apple.preferences started
+2026-04-28 14:02:14 deploy-box loginwindow[140]: session opened
+2026-04-28 14:02:18 deploy-box mDNSResponder[241]: probe completed
+2026-04-28 14:02:23 deploy-box networkd[392]: link state changed
+<span class="cursor"></span></div>
+
+      <div class="hint-banner">
+        <span class="badge">⌃ ARMED</span>
+        next key sends <b>⌃&lt;key&gt;</b> · tap ⌃ again to cancel · auto-clears after 2s
+      </div>
+
+      <div class="accbar">
+        <div class="chip glyph">⎋</div>
+        <div class="chip modifier armed">^</div>
+        <div class="chip modifier">⌥</div>
+        <div class="chip glyph">⇥</div>
+        <div class="chip glyph">←</div>
+        <div class="chip glyph">↓</div>
+        <div class="chip glyph">↑</div>
+        <div class="chip glyph">→</div>
+        <div class="chip">F5</div>
+        <div class="chip">F12</div>
+        <div class="chip">|</div>
+        <div class="chip">~</div>
+      </div>
+
+      <div class="kbd">
+        <div class="row">
+          <div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div>
+        </div>
+        <div class="row">
+          <div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div>
+        </div>
+        <div class="row">
+          <div class="key wide"></div><div class="key"></div><div class="key wide"></div>
+        </div>
+        <div class="label">tap C → sends ⌃C → unarms automatically</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STATE 3: long-press drag in progress -->
+  <div class="term-shell">
+    <div class="term-tag"><b>state 3</b> &nbsp;·&nbsp; long-press in progress — chip lifted, ready to drop into a new slot</div>
+    <div class="device">
+      <div class="topbar">
+        <div class="icon">☰</div>
+        <div class="pill">
+          <div class="dot"></div>
+          <div class="name">deploy-box</div>
+          <div class="sep">·</div>
+          <div class="tag">tmux</div>
+        </div>
+        <div class="tabs" style="margin-left: 8px;">
+          <div class="tab"><span>codex</span><span class="num">⌘1</span></div>
+          <div class="tab active"><span>build</span><span class="num">⌘2</span></div>
+          <div class="tab"><span>zsh</span><span class="num">⌘3</span></div>
+        </div>
+        <div class="spacer"></div>
+        <div class="plus">+</div>
+        <div class="icon">⌂</div>
+      </div>
+
+      <div class="canvas"><span class="prompt">user@server</span> <span class="dir">~/projects/tessera</span> <span class="git">main</span>
+<span class="prompt">$</span> <span class="cmd">vim</span> <span class="arg">Tessera/Settings/KeyboardSettingsView.swift</span>
+~
+~
+~
+"KeyboardSettingsView.swift" 41L, 1422B</div>
+
+      <div class="hint-banner">
+        <span class="badge">DRAG</span>
+        long-press to pick up · drop in a new slot to reorder · drop on × to remove · release outside the bar to cancel
+      </div>
+
+      <div class="accbar">
+        <div class="chip glyph">⎋</div>
+        <div class="chip modifier">^</div>
+        <div class="chip modifier">⌥</div>
+        <div class="chip glyph">⇥</div>
+        <div class="chip glyph shifted-right">←</div>
+        <div class="chip lifted">F5</div>
+        <div class="chip glyph">↓</div>
+        <div class="chip glyph">↑</div>
+        <div class="chip glyph">→</div>
+        <div class="chip">F12</div>
+        <div class="chip">|</div>
+        <div class="chip">~</div>
+        <div class="chip" style="background: var(--red); color: #fff; margin-left: 6px;">×</div>
+      </div>
+
+      <div class="kbd">
+        <div class="row">
+          <div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div>
+        </div>
+        <div class="row">
+          <div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div><div class="key"></div>
+        </div>
+        <div class="row">
+          <div class="key wide"></div><div class="key"></div><div class="key wide"></div>
+        </div>
+        <div class="label">red drop-target on the right · drop here to remove the lifted chip</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="legend">
+  <div><span class="swatch" style="background: var(--inputBg); border: 1px solid var(--border);"></span>idle chip</div>
+  <div><span class="swatch" style="background: var(--accentSoft); border: 1px solid var(--accent);"></span>armed modifier · or lifted chip mid-drag</div>
+  <div><span class="swatch" style="background: transparent; border: 1px dashed var(--borderStrong);"></span>add slot</div>
+  <div><span class="swatch" style="background: var(--red);"></span>drop-here-to-remove target (only shown during drag)</div>
+</div>
+
+</div>
+</body>
+</html>

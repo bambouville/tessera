@@ -1,0 +1,1589 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tessera — swipe pad mockup (experimental)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:           #000000;
+  --panelBg:      #0A0A0A;
+  --inputBg:      #141414;
+  --inputBgSoft:  #1C1C1E;
+  --fg:           #FFFFFF;
+  --fgMuted:      rgba(235,235,245,0.60);
+  --fgDim:        rgba(235,235,245,0.35);
+  --fgFaint:      rgba(235,235,245,0.18);
+  --accent:       #5B9FFF;
+  --accentSoft:   rgba(91,159,255,0.14);
+  --accentHi:     rgba(91,159,255,0.32);
+  --green:        #30D158;
+  --greenSoft:    rgba(48,209,88,0.16);
+  --amber:        #FF9F0A;
+  --amberSoft:    rgba(255,159,10,0.16);
+  --red:          #FF453A;
+  --redSoft:      rgba(255,69,58,0.16);
+  --border:       rgba(255,255,255,0.08);
+  --borderStrong: rgba(255,255,255,0.14);
+
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #181818;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  max-width: 1340px;
+  margin: 0 auto;
+  padding: 48px 32px 96px;
+}
+
+.doc-h1 {
+  font-size: 28px;
+  font-weight: 500;
+  margin: 0 0 4px;
+  color: var(--fg);
+}
+.doc-sub {
+  font-size: 13px;
+  color: var(--fgMuted);
+  margin: 0 0 6px;
+}
+.doc-meta {
+  font-size: 12px;
+  color: var(--fgDim);
+  margin: 0 0 36px;
+}
+
+.section-h {
+  font-size: 18px;
+  font-weight: 500;
+  margin: 56px 0 14px;
+  letter-spacing: 0.2px;
+  color: var(--fg);
+}
+.section-h .num {
+  color: var(--accent);
+  margin-right: 10px;
+}
+.section-sub {
+  font-size: 12px;
+  color: var(--fgMuted);
+  margin: 0 0 20px;
+  max-width: 820px;
+  line-height: 1.6;
+}
+
+/* ===== research/decisions card ===== */
+.research {
+  background: #101010;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 24px 28px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px 36px;
+}
+.research h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  margin: 0 0 10px;
+  letter-spacing: 0.5px;
+}
+.research ul {
+  padding-left: 18px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--fgMuted);
+  line-height: 1.7;
+}
+.research ul li b {
+  color: var(--fg);
+  font-weight: 500;
+}
+.research .needs-decision {
+  border: 1px dashed var(--accentHi);
+  background: var(--accentSoft);
+  border-radius: 10px;
+  padding: 14px 16px;
+  font-size: 12px;
+  color: var(--fg);
+  line-height: 1.7;
+  grid-column: 1 / -1;
+}
+.research .needs-decision b { color: var(--accent); }
+
+/* ===== device frames ===== */
+.device {
+  border: 1px solid var(--borderStrong);
+  border-radius: 22px;
+  background: var(--bg);
+  overflow: hidden;
+  box-shadow: 0 30px 60px -30px rgba(0,0,0,0.6);
+}
+
+/* ===== top bar (matches SessionTopBar v2) ===== */
+.topbar {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border-bottom: 0.5px solid var(--border);
+  background: var(--bg);
+}
+.topbar .icon {
+  width: 28px; height: 24px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; color: var(--fgMuted);
+}
+.topbar .pill {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px;
+}
+.topbar .pill .dot { width: 7px; height: 7px; border-radius: 4px; background: var(--green); }
+.topbar .pill .name { color: var(--fg); font-weight: 500; }
+.topbar .pill .sep { color: var(--fgDim); }
+.topbar .tabs { display: flex; gap: 2px; margin-left: 4px; }
+.topbar .tab {
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 9px; height: 24px;
+  border-radius: 6px;
+  font-size: 12px; color: var(--fgMuted);
+}
+.topbar .tab.active {
+  background: var(--accentSoft);
+  color: var(--fg);
+  font-weight: 500;
+}
+.topbar .tab .num { color: var(--fgFaint); font-size: 10.5px; }
+.topbar .tab.active .num { color: var(--accent); }
+.topbar .spacer { flex: 1; }
+.topbar .plus {
+  width: 22px; height: 22px;
+  border-radius: 11px;
+  border: 0.5px solid var(--borderStrong);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--fgMuted);
+  font-size: 12px;
+}
+
+/* ===== terminal canvas ===== */
+.canvas-wrap {
+  position: relative;
+  overflow: hidden;
+}
+.canvas {
+  background: var(--bg);
+  color: rgba(255,255,255,0.88);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 18px 20px 28px;
+  height: 460px;
+  overflow: hidden;
+  white-space: pre-wrap;
+}
+.canvas .prompt { color: var(--green); }
+.canvas .cmd    { color: #FFD479; }
+.canvas .arg    { color: var(--accent); }
+.canvas .dir    { color: #b794f4; }
+.canvas .git    { color: var(--amber); }
+.canvas .dim    { color: var(--fgDim); }
+.canvas .ok     { color: var(--green); }
+.canvas .warn   { color: var(--amber); }
+.canvas .hi     { color: var(--accent); }
+.canvas .cursor {
+  display: inline-block;
+  width: 7px; height: 13px;
+  background: var(--fg);
+  vertical-align: -2px;
+  animation: blink 1.05s step-end infinite;
+}
+@keyframes blink {
+  50% { opacity: 0; }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.45; transform: scale(0.85); }
+}
+@keyframes waveBar {
+  0%, 100% { transform: scaleY(0.4); }
+  50%      { transform: scaleY(1); }
+}
+
+/* claude-code "❯ choice" highlight */
+.canvas .choice-active {
+  background: var(--accentSoft);
+  color: var(--fg);
+  padding: 0 4px;
+  border-radius: 3px;
+  border-left: 2px solid var(--accent);
+  margin-left: -2px;
+}
+
+/* ===== the swipe puck (iOS .regularMaterial style) ===== */
+.puck-stage {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.puck {
+  position: absolute;
+  width: 50px; height: 50px;
+  border-radius: 25px;
+  /* iOS dark .regularMaterial: tinted translucent over backdrop-blur+saturate */
+  background: rgba(255,255,255,0.12);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 0.5px solid rgba(255,255,255,0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255,255,255,0.85);
+  /* layered iOS shadow stack: ambient + direct + inner highlight */
+  box-shadow:
+    0 12px 28px -8px rgba(0,0,0,0.45),
+    0 4px 10px rgba(0,0,0,0.25),
+    inset 0 0.5px 0 rgba(255,255,255,0.22);
+  transition: transform 0.18s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+.puck.resting {
+  opacity: 0.78;
+}
+.puck.armed {
+  transform: scale(1.04);
+  background: rgba(255,255,255,0.16);
+  border-color: rgba(255,255,255,0.30);
+  color: var(--fg);
+  box-shadow:
+    0 14px 34px -8px rgba(0,0,0,0.55),
+    0 4px 12px rgba(0,0,0,0.30),
+    0 0 0 4px rgba(91,159,255,0.10),
+    inset 0 0.5px 0 rgba(255,255,255,0.30);
+}
+.puck-mark { display: block; }
+
+/* circular petals — AirDrop / Control-Center style */
+.petals {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.petal {
+  position: absolute;
+  /* x,y in inline style = ring center */
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  width: 0; height: 0; /* anchor only — ring/caption pos'd around it */
+}
+.petal .ring {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 56px; height: 56px;
+  border-radius: 28px;
+  background: rgba(255,255,255,0.12);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 0.5px solid rgba(255,255,255,0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255,255,255,0.92);
+  box-shadow:
+    0 12px 28px -8px rgba(0,0,0,0.50),
+    0 4px 10px rgba(0,0,0,0.28),
+    inset 0 0.5px 0 rgba(255,255,255,0.22);
+  transform: translate(-50%, -50%);
+  transition: all 0.16s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+.petal .caption {
+  position: absolute;
+  top: calc(50% + 42px);
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  white-space: nowrap;
+  font-family: -apple-system, system-ui, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+}
+.petal .label {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.92);
+  letter-spacing: -0.1px;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+}
+.petal .bind {
+  font-size: 9.5px;
+  color: rgba(255,255,255,0.50);
+  margin-top: 2px;
+  letter-spacing: 0.3px;
+  font-family: var(--mono);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.7);
+}
+.petal .glyph svg { display: block; }
+
+/* active state: ring swells, picks up direction-tinted material */
+.petal.active .ring {
+  width: 70px; height: 70px;
+  border-radius: 35px;
+}
+.petal.approve.active .ring {
+  background: rgba(48,209,88,0.22);
+  border-color: rgba(48,209,88,0.55);
+  color: var(--green);
+  box-shadow:
+    0 16px 36px -8px rgba(48,209,88,0.35),
+    0 4px 12px rgba(0,0,0,0.30),
+    0 0 0 4px rgba(48,209,88,0.10),
+    inset 0 0.5px 0 rgba(255,255,255,0.25);
+}
+.petal.approve.active .caption { top: calc(50% + 48px); }
+.petal.approve.active .label { color: var(--green); }
+.petal.deny.active .ring {
+  background: rgba(255,69,58,0.22);
+  border-color: rgba(255,69,58,0.55);
+  color: var(--red);
+}
+.petal.deny.active .label { color: var(--red); }
+.petal.always.active .ring {
+  background: rgba(255,159,10,0.22);
+  border-color: rgba(255,159,10,0.55);
+  color: var(--amber);
+}
+.petal.always.active .label { color: var(--amber); }
+.petal.voice.active .ring {
+  background: rgba(91,159,255,0.22);
+  border-color: rgba(91,159,255,0.55);
+  color: var(--accent);
+}
+.petal.voice.active .label { color: var(--accent); }
+
+/* finger touch-glow — soft direction-tinted radial */
+.touch-glow {
+  position: absolute;
+  width: 90px; height: 90px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle,
+              rgba(48,209,88,0.22) 0%,
+              rgba(48,209,88,0.08) 45%,
+              transparent 72%);
+  pointer-events: none;
+}
+
+/* state-callout chips next to puck illustration */
+.state-tag {
+  position: absolute;
+  font-size: 10.5px;
+  letter-spacing: 0.5px;
+  color: var(--fgMuted);
+  background: rgba(20,20,22,0.85);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  text-transform: uppercase;
+}
+.state-tag b { color: var(--accent); font-weight: 600; }
+
+/* accessory bar at the bottom of the device frame */
+.accbar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  background: #1c1c1e;
+  border-top: 0.5px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+  align-items: center;
+  height: 52px;
+}
+.accbar::-webkit-scrollbar { display: none; }
+.accbar .chip {
+  flex-shrink: 0;
+  height: 36px;
+  min-width: 36px;
+  padding: 0 10px;
+  border-radius: 7px;
+  background: rgba(60,60,67,0.6);
+  color: var(--fg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* frame caption underneath each device */
+.frame-cap {
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--fgMuted);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.frame-cap .tag {
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.frame-cap .body {
+  color: var(--fgMuted);
+  line-height: 1.5;
+}
+
+.device-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 36px 32px;
+}
+
+/* ===== settings page (mirrors SettingsPageView shell) ===== */
+.settings {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 760px;
+  background: var(--bg);
+}
+.settings-rail {
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  padding: 28px 8px 16px;
+}
+.settings-rail .title {
+  font-size: 20px;
+  font-weight: 500;
+  padding: 0 12px;
+  margin-bottom: 18px;
+}
+.rail-row {
+  font-size: 13px;
+  color: var(--fgMuted);
+  padding: 9px 12px;
+  border-radius: 8px;
+  margin-bottom: 2px;
+}
+.rail-row.active {
+  color: var(--accent);
+  background: var(--accentSoft);
+}
+.rail-row .badge {
+  font-size: 9px;
+  background: var(--amberSoft);
+  color: var(--amber);
+  padding: 1.5px 5px;
+  border-radius: 3px;
+  margin-left: 6px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.settings-pane {
+  padding: 28px 40px 56px;
+  max-width: 720px;
+}
+.settings-h {
+  font-size: 22px;
+  font-weight: 500;
+  margin: 0 0 6px;
+}
+.settings-sub {
+  font-size: 11px;
+  color: var(--fgDim);
+  margin: 0 0 24px;
+  line-height: 1.6;
+}
+.settings-sub .warn-pill {
+  display: inline-block;
+  background: var(--amberSoft);
+  color: var(--amber);
+  font-size: 9.5px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.5px;
+  margin-right: 6px;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
+.field { margin-bottom: 26px; }
+.field-label {
+  font-size: 11px;
+  color: var(--fgMuted);
+  margin-bottom: 8px;
+}
+.field-sub {
+  font-size: 11px;
+  color: var(--fgDim);
+  margin-top: 8px;
+  line-height: 1.55;
+}
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.toggle-row:last-child { border-bottom: none; }
+.toggle-row .left .t1 { color: var(--fg); font-size: 13px; }
+.toggle-row .left .t2 { color: var(--fgMuted); font-size: 11px; margin-top: 2px; }
+.switch {
+  width: 46px;
+  height: 28px;
+  border-radius: 14px;
+  position: relative;
+  background: var(--inputBgSoft);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 22px; height: 22px;
+  border-radius: 11px;
+  background: var(--fgMuted);
+  transition: all 0.2s;
+}
+.switch.on { background: var(--accent); border-color: var(--accent); }
+.switch.on::after { left: 22px; background: #fff; }
+
+/* segmented for puck size / corner */
+.segmented {
+  display: inline-flex;
+  background: var(--inputBg);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 3px;
+  gap: 2px;
+}
+.seg {
+  font-size: 12px;
+  padding: 7px 14px;
+  border-radius: 6px;
+  color: var(--fgMuted);
+}
+.seg.active {
+  background: var(--accentSoft);
+  color: var(--accent);
+}
+
+/* active-profile detection pill */
+.detect-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: var(--panelBg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 14px;
+}
+.detect-card .left .t1 {
+  font-size: 12px;
+  color: var(--fgMuted);
+  margin-bottom: 4px;
+}
+.detect-card .left .t2 {
+  font-size: 13px;
+  color: var(--fg);
+  font-weight: 500;
+}
+.detect-card .left .t2 .agent-name { color: var(--accent); }
+.detect-card .right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--green);
+  background: var(--greenSoft);
+  padding: 5px 10px;
+  border-radius: 99px;
+}
+.detect-card .right .dot {
+  width: 6px; height: 6px;
+  background: var(--green);
+  border-radius: 3px;
+}
+
+/* profile rows + bindings */
+.profile-list {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panelBg);
+  overflow: hidden;
+}
+.profile-row {
+  border-bottom: 1px solid var(--border);
+}
+.profile-row:last-child { border-bottom: none; }
+.profile-head {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+}
+.profile-head .chev {
+  color: var(--fgFaint);
+  font-size: 10px;
+}
+.profile-head .name {
+  font-size: 13px;
+  color: var(--fg);
+  font-weight: 500;
+}
+.profile-head .name .pill-default {
+  font-size: 9px;
+  background: var(--accentSoft);
+  color: var(--accent);
+  padding: 2px 6px;
+  border-radius: 3px;
+  margin-left: 8px;
+  letter-spacing: 0.4px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.profile-head .match {
+  font-size: 10.5px;
+  color: var(--fgDim);
+  margin-top: 3px;
+}
+.profile-head .actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 10px;
+  color: var(--fgFaint);
+}
+.profile-row.expanded { background: rgba(91,159,255,0.03); }
+.profile-row.expanded .chev { color: var(--accent); transform: rotate(90deg); }
+
+.binding-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+  border-top: 1px solid var(--border);
+}
+.binding-cell {
+  background: var(--panelBg);
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 12px;
+  align-items: center;
+}
+.binding-cell .arr {
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  background: var(--inputBg);
+  border: 1px solid var(--border);
+  color: var(--fgMuted);
+}
+.binding-cell.approve .arr { color: var(--green); background: var(--greenSoft); border-color: rgba(48,209,88,0.32); }
+.binding-cell.deny    .arr { color: var(--red);   background: var(--redSoft);   border-color: rgba(255,69,58,0.32); }
+.binding-cell.always  .arr { color: var(--amber); background: var(--amberSoft); border-color: rgba(255,159,10,0.32); }
+.binding-cell.voice   .arr { color: var(--accent);background: var(--accentSoft);border-color: var(--accentHi); }
+.binding-cell .meta .role {
+  font-size: 12px;
+  color: var(--fg);
+  font-weight: 500;
+}
+.binding-cell .meta .dir {
+  font-size: 10px;
+  color: var(--fgFaint);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+.binding-cell .seq {
+  font-size: 11px;
+  color: var(--fgMuted);
+  background: var(--inputBg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 4px 8px;
+  font-weight: 500;
+}
+.binding-cell .seq.voice {
+  color: var(--accent);
+  border-color: var(--accentHi);
+  background: rgba(91,159,255,0.08);
+}
+
+.add-rule {
+  margin-top: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 9px 14px;
+  border-radius: 8px;
+  border: 1px dashed var(--borderStrong);
+  background: transparent;
+  color: var(--fgMuted);
+}
+
+/* rule editor preview pane (right column) */
+.editor-card {
+  margin-top: 24px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panelBg);
+  overflow: hidden;
+}
+.editor-head {
+  padding: 14px 18px 10px;
+  font-size: 11px;
+  color: var(--fgFaint);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+}
+.editor-body {
+  padding: 18px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+.input-row {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  align-items: center;
+  gap: 14px;
+}
+.input-row .lbl {
+  font-size: 11px;
+  color: var(--fgMuted);
+}
+.input-row .ctl {
+  background: var(--inputBg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 9px 12px;
+  font-size: 12px;
+  color: var(--fg);
+  font-family: var(--mono);
+}
+.input-row .ctl .mute { color: var(--fgFaint); }
+.input-row .ctl.code  { color: var(--accent); }
+
+/* voice subsection */
+.subhead {
+  font-size: 18px;
+  font-weight: 500;
+  margin: 36px 0 14px;
+}
+
+/* legend strip beneath in-session frames */
+.legend {
+  display: flex;
+  gap: 24px;
+  margin-top: 18px;
+  font-size: 11px;
+  color: var(--fgMuted);
+  flex-wrap: wrap;
+}
+.legend .item { display: flex; align-items: center; gap: 6px; }
+.legend .sw {
+  display: inline-block;
+  width: 10px; height: 10px; border-radius: 2px;
+}
+
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1 class="doc-h1">experimental · swipe pad</h1>
+<p class="doc-sub">thumb-anchored radial macro launcher · agent-prompt accelerator</p>
+<p class="doc-meta">design pass · dark mode · blue accent · JetBrainsMono · scale 1× · iPad-first, iPhone-ready</p>
+
+<!-- =============================================================== -->
+<h2 class="section-h"><span class="num">A</span>concept &amp; decisions to validate</h2>
+<div class="research">
+  <div>
+    <h3>WHAT IT IS</h3>
+    <ul>
+      <li>A floating, draggable <b>puck</b> the user parks anywhere on screen — like AssistiveTouch or a Messenger chat head.</li>
+      <li>Press &amp; hold → 4 cardinal petals fade in. Slide to a direction, release → fires a macro into the active terminal.</li>
+      <li>Smart defaults per detected agent (Claude Code, Codex CLI, aider). Falls back to a configurable shell profile.</li>
+      <li>Down petal opens iOS <b>on-device dictation</b> (SFSpeechRecognizer, no network).</li>
+    </ul>
+  </div>
+  <div>
+    <h3>WHY IT EARNS A SPOT</h3>
+    <ul>
+      <li>In a Claude/Codex turn, ~90% of inputs are <i>1↵ / 2↵ / esc / "do X instead"</i>. The keyboard is overkill for the first three; dictation handles the fourth one-handed.</li>
+      <li>Bell-as-turn-complete already alerts you the agent is waiting. Swipe pad is the matched <i>response</i> primitive.</li>
+      <li>Single thumb-zone target on iPhone where there's no room for an accessory bar.</li>
+    </ul>
+  </div>
+  <div class="needs-decision">
+    <b>decisions baked in for v1:</b><br>
+    <span style="color: var(--fgDim);">resolved (v1): <b style="color: var(--green);">direction mapping.</b> iOS convention — <code>→ approve · ← deny · ↑ always</code>. matches system dialog ordering (confirm on the right, dismiss on the left) so muscle memory transfers from native alerts.</span><br>
+    <span style="color: var(--fgDim);">resolved (v1): <b style="color: var(--green);">gesture vocabulary.</b> tap-hold-drag fires a directional macro, double-tap opens dictation, long-press relocates the puck. each primitive maps to one feature — no overloaded gestures.</span><br>
+    <span style="color: var(--fgDim);">resolved (v1): <b style="color: var(--green);">default petals.</b> Claude Code &amp; Codex ship with → / ← / ↑ bound only. the ↓ slot is hidden until the user configures a macro for it. dictation is a separate gesture, not a petal.</span><br>
+    <span style="color: var(--fgDim);">resolved (v1): <b style="color: var(--green);">app-match only.</b> we query tmux <code>#{pane_current_command}</code> when the puck is touched. outside tmux, the shell fallback profile takes over. scrollback-regex matching parked for v2.</span>
+  </div>
+</div>
+
+<!-- =============================================================== -->
+<h2 class="section-h"><span class="num">B</span>in-session — three states</h2>
+<p class="section-sub">how the puck looks at rest, when expanded into the radial, and when morphed into the dictation pill. iPad landscape · top bar v2 · iOS direction convention (approve = right, deny = left).</p>
+
+<div class="device-grid">
+
+  <!-- ============ STATE 1: at rest ============ -->
+  <div>
+    <div class="device">
+      <div class="topbar">
+        <div class="icon">☰</div>
+        <div class="pill">
+          <div class="dot"></div>
+          <div class="name">macbook</div>
+          <div class="sep">·</div>
+          <div class="name">claude</div>
+        </div>
+        <div class="tabs">
+          <div class="tab active"><span>claude</span><span class="num">⌘1</span></div>
+          <div class="tab"><span>logs</span><span class="num">⌘2</span></div>
+        </div>
+        <div class="spacer"></div>
+        <div class="plus">+</div>
+        <div class="icon">⌕</div>
+        <div class="icon">⌂</div>
+      </div>
+      <div class="canvas-wrap">
+        <div class="canvas"><span class="dim">› i'll add the SwipePadController and wire it into ContentView.swift.
+  this changes 2 files (+118 lines, -3 lines):</span>
+
+  <span class="hi">SwipePadController.swift</span>  <span class="ok">new file</span>
+  <span class="hi">ContentView.swift</span>        <span class="warn">3 edits</span>
+
+<span class="dim">───────────────────────────────────────────────────</span>
+
+  <span class="ok">Do you want to apply this change?</span>
+  <span class="choice-active">❯ 1. Yes</span>
+    <span class="dim">2. No, tell Claude what to do differently</span>
+    <span class="dim">3. Yes, and don't ask again this session</span>
+
+  <span class="cursor"></span>
+</div>
+        <!-- puck at rest, anchored bottom-right -->
+        <div class="puck-stage">
+          <div class="puck resting" style="right: 22px; bottom: 22px;">
+            <svg class="puck-mark" width="22" height="22" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <!-- horizontal arrow -->
+              <path d="M4 12h16"/>
+              <path d="M7 9l-3 3 3 3"/>
+              <path d="M17 9l3 3-3 3"/>
+              <!-- vertical arrow -->
+              <path d="M12 4v16"/>
+              <path d="M9 7l3-3 3 3"/>
+              <path d="M9 17l3 3 3-3"/>
+            </svg>
+          </div>
+          <div style="position: absolute; right: 90px; bottom: 24px;
+                      background: rgba(20,20,22,0.88);
+                      border: 0.5px solid var(--border);
+                      border-radius: 10px; padding: 10px 14px;
+                      backdrop-filter: blur(20px) saturate(180%);
+                      -webkit-backdrop-filter: blur(20px) saturate(180%);
+                      box-shadow: 0 10px 24px -8px rgba(0,0,0,0.5);
+                      font-size: 10.5px; line-height: 1.85;
+                      font-family: -apple-system, system-ui, sans-serif;">
+            <div style="color: var(--fgFaint); font-size: 9px; letter-spacing: 0.6px;
+                        text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">gestures</div>
+            <div style="color: var(--fg);"><span style="color: var(--accent); font-weight: 600;">hold + drag</span> &nbsp;macro</div>
+            <div style="color: var(--fg);"><span style="color: var(--accent); font-weight: 600;">double tap</span> &nbsp;&nbsp;dictation</div>
+            <div style="color: var(--fg);"><span style="color: var(--accent); font-weight: 600;">long press</span> &nbsp;move</div>
+          </div>
+        </div>
+      </div>
+      <div class="accbar">
+        <div class="chip">esc</div>
+        <div class="chip">⇥</div>
+        <div class="chip">⌃</div>
+        <div class="chip">⎇</div>
+        <div class="chip">↑</div>
+        <div class="chip">↓</div>
+        <div class="chip">←</div>
+        <div class="chip">→</div>
+      </div>
+    </div>
+    <div class="frame-cap">
+      <span class="tag">state 1</span>
+      <span class="body">at rest — 50pt frosted puck with a 4-way arrow mark hinting "drag in any direction." three discoverable gestures: tap-hold-drag fires a macro, double-tap starts dictation, long-press picks up the puck to relocate.</span>
+    </div>
+  </div>
+
+  <!-- ============ STATE 2: petals open ============ -->
+  <div>
+    <div class="device">
+      <div class="topbar">
+        <div class="icon">☰</div>
+        <div class="pill">
+          <div class="dot"></div>
+          <div class="name">macbook</div>
+          <div class="sep">·</div>
+          <div class="name">claude</div>
+        </div>
+        <div class="tabs">
+          <div class="tab active"><span>claude</span><span class="num">⌘1</span></div>
+          <div class="tab"><span>logs</span><span class="num">⌘2</span></div>
+        </div>
+        <div class="spacer"></div>
+        <div class="plus">+</div>
+        <div class="icon">⌕</div>
+        <div class="icon">⌂</div>
+      </div>
+      <div class="canvas-wrap">
+        <div class="canvas"><span class="dim">› i'll add the SwipePadController and wire it into ContentView.swift.
+  this changes 2 files (+118 lines, -3 lines):</span>
+
+  <span class="hi">SwipePadController.swift</span>  <span class="ok">new file</span>
+  <span class="hi">ContentView.swift</span>        <span class="warn">3 edits</span>
+
+<span class="dim">───────────────────────────────────────────────────</span>
+
+  <span class="ok">Do you want to apply this change?</span>
+  <span class="choice-active">❯ 1. Yes</span>
+    <span class="dim">2. No, tell Claude what to do differently</span>
+    <span class="dim">3. Yes, and don't ask again this session</span>
+
+  <span class="cursor"></span>
+</div>
+
+        <!-- puck mid-drag with petals open. all petals position on ring-center via translate(-50%,-50%). -->
+        <div class="puck-stage">
+          <!-- center anchor (ring center is at left+25, top+25 = (100% - 220 + 25, 200+25) = (100% - 195, 225)) -->
+          <div class="puck armed" style="left: calc(100% - 220px); top: 200px;">
+            <svg class="puck-mark" width="22" height="22" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 12h16"/>
+              <path d="M7 9l-3 3 3 3"/>
+              <path d="M17 9l3 3-3 3"/>
+              <path d="M12 4v16"/>
+              <path d="M9 7l3-3 3 3"/>
+              <path d="M9 17l3 3 3-3"/>
+            </svg>
+          </div>
+
+          <!-- soft direction-tinted glow at the touchpoint, showing the user is aimed at approve (right) -->
+          <div class="touch-glow" style="left: calc(100% - 95px); top: 225px;"></div>
+
+          <!-- LEFT: deny. 100pt left of center -->
+          <div class="petal deny" style="left: calc(100% - 295px); top: 225px;">
+            <div class="ring">
+              <svg width="20" height="20" viewBox="0 0 22 22" fill="none">
+                <path d="M6 6l10 10M16 6l-10 10" stroke="currentColor" stroke-width="2"
+                      stroke-linecap="round"/>
+              </svg>
+            </div>
+            <div class="caption">
+              <div class="label">deny</div>
+              <div class="bind">2 ↵</div>
+            </div>
+          </div>
+
+          <!-- RIGHT: approve — active (touch is here). 100pt right of center -->
+          <div class="petal approve active" style="left: calc(100% - 95px); top: 225px;">
+            <div class="ring">
+              <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+                <path d="M5 11.5l3.5 3.5L17 7" stroke="currentColor" stroke-width="2.2"
+                      stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <div class="caption">
+              <div class="label">approve</div>
+              <div class="bind">1 ↵</div>
+            </div>
+          </div>
+
+          <!-- UP: always allow. 100pt above center -->
+          <div class="petal always" style="left: calc(100% - 195px); top: 125px;">
+            <div class="ring">
+              <svg width="20" height="20" viewBox="0 0 22 22" fill="none">
+                <path d="M5 13l6-6 6 6M5 8l6-6 6 6" stroke="currentColor" stroke-width="2"
+                      stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <div class="caption">
+              <div class="label">always</div>
+              <div class="bind">3 ↵</div>
+            </div>
+          </div>
+
+          <!-- DOWN slot intentionally empty: not bound by default. shown here as a faint ghost so
+               reviewers see where a 4th petal would appear if the user binds the ↓ direction. -->
+          <div class="petal" style="left: calc(100% - 195px); top: 325px; opacity: 0.35;">
+            <div class="ring" style="border-style: dashed; background: rgba(255,255,255,0.04);
+                                     box-shadow: none;">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6"
+                      stroke-linecap="round" opacity="0.55"/>
+              </svg>
+            </div>
+            <div class="caption">
+              <div class="label" style="color: rgba(255,255,255,0.50); font-size: 10.5px;">unbound</div>
+              <div class="bind" style="color: rgba(255,255,255,0.30);">configure to enable</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="accbar">
+        <div class="chip">esc</div>
+        <div class="chip">⇥</div>
+        <div class="chip">⌃</div>
+        <div class="chip">⎇</div>
+        <div class="chip">↑</div>
+        <div class="chip">↓</div>
+        <div class="chip">←</div>
+        <div class="chip">→</div>
+      </div>
+    </div>
+    <div class="frame-cap">
+      <span class="tag">state 2</span>
+      <span class="body">finger has crossed the 24pt dead-zone, three petals fade in over 120ms. release on a petal fires its macro; release inside the dead-zone cancels with a quick spring-back. the ↓ slot stays hidden until the user binds it — shown here as a dashed placeholder for reference.</span>
+    </div>
+  </div>
+
+  <!-- ============ STATE 3: dictating ============ -->
+  <div>
+    <div class="device">
+      <div class="topbar">
+        <div class="icon">☰</div>
+        <div class="pill">
+          <div class="dot"></div>
+          <div class="name">macbook</div>
+          <div class="sep">·</div>
+          <div class="name">claude</div>
+        </div>
+        <div class="tabs">
+          <div class="tab active"><span>claude</span><span class="num">⌘1</span></div>
+          <div class="tab"><span>logs</span><span class="num">⌘2</span></div>
+        </div>
+        <div class="spacer"></div>
+        <div class="plus">+</div>
+        <div class="icon">⌕</div>
+        <div class="icon">⌂</div>
+      </div>
+      <div class="canvas-wrap">
+        <div class="canvas"><span class="dim">› i'll add the SwipePadController and wire it into ContentView.swift.
+  this changes 2 files (+118 lines, -3 lines):</span>
+
+  <span class="hi">SwipePadController.swift</span>  <span class="ok">new file</span>
+  <span class="hi">ContentView.swift</span>        <span class="warn">3 edits</span>
+
+<span class="dim">───────────────────────────────────────────────────</span>
+
+  <span class="ok">Do you want to apply this change?</span>
+  <span class="choice-active">❯ 1. Yes</span>
+    <span class="dim">2. No, tell Claude what to do differently</span>
+    <span class="dim">3. Yes, and don't ask again this session</span>
+
+  <span class="cursor"></span>
+</div>
+
+        <div class="puck-stage">
+          <!-- transcript bubble — floats above the dictation pill, contains streaming text -->
+          <div style="position: absolute; right: 22px; bottom: 132px;
+                      width: 296px;
+                      background: rgba(20,20,22,0.92);
+                      border: 0.5px solid var(--border);
+                      border-radius: 14px; padding: 12px 14px 13px;
+                      backdrop-filter: blur(28px) saturate(180%);
+                      -webkit-backdrop-filter: blur(28px) saturate(180%);
+                      font-family: -apple-system, system-ui, 'SF Pro Text', sans-serif;
+                      box-shadow:
+                        0 16px 36px -10px rgba(0,0,0,0.55),
+                        inset 0 0.5px 0 rgba(255,255,255,0.18);">
+            <div style="font-size: 9px; color: var(--fgFaint);
+                        letter-spacing: 0.6px; text-transform: uppercase;
+                        margin-bottom: 6px; font-weight: 600;
+                        display: flex; align-items: center; gap: 5px;">
+              <span style="display: inline-block; width: 6px; height: 6px;
+                           border-radius: 3px; background: var(--red);
+                           box-shadow: 0 0 6px var(--red);
+                           animation: pulse 1.4s ease-in-out infinite;"></span>
+              listening
+            </div>
+            <div style="font-size: 13px; line-height: 1.45; color: var(--fg);
+                        letter-spacing: -0.1px;">
+              add error handling for the network timeout case so it retries with exponential<span style="display: inline-block; width: 2px; height: 14px; background: var(--accent); margin-left: 3px; vertical-align: -2px; animation: blink 0.85s step-end infinite;"></span>
+            </div>
+          </div>
+
+          <!-- pointer arrow from bubble down to pill -->
+          <div style="position: absolute; right: 102px; bottom: 124px;
+                      width: 10px; height: 8px;
+                      background: rgba(20,20,22,0.92);
+                      clip-path: polygon(0% 0%, 100% 0%, 50% 100%);
+                      border-left: 0.5px solid var(--border);
+                      border-right: 0.5px solid var(--border);"></div>
+
+          <!-- the morphed puck → dictation pill -->
+          <div style="position: absolute; right: 22px; bottom: 64px;
+                      height: 56px;
+                      display: flex; align-items: center; gap: 11px;
+                      padding: 0 8px 0 14px;
+                      border-radius: 28px;
+                      background: rgba(255,255,255,0.13);
+                      border: 0.5px solid rgba(255,255,255,0.22);
+                      backdrop-filter: blur(28px) saturate(180%);
+                      -webkit-backdrop-filter: blur(28px) saturate(180%);
+                      box-shadow:
+                        0 14px 30px -8px rgba(0,0,0,0.55),
+                        0 4px 10px rgba(0,0,0,0.25),
+                        inset 0 0.5px 0 rgba(255,255,255,0.25);">
+            <!-- recording dot -->
+            <div style="width: 8px; height: 8px; border-radius: 4px;
+                        background: var(--red);
+                        box-shadow: 0 0 10px var(--red);
+                        animation: pulse 1.4s ease-in-out infinite;
+                        flex-shrink: 0;"></div>
+            <!-- mic glyph -->
+            <svg width="18" height="18" viewBox="0 0 22 22" fill="none" style="flex-shrink: 0;">
+              <rect x="8" y="2.5" width="6" height="11" rx="3" fill="#5B9FFF"/>
+              <path d="M4.5 11a6.5 6.5 0 0 0 13 0M11 17.5v2.5" stroke="#5B9FFF"
+                    stroke-width="1.8" stroke-linecap="round" fill="none"/>
+            </svg>
+            <!-- live waveform: 7 bars, scaling animation simulates voice -->
+            <div style="display: flex; align-items: center; gap: 3px; height: 30px; flex-shrink: 0;">
+              <div style="width: 3px; height: 10px; background: var(--accent); border-radius: 1.5px;
+                          transform-origin: center;
+                          animation: waveBar 0.8s ease-in-out infinite;"></div>
+              <div style="width: 3px; height: 18px; background: var(--accent); border-radius: 1.5px;
+                          transform-origin: center;
+                          animation: waveBar 0.6s ease-in-out infinite 0.1s;"></div>
+              <div style="width: 3px; height: 26px; background: var(--accent); border-radius: 1.5px;
+                          transform-origin: center;
+                          animation: waveBar 0.5s ease-in-out infinite 0.2s;"></div>
+              <div style="width: 3px; height: 16px; background: var(--accent); border-radius: 1.5px;
+                          transform-origin: center;
+                          animation: waveBar 0.7s ease-in-out infinite 0.05s;"></div>
+              <div style="width: 3px; height: 22px; background: var(--accent); border-radius: 1.5px;
+                          transform-origin: center;
+                          animation: waveBar 0.55s ease-in-out infinite 0.15s;"></div>
+              <div style="width: 3px; height: 12px; background: var(--accent); border-radius: 1.5px;
+                          transform-origin: center;
+                          animation: waveBar 0.9s ease-in-out infinite 0.25s;"></div>
+              <div style="width: 3px; height: 8px;  background: var(--accent); border-radius: 1.5px;
+                          transform-origin: center;
+                          animation: waveBar 0.75s ease-in-out infinite 0.3s;"></div>
+            </div>
+            <!-- timer -->
+            <div style="font-family: var(--mono); font-size: 11.5px;
+                        color: rgba(255,255,255,0.78); font-weight: 500;
+                        flex-shrink: 0; letter-spacing: 0.3px;">0:04</div>
+            <!-- cancel × -->
+            <div style="width: 30px; height: 30px; border-radius: 15px;
+                        background: rgba(255,255,255,0.10);
+                        border: 0.5px solid rgba(255,255,255,0.12);
+                        display: flex; align-items: center; justify-content: center;
+                        color: var(--fgMuted); font-size: 12px;
+                        flex-shrink: 0; margin-left: 2px;">
+              <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                <path d="M2 2l7 7M9 2l-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              </svg>
+            </div>
+          </div>
+
+          <!-- commit hint below the pill -->
+          <div style="position: absolute; right: 30px; bottom: 36px;
+                      font-family: -apple-system, system-ui, sans-serif;
+                      font-size: 10.5px; color: var(--fgDim);
+                      text-align: right; line-height: 1.4;
+                      letter-spacing: 0.1px;">
+            tap pill to send · pause 1.2s to auto-commit
+          </div>
+        </div>
+      </div>
+      <div class="accbar">
+        <div class="chip">esc</div>
+        <div class="chip">⇥</div>
+        <div class="chip">⌃</div>
+        <div class="chip">⎇</div>
+        <div class="chip">↑</div>
+        <div class="chip">↓</div>
+        <div class="chip">←</div>
+        <div class="chip">→</div>
+      </div>
+    </div>
+    <div class="frame-cap">
+      <span class="tag">state 3</span>
+      <span class="body">after a double-tap, the puck morphs into a pill: recording dot (pulsing red) + mic glyph + live waveform + elapsed timer + cancel. transcript streams into a callout above. pause 1.2s or tap the pill to commit — the transcribed text is sent into the terminal as if typed, with an optional trailing <code>↵</code>.</span>
+    </div>
+  </div>
+</div>
+
+<div class="legend">
+  <div class="item"><span class="sw" style="background: var(--green);"></span> approve · positive action</div>
+  <div class="item"><span class="sw" style="background: var(--red);"></span> deny · destructive action</div>
+  <div class="item"><span class="sw" style="background: var(--amber);"></span> always · "don't ask again" semantics</div>
+  <div class="item"><span class="sw" style="background: rgba(255,255,255,0.25);"></span> ↓ unbound · user-configurable 4th slot</div>
+</div>
+
+<!-- =============================================================== -->
+<h2 class="section-h"><span class="num">C</span>settings → experimental</h2>
+<p class="section-sub">new tab in the settings rail, sitting below "sync". flagged with an <span style="color:var(--amber); font-weight:500;">EXPERIMENTAL</span> badge so users know prefs here may break between releases. rule-based: each <b>profile</b> binds 4 directional macros, scoped to a match expression (auto-detected against scrollback or the foreground tmux command).</p>
+
+<div class="device">
+  <div class="settings">
+
+    <div class="settings-rail">
+      <div class="title">settings</div>
+      <div class="rail-row">appearance</div>
+      <div class="rail-row">terminal</div>
+      <div class="rail-row">themes</div>
+      <div class="rail-row">keyboard</div>
+      <div class="rail-row">security</div>
+      <div class="rail-row">sync</div>
+      <div class="rail-row active">experimental <span class="badge">new</span></div>
+      <div class="rail-row">about</div>
+    </div>
+
+    <div class="settings-pane">
+      <h2 class="settings-h">experimental</h2>
+      <p class="settings-sub">
+        <span class="warn-pill">heads up</span>features in this section are under active design — keybindings, defaults, and storage layouts may change between releases.
+      </p>
+
+      <!-- ============ MASTER TOGGLE ============ -->
+      <div class="toggle-row">
+        <div class="left">
+          <div class="t1">swipe pad</div>
+          <div class="t2">floating thumb-zone puck · 3 discrete gestures · radial macros + on-device dictation</div>
+        </div>
+        <div class="switch on"></div>
+      </div>
+
+      <!-- ============ GESTURE VOCABULARY ============ -->
+      <div class="field" style="margin-top: 22px;">
+        <div class="field-label">gestures</div>
+        <div class="profile-list">
+          <div class="profile-row">
+            <div class="profile-head">
+              <div style="width: 28px; height: 28px; border-radius: 14px;
+                          background: var(--accentSoft); color: var(--accent);
+                          display: flex; align-items: center; justify-content: center;
+                          font-size: 13px; font-weight: 600;">↗</div>
+              <div>
+                <div class="name">tap, hold &amp; drag</div>
+                <div class="match" style="margin-top: 3px;">opens the radial · drag to a direction and release to fire that macro · release in the dead-zone to cancel</div>
+              </div>
+              <div class="actions" style="font-size: 10px; letter-spacing: 0.5px;
+                                          color: var(--accent); text-transform: uppercase;">macro</div>
+            </div>
+          </div>
+          <div class="profile-row">
+            <div class="profile-head">
+              <div style="width: 28px; height: 28px; border-radius: 14px;
+                          background: var(--accentSoft); color: var(--accent);
+                          display: flex; align-items: center; justify-content: center;
+                          font-size: 11px; font-weight: 700; letter-spacing: -1px;">··</div>
+              <div>
+                <div class="name">double tap</div>
+                <div class="match" style="margin-top: 3px;">starts on-device dictation · puck morphs into a live waveform · tap again or pause to commit</div>
+              </div>
+              <div class="actions" style="font-size: 10px; letter-spacing: 0.5px;
+                                          color: var(--accent); text-transform: uppercase;">dictation</div>
+            </div>
+          </div>
+          <div class="profile-row">
+            <div class="profile-head">
+              <div style="width: 28px; height: 28px; border-radius: 14px;
+                          background: var(--accentSoft); color: var(--accent);
+                          display: flex; align-items: center; justify-content: center;
+                          font-size: 12px; font-weight: 600;">⊕</div>
+              <div>
+                <div class="name">long press</div>
+                <div class="match" style="margin-top: 3px;">picks up the puck for relocation · drag to any spot and release · snaps to nearest edge</div>
+              </div>
+              <div class="actions" style="font-size: 10px; letter-spacing: 0.5px;
+                                          color: var(--accent); text-transform: uppercase;">move</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ PUCK PLACEMENT / SIZE ============ -->
+      <div class="field" style="margin-top: 22px;">
+        <div class="field-label">default corner</div>
+        <div class="segmented">
+          <div class="seg">top-left</div>
+          <div class="seg">top-right</div>
+          <div class="seg">bottom-left</div>
+          <div class="seg active">bottom-right</div>
+        </div>
+        <div class="field-sub">the puck remembers its last position per-orientation. this is just the cold-launch fallback.</div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">puck size</div>
+        <div class="segmented">
+          <div class="seg">compact · 44pt</div>
+          <div class="seg active">standard · 52pt</div>
+          <div class="seg">large · 64pt</div>
+        </div>
+      </div>
+
+      <!-- ============ AUTO-DETECTED AGENT ============ -->
+      <div class="field" style="margin-top: 6px;">
+        <div class="field-label">active profile · auto-detected</div>
+        <div class="detect-card">
+          <div class="left">
+            <div class="t1">detected from foreground process</div>
+            <div class="t2"><span class="agent-name">claude code</span> · <code style="color:var(--fgMuted);">#{pane_current_command} == claude</code></div>
+          </div>
+          <div class="right">
+            <div class="dot"></div>
+            <span>matching</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ PROFILES / RULES ============ -->
+      <div class="field">
+        <div class="field-label">profiles · evaluated top-to-bottom · first match wins</div>
+
+        <div class="profile-list">
+
+          <!-- Claude Code (expanded) -->
+          <div class="profile-row expanded">
+            <div class="profile-head">
+              <div class="chev">▶</div>
+              <div>
+                <div class="name">claude code <span class="pill-default">smart default</span></div>
+                <div class="match">match: process <code>claude</code></div>
+              </div>
+              <div class="actions">edit · ⋯</div>
+            </div>
+            <div class="binding-grid">
+              <div class="binding-cell deny">
+                <div class="arr">←</div>
+                <div class="meta">
+                  <div class="role">deny</div>
+                  <div class="dir">drag left</div>
+                </div>
+                <div class="seq">2 ↵</div>
+              </div>
+              <div class="binding-cell approve">
+                <div class="arr">→</div>
+                <div class="meta">
+                  <div class="role">approve</div>
+                  <div class="dir">drag right</div>
+                </div>
+                <div class="seq">1 ↵</div>
+              </div>
+              <div class="binding-cell always">
+                <div class="arr">↑</div>
+                <div class="meta">
+                  <div class="role">always allow</div>
+                  <div class="dir">drag up</div>
+                </div>
+                <div class="seq">3 ↵</div>
+              </div>
+              <div class="binding-cell" style="opacity: 0.55;">
+                <div class="arr" style="border-style: dashed; color: var(--fgFaint);
+                                        background: transparent;">↓</div>
+                <div class="meta">
+                  <div class="role" style="color: var(--fgMuted);">not bound</div>
+                  <div class="dir">drag down · petal hidden until set</div>
+                </div>
+                <div class="seq" style="border-style: dashed; color: var(--fgFaint);
+                                        background: transparent;">＋ add</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Codex CLI (expanded) — single-key shortcuts, esc for deny, 'p' for per-command always-allow -->
+          <div class="profile-row expanded">
+            <div class="profile-head">
+              <div class="chev">▶</div>
+              <div>
+                <div class="name">codex cli <span class="pill-default">smart default</span></div>
+                <div class="match">match: process <code>codex</code></div>
+              </div>
+              <div class="actions">edit · ⋯</div>
+            </div>
+            <div class="binding-grid">
+              <div class="binding-cell deny">
+                <div class="arr">←</div>
+                <div class="meta">
+                  <div class="role">deny</div>
+                  <div class="dir">drag left · tell codex differently</div>
+                </div>
+                <div class="seq">esc</div>
+              </div>
+              <div class="binding-cell approve">
+                <div class="arr">→</div>
+                <div class="meta">
+                  <div class="role">approve</div>
+                  <div class="dir">drag right · yes, proceed</div>
+                </div>
+                <div class="seq">y</div>
+              </div>
+              <div class="binding-cell always">
+                <div class="arr">↑</div>
+                <div class="meta">
+                  <div class="role">always allow</div>
+                  <div class="dir">drag up · per-command pattern</div>
+                </div>
+                <div class="seq">p</div>
+              </div>
+              <div class="binding-cell" style="opacity: 0.55;">
+                <div class="arr" style="border-style: dashed; color: var(--fgFaint);
+                                        background: transparent;">↓</div>
+                <div class="meta">
+                  <div class="role" style="color: var(--fgMuted);">not bound</div>
+                  <div class="dir">drag down · petal hidden until set</div>
+                </div>
+                <div class="seq" style="border-style: dashed; color: var(--fgFaint);
+                                        background: transparent;">＋ add</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- aider (collapsed) -->
+          <div class="profile-row">
+            <div class="profile-head">
+              <div class="chev">▶</div>
+              <div>
+                <div class="name">aider <span class="pill-default">smart default</span></div>
+                <div class="match">match: process <code>aider</code></div>
+              </div>
+              <div class="actions">edit · ⋯</div>
+            </div>
+          </div>
+
+          <!-- Default / shell fallback (collapsed) -->
+          <div class="profile-row">
+            <div class="profile-head">
+              <div class="chev">▶</div>
+              <div>
+                <div class="name">shell · fallback</div>
+                <div class="match">always matches when no profile above matched. voice-only by default; other directions unbound.</div>
+              </div>
+              <div class="actions">edit · ⋯</div>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="add-rule">＋ add profile</div>
+      </div>
+
+      <!-- ============ INLINE RULE EDITOR ============ -->
+      <div class="editor-card">
+        <div class="editor-head">editing · claude code</div>
+        <div class="editor-body">
+          <div class="input-row">
+            <div class="lbl">profile name</div>
+            <div class="ctl">claude code</div>
+          </div>
+          <div class="input-row">
+            <div class="lbl">match · process</div>
+            <div class="ctl"><span class="mute">tmux #{pane_current_command} ==</span> claude</div>
+          </div>
+          <div class="input-row">
+            <div class="lbl">← deny · sends</div>
+            <div class="ctl code">2 ↵</div>
+          </div>
+          <div class="input-row">
+            <div class="lbl">→ approve · sends</div>
+            <div class="ctl code">1 ↵</div>
+          </div>
+          <div class="input-row">
+            <div class="lbl">↑ always · sends</div>
+            <div class="ctl code">3 ↵</div>
+          </div>
+          <div class="input-row">
+            <div class="lbl">↓ macro · sends</div>
+            <div class="ctl" style="border-style: dashed; color: var(--fgFaint);">
+              <span style="color: var(--fgMuted);">＋</span> not bound · tap to add a 4th macro
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ VOICE SUBSECTION ============ -->
+      <h3 class="subhead">voice input</h3>
+      <p style="font-size: 11px; color: var(--fgDim); margin: -6px 0 14px; line-height: 1.55;">
+        triggered by <span style="color: var(--accent); font-weight: 500;">double tap</span> on the puck. independent of the radial — no swipe required.
+      </p>
+
+      <div class="toggle-row">
+        <div class="left">
+          <div class="t1">on-device dictation</div>
+          <div class="t2">SFSpeechRecognizer · no audio leaves the device · english</div>
+        </div>
+        <div class="switch on"></div>
+      </div>
+
+      <div class="toggle-row">
+        <div class="left">
+          <div class="t1">commit on silence</div>
+          <div class="t2">auto-send after 1.2s of silence · otherwise double-tap again to send</div>
+        </div>
+        <div class="switch on"></div>
+      </div>
+
+      <div class="toggle-row">
+        <div class="left">
+          <div class="t1">append return</div>
+          <div class="t2">send a ↵ after the transcript hits the terminal</div>
+        </div>
+        <div class="switch"></div>
+      </div>
+
+      <div class="toggle-row">
+        <div class="left">
+          <div class="t1">live waveform on the puck</div>
+          <div class="t2">the puck morphs into a mic+waveform glyph while listening</div>
+        </div>
+        <div class="switch on"></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<p class="section-sub" style="margin-top: 28px;">
+  <b style="color:var(--fg);">notes for review:</b><br>
+  — <b>direction mapping follows iOS convention</b>: <code>→ approve · ← deny · ↑ always</code>. confirm-on-the-right matches system alerts, share sheets, and message-action menus, so muscle memory transfers without retraining.<br>
+  — <b>gesture vocabulary</b>: each primitive maps to one feature — no overloaded gestures. tap-hold-drag → macro · double-tap → dictation · long-press → relocate. discoverability via the small gesture-key callout in state 1, plus the gestures card in settings.<br>
+  — <b>default radial is 3 petals</b> (→ / ← / ↑) for Claude Code &amp; Codex. the ↓ slot is hidden until the user binds a macro to it — keeps the resting radial feel clean and removes the "what does down do?" learning tax for the common case.<br>
+  — detection signal in v1 is <code>pane_current_command</code> only, queried via tmux <code>-CC</code> when the puck is touched. outside tmux mode, the shell fallback profile is used. scrollback-regex matching is parked for a future release.<br>
+  — &quot;always allow&quot; semantics differ per agent: Claude Code's option 3 (<code>3 ↵</code>) is session-wide; Codex's <code>p</code> is <i>per-command-pattern</i> (e.g. "don't ask again for commands starting with <code>date</code>"). same gesture, agent-appropriate behavior baked into each profile.<br>
+  — Codex uses single-key shortcuts without <code>↵</code> (<code>y</code> / <code>p</code> / <code>esc</code>), Claude Code uses number-plus-Enter. the rule model supports both — the macro field is just an opaque byte sequence.<br>
+  — dictation activation via double-tap means voice has zero conflict with the radial: you can never accidentally fire a macro when you meant to speak. trade-off is reduced discoverability vs. a visible petal — addressed by the gestures card and a one-time first-run tooltip.
+</p>
+
+</div>
+</body>
+</html>

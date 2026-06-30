@@ -1,0 +1,1324 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0852B22FF60AF0B5F713D29B /* ScrollProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = F258CE6A611C425C97F1A49C /* ScrollProbe.swift */; };
+		1A0004000000000000000001 /* TesseraApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000001 /* TesseraApp.swift */; };
+		1A0004000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000002 /* ContentView.swift */; };
+		1A0004000000000000000003 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000003 /* Assets.xcassets */; };
+		1A0004000000000000000005 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A000000000000000001 /* SwiftTerm */; };
+		1A0004000000000000000006 /* ScrollDispatcher in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A000000000000000002 /* ScrollDispatcher */; };
+		1A0004000000000000000007 /* TmuxControl in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A000000000000000003 /* TmuxControl */; };
+		1A0004000000000000000008 /* Citadel in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A000000000000000004 /* Citadel */; };
+		1A0004000000000000000009 /* Host.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000006 /* Host.swift */; };
+		1A000400000000000000000A /* SSHSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000007 /* SSHSession.swift */; };
+		1A000400000000000000000B /* HostEntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000008 /* HostEntryView.swift */; };
+		1A000400000000000000000C /* SessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000009 /* SessionView.swift */; };
+		1A000400000000000000000D /* TesseraTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000300000000000000000A /* TesseraTerminalView.swift */; };
+		1A000400000000000000000E /* AutoTmuxHostStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000300000000000000000B /* AutoTmuxHostStorage.swift */; };
+		1A000400000000000000000F /* PersistedHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000300000000000000000C /* PersistedHost.swift */; };
+		1A0004000000000000000010 /* Identity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000300000000000000000D /* Identity.swift */; };
+		1A0004000000000000000011 /* LiveSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000300000000000000000E /* LiveSession.swift */; };
+		1A0004000000000000000012 /* SessionSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000300000000000000000F /* SessionSidebar.swift */; };
+		1A0004000000000000000013 /* HostDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000010 /* HostDetailView.swift */; };
+		1A0004000000000000000015 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000012 /* KeychainHelper.swift */; };
+		1A0004000000000000000016 /* StoredKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000013 /* StoredKey.swift */; };
+		1A0004000000000000000017 /* KeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000014 /* KeyStore.swift */; };
+		1A0004000000000000000019 /* KnownHostsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000016 /* KnownHostsStore.swift */; };
+		1A000400000000000000001A /* HostKeyVerificationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000017 /* HostKeyVerificationView.swift */; };
+		1A000400000000000000001B /* TerminalSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000018 /* TerminalSession.swift */; };
+		1A000400000000000000001C /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000019 /* Session.swift */; };
+		1A000400000000000000001D /* SSHAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000300000000000000001A /* SSHAuth.swift */; };
+		1A0004000000000000000020 /* MoshBridge in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A000000000000000005 /* MoshBridge */; };
+		1A0004000000000000000021 /* MoshSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000300000000000000001B /* MoshSession.swift */; };
+		1A0004000000000000000022 /* MoshBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000300000000000000001C /* MoshBootstrap.swift */; };
+		1A0004000000000000000023 /* MoshBootstrapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000300000000000000001E /* MoshBootstrapTests.swift */; };
+		1A0004000000000000000024 /* KnownHostsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000300000000000000001F /* KnownHostsStoreTests.swift */; };
+		1A0004000000000000000025 /* OSDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000025 /* OSDetector.swift */; };
+		1A0004000000000000000026 /* HostOSDetectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000026 /* HostOSDetectionState.swift */; };
+		1A0004000000000000000027 /* OSDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000027 /* OSDetectorTests.swift */; };
+		1A0004000000000000000028 /* OSDetectionProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000028 /* OSDetectionProbe.swift */; };
+		1A0004000000000000000029 /* RemoteAuthorizedKeysInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000029 /* RemoteAuthorizedKeysInstallerTests.swift */; };
+		1A0004000000000000000030 /* PortForwarding in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A000000000000000006 /* PortForwarding */; };
+		1A00040000000000000000F0 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 1A00030000000000000000F0 /* PrivacyInfo.xcprivacy */; };
+		1A00040000000000000000F1 /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = 1A00030000000000000000F1 /* LICENSE */; };
+		1A00040000000000000000F2 /* COPYING.iOS in Resources */ = {isa = PBXBuildFile; fileRef = 1A00030000000000000000F2 /* COPYING.iOS */; };
+		1A00040000000000000000F3 /* ThirdPartyNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = 1A00030000000000000000F3 /* ThirdPartyNotices.txt */; };
+		1A0014000000000000000001 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000001 /* DesignTokens.swift */; };
+		1A0014000000000000000002 /* AppearancePreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000002 /* AppearancePreferences.swift */; };
+		1A0014000000000000000003 /* Typography.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000003 /* Typography.swift */; };
+		1A0014000000000000000004 /* Field.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000004 /* Field.swift */; };
+		1A0014000000000000000005 /* Input.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000005 /* Input.swift */; };
+		1A0014000000000000000006 /* Btn.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000006 /* Btn.swift */; };
+		1A0014000000000000000007 /* Chip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000007 /* Chip.swift */; };
+		1A0014000000000000000008 /* Tag.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000008 /* Tag.swift */; };
+		1A0014000000000000000009 /* StatusDot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000009 /* StatusDot.swift */; };
+		1A001400000000000000000A /* ToggleRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000000A /* ToggleRow.swift */; };
+		1A001400000000000000000B /* JetBrainsMono.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000000B /* JetBrainsMono.ttf */; };
+		1A001400000000000000000C /* HostsLandingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000000C /* HostsLandingView.swift */; };
+		1A001400000000000000000D /* OSBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000000D /* OSBadge.swift */; };
+		1A001400000000000000000E /* HostCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000000E /* HostCard.swift */; };
+		1A001400000000000000000F /* KeysPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000000F /* KeysPageView.swift */; };
+		1A0014000000000000000010 /* GenerateKeyModal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000010 /* GenerateKeyModal.swift */; };
+		1A0014000000000000000011 /* ImportKeyModal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000011 /* ImportKeyModal.swift */; };
+		1A0014000000000000000013 /* KnownHostsPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000013 /* KnownHostsPageView.swift */; };
+		1A0014000000000000000014 /* SettingsPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000014 /* SettingsPageView.swift */; };
+		1A0014000000000000000015 /* AppearanceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000015 /* AppearanceSettingsView.swift */; };
+		1A0014000000000000000016 /* TerminalSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000016 /* TerminalSettingsView.swift */; };
+		1A0014000000000000000017 /* ThemeSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000017 /* ThemeSettingsView.swift */; };
+		1A0014000000000000000018 /* KeyboardSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000018 /* KeyboardSettingsView.swift */; };
+		1A0014000000000000000019 /* SecuritySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000019 /* SecuritySettingsView.swift */; };
+		1A001400000000000000001B /* AboutSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000001B /* AboutSettingsView.swift */; };
+		1A001400000000000000001C /* TerminalTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000001C /* TerminalTheme.swift */; };
+		1A001400000000000000001D /* TesseraLogo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000001D /* TesseraLogo.swift */; };
+		1A001400000000000000001E /* DistroLogos.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000001E /* DistroLogos.swift */; };
+		1A001400000000000000001F /* InstallKeyToHostFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000001F /* InstallKeyToHostFlow.swift */; };
+		1A0014000000000000000020 /* RemoteAuthorizedKeysInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000020 /* RemoteAuthorizedKeysInstaller.swift */; };
+		1A0014000000000000000021 /* BiometricGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000021 /* BiometricGate.swift */; };
+		1A0014000000000000000022 /* BiometricSessionCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000022 /* BiometricSessionCache.swift */; };
+		1A0014000000000000000023 /* AppLockController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000023 /* AppLockController.swift */; };
+		1A0014000000000000000024 /* LockScreenView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000024 /* LockScreenView.swift */; };
+		1A0014000000000000000025 /* HostLaunchPrologue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000025 /* HostLaunchPrologue.swift */; };
+		1A0014000000000000000026 /* FindController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000026 /* FindController.swift */; };
+		1A0014000000000000000027 /* FindBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000027 /* FindBar.swift */; };
+		1A0014000000000000000028 /* TerminalSearchAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000028 /* TerminalSearchAdapter.swift */; };
+		1A0014000000000000000029 /* AppPhase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000029 /* AppPhase.swift */; };
+		1A001400000000000000002A /* BellRateLimiter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000002A /* BellRateLimiter.swift */; };
+		1A001400000000000000002B /* BellController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000002B /* BellController.swift */; };
+		1A001400000000000000002C /* SessionRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000002C /* SessionRegistry.swift */; };
+		1A001400000000000000002D /* CommandPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000002D /* CommandPalette.swift */; };
+		1A001400000000000000002E /* CommandPaletteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000002E /* CommandPaletteView.swift */; };
+		1A001400000000000000002F /* SessionSwitcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000002F /* SessionSwitcher.swift */; };
+		1A0014000000000000000030 /* SessionLaunchOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000030 /* SessionLaunchOverlay.swift */; };
+		1A0014000000000000000031 /* PaneGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000031 /* PaneGridView.swift */; };
+		1A0014000000000000000032 /* TerminalCellMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000032 /* TerminalCellMetrics.swift */; };
+		1A0024000000000000000001 /* AccessoryChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0023000000000000000001 /* AccessoryChip.swift */; };
+		1A0024000000000000000002 /* AccessoryChipEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0023000000000000000002 /* AccessoryChipEncoder.swift */; };
+		1A0024000000000000000003 /* ModifierState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0023000000000000000003 /* ModifierState.swift */; };
+		1A0024000000000000000004 /* AccessoryChipEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0023000000000000000004 /* AccessoryChipEncoderTests.swift */; };
+		1A0024000000000000000005 /* ModifierStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0023000000000000000005 /* ModifierStateTests.swift */; };
+		1A0024000000000000000007 /* SessionAccessoryBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0023000000000000000007 /* SessionAccessoryBar.swift */; };
+		1A0024000000000000000008 /* DraggableChipBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0023000000000000000008 /* DraggableChipBar.swift */; };
+		1A0024000000000000000009 /* SessionRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0023000000000000000009 /* SessionRegistryTests.swift */; };
+		1A002400000000000000000A /* CommandPaletteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002300000000000000000A /* CommandPaletteTests.swift */; };
+		1A002400000000000000000B /* SessionSwitcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002300000000000000000B /* SessionSwitcherTests.swift */; };
+		1A0024000000000000000010 /* TesseraMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0025000000000000000010 /* TesseraMigration.swift */; };
+		1A0024000000000000000011 /* TesseraMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0025000000000000000011 /* TesseraMigrationTests.swift */; };
+		1A0025000000000000000001 /* EnclaveAuthDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0025000000000000000002 /* EnclaveAuthDelegate.swift */; };
+		1A0028000000000000000001 /* DirectTCPIPChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0027000000000000000001 /* DirectTCPIPChannel.swift */; };
+		1A0028000000000000000002 /* PortListener.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0027000000000000000002 /* PortListener.swift */; };
+		1A0028000000000000000003 /* PortForwarder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0027000000000000000003 /* PortForwarder.swift */; };
+		1A0028000000000000000004 /* PortForwardConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0027000000000000000004 /* PortForwardConnection.swift */; };
+		1A0028000000000000000005 /* PortForwarderManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0027000000000000000005 /* PortForwarderManager.swift */; };
+		1A0028000000000000000006 /* TunnelsRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0027000000000000000006 /* TunnelsRegistry.swift */; };
+		1A0028000000000000000007 /* ForwardingTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0027000000000000000007 /* ForwardingTabView.swift */; };
+		1A0028000000000000000009 /* ForwardingStatusChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0027000000000000000009 /* ForwardingStatusChip.swift */; };
+		1A002800000000000000000A /* TunnelsPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002700000000000000000A /* TunnelsPageView.swift */; };
+		1A002C000000000000000001 /* SwipePadProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B000000000000000001 /* SwipePadProfile.swift */; };
+		1A002C000000000000000002 /* MacroEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B000000000000000002 /* MacroEncoder.swift */; };
+		1A002C000000000000000003 /* SwipePadProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B000000000000000003 /* SwipePadProfileStore.swift */; };
+		1A002C000000000000000004 /* SwipePadActiveProfileResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B000000000000000004 /* SwipePadActiveProfileResolver.swift */; };
+		1A002C000000000000000005 /* SpeechDictationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B000000000000000005 /* SpeechDictationController.swift */; };
+		1A002C000000000000000006 /* SwipePadOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B000000000000000006 /* SwipePadOverlay.swift */; };
+		1A002C000000000000000007 /* SwipePadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B000000000000000007 /* SwipePadView.swift */; };
+		1A002C000000000000000008 /* MacroEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B000000000000000008 /* MacroEncoderTests.swift */; };
+		1A002C000000000000000009 /* SwipePadProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B000000000000000009 /* SwipePadProfileTests.swift */; };
+		1A002C00000000000000000A /* ExperimentalSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B00000000000000000A /* ExperimentalSettingsView.swift */; };
+		1A0034000000000000000001 /* SessionRestoreStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0033000000000000000001 /* SessionRestoreStore.swift */; };
+		1A0034000000000000000002 /* SessionRestoreSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0033000000000000000002 /* SessionRestoreSheet.swift */; };
+		1A0034000000000000000003 /* SessionRestoreStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0033000000000000000003 /* SessionRestoreStoreTests.swift */; };
+		1A0034000000000000000004 /* SessionRestoreResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0033000000000000000004 /* SessionRestoreResolverTests.swift */; };
+		1A0041000000000000000002 /* OnboardingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0040000000000000000002 /* OnboardingController.swift */; };
+		1A0041000000000000000003 /* OnboardingStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0040000000000000000003 /* OnboardingStep.swift */; };
+		1A0041000000000000000004 /* OnboardingAnchor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0040000000000000000004 /* OnboardingAnchor.swift */; };
+		1A0041000000000000000005 /* OnboardingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0040000000000000000005 /* OnboardingOverlay.swift */; };
+		1A0041000000000000000006 /* OnboardingControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0040000000000000000006 /* OnboardingControllerTests.swift */; };
+		1A0050000000000000000002 /* KittyWindowModeStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0050000000000000000001 /* KittyWindowModeStoreTests.swift */; };
+		1A0050000000000000000004 /* PaneLayoutMathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0050000000000000000003 /* PaneLayoutMathTests.swift */; };
+		4E85A5F67DAFF1329C6E2D52 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5930AA51D944F5C5F0C84F3C /* Foundation.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		1A000C000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1A0001000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1A0005000000000000000001;
+			remoteInfo = Tessera;
+		};
+		EC135A0DF3CB132FC7E185BC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1A0001000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1A0005000000000000000001;
+			remoteInfo = Tessera;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		1A0003000000000000000001 /* TesseraApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TesseraApp.swift; sourceTree = "<group>"; };
+		1A0003000000000000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		1A0003000000000000000003 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		1A0003000000000000000004 /* Tessera.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Tessera.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A0003000000000000000006 /* Host.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Host.swift; sourceTree = "<group>"; };
+		1A0003000000000000000007 /* SSHSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHSession.swift; sourceTree = "<group>"; };
+		1A0003000000000000000008 /* HostEntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostEntryView.swift; sourceTree = "<group>"; };
+		1A0003000000000000000009 /* SessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionView.swift; sourceTree = "<group>"; };
+		1A000300000000000000000A /* TesseraTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TesseraTerminalView.swift; sourceTree = "<group>"; };
+		1A000300000000000000000B /* AutoTmuxHostStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoTmuxHostStorage.swift; sourceTree = "<group>"; };
+		1A000300000000000000000C /* PersistedHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedHost.swift; sourceTree = "<group>"; };
+		1A000300000000000000000D /* Identity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Identity.swift; sourceTree = "<group>"; };
+		1A000300000000000000000E /* LiveSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSession.swift; sourceTree = "<group>"; };
+		1A000300000000000000000F /* SessionSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSidebar.swift; sourceTree = "<group>"; };
+		1A0003000000000000000010 /* HostDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostDetailView.swift; sourceTree = "<group>"; };
+		1A0003000000000000000012 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
+		1A0003000000000000000013 /* StoredKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoredKey.swift; sourceTree = "<group>"; };
+		1A0003000000000000000014 /* KeyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyStore.swift; sourceTree = "<group>"; };
+		1A0003000000000000000016 /* KnownHostsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnownHostsStore.swift; sourceTree = "<group>"; };
+		1A0003000000000000000017 /* HostKeyVerificationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostKeyVerificationView.swift; sourceTree = "<group>"; };
+		1A0003000000000000000018 /* TerminalSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSession.swift; sourceTree = "<group>"; };
+		1A0003000000000000000019 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
+		1A000300000000000000001A /* SSHAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHAuth.swift; sourceTree = "<group>"; };
+		1A000300000000000000001B /* MoshSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoshSession.swift; sourceTree = "<group>"; };
+		1A000300000000000000001C /* MoshBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoshBootstrap.swift; sourceTree = "<group>"; };
+		1A000300000000000000001D /* TesseraTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TesseraTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A000300000000000000001E /* MoshBootstrapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoshBootstrapTests.swift; sourceTree = "<group>"; };
+		1A000300000000000000001F /* KnownHostsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnownHostsStoreTests.swift; sourceTree = "<group>"; };
+		1A0003000000000000000025 /* OSDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSDetector.swift; sourceTree = "<group>"; };
+		1A0003000000000000000026 /* HostOSDetectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostOSDetectionState.swift; sourceTree = "<group>"; };
+		1A0003000000000000000027 /* OSDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSDetectorTests.swift; sourceTree = "<group>"; };
+		1A0003000000000000000028 /* OSDetectionProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSDetectionProbe.swift; sourceTree = "<group>"; };
+		1A0003000000000000000029 /* RemoteAuthorizedKeysInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAuthorizedKeysInstallerTests.swift; sourceTree = "<group>"; };
+		1A00030000000000000000F0 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		1A00030000000000000000F1 /* LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; name = LICENSE; path = LICENSE; sourceTree = SOURCE_ROOT; };
+		1A00030000000000000000F2 /* COPYING.iOS */ = {isa = PBXFileReference; lastKnownFileType = text; name = COPYING.iOS; path = COPYING.iOS; sourceTree = SOURCE_ROOT; };
+		1A00030000000000000000F3 /* ThirdPartyNotices.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = ThirdPartyNotices.txt; sourceTree = "<group>"; };
+		1A0013000000000000000001 /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
+		1A0013000000000000000002 /* AppearancePreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearancePreferences.swift; sourceTree = "<group>"; };
+		1A0013000000000000000003 /* Typography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Typography.swift; sourceTree = "<group>"; };
+		1A0013000000000000000004 /* Field.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Field.swift; sourceTree = "<group>"; };
+		1A0013000000000000000005 /* Input.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Input.swift; sourceTree = "<group>"; };
+		1A0013000000000000000006 /* Btn.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Btn.swift; sourceTree = "<group>"; };
+		1A0013000000000000000007 /* Chip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Chip.swift; sourceTree = "<group>"; };
+		1A0013000000000000000008 /* Tag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tag.swift; sourceTree = "<group>"; };
+		1A0013000000000000000009 /* StatusDot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusDot.swift; sourceTree = "<group>"; };
+		1A001300000000000000000A /* ToggleRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToggleRow.swift; sourceTree = "<group>"; };
+		1A001300000000000000000B /* JetBrainsMono.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = JetBrainsMono.ttf; sourceTree = "<group>"; };
+		1A001300000000000000000C /* HostsLandingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostsLandingView.swift; sourceTree = "<group>"; };
+		1A001300000000000000000D /* OSBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSBadge.swift; sourceTree = "<group>"; };
+		1A001300000000000000000E /* HostCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostCard.swift; sourceTree = "<group>"; };
+		1A001300000000000000000F /* KeysPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeysPageView.swift; sourceTree = "<group>"; };
+		1A0013000000000000000010 /* GenerateKeyModal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerateKeyModal.swift; sourceTree = "<group>"; };
+		1A0013000000000000000011 /* ImportKeyModal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportKeyModal.swift; sourceTree = "<group>"; };
+		1A0013000000000000000013 /* KnownHostsPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnownHostsPageView.swift; sourceTree = "<group>"; };
+		1A0013000000000000000014 /* SettingsPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPageView.swift; sourceTree = "<group>"; };
+		1A0013000000000000000015 /* AppearanceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceSettingsView.swift; sourceTree = "<group>"; };
+		1A0013000000000000000016 /* TerminalSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSettingsView.swift; sourceTree = "<group>"; };
+		1A0013000000000000000017 /* ThemeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeSettingsView.swift; sourceTree = "<group>"; };
+		1A0013000000000000000018 /* KeyboardSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardSettingsView.swift; sourceTree = "<group>"; };
+		1A0013000000000000000019 /* SecuritySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecuritySettingsView.swift; sourceTree = "<group>"; };
+		1A001300000000000000001B /* AboutSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutSettingsView.swift; sourceTree = "<group>"; };
+		1A001300000000000000001C /* TerminalTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalTheme.swift; sourceTree = "<group>"; };
+		1A001300000000000000001D /* TesseraLogo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TesseraLogo.swift; sourceTree = "<group>"; };
+		1A001300000000000000001E /* DistroLogos.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DistroLogos.swift; sourceTree = "<group>"; };
+		1A001300000000000000001F /* InstallKeyToHostFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstallKeyToHostFlow.swift; sourceTree = "<group>"; };
+		1A0013000000000000000020 /* RemoteAuthorizedKeysInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAuthorizedKeysInstaller.swift; sourceTree = "<group>"; };
+		1A0013000000000000000021 /* BiometricGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BiometricGate.swift; sourceTree = "<group>"; };
+		1A0013000000000000000022 /* BiometricSessionCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BiometricSessionCache.swift; sourceTree = "<group>"; };
+		1A0013000000000000000023 /* AppLockController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLockController.swift; sourceTree = "<group>"; };
+		1A0013000000000000000024 /* LockScreenView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockScreenView.swift; sourceTree = "<group>"; };
+		1A0013000000000000000025 /* HostLaunchPrologue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostLaunchPrologue.swift; sourceTree = "<group>"; };
+		1A0013000000000000000026 /* FindController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FindController.swift; sourceTree = "<group>"; };
+		1A0013000000000000000027 /* FindBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FindBar.swift; sourceTree = "<group>"; };
+		1A0013000000000000000028 /* TerminalSearchAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSearchAdapter.swift; sourceTree = "<group>"; };
+		1A0013000000000000000029 /* AppPhase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPhase.swift; sourceTree = "<group>"; };
+		1A001300000000000000002A /* BellRateLimiter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BellRateLimiter.swift; sourceTree = "<group>"; };
+		1A001300000000000000002B /* BellController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BellController.swift; sourceTree = "<group>"; };
+		1A001300000000000000002C /* SessionRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRegistry.swift; sourceTree = "<group>"; };
+		1A001300000000000000002D /* CommandPalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPalette.swift; sourceTree = "<group>"; };
+		1A001300000000000000002E /* CommandPaletteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteView.swift; sourceTree = "<group>"; };
+		1A001300000000000000002F /* SessionSwitcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSwitcher.swift; sourceTree = "<group>"; };
+		1A0013000000000000000030 /* SessionLaunchOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionLaunchOverlay.swift; sourceTree = "<group>"; };
+		1A0013000000000000000031 /* PaneGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panes/PaneGridView.swift; sourceTree = "<group>"; };
+		1A0013000000000000000032 /* TerminalCellMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panes/TerminalCellMetrics.swift; sourceTree = "<group>"; };
+		1A0023000000000000000001 /* AccessoryChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessoryChip.swift; sourceTree = "<group>"; };
+		1A0023000000000000000002 /* AccessoryChipEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessoryChipEncoder.swift; sourceTree = "<group>"; };
+		1A0023000000000000000003 /* ModifierState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModifierState.swift; sourceTree = "<group>"; };
+		1A0023000000000000000004 /* AccessoryChipEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessoryChipEncoderTests.swift; sourceTree = "<group>"; };
+		1A0023000000000000000005 /* ModifierStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModifierStateTests.swift; sourceTree = "<group>"; };
+		1A0023000000000000000007 /* SessionAccessoryBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionAccessoryBar.swift; sourceTree = "<group>"; };
+		1A0023000000000000000008 /* DraggableChipBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraggableChipBar.swift; sourceTree = "<group>"; };
+		1A0023000000000000000009 /* SessionRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRegistryTests.swift; sourceTree = "<group>"; };
+		1A002300000000000000000A /* CommandPaletteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteTests.swift; sourceTree = "<group>"; };
+		1A002300000000000000000B /* SessionSwitcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSwitcherTests.swift; sourceTree = "<group>"; };
+		1A0025000000000000000002 /* EnclaveAuthDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnclaveAuthDelegate.swift; sourceTree = "<group>"; };
+		1A0025000000000000000010 /* TesseraMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TesseraMigration.swift; sourceTree = "<group>"; };
+		1A0025000000000000000011 /* TesseraMigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TesseraMigrationTests.swift; sourceTree = "<group>"; };
+		1A0027000000000000000001 /* DirectTCPIPChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectTCPIPChannel.swift; sourceTree = "<group>"; };
+		1A0027000000000000000002 /* PortListener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortListener.swift; sourceTree = "<group>"; };
+		1A0027000000000000000003 /* PortForwarder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortForwarder.swift; sourceTree = "<group>"; };
+		1A0027000000000000000004 /* PortForwardConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortForwardConnection.swift; sourceTree = "<group>"; };
+		1A0027000000000000000005 /* PortForwarderManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortForwarderManager.swift; sourceTree = "<group>"; };
+		1A0027000000000000000006 /* TunnelsRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelsRegistry.swift; sourceTree = "<group>"; };
+		1A0027000000000000000007 /* ForwardingTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForwardingTabView.swift; sourceTree = "<group>"; };
+		1A0027000000000000000009 /* ForwardingStatusChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForwardingStatusChip.swift; sourceTree = "<group>"; };
+		1A002700000000000000000A /* TunnelsPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelsPageView.swift; sourceTree = "<group>"; };
+		1A002B000000000000000001 /* SwipePadProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipePadProfile.swift; sourceTree = "<group>"; };
+		1A002B000000000000000002 /* MacroEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroEncoder.swift; sourceTree = "<group>"; };
+		1A002B000000000000000003 /* SwipePadProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipePadProfileStore.swift; sourceTree = "<group>"; };
+		1A002B000000000000000004 /* SwipePadActiveProfileResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipePadActiveProfileResolver.swift; sourceTree = "<group>"; };
+		1A002B000000000000000005 /* SpeechDictationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechDictationController.swift; sourceTree = "<group>"; };
+		1A002B000000000000000006 /* SwipePadOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipePadOverlay.swift; sourceTree = "<group>"; };
+		1A002B000000000000000007 /* SwipePadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipePadView.swift; sourceTree = "<group>"; };
+		1A002B000000000000000008 /* MacroEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroEncoderTests.swift; sourceTree = "<group>"; };
+		1A002B000000000000000009 /* SwipePadProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipePadProfileTests.swift; sourceTree = "<group>"; };
+		1A002B00000000000000000A /* ExperimentalSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExperimentalSettingsView.swift; sourceTree = "<group>"; };
+		1A0033000000000000000001 /* SessionRestoreStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRestoreStore.swift; sourceTree = "<group>"; };
+		1A0033000000000000000002 /* SessionRestoreSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRestoreSheet.swift; sourceTree = "<group>"; };
+		1A0033000000000000000003 /* SessionRestoreStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRestoreStoreTests.swift; sourceTree = "<group>"; };
+		1A0033000000000000000004 /* SessionRestoreResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRestoreResolverTests.swift; sourceTree = "<group>"; };
+		1A0040000000000000000002 /* OnboardingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingController.swift; sourceTree = "<group>"; };
+		1A0040000000000000000003 /* OnboardingStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingStep.swift; sourceTree = "<group>"; };
+		1A0040000000000000000004 /* OnboardingAnchor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingAnchor.swift; sourceTree = "<group>"; };
+		1A0040000000000000000005 /* OnboardingOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingOverlay.swift; sourceTree = "<group>"; };
+		1A0040000000000000000006 /* OnboardingControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingControllerTests.swift; sourceTree = "<group>"; };
+		1A0050000000000000000001 /* KittyWindowModeStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KittyWindowModeStoreTests.swift; sourceTree = "<group>"; };
+		1A0050000000000000000003 /* PaneLayoutMathTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneLayoutMathTests.swift; sourceTree = "<group>"; };
+		5930AA51D944F5C5F0C84F3C /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		D6F0936D127F28EC4A75489D /* TesseraUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TesseraUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F258CE6A611C425C97F1A49C /* ScrollProbe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScrollProbe.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		1A0006000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A0004000000000000000005 /* SwiftTerm in Frameworks */,
+				1A0004000000000000000006 /* ScrollDispatcher in Frameworks */,
+				1A0004000000000000000007 /* TmuxControl in Frameworks */,
+				1A0004000000000000000008 /* Citadel in Frameworks */,
+				1A0004000000000000000020 /* MoshBridge in Frameworks */,
+				1A0004000000000000000030 /* PortForwarding in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1A0006000000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7BC300862A0692A8EA70A55A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4E85A5F67DAFF1329C6E2D52 /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1A0002000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				1A0002000000000000000002 /* Tessera */,
+				1A0002000000000000000004 /* TesseraTests */,
+				1A0002000000000000000003 /* Products */,
+				1BFF7918809885BF33DA260B /* Frameworks */,
+				A8DFFAA025EC04DAA914F477 /* TesseraUITests */,
+			);
+			sourceTree = "<group>";
+		};
+		1A0002000000000000000002 /* Tessera */ = {
+			isa = PBXGroup;
+			children = (
+				1A0003000000000000000001 /* TesseraApp.swift */,
+				1A0003000000000000000002 /* ContentView.swift */,
+				1A0003000000000000000006 /* Host.swift */,
+				1A0013000000000000000025 /* HostLaunchPrologue.swift */,
+				1A0003000000000000000007 /* SSHSession.swift */,
+				1A0003000000000000000008 /* HostEntryView.swift */,
+				1A0003000000000000000009 /* SessionView.swift */,
+				1A0013000000000000000030 /* SessionLaunchOverlay.swift */,
+				1A000300000000000000000A /* TesseraTerminalView.swift */,
+				1A0013000000000000000031 /* PaneGridView.swift */,
+				1A0013000000000000000032 /* TerminalCellMetrics.swift */,
+				1A000300000000000000000B /* AutoTmuxHostStorage.swift */,
+				1A0003000000000000000025 /* OSDetector.swift */,
+				1A0003000000000000000026 /* HostOSDetectionState.swift */,
+				1A0003000000000000000028 /* OSDetectionProbe.swift */,
+				1A000300000000000000000C /* PersistedHost.swift */,
+				1A000300000000000000000D /* Identity.swift */,
+				1A0025000000000000000010 /* TesseraMigration.swift */,
+				1A000300000000000000000E /* LiveSession.swift */,
+				1A0033000000000000000001 /* SessionRestoreStore.swift */,
+				1A0033000000000000000002 /* SessionRestoreSheet.swift */,
+				1A000300000000000000000F /* SessionSidebar.swift */,
+				1A0003000000000000000010 /* HostDetailView.swift */,
+				1A0003000000000000000012 /* KeychainHelper.swift */,
+				1A0003000000000000000013 /* StoredKey.swift */,
+				1A0003000000000000000014 /* KeyStore.swift */,
+				1A0003000000000000000016 /* KnownHostsStore.swift */,
+				1A0003000000000000000017 /* HostKeyVerificationView.swift */,
+				1A0003000000000000000018 /* TerminalSession.swift */,
+				1A0003000000000000000019 /* Session.swift */,
+				1A000300000000000000001A /* SSHAuth.swift */,
+				1A000300000000000000001B /* MoshSession.swift */,
+				1A000300000000000000001C /* MoshBootstrap.swift */,
+				1A001200000000000000000A /* Security */,
+				1A0040000000000000000001 /* Onboarding */,
+				1A001200000000000000000B /* Find */,
+				1A001200000000000000000C /* Notifications */,
+				1A001200000000000000000D /* Navigation */,
+				1A0026000000000000000001 /* Forwarding */,
+				1A0022000000000000000001 /* Keyboard */,
+				1A002A000000000000000001 /* SwipePad */,
+				1A0012000000000000000001 /* Design */,
+				1A0012000000000000000004 /* Hosts */,
+				1A0012000000000000000005 /* Keys */,
+				1A0012000000000000000006 /* KnownHosts */,
+				1A0012000000000000000007 /* Settings */,
+				1A0012000000000000000008 /* Terminal */,
+				1A0012000000000000000003 /* Resources */,
+				1A0003000000000000000003 /* Assets.xcassets */,
+				1A00030000000000000000F0 /* PrivacyInfo.xcprivacy */,
+				1A00030000000000000000F1 /* LICENSE */,
+				1A00030000000000000000F2 /* COPYING.iOS */,
+			);
+			path = Tessera;
+			sourceTree = "<group>";
+		};
+		1A0002000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				1A0003000000000000000004 /* Tessera.app */,
+				1A000300000000000000001D /* TesseraTests.xctest */,
+				D6F0936D127F28EC4A75489D /* TesseraUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		1A0002000000000000000004 /* TesseraTests */ = {
+			isa = PBXGroup;
+			children = (
+				1A000300000000000000001E /* MoshBootstrapTests.swift */,
+				1A000300000000000000001F /* KnownHostsStoreTests.swift */,
+				1A0025000000000000000011 /* TesseraMigrationTests.swift */,
+				1A0003000000000000000027 /* OSDetectorTests.swift */,
+				1A0003000000000000000029 /* RemoteAuthorizedKeysInstallerTests.swift */,
+				1A0023000000000000000004 /* AccessoryChipEncoderTests.swift */,
+				1A0023000000000000000005 /* ModifierStateTests.swift */,
+				1A002B000000000000000008 /* MacroEncoderTests.swift */,
+				1A002B000000000000000009 /* SwipePadProfileTests.swift */,
+				1A0023000000000000000009 /* SessionRegistryTests.swift */,
+				1A002300000000000000000A /* CommandPaletteTests.swift */,
+				1A002300000000000000000B /* SessionSwitcherTests.swift */,
+				1A0033000000000000000003 /* SessionRestoreStoreTests.swift */,
+				1A0033000000000000000004 /* SessionRestoreResolverTests.swift */,
+				1A0040000000000000000006 /* OnboardingControllerTests.swift */,
+				1A0050000000000000000001 /* KittyWindowModeStoreTests.swift */,
+				1A0050000000000000000003 /* PaneLayoutMathTests.swift */,
+			);
+			path = TesseraTests;
+			sourceTree = "<group>";
+		};
+		1A0012000000000000000001 /* Design */ = {
+			isa = PBXGroup;
+			children = (
+				1A0013000000000000000001 /* DesignTokens.swift */,
+				1A0013000000000000000002 /* AppearancePreferences.swift */,
+				1A0013000000000000000003 /* Typography.swift */,
+				1A0012000000000000000002 /* Components */,
+			);
+			path = Design;
+			sourceTree = "<group>";
+		};
+		1A0012000000000000000002 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				1A0013000000000000000004 /* Field.swift */,
+				1A0013000000000000000005 /* Input.swift */,
+				1A0013000000000000000006 /* Btn.swift */,
+				1A0013000000000000000007 /* Chip.swift */,
+				1A0013000000000000000008 /* Tag.swift */,
+				1A0013000000000000000009 /* StatusDot.swift */,
+				1A001300000000000000000A /* ToggleRow.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		1A0012000000000000000003 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				1A001300000000000000000B /* JetBrainsMono.ttf */,
+				1A00030000000000000000F3 /* ThirdPartyNotices.txt */,
+				1A0012000000000000000009 /* Logo */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		1A0012000000000000000004 /* Hosts */ = {
+			isa = PBXGroup;
+			children = (
+				1A001300000000000000000C /* HostsLandingView.swift */,
+				1A001300000000000000000D /* OSBadge.swift */,
+				1A001300000000000000000E /* HostCard.swift */,
+			);
+			path = Hosts;
+			sourceTree = "<group>";
+		};
+		1A0012000000000000000005 /* Keys */ = {
+			isa = PBXGroup;
+			children = (
+				1A001300000000000000000F /* KeysPageView.swift */,
+				1A0013000000000000000010 /* GenerateKeyModal.swift */,
+				1A0013000000000000000011 /* ImportKeyModal.swift */,
+				1A001300000000000000001F /* InstallKeyToHostFlow.swift */,
+				1A0013000000000000000020 /* RemoteAuthorizedKeysInstaller.swift */,
+			);
+			path = Keys;
+			sourceTree = "<group>";
+		};
+		1A0012000000000000000006 /* KnownHosts */ = {
+			isa = PBXGroup;
+			children = (
+				1A0013000000000000000013 /* KnownHostsPageView.swift */,
+			);
+			path = KnownHosts;
+			sourceTree = "<group>";
+		};
+		1A0012000000000000000007 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				1A0013000000000000000014 /* SettingsPageView.swift */,
+				1A0013000000000000000015 /* AppearanceSettingsView.swift */,
+				1A0013000000000000000016 /* TerminalSettingsView.swift */,
+				1A0013000000000000000017 /* ThemeSettingsView.swift */,
+				1A0013000000000000000018 /* KeyboardSettingsView.swift */,
+				1A0013000000000000000019 /* SecuritySettingsView.swift */,
+				1A002B00000000000000000A /* ExperimentalSettingsView.swift */,
+				1A001300000000000000001B /* AboutSettingsView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		1A0012000000000000000008 /* Terminal */ = {
+			isa = PBXGroup;
+			children = (
+				1A001300000000000000001C /* TerminalTheme.swift */,
+			);
+			path = Terminal;
+			sourceTree = "<group>";
+		};
+		1A0012000000000000000009 /* Logo */ = {
+			isa = PBXGroup;
+			children = (
+				1A001300000000000000001D /* TesseraLogo.swift */,
+				1A001300000000000000001E /* DistroLogos.swift */,
+			);
+			path = Logo;
+			sourceTree = "<group>";
+		};
+		1A001200000000000000000A /* Security */ = {
+			isa = PBXGroup;
+			children = (
+				1A0013000000000000000021 /* BiometricGate.swift */,
+				1A0013000000000000000022 /* BiometricSessionCache.swift */,
+				1A0013000000000000000023 /* AppLockController.swift */,
+				1A0013000000000000000024 /* LockScreenView.swift */,
+				1A0025000000000000000002 /* EnclaveAuthDelegate.swift */,
+			);
+			path = Security;
+			sourceTree = "<group>";
+		};
+		1A001200000000000000000B /* Find */ = {
+			isa = PBXGroup;
+			children = (
+				1A0013000000000000000026 /* FindController.swift */,
+				1A0013000000000000000027 /* FindBar.swift */,
+				1A0013000000000000000028 /* TerminalSearchAdapter.swift */,
+			);
+			path = Find;
+			sourceTree = "<group>";
+		};
+		1A001200000000000000000C /* Notifications */ = {
+			isa = PBXGroup;
+			children = (
+				1A0013000000000000000029 /* AppPhase.swift */,
+				1A001300000000000000002A /* BellRateLimiter.swift */,
+				1A001300000000000000002B /* BellController.swift */,
+			);
+			path = Notifications;
+			sourceTree = "<group>";
+		};
+		1A001200000000000000000D /* Navigation */ = {
+			isa = PBXGroup;
+			children = (
+				1A001300000000000000002C /* SessionRegistry.swift */,
+				1A001300000000000000002D /* CommandPalette.swift */,
+				1A001300000000000000002E /* CommandPaletteView.swift */,
+				1A001300000000000000002F /* SessionSwitcher.swift */,
+			);
+			path = Navigation;
+			sourceTree = "<group>";
+		};
+		1A0022000000000000000001 /* Keyboard */ = {
+			isa = PBXGroup;
+			children = (
+				1A0023000000000000000001 /* AccessoryChip.swift */,
+				1A0023000000000000000002 /* AccessoryChipEncoder.swift */,
+				1A0023000000000000000003 /* ModifierState.swift */,
+				1A0023000000000000000007 /* SessionAccessoryBar.swift */,
+				1A0023000000000000000008 /* DraggableChipBar.swift */,
+			);
+			path = Keyboard;
+			sourceTree = "<group>";
+		};
+		1A0026000000000000000001 /* Forwarding */ = {
+			isa = PBXGroup;
+			children = (
+				1A0027000000000000000001 /* DirectTCPIPChannel.swift */,
+				1A0027000000000000000002 /* PortListener.swift */,
+				1A0027000000000000000003 /* PortForwarder.swift */,
+				1A0027000000000000000004 /* PortForwardConnection.swift */,
+				1A0027000000000000000005 /* PortForwarderManager.swift */,
+				1A0027000000000000000006 /* TunnelsRegistry.swift */,
+				1A0027000000000000000007 /* ForwardingTabView.swift */,
+				1A0027000000000000000009 /* ForwardingStatusChip.swift */,
+				1A002700000000000000000A /* TunnelsPageView.swift */,
+			);
+			path = Forwarding;
+			sourceTree = "<group>";
+		};
+		1A002A000000000000000001 /* SwipePad */ = {
+			isa = PBXGroup;
+			children = (
+				1A002B000000000000000001 /* SwipePadProfile.swift */,
+				1A002B000000000000000002 /* MacroEncoder.swift */,
+				1A002B000000000000000003 /* SwipePadProfileStore.swift */,
+				1A002B000000000000000004 /* SwipePadActiveProfileResolver.swift */,
+				1A002B000000000000000005 /* SpeechDictationController.swift */,
+				1A002B000000000000000006 /* SwipePadOverlay.swift */,
+				1A002B000000000000000007 /* SwipePadView.swift */,
+			);
+			path = SwipePad;
+			sourceTree = "<group>";
+		};
+		1A0040000000000000000001 /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				1A0040000000000000000002 /* OnboardingController.swift */,
+				1A0040000000000000000003 /* OnboardingStep.swift */,
+				1A0040000000000000000004 /* OnboardingAnchor.swift */,
+				1A0040000000000000000005 /* OnboardingOverlay.swift */,
+			);
+			path = Onboarding;
+			sourceTree = "<group>";
+		};
+		1BFF7918809885BF33DA260B /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				309AFE32288B0FB9BDBBBB5B /* iOS */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		309AFE32288B0FB9BDBBBB5B /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				5930AA51D944F5C5F0C84F3C /* Foundation.framework */,
+			);
+			name = iOS;
+			sourceTree = "<group>";
+		};
+		A8DFFAA025EC04DAA914F477 /* TesseraUITests */ = {
+			isa = PBXGroup;
+			children = (
+				F258CE6A611C425C97F1A49C /* ScrollProbe.swift */,
+			);
+			name = TesseraUITests;
+			path = TesseraUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1A0005000000000000000001 /* Tessera */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A0008000000000000000002 /* Build configuration list for PBXNativeTarget "Tessera" */;
+			buildPhases = (
+				1A0006000000000000000001 /* Sources */,
+				1A0006000000000000000002 /* Frameworks */,
+				1A0006000000000000000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Tessera;
+			packageProductDependencies = (
+				1A000A000000000000000001 /* SwiftTerm */,
+				1A000A000000000000000002 /* ScrollDispatcher */,
+				1A000A000000000000000003 /* TmuxControl */,
+				1A000A000000000000000004 /* Citadel */,
+				1A000A000000000000000005 /* MoshBridge */,
+				1A000A000000000000000006 /* PortForwarding */,
+			);
+			productName = Tessera;
+			productReference = 1A0003000000000000000004 /* Tessera.app */;
+			productType = "com.apple.product-type.application";
+		};
+		1A0005000000000000000002 /* TesseraTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A0008000000000000000003 /* Build configuration list for PBXNativeTarget "TesseraTests" */;
+			buildPhases = (
+				1A0006000000000000000004 /* Sources */,
+				1A0006000000000000000005 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				1A000D000000000000000001 /* PBXTargetDependency */,
+			);
+			name = TesseraTests;
+			productName = TesseraTests;
+			productReference = 1A000300000000000000001D /* TesseraTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		D99FA07CA841FF260AE6856E /* TesseraUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BD720DB53FAE2AE557192B84 /* Build configuration list for PBXNativeTarget "TesseraUITests" */;
+			buildPhases = (
+				B6A7D18DE4A8371E82A84030 /* Sources */,
+				7BC300862A0692A8EA70A55A /* Frameworks */,
+				2336071A11ED016196C23EE3 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				002AF9F5F6954B8546DF6EE3 /* PBXTargetDependency */,
+			);
+			name = TesseraUITests;
+			productName = TesseraUITests;
+			productReference = D6F0936D127F28EC4A75489D /* TesseraUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		1A0001000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					1A0005000000000000000001 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					1A0005000000000000000002 = {
+						CreatedOnToolsVersion = 26.0;
+						TestTargetID = 1A0005000000000000000001;
+					};
+				};
+			};
+			buildConfigurationList = 1A0008000000000000000001 /* Build configuration list for PBXProject "Tessera" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 1A0002000000000000000001;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				1A0009000000000000000001 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
+				1A0009000000000000000002 /* XCRemoteSwiftPackageReference "Citadel" */,
+				1A000B000000000000000001 /* XCLocalSwiftPackageReference "ScrollDispatcher" */,
+				1A000B000000000000000002 /* XCLocalSwiftPackageReference "TmuxControl" */,
+				1A000B000000000000000003 /* XCLocalSwiftPackageReference "MoshBridge" */,
+				1A000B000000000000000004 /* XCLocalSwiftPackageReference "PortForwarding" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 1A0002000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				1A0005000000000000000001 /* Tessera */,
+				1A0005000000000000000002 /* TesseraTests */,
+				D99FA07CA841FF260AE6856E /* TesseraUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1A0006000000000000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A0004000000000000000003 /* Assets.xcassets in Resources */,
+				1A001400000000000000000B /* JetBrainsMono.ttf in Resources */,
+				1A00040000000000000000F0 /* PrivacyInfo.xcprivacy in Resources */,
+				1A00040000000000000000F1 /* LICENSE in Resources */,
+				1A00040000000000000000F2 /* COPYING.iOS in Resources */,
+				1A00040000000000000000F3 /* ThirdPartyNotices.txt in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2336071A11ED016196C23EE3 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1A0006000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A0004000000000000000001 /* TesseraApp.swift in Sources */,
+				1A0004000000000000000002 /* ContentView.swift in Sources */,
+				1A0004000000000000000009 /* Host.swift in Sources */,
+				1A000400000000000000000A /* SSHSession.swift in Sources */,
+				1A000400000000000000000B /* HostEntryView.swift in Sources */,
+				1A000400000000000000000C /* SessionView.swift in Sources */,
+				1A0014000000000000000030 /* SessionLaunchOverlay.swift in Sources */,
+				1A0041000000000000000002 /* OnboardingController.swift in Sources */,
+				1A0041000000000000000003 /* OnboardingStep.swift in Sources */,
+				1A0041000000000000000004 /* OnboardingAnchor.swift in Sources */,
+				1A0041000000000000000005 /* OnboardingOverlay.swift in Sources */,
+				1A000400000000000000000D /* TesseraTerminalView.swift in Sources */,
+				1A0014000000000000000031 /* PaneGridView.swift in Sources */,
+				1A0014000000000000000032 /* TerminalCellMetrics.swift in Sources */,
+				1A000400000000000000000E /* AutoTmuxHostStorage.swift in Sources */,
+				1A0004000000000000000025 /* OSDetector.swift in Sources */,
+				1A0004000000000000000026 /* HostOSDetectionState.swift in Sources */,
+				1A0004000000000000000028 /* OSDetectionProbe.swift in Sources */,
+				1A000400000000000000000F /* PersistedHost.swift in Sources */,
+				1A0004000000000000000010 /* Identity.swift in Sources */,
+				1A0004000000000000000011 /* LiveSession.swift in Sources */,
+				1A0034000000000000000001 /* SessionRestoreStore.swift in Sources */,
+				1A0034000000000000000002 /* SessionRestoreSheet.swift in Sources */,
+				1A0004000000000000000012 /* SessionSidebar.swift in Sources */,
+				1A0004000000000000000013 /* HostDetailView.swift in Sources */,
+				1A0004000000000000000015 /* KeychainHelper.swift in Sources */,
+				1A0004000000000000000016 /* StoredKey.swift in Sources */,
+				1A0024000000000000000010 /* TesseraMigration.swift in Sources */,
+				1A0004000000000000000017 /* KeyStore.swift in Sources */,
+				1A0004000000000000000019 /* KnownHostsStore.swift in Sources */,
+				1A000400000000000000001A /* HostKeyVerificationView.swift in Sources */,
+				1A000400000000000000001B /* TerminalSession.swift in Sources */,
+				1A000400000000000000001C /* Session.swift in Sources */,
+				1A000400000000000000001D /* SSHAuth.swift in Sources */,
+				1A0004000000000000000021 /* MoshSession.swift in Sources */,
+				1A0004000000000000000022 /* MoshBootstrap.swift in Sources */,
+				1A0024000000000000000001 /* AccessoryChip.swift in Sources */,
+				1A0024000000000000000002 /* AccessoryChipEncoder.swift in Sources */,
+				1A0024000000000000000003 /* ModifierState.swift in Sources */,
+				1A0024000000000000000007 /* SessionAccessoryBar.swift in Sources */,
+				1A0024000000000000000008 /* DraggableChipBar.swift in Sources */,
+				1A0014000000000000000001 /* DesignTokens.swift in Sources */,
+				1A0014000000000000000002 /* AppearancePreferences.swift in Sources */,
+				1A0014000000000000000003 /* Typography.swift in Sources */,
+				1A0014000000000000000004 /* Field.swift in Sources */,
+				1A0014000000000000000005 /* Input.swift in Sources */,
+				1A0014000000000000000006 /* Btn.swift in Sources */,
+				1A0014000000000000000007 /* Chip.swift in Sources */,
+				1A0014000000000000000008 /* Tag.swift in Sources */,
+				1A0014000000000000000009 /* StatusDot.swift in Sources */,
+				1A001400000000000000000A /* ToggleRow.swift in Sources */,
+				1A001400000000000000000C /* HostsLandingView.swift in Sources */,
+				1A001400000000000000000D /* OSBadge.swift in Sources */,
+				1A001400000000000000000E /* HostCard.swift in Sources */,
+				1A001400000000000000000F /* KeysPageView.swift in Sources */,
+				1A0014000000000000000010 /* GenerateKeyModal.swift in Sources */,
+				1A0014000000000000000011 /* ImportKeyModal.swift in Sources */,
+				1A001400000000000000001F /* InstallKeyToHostFlow.swift in Sources */,
+				1A0014000000000000000020 /* RemoteAuthorizedKeysInstaller.swift in Sources */,
+				1A0014000000000000000013 /* KnownHostsPageView.swift in Sources */,
+				1A0014000000000000000014 /* SettingsPageView.swift in Sources */,
+				1A0014000000000000000015 /* AppearanceSettingsView.swift in Sources */,
+				1A0014000000000000000016 /* TerminalSettingsView.swift in Sources */,
+				1A0014000000000000000017 /* ThemeSettingsView.swift in Sources */,
+				1A0014000000000000000018 /* KeyboardSettingsView.swift in Sources */,
+				1A0014000000000000000019 /* SecuritySettingsView.swift in Sources */,
+				1A001400000000000000001B /* AboutSettingsView.swift in Sources */,
+				1A001400000000000000001C /* TerminalTheme.swift in Sources */,
+				1A001400000000000000001D /* TesseraLogo.swift in Sources */,
+				1A001400000000000000001E /* DistroLogos.swift in Sources */,
+				1A0014000000000000000021 /* BiometricGate.swift in Sources */,
+				1A0014000000000000000022 /* BiometricSessionCache.swift in Sources */,
+				1A0014000000000000000023 /* AppLockController.swift in Sources */,
+				1A0014000000000000000024 /* LockScreenView.swift in Sources */,
+				1A0014000000000000000025 /* HostLaunchPrologue.swift in Sources */,
+				1A0014000000000000000026 /* FindController.swift in Sources */,
+				1A0014000000000000000027 /* FindBar.swift in Sources */,
+				1A0014000000000000000028 /* TerminalSearchAdapter.swift in Sources */,
+				1A0014000000000000000029 /* AppPhase.swift in Sources */,
+				1A001400000000000000002A /* BellRateLimiter.swift in Sources */,
+				1A001400000000000000002B /* BellController.swift in Sources */,
+				1A0025000000000000000001 /* EnclaveAuthDelegate.swift in Sources */,
+				1A0028000000000000000001 /* DirectTCPIPChannel.swift in Sources */,
+				1A0028000000000000000002 /* PortListener.swift in Sources */,
+				1A0028000000000000000003 /* PortForwarder.swift in Sources */,
+				1A0028000000000000000004 /* PortForwardConnection.swift in Sources */,
+				1A0028000000000000000005 /* PortForwarderManager.swift in Sources */,
+				1A0028000000000000000006 /* TunnelsRegistry.swift in Sources */,
+				1A0028000000000000000007 /* ForwardingTabView.swift in Sources */,
+				1A0028000000000000000009 /* ForwardingStatusChip.swift in Sources */,
+				1A002800000000000000000A /* TunnelsPageView.swift in Sources */,
+				1A002C000000000000000001 /* SwipePadProfile.swift in Sources */,
+				1A002C000000000000000002 /* MacroEncoder.swift in Sources */,
+				1A002C000000000000000003 /* SwipePadProfileStore.swift in Sources */,
+				1A002C000000000000000004 /* SwipePadActiveProfileResolver.swift in Sources */,
+				1A002C000000000000000005 /* SpeechDictationController.swift in Sources */,
+				1A002C000000000000000006 /* SwipePadOverlay.swift in Sources */,
+				1A002C000000000000000007 /* SwipePadView.swift in Sources */,
+				1A002C00000000000000000A /* ExperimentalSettingsView.swift in Sources */,
+				1A001400000000000000002C /* SessionRegistry.swift in Sources */,
+				1A001400000000000000002D /* CommandPalette.swift in Sources */,
+				1A001400000000000000002E /* CommandPaletteView.swift in Sources */,
+				1A001400000000000000002F /* SessionSwitcher.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1A0006000000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A0004000000000000000023 /* MoshBootstrapTests.swift in Sources */,
+				1A0004000000000000000024 /* KnownHostsStoreTests.swift in Sources */,
+				1A0024000000000000000011 /* TesseraMigrationTests.swift in Sources */,
+				1A0004000000000000000027 /* OSDetectorTests.swift in Sources */,
+				1A0004000000000000000029 /* RemoteAuthorizedKeysInstallerTests.swift in Sources */,
+				1A0024000000000000000004 /* AccessoryChipEncoderTests.swift in Sources */,
+				1A0024000000000000000005 /* ModifierStateTests.swift in Sources */,
+				1A002C000000000000000008 /* MacroEncoderTests.swift in Sources */,
+				1A002C000000000000000009 /* SwipePadProfileTests.swift in Sources */,
+				1A0024000000000000000009 /* SessionRegistryTests.swift in Sources */,
+				1A002400000000000000000A /* CommandPaletteTests.swift in Sources */,
+				1A002400000000000000000B /* SessionSwitcherTests.swift in Sources */,
+				1A0034000000000000000003 /* SessionRestoreStoreTests.swift in Sources */,
+				1A0034000000000000000004 /* SessionRestoreResolverTests.swift in Sources */,
+				1A0041000000000000000006 /* OnboardingControllerTests.swift in Sources */,
+				1A0050000000000000000002 /* KittyWindowModeStoreTests.swift in Sources */,
+				1A0050000000000000000004 /* PaneLayoutMathTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B6A7D18DE4A8371E82A84030 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0852B22FF60AF0B5F713D29B /* ScrollProbe.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		002AF9F5F6954B8546DF6EE3 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = Tessera;
+			target = 1A0005000000000000000001 /* Tessera */;
+			targetProxy = EC135A0DF3CB132FC7E185BC /* PBXContainerItemProxy */;
+		};
+		1A000D000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1A0005000000000000000001 /* Tessera */;
+			targetProxy = 1A000C000000000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		1A0007000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		1A0007000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		1A0007000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Tessera;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = YES;
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Tessera unlocks SSH keys protected by biometric authentication.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Tessera connects to SSH and Mosh servers on your local network and forwards local ports to them.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Tessera uses the microphone for on-device dictation into terminal sessions.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Tessera uses on-device speech recognition to dictate text into terminal sessions.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIStatusBarHidden = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraApp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Debug;
+		};
+		1A0007000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Tessera;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = YES;
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Tessera unlocks SSH keys protected by biometric authentication.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Tessera connects to SSH and Mosh servers on your local network and forwards local ports to them.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Tessera uses the microphone for on-device dictation into terminal sessions.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Tessera uses on-device speech recognition to dictate text into terminal sessions.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIStatusBarHidden = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraApp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Release;
+		};
+		1A0007000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 2;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Tessera.app/Tessera";
+				TEST_TARGET_NAME = Tessera;
+			};
+			name = Debug;
+		};
+		1A0007000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 2;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Tessera.app/Tessera";
+				TEST_TARGET_NAME = Tessera;
+			};
+			name = Release;
+		};
+		3C7FA43334C4F177F443DDCF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 2;
+				TEST_TARGET_NAME = Tessera;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		775450A930104A1A18BFF510 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 2;
+				TEST_TARGET_NAME = Tessera;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1A0008000000000000000001 /* Build configuration list for PBXProject "Tessera" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A0007000000000000000001 /* Debug */,
+				1A0007000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1A0008000000000000000002 /* Build configuration list for PBXNativeTarget "Tessera" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A0007000000000000000003 /* Debug */,
+				1A0007000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1A0008000000000000000003 /* Build configuration list for PBXNativeTarget "TesseraTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A0007000000000000000005 /* Debug */,
+				1A0007000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		BD720DB53FAE2AE557192B84 /* Build configuration list for PBXNativeTarget "TesseraUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3C7FA43334C4F177F443DDCF /* Release */,
+				775450A930104A1A18BFF510 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		1A000B000000000000000001 /* XCLocalSwiftPackageReference "ScrollDispatcher" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ScrollDispatcher;
+		};
+		1A000B000000000000000002 /* XCLocalSwiftPackageReference "TmuxControl" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/TmuxControl;
+		};
+		1A000B000000000000000003 /* XCLocalSwiftPackageReference "MoshBridge" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/MoshBridge;
+		};
+		1A000B000000000000000004 /* XCLocalSwiftPackageReference "PortForwarding" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/PortForwarding;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		1A0009000000000000000001 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/bambouville/SwiftTerm";
+			requirement = {
+				kind = revision;
+				revision = d34c15f76342ce66f717ac0830e0c0484b86a9dd;
+			};
+		};
+		1A0009000000000000000002 /* XCRemoteSwiftPackageReference "Citadel" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/orlandos-nl/Citadel";
+			requirement = {
+				kind = upToNextMinorVersion;
+				minimumVersion = 0.12.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1A000A000000000000000001 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1A0009000000000000000001 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
+		};
+		1A000A000000000000000002 /* ScrollDispatcher */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ScrollDispatcher;
+		};
+		1A000A000000000000000003 /* TmuxControl */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TmuxControl;
+		};
+		1A000A000000000000000004 /* Citadel */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1A0009000000000000000002 /* XCRemoteSwiftPackageReference "Citadel" */;
+			productName = Citadel;
+		};
+		1A000A000000000000000005 /* MoshBridge */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MoshBridge;
+		};
+		1A000A000000000000000006 /* PortForwarding */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PortForwarding;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 1A0001000000000000000001 /* Project object */;
+}

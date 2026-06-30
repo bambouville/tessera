@@ -1,0 +1,6 @@
+[submodule "Packages/MoshBridge/Vendor/protobuf"]
+	path = Packages/MoshBridge/Vendor/protobuf
+	url = https://github.com/protocolbuffers/protobuf.git
+[submodule "Packages/MoshBridge/Vendor/mosh"]
+	path = Packages/MoshBridge/Vendor/mosh
+	url = https://github.com/bambouville/mosh.git

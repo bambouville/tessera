@@ -1,0 +1,42 @@
+# macOS
+.DS_Store
+
+# Xcode user data
+xcuserdata/
+*.xcuserstate
+*.xcuserdatad/
+*.xccheckout
+*.moved-aside
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+# Package.resolved IS committed for reproducible app builds — intentionally not ignored.
+
+# Build products
+build/
+*.o
+*.a
+
+# CocoaPods (not used but noise-proofing)
+Pods/
+
+# Carthage (not used)
+Carthage/Build/
+
+# fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output
+
+# Local agent / editor / build state
+.claude/
+*-review.md
+CLAUDE.md
+.release/

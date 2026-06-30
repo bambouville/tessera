@@ -1,0 +1,161 @@
+import Foundation
+import CryptoKit
+
+/// Pure-function helpers for the §3.2 "auto-tmux on connect" flow.
+///
+/// On every successful SSH connect (with the per-host `autoTmux`
+/// preference enabled), Tessera sends a single shell one-liner over
+/// stdin that either:
+///
+///   - `exec`s `tmux -CC attach -t <name>` if a session with that
+///     name already exists on the host, so the user resumes their
+///     work transparently;
+///   - `exec`s `tmux -CC new -s <name>` to create one if it doesn't,
+///     putting Tessera straight into tmux control mode without any
+///     manual `tmux -CC attach` typing; or
+///   - prints `unavailableSentinel` if `tmux` isn't on `$PATH` at all,
+///     which Tessera detects in the output stream and surfaces as a
+///     dismissible "tmux not available" banner.
+///
+/// `exec` is intentional on the happy path: when tmux exits, the
+/// login shell exits with it, so disconnect becomes one clean event
+/// rather than a return-to-shell-prompt with an orphan process.
+///
+/// All helpers are pure functions — no UIKit, no SwiftUI, no IO —
+/// so they can live in this package and be exhaustively unit-tested
+/// without a simulator.
+public enum AutoTmuxScript {
+
+    /// Marker the no-tmux branch prints to stdout. Tessera scans the
+    /// SSH output stream for this byte sequence (see
+    /// `chunkContainsSentinel(_:)`) and shows the unavailable banner
+    /// when it appears.
+    ///
+    /// **The byte sequence the scanner looks for is the INTERPRETED
+    /// printf output, not the source string.** The actual shell
+    /// command embeds the underscores as octal escapes (`\137` =
+    /// `0x5f` = `_`) so that when the PTY echoes the command line
+    /// back to us before the shell executes it, the echoed bytes
+    /// contain `\137\137TESSERA_NO_TMUX\137\137` — which does NOT
+    /// match this needle and therefore doesn't false-positive the
+    /// banner. Only the printf's interpreted output matches.
+    ///
+    /// The two leading and trailing underscores plus the all-caps
+    /// `TESSERA_NO_TMUX` make this distinctive enough that we don't
+    /// expect false positives in any real shell output either.
+    public static let unavailableSentinel = "__TESSERA_NO_TMUX__"
+
+    /// Build the one-line shell snippet to send over stdin on connect.
+    ///
+    /// The leading `clear` wipes the login shell's MOTD and the echoed
+    /// command itself, so on the happy path the user sees a clean
+    /// terminal hand off straight to tmux's first paint with no
+    /// visual gunk. On the failure path the screen is cleared and
+    /// then the sentinel + a fresh prompt appear — also clean.
+    ///
+    /// The sentinel uses POSIX-printf octal escapes (`\137` for `_`)
+    /// rather than literal underscores. Why: the PTY echoes the
+    /// command line we sent back to us before the shell executes
+    /// it. If the source command contained the literal string
+    /// `__TESSERA_NO_TMUX__`, our chunk scanner would find it in
+    /// the echo and false-positive the banner *before* the shell
+    /// even decides whether tmux is available. With escapes, the
+    /// echo contains `\137\137TESSERA_NO_TMUX\137\137` (literal
+    /// backslash-one-three-seven sequences) which doesn't match
+    /// the needle; only the printf's *interpreted* output matches.
+    ///
+    /// The shell-quoting is fragile-by-design: `<sessionName>` is NOT
+    /// shell-escaped, so the caller must constrain it to a known-safe
+    /// character set. The session names this package generates via
+    /// `defaultSessionName(forHostKey:)` are always
+    /// `tessera-[0-9a-f]{8}`, which is safe in any shell.
+    public static func command(sessionName: String) -> String {
+        let s = sessionName
+        return "export COLORTERM=truecolor; clear; if command -v tmux >/dev/null 2>&1; then "
+            + "if tmux has-session -t \(s) 2>/dev/null; then "
+            + "exec tmux -CC attach -t \(s); "
+            + "else exec tmux -CC new -s \(s); "
+            + "fi; "
+            + "else printf '\\137\\137TESSERA_NO_TMUX\\137\\137\\n'; "
+            + "fi\n"
+    }
+
+    /// Derive a deterministic 8-hex-char tmux session name from a
+    /// host identifier (e.g. `"user@host:port"`).
+    ///
+    /// Same input always yields the same name, so two consequences
+    /// fall out for free:
+    ///
+    /// 1. **Reinstalls don't accumulate orphans.** If the user wipes
+    ///    Tessera's local state, a fresh app talking to the same host
+    ///    computes the same name and re-attaches to the existing
+    ///    server-side tmux session instead of stranding it.
+    ///
+    /// 2. **Two devices using the same Host config rendezvous.**
+    ///    iPad A and iPad B with the same `user@host:port` end up
+    ///    sharing one tmux session, which is exactly what most users
+    ///    expect from a "resume my work" feature across devices.
+    ///
+    /// SHA-256 → first 4 bytes → 8 hex chars is more than enough
+    /// uniqueness for the per-host scope (collisions matter only
+    /// when two different host-keys collide, and the birthday-bound
+    /// is ~65k pairs).
+    public static func defaultSessionName(forHostKey key: String) -> String {
+        let digest = SHA256.hash(data: Data(key.utf8))
+        let hex = digest.prefix(4).map { String(format: "%02x", $0) }.joined()
+        return "tessera-\(hex)"
+    }
+
+    /// Returns true if the chunk's bytes contain the unavailable
+    /// sentinel anywhere in their interior.
+    ///
+    /// Naive O(n·m) substring scan: the needle is 19 bytes and a
+    /// typical SSH chunk is a few KB, so even pessimistically this
+    /// is microsecond-scale work; Boyer–Moore would be overkill.
+    ///
+    /// This is intentionally stateless. Use `AutoTmuxSentinelScanner`
+    /// when scanning a byte stream where the sentinel may cross chunk
+    /// boundaries.
+    public static func chunkContainsSentinel(_ chunk: [UInt8]) -> Bool {
+        let needle = Array(unavailableSentinel.utf8)
+        guard !needle.isEmpty, chunk.count >= needle.count else { return false }
+        outer: for i in 0...(chunk.count - needle.count) {
+            for j in 0..<needle.count where chunk[i + j] != needle[j] {
+                continue outer
+            }
+            return true
+        }
+        return false
+    }
+}
+
+/// Streaming detector for `AutoTmuxScript.unavailableSentinel`.
+///
+/// Session output usually arrives in packet-sized chunks, but the
+/// sentinel is still allowed to straddle a chunk boundary. This scanner
+/// keeps just enough tail bytes to make the next feed boundary-safe.
+public struct AutoTmuxSentinelScanner {
+    private let needle: [UInt8] = Array(AutoTmuxScript.unavailableSentinel.utf8)
+    private var tail: [UInt8] = []
+
+    public init() {}
+
+    public mutating func reset() {
+        tail.removeAll(keepingCapacity: true)
+    }
+
+    public mutating func feed(_ chunk: [UInt8]) -> Bool {
+        guard !needle.isEmpty else { return false }
+
+        var haystack = tail
+        haystack.append(contentsOf: chunk)
+        let found = AutoTmuxScript.chunkContainsSentinel(haystack)
+        let keepCount = max(needle.count - 1, 0)
+        if haystack.count > keepCount {
+            tail = Array(haystack.suffix(keepCount))
+        } else {
+            tail = haystack
+        }
+        return found
+    }
+}

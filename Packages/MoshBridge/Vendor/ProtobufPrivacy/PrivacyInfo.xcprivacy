@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Privacy manifest for the vendored libprotobuf-lite (v21.12) compiled into
+	  the Protobuf target. Apple lists Protocol Buffers among third-party SDKs
+	  that must carry a privacy manifest. The compiled lite-runtime subset
+	  performs pure in-memory (de)serialization: it collects no data, contacts
+	  no network, and uses no required-reason APIs on Apple platforms (the only
+	  filesystem-metadata code path, io_win32.cc, is entirely #if _WIN32).
+	-->
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array/>
+</dict>
+</plist>

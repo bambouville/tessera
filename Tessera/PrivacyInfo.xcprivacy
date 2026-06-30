@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Tessera collects no data. SSH hosts, keys, and preferences are stored only
+	  on-device; the app connects directly to user-provided servers with no
+	  Tessera-operated backend, analytics, or telemetry. The diagnostic log
+	  (Settings -> Diagnostics) is written locally and is only ever shared if the
+	  user explicitly invokes the system share sheet and chooses a destination
+	  themselves, so it is not developer "data collection" under Apple's
+	  definition. Hence NSPrivacyCollectedDataTypes is empty.
+	-->
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<!--
+		  UserDefaults: preferences, per-host runtime state, OS-detection
+		  flags, session-restore, swipe-pad profiles. All UserDefaults.standard,
+		  accessible only to this app. Reason CA92.1.
+		-->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+		<!--
+		  File timestamps/size: (1) the Diagnostics settings page
+		  (SettingsPageView) reads attributesOfItem for the log file inside the
+		  app's Application Support container — to display its size and
+		  "updated" date and to decide rotation/emptiness. Rotation is not
+		  "display to the user", so DDA9.1 alone would under-declare; C617.1
+		  (metadata of files inside the app container) covers every use.
+		  (2) SwiftTerm's KittyGraphics (statically linked) calls stat/fstat on
+		  kitty image-protocol transfer paths, which the iOS sandbox confines to
+		  the app container — also covered by C617.1.
+		-->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+			</array>
+		</dict>
+		<!--
+		  System boot time: mosh's src/util/timestamp.cc (statically linked via
+		  MoshBridge; HAVE_MACH_ABSOLUTE_TIME=1 in Vendor/MoshConfig/config.h)
+		  references mach_absolute_time() as a monotonic fallback clock for its
+		  protocol timers — measuring elapsed time between in-app events, which
+		  is exactly reason 35F9.1. Apple's ITMS-91053 scan is static, so the
+		  symbol must be declared even though clock_gettime is preferred at
+		  runtime. (protobuf's map.h would also use mach_absolute_time if a
+		  map<> proto field were ever added — covered by this same entry.)
+		-->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>35F9.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

@@ -1,0 +1,60 @@
+# Mosh App Store distribution exception
+
+The Mosh developers are aware that the terms of service that apply to
+apps distributed via Apple's App Store services may conflict with
+rights granted under Mosh's license, the GNU General Public License,
+version 3. The Mosh copyright holders do not wish this conflict to
+prevent the otherwise-compliant distribution of Mosh-derived apps via
+the App Store. Therefore, we have committed not to pursue any license
+violation that results solely from the conflict between the GPLv3 and
+the Apple App Store terms of service. In other words, as long as you
+comply with the GPL in all other respects, including its requirements
+to provide users with source code and the text of the license, we will
+not object to your distribution of Mosh through the App Store.
+
+
+# Tessera App Store distribution exception
+
+Tessera's own source code is licensed under the GNU General Public
+License, version 3, and the same conflict described above — between the
+terms of the GPLv3 and the terms of service governing Apple's App Store
+and TestFlight beta-distribution services — applies to it.
+
+As an additional permission under section 7 of the GPLv3, Bambouville Inc.
+grants permission for Tessera to be conveyed through Apple's App Store and
+TestFlight only by Bambouville Inc. or by persons acting on Bambouville Inc.'s
+behalf or with Bambouville Inc.'s prior written authorization.
+
+For such official or authorized distribution, Bambouville Inc. will not treat
+the distribution as a violation of the GPLv3 solely because Apple's App Store
+or TestFlight terms impose conditions that would otherwise conflict with the
+GPLv3, including the GPLv3 requirements regarding Installation Information for
+User Products, to the extent Apple's platform makes those requirements
+impossible to satisfy.
+
+This additional permission does not apply to App Store or TestFlight
+distribution by others. It does not restrict any rights under the GPLv3 to copy,
+modify, or convey Tessera through channels whose terms allow full compliance
+with the GPLv3. All other GPLv3 obligations remain, including the obligation to
+provide Corresponding Source and the text of the License. Tessera satisfies the
+source-availability requirement by publishing its complete corresponding source
+at:
+
+    https://github.com/bambouville/tessera
+
+# Trademark reservation
+
+As supplemental terms under sections 7(c) and 7(e) of the GPLv3, this license
+does not grant any rights under trademark law to the "Tessera" name, the
+Tessera app icon, or other Tessera brand assets, which identify the official
+distribution by Bambouville Inc.
+
+You must not misrepresent the origin of Tessera or any version of it. If you
+convey a modified version, you must mark it as modified and must use a name,
+icon, and branding that are reasonably distinguishable from the official
+Tessera distribution and that do not suggest that Bambouville Inc. produced,
+endorsed, or sponsors the modified version.
+
+Nothing in this paragraph requires rebranding of unmodified, verbatim copies,
+but no trademark rights are granted except to the extent permitted by applicable
+trademark law.
