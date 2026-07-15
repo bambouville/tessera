@@ -71,6 +71,136 @@ final class RepaintAssemblyTests: XCTestCase {
         XCTAssertFalse(RepaintAssembly.backgroundLeftOpen(in: [line]))
     }
 
+    func test_backgroundLeftOpen_foregroundTruecolorComponentsNotMisreadAsBackground() {
+        // Legacy `38;2;r;g;b` operands must be consumed — a green component of
+        // 100 is not SGR 100 (bright-black background).
+        let line = "\(esc)[38;2;100;107;42mtext"
+        XCTAssertFalse(RepaintAssembly.backgroundLeftOpen(in: [line]))
+    }
+
+    // MARK: row-seam background neutralization (gray-box ghost)
+    //
+    // A CRLF fed while the background pen is open scrolls (on the bottom row)
+    // and BCE-fills the scrolled-in line with that background; rows that then
+    // land in scrollback keep the stale colored tail forever. The assembler
+    // must close the background before every seam CRLF and re-establish it
+    // right after.
+
+    func test_assemble_neutralizesOpenBackgroundAtRowSeam_indexed() {
+        let grayRow = "\(esc)[100m                    "
+        let bytes = RepaintAssembly.assemble(
+            state: Self.makeState(cursorX: 0, cursorY: 0),
+            captureLines: [grayRow, "\(esc)[49mshort"],
+            historyLines: [],
+            savedPrimaryLines: [],
+            altScreenLines: nil,
+            terminalIsInAltScreen: false,
+            clientRows: 24
+        )
+        let text = String(decoding: bytes, as: UTF8.self)
+        XCTAssertTrue(
+            text.contains("\(grayRow)\(esc)[49m\r\n\(esc)[100m\(esc)[49mshort"),
+            "expected bg closed before the seam CRLF and re-opened after"
+        )
+    }
+
+    func test_assemble_neutralizesOpenBackgroundAtRowSeam_extendedForms() {
+        for opener in ["48;5;236", "48;2;40;40;40", "48:2::64:64:64"] {
+            let grayRow = "\(esc)[\(opener)m box"
+            let bytes = RepaintAssembly.assemble(
+                state: Self.makeState(cursorX: 0, cursorY: 0),
+                captureLines: [grayRow, "next"],
+                historyLines: [],
+                savedPrimaryLines: [],
+                altScreenLines: nil,
+                terminalIsInAltScreen: false,
+                clientRows: 24
+            )
+            let text = String(decoding: bytes, as: UTF8.self)
+            XCTAssertTrue(
+                text.contains("\(grayRow)\(esc)[49m\r\n\(esc)[\(opener)mnext"),
+                "expected \(opener) re-established after the seam"
+            )
+        }
+    }
+
+    func test_assemble_openBackgroundCarriesAcrossRowsToLaterSeams() {
+        // Pen opened on row 0, row 1 has no SGR of its own: the row1→row2 seam
+        // must still be neutralized and re-opened.
+        let lines = ["\(esc)[100mheader", "body", "footer"]
+        let bytes = RepaintAssembly.assemble(
+            state: Self.makeState(cursorX: 0, cursorY: 0),
+            captureLines: lines,
+            historyLines: [],
+            savedPrimaryLines: [],
+            altScreenLines: nil,
+            terminalIsInAltScreen: false,
+            clientRows: 24
+        )
+        let text = String(decoding: bytes, as: UTF8.self)
+        XCTAssertTrue(text.contains("header\(esc)[49m\r\n\(esc)[100mbody"))
+        XCTAssertTrue(text.contains("body\(esc)[49m\r\n\(esc)[100mfooter"))
+    }
+
+    func test_assemble_plainSeamsStayPlain() {
+        let bytes = RepaintAssembly.assemble(
+            state: Self.makeState(cursorX: 0, cursorY: 0),
+            captureLines: ["plain", "text", "\(esc)[41mred\(esc)[49m", "after"],
+            historyLines: [],
+            savedPrimaryLines: [],
+            altScreenLines: nil,
+            terminalIsInAltScreen: false,
+            clientRows: 24
+        )
+        let text = String(decoding: bytes, as: UTF8.self)
+        XCTAssertTrue(text.contains("plain\r\ntext"))
+        XCTAssertTrue(
+            text.contains("\(esc)[49m\r\nafter"),
+            "a seam whose pen was closed by the row itself must not be rewritten"
+        )
+        XCTAssertFalse(text.contains("\(esc)[49m\r\n\(esc)["))
+    }
+
+    func test_assemble_altBranchResetsBeforeSegmentSeamCRLF() {
+        // The history → saved-primary segment seam: the full reset must come
+        // BEFORE the CRLF so a scroll fill at the seam uses the default
+        // background.
+        let historyTail = "\(esc)[100mgray history tail"
+        let bytes = RepaintAssembly.assemble(
+            state: Self.makeState(cursorX: 0, cursorY: 0, paneInAltScreen: true),
+            captureLines: ["alt screen row"],
+            historyLines: ["old row", historyTail],
+            savedPrimaryLines: ["saved primary row"],
+            altScreenLines: ["alt screen row"],
+            terminalIsInAltScreen: false,
+            clientRows: 24
+        )
+        let text = String(decoding: bytes, as: UTF8.self)
+        XCTAssertTrue(
+            text.contains("\(historyTail)\(esc)[0m\r\nsaved primary row"),
+            "expected the segment reset ahead of the seam CRLF"
+        )
+    }
+
+    func test_assemble_inPlaceAltRefreshNeverTouchesSavedPrimaryBuffer() {
+        let bytes = RepaintAssembly.assemble(
+            state: Self.makeState(cursorX: 4, cursorY: 5, paneInAltScreen: true),
+            captureLines: ["alternate viewport"],
+            historyLines: [],
+            savedPrimaryLines: [],
+            altScreenLines: ["alternate viewport"],
+            terminalIsInAltScreen: true,
+            clientRows: 24,
+            preservePrimaryDuringAltRefresh: true
+        )
+        let text = String(decoding: bytes, as: UTF8.self)
+
+        XCTAssertTrue(text.contains("alternate viewport"))
+        XCTAssertFalse(text.contains("\(esc)[?1049l"))
+        XCTAssertFalse(text.contains("\(esc)[?1049h"))
+        XCTAssertTrue(text.contains("\(esc)[6;5H"))
+    }
+
     // MARK: assemble closes the pen at the content tail
 
     func test_assemble_primaryClosesOpenBackgroundAfterContent() {

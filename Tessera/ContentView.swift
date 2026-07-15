@@ -9,6 +9,51 @@ private struct RestoreStateEvent {
     let state: SessionState
 }
 
+private struct ShareExtensionUploadTargetsDocument: Codable {
+    var version = 1
+    var updatedAt: Date
+    var targets: [ShareExtensionUploadTarget]
+}
+
+private struct ShareExtensionUploadTarget: Codable {
+    var id: UUID
+    var label: String
+    var isConnected: Bool
+    var isConnecting: Bool
+    var isActiveSession: Bool
+    var isFailed: Bool
+    var sessionCwd: String?
+
+    init(candidate: UploadHostCandidate) {
+        id = candidate.id
+        label = candidate.label
+        isConnected = candidate.isConnected
+        isConnecting = candidate.isConnecting
+        isActiveSession = candidate.isActiveSession
+        isFailed = candidate.isFailed
+        sessionCwd = candidate.sessionCwd
+    }
+}
+
+private struct ShareInboxMetadata: Codable {
+    var version: Int
+    var targetHostID: UUID?
+}
+
+private struct ShareInboxQueuedFile {
+    let itemID: String
+    let inboxURL: URL
+    let hostID: UUID?
+    let fileURL: URL
+}
+
+private struct ActiveShareQueueUpload {
+    let itemID: String
+    let inboxURL: URL
+    let hostID: UUID
+    let sourceFileURL: URL
+}
+
 /// Top-level navigation: NavigationSplitView with a sidebar
 /// session/host switcher and a detail pane that shows either a
 /// host edit form or a live terminal session.
@@ -21,9 +66,12 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.designTokens) private var T
     @Environment(AppearancePreferences.self) private var appearance
+    @Environment(HostTerminalBackgroundStore.self) private var hostBackgrounds
     @Environment(AppLockController.self) private var appLockController
     @Environment(OnboardingController.self) private var onboarding
     @Environment(AppPhase.self) private var appPhase
+    @Environment(SwipePadProfileStore.self) private var swipePadStore
+    @Environment(BellController.self) private var bellController
 
     @State private var activeSessions: [LiveSession] = []
     @State private var selectedItem: SidebarItem?
@@ -37,17 +85,55 @@ struct ContentView: View {
     /// Host key verification request from any connecting session.
     @State private var hostKeyRequest: HostKeyVerificationRequest?
 
+    /// Share-in ("Copy to Tessera"): staged incoming file driving the
+    /// Upload sheet. Requests always park first and present only when
+    /// no sibling sheet (host-key prompt, restore prompt) is up and the
+    /// app is unlocked — two sheets set in one transaction means one
+    /// silently never presents.
+    @State private var uploadRequest: UploadRequest?
+    @State private var pendingUploadRequest: UploadRequest?
+    /// Share-in transfers can fail with no panel/strip on screen (the
+    /// sheet is long dismissed) — this alert is their only surface.
+    @State private var uploadFailureMessage: String?
+    /// Live host rows for the presented Upload sheet. A share often
+    /// foregrounds (or relaunches) the app while sessions are still
+    /// auto-reconnecting — a snapshot taken at presentation would call
+    /// every host disconnected, so rows refresh on session-state
+    /// events for as long as the sheet is up.
+    @State private var uploadSheetModel = UploadSheetModel()
+    /// Hosts with an on-demand cwd discovery running (dedup guard).
+    @State private var cwdResolutionsInFlight: Set<UUID> = []
+    /// Source inbox item for the currently presented upload sheet when
+    /// it came from the screenshot/share extension's per-host queue.
+    @State private var activeShareQueueUpload: ActiveShareQueueUpload?
+
     /// Switcher: shared observable mirror of `activeSessions` plus
     /// per-session last-touched timestamps. Read by the command
     /// palette via the environment.
     @State private var sessionRegistry = SessionRegistry()
     @State private var commandPalette = CommandPalette()
+    // Production starts inert. `onAppear` applies the persisted experimental
+    // preference before any registered session source is allowed to discover.
+    @State private var agentCenter = AgentCenter(isEnabled: false)
+    @State private var agentCenterReturnItem: SidebarItem?
+
+    /// One FileBridge (dedicated SSH + SFTP) per remote endpoint, shared
+    /// across all sessions to that host regardless of transport. Bridges
+    /// are created lazily by the session views' Files panels; nothing
+    /// connects until the user opens a panel.
+    @State private var fileBridges = FileBridgeRegistry()
 
     private let sessionRestoreStore = SessionRestoreStore()
+    private let shareInboxAppGroupID = "group.com.bambouville.TesseraApp"
+    private let shareInboxFolderName = "ShareInbox"
+    private let shareInboxTargetsFileName = "upload-targets.json"
+    private let shareInboxMetadataFileName = "metadata.json"
+    private let shareInboxConsumedDefaultsKey = "ShareInbox.ConsumedIDs"
+    private let shareInboxConsumedLimit = 200
 
     private var sidebarVisible: Bool { columnVisibility != .detailOnly }
 
-    var body: some View {
+    private var contentShell: some View {
         ZStack(alignment: .leading) {
             // Detail fills the full frame on every page. The sidebar floats
             // ABOVE it (HIG "extend content beneath the sidebar"), so toggling
@@ -117,6 +203,14 @@ struct ContentView: View {
                 .opacity(0)
                 .frame(width: 0, height: 0)
         )
+        .background {
+            if appearance.agentCenterEnabled {
+                Button("Toggle Agent Center", action: toggleAgentCenter)
+                    .keyboardShortcut("a", modifiers: [.command, .shift])
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
+            }
+        }
         .background(
             // Global ⌘, — the platform-standard "open Settings" chord.
             // Covers the landing page, host editor, and other browse
@@ -131,15 +225,22 @@ struct ContentView: View {
         )
         .environment(sessionRegistry)
         .environment(commandPalette)
+        .environment(agentCenter)
+        .environment(fileBridges)
         .overlay {
             if commandPalette.isOpen {
-                CommandPaletteView(palette: commandPalette) { id in
-                    selectSession(id)
-                }
+                CommandPaletteView(
+                    palette: commandPalette,
+                    onCommit: handleCommandPaletteCommit
+                )
                 .transition(.opacity)
                 .zIndex(50)
             }
         }
+    }
+
+    private var agentAwareContent: some View {
+        contentShell
         // First-launch walkthrough. Mounted last so it floats above the sidebar
         // (zIndex 2) and the command palette (zIndex 50). `overlayPreferenceValue`
         // resolves the onboarding anchors published by the landing CTA and the
@@ -157,12 +258,19 @@ struct ContentView: View {
         }
         .onChange(of: activeSessions.map(\.id)) { _, _ in
             sessionRegistry.syncActiveSessions(activeSessions)
+            refreshCommandPaletteSnapshot()
             logRestoreDiag(
                 "active-sessions-changed count=\(activeSessions.count) sessions=\(activeSessionSummary())"
             )
             persistRestoreSnapshots()
+            refreshUploadCandidatesIfPresented()
+            publishShareExtensionTargets(reason: "active-sessions")
+            presentQueuedShareForSelectedHostIfClear(reason: "active-sessions")
         }
-        .onChange(of: selectedItem) { _, newValue in
+        .onChange(of: selectedItem) { oldValue, newValue in
+            if newValue == .agents, oldValue != .agents {
+                agentCenterReturnItem = oldValue
+            }
             if case .session(let id) = newValue {
                 sessionRegistry.markTouched(id)
             }
@@ -170,14 +278,93 @@ struct ContentView: View {
                 "selected-changed selected=\(sidebarItemDescription(newValue)) active=\(appPhase.isActive)"
             )
             persistRestoreSnapshots()
+            publishShareExtensionTargets(reason: "selected")
+            presentQueuedShareForSelectedHostIfClear(reason: "selected")
+            updateAgentSurfaceDemand()
         }
+        .onChange(of: commandPalette.isOpen) { _, _ in
+            updateAgentSurfaceDemand()
+        }
+        .onChange(of: agentCenter.activityRevision) { _, _ in
+            refreshCommandPaletteSnapshot()
+        }
+        .onChange(of: agentCenter.workingCount) { _, _ in
+            updateAgentAttentionBackgroundKeepAlive(reason: "agent-activity")
+        }
+        .onChange(of: appearance.agentCenterEnabled) { _, enabled in
+            if !enabled, selectedItem == .agents {
+                toggleAgentCenter()
+            }
+            agentCenter.setEnabled(enabled)
+            if !enabled {
+                bellController.cancelAgentNotifications()
+            }
+            updateAgentAttentionBackgroundKeepAlive(reason: "agent-center-setting")
+            refreshCommandPaletteSnapshot()
+            updateAgentSurfaceDemand()
+            if enabled {
+                handlePendingAgentNotification()
+            }
+        }
+        .onChange(of: appearance.agentCenterNotificationsEnabled) { _, enabled in
+            if !enabled { bellController.cancelAgentNotifications() }
+            updateAgentAttentionBackgroundKeepAlive(reason: "notification-setting")
+        }
+        .onChange(of: swipePadStore.profiles) { _, profiles in
+            agentCenter.syncProfiles(profiles)
+            agentCenter.refreshAll()
+        }
+    }
+
+    var body: some View {
+        agentAwareContent
         .onChange(of: appLockController.isLocked) { _, isLocked in
             logRestoreDiag("app-lock-changed locked=\(isLocked)")
             if !isLocked {
                 if !attemptForegroundRestoreIfNeeded(reason: "unlock") {
                     attemptStartupRestoreIfReady()
                 }
+                // After the restore attempt: it may have set
+                // restorePrompt in this same transaction, in which case
+                // the parked share-in stays parked until that sheet
+                // clears (its onChange re-attempts).
+                presentParkedUploadIfClear()
+                scheduleShareInboxSweep(reason: "unlock")
+                presentQueuedShareForSelectedHostIfClear(reason: "unlock")
             }
+        }
+        .onChange(of: appearance.requireBiometricForKeyUse) { _, _ in
+            SSHAuthenticationPolicyStore.shared.observeGlobalKeyRequirement(
+                appearance.requireBiometricForKeyUse
+            )
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: ModelContext.didSave)
+                .filter { notification in
+                    guard let context = notification.object as? ModelContext else {
+                        return false
+                    }
+                    return context === modelContext
+                }
+        ) { _ in
+            // Re-read only active saved-host signatures. The authority compares
+            // them before invalidating, so unrelated SwiftData saves are cheap
+            // and do not break a valid 30-second same-policy grant.
+            SSHAuthenticationPolicyStore.shared.refreshCurrentPolicies()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+                .map { _ in
+                    UserDefaults.standard.bool(
+                        forKey: "tessera.pref.requireBiometricForKeyUse"
+                    )
+                }
+                .removeDuplicates()
+                .receive(on: RunLoop.main)
+        ) { capturedValue in
+            SSHAuthenticationPolicyStore.shared.observeGlobalKeyRequirement(
+                capturedValue
+            )
         }
         .onChange(of: onboarding.phase) { _, newPhase in
             // A spotlight step needs its target on screen. The replay path
@@ -192,6 +379,13 @@ struct ContentView: View {
             columnVisibility = .automatic
         }
         .onChange(of: appPhase.isActive) { _, isActive in
+            agentCenter.setApplicationActive(isActive)
+            if isActive {
+                // Foreground attention is represented by the exact-pane-aware
+                // top-bar chip. Withdraw stale background banners while
+                // preserving the independent unread attention records.
+                bellController.cancelAgentNotifications()
+            }
             logRestoreDiag(
                 "app-phase-changed active=\(isActive) didEvaluateStartupRestore=\(didEvaluateStartupRestore) activeCount=\(activeSessions.count) inactivePreserved=\(hasInactivePreservedRestoreSnapshots)"
             )
@@ -201,19 +395,56 @@ struct ContentView: View {
             }
             if isActive,
                attemptForegroundRestoreIfNeeded(reason: "foreground") {
+                publishShareExtensionTargets(reason: "foreground")
+                scheduleShareInboxSweep(reason: "foreground")
+                presentQueuedShareForSelectedHostIfClear(reason: "foreground")
                 return
+            }
+            if isActive {
+                publishShareExtensionTargets(reason: "foreground")
+                scheduleShareInboxSweep(reason: "foreground")
+                presentQueuedShareForSelectedHostIfClear(reason: "foreground")
             }
             persistRestoreSnapshots()
         }
+        .onChange(of: appPhase.state) { _, state in
+            updateAgentAttentionBackgroundKeepAlive(
+                reason: "app-phase-\(state.rawValue)"
+            )
+        }
         .onAppear {
+            configureCurrentSSHAuthenticationPolicy()
             logRestoreDiag(
                 "content-appear locked=\(appLockController.isLocked) active=\(appPhase.isActive) activeCount=\(activeSessions.count) didEvaluateStartupRestore=\(didEvaluateStartupRestore)"
             )
             sessionRegistry.syncActiveSessions(activeSessions)
+            agentCenter.setEnabled(appearance.agentCenterEnabled)
+            agentCenter.setApplicationActive(appPhase.isActive)
+            updateAgentAttentionBackgroundKeepAlive(reason: "content-appear")
+            if !appearance.agentCenterEnabled {
+                bellController.cancelAgentNotifications()
+            }
+            agentCenter.syncProfiles(swipePadStore.profiles)
+            agentCenter.onJumpToSession = { id in selectSession(id) }
+            agentCenter.onAttention = { attention, agent in
+                bellController.agentAttention(attention, agent: agent)
+            }
+            agentCenter.onAttentionAcknowledged = { agentID in
+                bellController.cancelAgentNotification(for: agentID)
+            }
+            AgentNotificationRouter.shared.onRoute = { route in
+                guard appearance.agentCenterEnabled else { return }
+                agentCenter.jump(agentID: route)
+            }
+            updateAgentSurfaceDemand()
+            handlePendingAgentNotification()
             if case .session(let id) = selectedItem {
                 sessionRegistry.markTouched(id)
             }
             attemptStartupRestoreIfReady()
+            publishShareExtensionTargets(reason: "appear")
+            scheduleShareInboxSweep(reason: "appear")
+            presentQueuedShareForSelectedHostIfClear(reason: "appear")
             maybeBeginOnboarding()
         }
         .statusBarHidden(true)
@@ -222,11 +453,11 @@ struct ContentView: View {
             HostKeyVerificationView(
                 request: request,
                 onTrust: {
-                    request.continuation.resume(returning: true)
+                    request.accept()
                     hostKeyRequest = nil
                 },
                 onReject: {
-                    request.continuation.resume(returning: false)
+                    request.reject()
                     hostKeyRequest = nil
                 }
             )
@@ -240,12 +471,77 @@ struct ContentView: View {
                 onNotNow: { skipPreviousConnections() }
             )
         }
+        .sheet(item: $uploadRequest) { request in
+            UploadSheetView(
+                request: request,
+                model: uploadSheetModel,
+                onUpload: { candidate, destination, pastePath in
+                    let queuedUpload = activeShareQueueUpload
+                    performUpload(
+                        request: request,
+                        candidate: candidate,
+                        destination: destination,
+                        pastePath: pastePath
+                    )
+                    uploadRequest = nil
+                    if let queuedUpload {
+                        finishQueuedShareUpload(queuedUpload, reason: "uploaded")
+                    }
+                },
+                onCancel: {
+                    let queuedUpload = activeShareQueueUpload
+                    uploadRequest = nil
+                    if let queuedUpload {
+                        finishQueuedShareUpload(queuedUpload, reason: "cancelled")
+                    }
+                },
+                onResolveCwd: { candidate in
+                    resolveSessionCwdIfNeeded(for: candidate.id)
+                }
+            )
+        }
+        .onOpenURL { url in
+            handleIncomingOpenURL(url)
+        }
+        .onChange(of: restorePrompt == nil) { _, _ in
+            presentParkedUploadIfClear()
+            presentQueuedShareForSelectedHostIfClear(reason: "restore-cleared")
+        }
+        .onChange(of: hostKeyRequest == nil) { _, _ in
+            presentParkedUploadIfClear()
+            presentQueuedShareForSelectedHostIfClear(reason: "hostkey-cleared")
+        }
+        .alert(
+            "upload failed",
+            isPresented: Binding(
+                get: { uploadFailureMessage != nil },
+                set: { if !$0 { uploadFailureMessage = nil } }
+            )
+        ) {
+            Button("ok", role: .cancel) {}
+        } message: {
+            Text(uploadFailureMessage ?? "")
+        }
         .onReceive(hostKeyVerificationPublisher) { request in
+            if request.isResolved {
+                return
+            }
+            if hostKeyRequest?.id == request.id {
+                return
+            }
+            if let current = hostKeyRequest,
+               current.isSameChallenge(as: request) {
+                current.coalesce(request)
+                DiagnosticLogStore.appendSSH(
+                    "hostkey prompt coalesced duplicate endpoint=\(request.endpoint) keyType=\(request.keyType)"
+                )
+                return
+            }
             // If a previous request is still pending (two sessions
             // connecting simultaneously), reject it so its continuation
             // doesn't leak. Only one prompt at a time.
             if let previous = hostKeyRequest {
-                previous.continuation.resume(returning: false)
+                previous.reject()
             }
             hostKeyRequest = request
         }
@@ -256,7 +552,18 @@ struct ContentView: View {
             logRestoreDiag(
                 "session-state live=\(shortID(event.liveSessionID)) host=\(shortID(event.persistedHostID)) transport=\(event.transport) state=\(stateDescription(event.state)) active=\(appPhase.isActive)"
             )
+            if event.transport == "mosh", case .failed = event.state {
+                attemptMoshJumpFallback(liveSessionID: event.liveSessionID)
+            }
             persistRestoreSnapshots()
+            refreshUploadCandidatesIfPresented()
+            publishShareExtensionTargets(reason: "session-state")
+            presentQueuedShareForSelectedHostIfClear(reason: "session-state")
+        }
+        .onReceive(remoteCwdPublisher) { _ in
+            refreshUploadCandidatesIfPresented()
+            publishShareExtensionTargets(reason: "remote-cwd")
+            presentQueuedShareForSelectedHostIfClear(reason: "remote-cwd")
         }
     }
 
@@ -306,6 +613,28 @@ struct ContentView: View {
                     .eraseToAnyPublisher()
             }
         )
+    }
+
+    /// Fires when any live session's cwd mirror updates (tmux pane
+    /// metadata, OSC 7, poller, on-demand resolve) — keeps the Upload
+    /// sheet's "session cwd" row live. dropFirst skips the @Published
+    /// replay on every resubscription.
+    private var remoteCwdPublisher: AnyPublisher<Void, Never> {
+        guard !activeSessions.isEmpty else {
+            return Empty().eraseToAnyPublisher()
+        }
+        return Publishers.MergeMany(
+            activeSessions.map { live -> AnyPublisher<Void, Never> in
+                switch live.session {
+                case .ssh(let session):
+                    return session.$remoteWorkingDirectory
+                        .dropFirst().map { _ in () }.eraseToAnyPublisher()
+                case .mosh(let session):
+                    return session.$remoteWorkingDirectory
+                        .dropFirst().map { _ in () }.eraseToAnyPublisher()
+                }
+            }
+        ).eraseToAnyPublisher()
     }
 
     private var sessionStatePublisher: AnyPublisher<RestoreStateEvent, Never> {
@@ -398,7 +727,9 @@ struct ContentView: View {
                         onSelectSession: { id in
                             selectSession(id)
                         },
-                        onOpenSettings: openSettings
+                        onOpenSettings: openSettings,
+                        onOpenAgentCenter: appearance.agentCenterEnabled
+                            ? toggleAgentCenter : nil
                     )
                     .opacity(isSelected ? 1 : 0)
                     .allowsHitTesting(isSelected)
@@ -442,7 +773,9 @@ struct ContentView: View {
                         onSelectSession: { id in
                             selectSession(id)
                         },
-                        onOpenSettings: openSettings
+                        onOpenSettings: openSettings,
+                        onOpenAgentCenter: appearance.agentCenterEnabled
+                            ? toggleAgentCenter : nil
                     )
                     .opacity(isSelected ? 1 : 0)
                     .allowsHitTesting(isSelected)
@@ -458,8 +791,12 @@ struct ContentView: View {
                         if let host = fetchHost(hostID) {
                             HostDetailView(
                                 host: host,
-                                onConnect: { persistedHost, password in
-                                    connect(to: persistedHost, password: password)
+                                onConnect: { persistedHost, password, jumpPasswords in
+                                    connect(
+                                        to: persistedHost,
+                                        password: password,
+                                        jumpPasswords: jumpPasswords
+                                    )
                                 },
                                 onCancel: { dismissEditor(host: host, deleteIfDraft: true) },
                                 onDelete: { dismissEditor(host: host, deleteIfDraft: false, force: true) }
@@ -469,6 +806,12 @@ struct ContentView: View {
                         }
                     case .keys:
                         KeysPageView()
+                    case .agents:
+                        if appearance.agentCenterEnabled {
+                            AgentCenterPage(center: agentCenter)
+                        } else {
+                            landing
+                        }
                     case .knownHosts:
                         KnownHostsPageView()
                     case .tunnels:
@@ -476,7 +819,9 @@ struct ContentView: View {
                             selectedItem = .host(persistedHost.id)
                         }
                     case .settings:
-                        SettingsPageView()
+                        SettingsPageView(
+                            onUploadDiagnosticLog: uploadDiagnosticLog
+                        )
                     default:
                         landing
                     }
@@ -556,6 +901,11 @@ struct ContentView: View {
         let isDraft = host.name.trimmingCharacters(in: .whitespaces).isEmpty
             && host.address.trimmingCharacters(in: .whitespaces).isEmpty
         if force || (deleteIfDraft && isDraft) {
+            hostBackgrounds.removeOverride(for: host.id)
+            // GC only this host's outgoing jump link. Links pointing AT
+            // this host stay: dependents must fail closed ("jump host no
+            // longer exists"), never silently connect direct.
+            HostJumpChainResolver.removeOutgoingLink(for: host.id, in: modelContext)
             modelContext.delete(host)
             try? modelContext.save()
         }
@@ -567,6 +917,762 @@ struct ContentView: View {
             predicate: #Predicate { $0.id == id }
         )
         return try? modelContext.fetch(descriptor).first
+    }
+
+    /// Installs the one live SwiftData-backed resolver used by every new SSH
+    /// leg, including Mosh side channels, Files, and key/shell installers.
+    /// The fallback contributes only an ephemeral password entered for this
+    /// session; endpoint, identity, key metadata, and global policy are fetched
+    /// again immediately before authentication.
+    private func configureCurrentSSHAuthenticationPolicy() {
+        let context = modelContext
+        let preferences = appearance
+        SSHAuthenticationPolicyStore.shared.configureCurrentPolicyProvider {
+            hostID, fallback in
+            let hostDescriptor = FetchDescriptor<PersistedHost>(
+                predicate: #Predicate { $0.id == hostID }
+            )
+            guard let persisted = try? context.fetch(hostDescriptor).first else {
+                return nil
+            }
+
+            let storedKey: StoredKey?
+            if case .key(let keyID) = persisted.identity?.credentialMode {
+                let keyDescriptor = FetchDescriptor<StoredKey>(
+                    predicate: #Predicate { $0.id == keyID }
+                )
+                storedKey = try? context.fetch(keyDescriptor).first
+            } else {
+                storedKey = nil
+            }
+
+            let requiresOwnerPresence: Bool
+            let preferredOwnerPresence: Bool
+            if case .key = persisted.identity?.credentialMode {
+                requiresOwnerPresence = requiresOwnerPresenceForKeyUse(
+                    key: storedKey,
+                    globalPreference: preferences.requireBiometricForKeyUse
+                )
+                preferredOwnerPresence = preferences.requireBiometricForKeyUse
+                    && (storedKey?.requiresBiometric ?? false)
+            } else {
+                requiresOwnerPresence = false
+                preferredOwnerPresence = false
+            }
+
+            let transientPassword: String
+            let transientRevision: HostPasswordCredentialRevision?
+            if case .ephemeral = fallback.passwordCredentialRevision,
+               !fallback.password.isEmpty {
+                transientPassword = fallback.password
+                transientRevision = fallback.passwordCredentialRevision
+            } else {
+                transientPassword = ""
+                transientRevision = nil
+            }
+
+            let transientJumpPasswords: [UUID: HostTransientPasswordCredential] = Dictionary(
+                uniqueKeysWithValues: fallback.jumpChain.compactMap { hop in
+                    guard !hop.password.isEmpty,
+                          case .ephemeral = hop.passwordCredentialRevision else {
+                        return nil as (UUID, HostTransientPasswordCredential)?
+                    }
+                    return (
+                        hop.id,
+                        HostTransientPasswordCredential(
+                            password: hop.password,
+                            revision: hop.passwordCredentialRevision
+                        )
+                    )
+                }
+            )
+
+            return SSHConnectionPolicyDraft(
+                host: Host(
+                    from: persisted,
+                    transientPassword: transientPassword,
+                    transientPasswordCredentialRevision: transientRevision,
+                    transientJumpPasswords: transientJumpPasswords
+                ),
+                requireBiometric: requiresOwnerPresence,
+                isSecureEnclave: storedKey?.isSecureEnclave ?? false,
+                keyAlgorithm: storedKey?.algorithm,
+                ownerPresencePreference: preferredOwnerPresence
+            )
+        }
+        SSHAuthenticationPolicyStore.shared.registerPersistedHosts(
+            fetchHosts().map(\.id)
+        )
+        SSHAuthenticationPolicyStore.shared.observeGlobalKeyRequirement(
+            appearance.requireBiometricForKeyUse
+        )
+        SSHAuthenticationPolicyStore.shared.observePasswordCredentialRevision(
+            KeychainHelper.passwordCredentialRevision
+        )
+    }
+
+    // MARK: - Share-in (Upload sheet)
+
+    private func handleIncomingOpenURL(_ url: URL) {
+        if handleShareExtensionURL(url) {
+            return
+        }
+        handleIncomingShareURL(url)
+    }
+
+    private func handleShareExtensionURL(_ url: URL) -> Bool {
+        guard url.scheme == "tessera", url.host == "share-inbox" else {
+            return false
+        }
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        guard
+            let itemID = components?.queryItems?.first(where: { $0.name == "id" })?.value,
+            UUID(uuidString: itemID) != nil
+        else {
+            DiagnosticLogStore.appendApp("share-extension open ignored reason=invalid-id")
+            return true
+        }
+        DiagnosticLogStore.appendApp("share-extension open received id=\(String(itemID.prefix(8)))")
+        scheduleShareInboxSweep(reason: "open-url")
+        presentQueuedShareForSelectedHostIfClear(reason: "open-url")
+        return true
+    }
+
+    private func scheduleShareInboxSweep(reason: String) {
+        processPendingShareInboxItems(reason: reason)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            processPendingShareInboxItems(reason: "\(reason)-delayed")
+        }
+    }
+
+    private func processPendingShareInboxItems(reason: String) {
+        guard !appLockController.isLocked else { return }
+        guard let rootURL = shareInboxRootURL() else { return }
+        guard FileManager.default.fileExists(atPath: rootURL.path) else { return }
+
+        do {
+            for directory in try shareInboxDirectories(rootURL: rootURL) {
+                if isShareInboxConsumed(directory.lastPathComponent) {
+                    cleanupShareInboxDirectory(directory, reason: "\(reason)-already-consumed")
+                    continue
+                }
+                if shareInboxFiles(in: directory).isEmpty {
+                    markShareInboxConsumed(directory.lastPathComponent)
+                    cleanupShareInboxDirectory(directory, reason: "\(reason)-empty")
+                    continue
+                }
+                if readShareInboxMetadata(in: directory)?.targetHostID == nil {
+                    markShareInboxConsumed(directory.lastPathComponent)
+                    cleanupShareInboxDirectory(directory, reason: "\(reason)-untargeted")
+                }
+            }
+            presentQueuedShareForSelectedHostIfClear(reason: reason)
+        } catch CocoaError.fileReadNoSuchFile {
+            return
+        } catch {
+            DiagnosticLogStore.appendApp("share-extension sweep failed reason=\(reason) error=\(error.localizedDescription)")
+        }
+    }
+
+    private func shareInboxRootURL() -> URL? {
+        FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: shareInboxAppGroupID)?
+            .appendingPathComponent(shareInboxFolderName, isDirectory: true)
+    }
+
+    private func shareInboxTargetsURL() -> URL? {
+        shareInboxRootURL()?
+            .appendingPathComponent(shareInboxTargetsFileName, isDirectory: false)
+    }
+
+    private func publishShareExtensionTargets(reason: String) {
+        publishShareExtensionTargets(candidates: uploadHostCandidates(), reason: reason)
+    }
+
+    private func publishShareExtensionTargets(
+        candidates: [UploadHostCandidate],
+        reason: String
+    ) {
+        guard let targetsURL = shareInboxTargetsURL() else { return }
+        do {
+            try FileManager.default.createDirectory(
+                at: targetsURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let document = ShareExtensionUploadTargetsDocument(
+                updatedAt: Date(),
+                targets: candidates.map(ShareExtensionUploadTarget.init(candidate:))
+            )
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            let data = try encoder.encode(document)
+            try data.write(to: targetsURL, options: .atomic)
+            DiagnosticLogStore.appendApp(
+                "share-extension targets published reason=\(reason) count=\(document.targets.count)"
+            )
+        } catch {
+            DiagnosticLogStore.appendApp(
+                "share-extension targets publish failed reason=\(reason) error=\(error.localizedDescription)"
+            )
+        }
+    }
+
+    private var shareInboxDefaults: UserDefaults {
+        UserDefaults(suiteName: shareInboxAppGroupID) ?? .standard
+    }
+
+    private func isShareInboxConsumed(_ itemID: String) -> Bool {
+        shareInboxDefaults.stringArray(forKey: shareInboxConsumedDefaultsKey)?
+            .contains(itemID) == true
+    }
+
+    private func markShareInboxConsumed(_ itemID: String) {
+        var consumed = shareInboxDefaults.stringArray(forKey: shareInboxConsumedDefaultsKey) ?? []
+        consumed.removeAll { $0 == itemID }
+        consumed.append(itemID)
+        if consumed.count > shareInboxConsumedLimit {
+            consumed = Array(consumed.suffix(shareInboxConsumedLimit))
+        }
+        shareInboxDefaults.set(consumed, forKey: shareInboxConsumedDefaultsKey)
+    }
+
+    private func cleanupShareInboxDirectory(_ inboxURL: URL, reason: String) {
+        do {
+            try FileManager.default.removeItem(at: inboxURL)
+            DiagnosticLogStore.appendApp(
+                "share-extension inbox cleanup ok reason=\(reason) id=\(inboxURL.lastPathComponent)"
+            )
+        } catch CocoaError.fileNoSuchFile {
+            return
+        } catch CocoaError.fileReadNoSuchFile {
+            return
+        } catch {
+            DiagnosticLogStore.appendApp(
+                "share-extension inbox cleanup failed reason=\(reason) id=\(inboxURL.lastPathComponent) error=\(error.localizedDescription)"
+            )
+        }
+    }
+
+    private func presentQueuedShareForSelectedHostIfClear(reason: String) {
+        guard !appLockController.isLocked,
+              pendingUploadRequest == nil,
+              uploadRequest == nil,
+              restorePrompt == nil,
+              hostKeyRequest == nil,
+              activeShareQueueUpload == nil,
+              let hostID = selectedShareQueueHostID(),
+              let queued = nextQueuedShareFile(for: hostID)
+        else { return }
+
+        let candidates = uploadHostCandidates()
+        guard let candidate = candidates.first(where: { $0.id == hostID }) else {
+            DiagnosticLogStore.appendApp(
+                "share-extension queue skipped reason=\(reason) host=\(String(hostID.uuidString.prefix(8))) missing-candidate=true"
+            )
+            return
+        }
+
+        do {
+            activeShareQueueUpload = ActiveShareQueueUpload(
+                itemID: queued.itemID,
+                inboxURL: queued.inboxURL,
+                hostID: hostID,
+                sourceFileURL: queued.fileURL
+            )
+            uploadSheetModel.candidates = [candidate]
+            uploadRequest = try makeUploadRequest(
+                from: queued.fileURL,
+                displayName: queued.fileURL.lastPathComponent,
+                sourceHint: "Share"
+            )
+            DiagnosticLogStore.appendApp(
+                "share-extension queue presenting reason=\(reason) host=\(String(hostID.uuidString.prefix(8))) file=\(queued.fileURL.lastPathComponent)"
+            )
+        } catch {
+            activeShareQueueUpload = nil
+            uploadFailureMessage = "\(queued.fileURL.lastPathComponent): \(error.localizedDescription)"
+            DiagnosticLogStore.appendApp(
+                "share-extension queue staging failed reason=\(reason) host=\(String(hostID.uuidString.prefix(8))) error=\(error.localizedDescription)"
+            )
+        }
+    }
+
+    private func selectedShareQueueHostID() -> UUID? {
+        switch selectedItem {
+        case .session(let id):
+            return activeSessions.first(where: { $0.id == id })?.persistedHostID
+        case .host(let id):
+            return id
+        default:
+            return nil
+        }
+    }
+
+    private func nextQueuedShareFile(for hostID: UUID) -> ShareInboxQueuedFile? {
+        guard let rootURL = shareInboxRootURL(),
+              FileManager.default.fileExists(atPath: rootURL.path)
+        else { return nil }
+
+        do {
+            for inboxURL in try shareInboxDirectories(rootURL: rootURL) {
+                let itemID = inboxURL.lastPathComponent
+                if isShareInboxConsumed(itemID) {
+                    cleanupShareInboxDirectory(inboxURL, reason: "queue-already-consumed")
+                    continue
+                }
+                let metadata = readShareInboxMetadata(in: inboxURL)
+                guard metadata?.targetHostID == hostID else { continue }
+                let files = shareInboxFiles(in: inboxURL)
+                guard let fileURL = files.first else {
+                    markShareInboxConsumed(itemID)
+                    cleanupShareInboxDirectory(inboxURL, reason: "queue-empty")
+                    continue
+                }
+                return ShareInboxQueuedFile(
+                    itemID: itemID,
+                    inboxURL: inboxURL,
+                    hostID: metadata?.targetHostID,
+                    fileURL: fileURL
+                )
+            }
+        } catch {
+            DiagnosticLogStore.appendApp(
+                "share-extension queue scan failed host=\(String(hostID.uuidString.prefix(8))) error=\(error.localizedDescription)"
+            )
+        }
+        return nil
+    }
+
+    private func finishQueuedShareUpload(
+        _ queued: ActiveShareQueueUpload,
+        reason: String
+    ) {
+        activeShareQueueUpload = nil
+        do {
+            try FileManager.default.removeItem(at: queued.sourceFileURL)
+            DiagnosticLogStore.appendApp(
+                "share-extension queue file consumed reason=\(reason) host=\(String(queued.hostID.uuidString.prefix(8))) file=\(queued.sourceFileURL.lastPathComponent)"
+            )
+        } catch CocoaError.fileNoSuchFile {
+            DiagnosticLogStore.appendApp(
+                "share-extension queue file already missing reason=\(reason) file=\(queued.sourceFileURL.lastPathComponent)"
+            )
+        } catch CocoaError.fileReadNoSuchFile {
+            DiagnosticLogStore.appendApp(
+                "share-extension queue file already missing reason=\(reason) file=\(queued.sourceFileURL.lastPathComponent)"
+            )
+        } catch {
+            DiagnosticLogStore.appendApp(
+                "share-extension queue file cleanup failed reason=\(reason) file=\(queued.sourceFileURL.lastPathComponent) error=\(error.localizedDescription)"
+            )
+        }
+
+        if shareInboxFiles(in: queued.inboxURL).isEmpty {
+            markShareInboxConsumed(queued.itemID)
+            cleanupShareInboxDirectory(queued.inboxURL, reason: "queue-\(reason)")
+        }
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            presentQueuedShareForSelectedHostIfClear(reason: "queue-\(reason)-next")
+        }
+    }
+
+    private func shareInboxDirectories(rootURL: URL) throws -> [URL] {
+        try FileManager.default.contentsOfDirectory(
+            at: rootURL,
+            includingPropertiesForKeys: [
+                .isDirectoryKey,
+                .contentModificationDateKey,
+                .creationDateKey
+            ],
+            options: [.skipsHiddenFiles]
+        )
+        .filter { url in
+            ((try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false) == true
+        }
+        .sorted { lhs, rhs in
+            shareInboxSortDate(lhs) < shareInboxSortDate(rhs)
+        }
+    }
+
+    private func shareInboxFiles(in inboxURL: URL) -> [URL] {
+        do {
+            return try FileManager.default.contentsOfDirectory(
+                at: inboxURL,
+                includingPropertiesForKeys: [
+                    .isDirectoryKey,
+                    .contentModificationDateKey,
+                    .creationDateKey
+                ],
+                options: [.skipsHiddenFiles]
+            )
+            .filter { url in
+                ((try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? true) == false
+                    && url.lastPathComponent != shareInboxMetadataFileName
+            }
+            .sorted { lhs, rhs in
+                shareInboxSortDate(lhs) < shareInboxSortDate(rhs)
+            }
+        } catch {
+            return []
+        }
+    }
+
+    private func readShareInboxMetadata(in inboxURL: URL) -> ShareInboxMetadata? {
+        let metadataURL = inboxURL
+            .appendingPathComponent(shareInboxMetadataFileName, isDirectory: false)
+        guard let data = try? Data(contentsOf: metadataURL) else { return nil }
+        do {
+            return try JSONDecoder().decode(ShareInboxMetadata.self, from: data)
+        } catch {
+            DiagnosticLogStore.appendApp(
+                "share-extension metadata ignored id=\(inboxURL.lastPathComponent) error=\(error.localizedDescription)"
+            )
+            return nil
+        }
+    }
+
+    private func shareInboxSortDate(_ url: URL) -> Date {
+        let values = try? url.resourceValues(forKeys: [
+            .contentModificationDateKey,
+            .creationDateKey
+        ])
+        return values?.contentModificationDate
+            ?? values?.creationDate
+            ?? .distantPast
+    }
+
+    /// "Copy to Tessera" entry point. The provided URL is only readable
+    /// inside this callback (security scope), so stage a copy first;
+    /// the sheet presents against the staged file. Never auto-connects:
+    /// the bridge dials only when the user taps Upload.
+    private func handleIncomingShareURL(_ url: URL) {
+        guard url.isFileURL else { return }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        stageUploadRequest(
+            from: url,
+            displayName: url.lastPathComponent,
+            sourceHint: nil,
+            failureContext: "share-in",
+            cleanupURL: nil
+        )
+    }
+
+    private func uploadDiagnosticLog() {
+        guard !DiagnosticLogStore.info().isEmpty else { return }
+        stageUploadRequest(
+            from: DiagnosticLogStore.logFileURL,
+            displayName: "tessera-diagnostics.log",
+            sourceHint: "Diagnostics",
+            failureContext: "diagnostics-upload",
+            cleanupURL: nil
+        )
+    }
+
+    @discardableResult
+    private func stageUploadRequest(
+        from url: URL,
+        displayName: String,
+        sourceHint: String?,
+        failureContext: String,
+        cleanupURL: URL?
+    ) -> Bool {
+        do {
+            pendingUploadRequest = try makeUploadRequest(
+                from: url,
+                displayName: displayName,
+                sourceHint: sourceHint
+            )
+            if let cleanupURL {
+                try? FileManager.default.removeItem(at: cleanupURL)
+            }
+            presentParkedUploadIfClear()
+            return true
+        } catch {
+            let message = error.localizedDescription
+            DiagnosticLogStore.appendApp("\(failureContext) staging failed: \(message)")
+            uploadFailureMessage = "\(displayName): \(message)"
+            return false
+        }
+    }
+
+    private func makeUploadRequest(
+        from url: URL,
+        displayName: String,
+        sourceHint: String?
+    ) throws -> UploadRequest {
+        let staged = try FilesPanelController.stageLocalCopy(of: url)
+        let size = (try? FileManager.default
+            .attributesOfItem(atPath: staged.path)[.size] as? NSNumber)?
+            .uint64Value
+        return UploadRequest(
+            stagedURL: staged,
+            displayName: displayName,
+            fileSize: size,
+            sourceHint: sourceHint
+        )
+    }
+
+    /// Single gate for presenting a parked share-in request: only when
+    /// unlocked and no sibling sheet is up. Re-attempted whenever the
+    /// lock, the restore prompt, or the host-key prompt clears.
+    private func presentParkedUploadIfClear() {
+        guard let parked = pendingUploadRequest,
+              uploadRequest == nil,
+              restorePrompt == nil,
+              hostKeyRequest == nil,
+              !appLockController.isLocked else { return }
+        pendingUploadRequest = nil
+        uploadSheetModel.candidates = uploadHostCandidates()
+        uploadRequest = parked
+    }
+
+    private func refreshUploadCandidatesIfPresented() {
+        guard uploadRequest != nil else { return }
+        // Change-guarded: the cwd/state publishers replay on
+        // resubscription; writing an equal array would re-render (and
+        // resubscribe) for nothing.
+        let fresh = uploadCandidatesForPresentedSheet()
+        if fresh != uploadSheetModel.candidates {
+            uploadSheetModel.candidates = fresh
+            DiagnosticLogStore.appendApp(
+                "upload-sheet candidates refreshed: "
+                + fresh.map { "\($0.label):\($0.isConnected ? "up" : $0.isConnecting ? "conn" : $0.isFailed ? "fail" : "down")" }
+                    .joined(separator: " ")
+            )
+        }
+    }
+
+    private func uploadCandidatesForPresentedSheet() -> [UploadHostCandidate] {
+        let candidates = uploadHostCandidates()
+        guard let hostID = activeShareQueueUpload?.hostID else {
+            return candidates
+        }
+        return candidates.filter { $0.id == hostID }
+    }
+
+    /// On-demand cwd for the Upload sheet's selected host. The mirror
+    /// (session.remoteWorkingDirectory) is only fed organically by tmux
+    /// pane metadata, OSC 7, or the panel's poller — on plain SSH/mosh
+    /// with no panel ever opened it's empty at share time. This runs
+    /// ONE discovery exec over the host's bridge (same machinery as the
+    /// panel's poller; the user's share/selection is the gesture that
+    /// permits the bridge connect — no terminal session is opened).
+    private func resolveSessionCwdIfNeeded(for candidateID: UUID) {
+        guard let live = activeSessions.first(where: {
+            $0.persistedHostID == candidateID
+                && $0.session.terminalSession.state == .connected
+        }) else {
+            DiagnosticLogStore.appendApp(
+                "upload-cwd resolve skipped host=\(String(candidateID.uuidString.prefix(8))) reason=no-connected-session"
+            )
+            return
+        }
+        let terminal = live.session.terminalSession
+        if terminal.remoteWorkingDirectory != nil {
+            // Mirror already knows (e.g. it filled after the sheet
+            // presented) — just get the row updated.
+            DiagnosticLogStore.appendApp("upload-cwd resolve mirror-already-set")
+            refreshUploadCandidatesIfPresented()
+            return
+        }
+        guard !cwdResolutionsInFlight.contains(candidateID) else {
+            DiagnosticLogStore.appendApp("upload-cwd resolve already-in-flight")
+            return
+        }
+        let discovery: RemoteCwdPoller.ShellDiscovery
+        if live.launchMode != .customCommand {
+            // tmux launch modes: NEVER guess with the shell heuristic —
+            // the host can run several tmux sessions and it confidently
+            // answers with another session's window. Ask tmux itself
+            // for OUR named session's active pane: session-scoped, and
+            // independent of the -CC side channel, which is
+            // deliberately DOWN for backgrounded sessions (007c674
+            // steady state), so pane metadata can't answer here.
+            guard let name = MoshBootstrap.resolvedTmuxSessionName(
+                for: terminal.host) else {
+                DiagnosticLogStore.appendApp(
+                    "upload-cwd resolve skipped reason=tmux-mode-without-session-name"
+                )
+                return
+            }
+            discovery = .tmuxSession(name: name)
+        } else if case .mosh(let s) = live.session, let pid = s.remoteServerPID {
+            // The PID anchor beats the heuristic when the bootstrap
+            // banner delivered one.
+            discovery = .moshServerChild(serverPID: pid)
+        } else {
+            discovery = .newestLoginShell
+        }
+        // Credential-reuse rule as in performUpload: the live session's
+        // snapshot, never a rebuilt DTO.
+        let bridge: FileBridge
+        switch live.session {
+        case .ssh(let s):
+            bridge = fileBridges.bridge(
+                for: s.host, requireBiometric: s.requireBiometric,
+                isSecureEnclave: s.isSecureEnclave)
+        case .mosh(let s):
+            bridge = fileBridges.bridge(
+                for: s.host, requireBiometric: s.requireBiometric,
+                isSecureEnclave: s.isSecureEnclave)
+        }
+        cwdResolutionsInFlight.insert(candidateID)
+        DiagnosticLogStore.appendApp(
+            "upload-cwd resolve mode=\(live.launchMode.rawValue) discovery=\(String(describing: discovery))"
+        )
+        Task {
+            defer { cwdResolutionsInFlight.remove(candidateID) }
+            do {
+                try await bridge.connect()
+                let output = try await bridge.exec(
+                    RemoteCwdPoller.discoveryCommand(for: discovery),
+                    inShell: false
+                )
+                let path = RemoteCwdPoller.reportedPath(in: output)
+                DiagnosticLogStore.appendApp(
+                    "upload-cwd resolve result=\(path == nil ? "missing" : "present") rawBytes=\(output.utf8.count)"
+                )
+                // Don't stomp a value that arrived organically (pane
+                // metadata / OSC 7) while the probe was in flight.
+                if terminal.remoteWorkingDirectory == nil, let path {
+                    terminal.remoteWorkingDirectory = path
+                }
+            } catch {
+                DiagnosticLogStore.appendApp(
+                    "upload-cwd resolve failed error=\(error.localizedDescription)"
+                )
+                // cwd row simply stays disabled; temp still works.
+            }
+            refreshUploadCandidatesIfPresented()
+        }
+    }
+
+    /// Host rows for the Upload sheet. Persisted hosts only — a
+    /// quick-connect session's credentials died with its DTO, so the
+    /// bridge couldn't be rebuilt for it.
+    private func uploadHostCandidates() -> [UploadHostCandidate] {
+        let selectedSessionID: UUID? = {
+            if case .session(let id) = selectedItem { return id }
+            return nil
+        }()
+        return fetchHosts().map { host in
+            let sessions = activeSessions.filter { $0.persistedHostID == host.id }
+            let connected = sessions.filter {
+                $0.session.terminalSession.state == .connected
+            }
+            let connecting = sessions.contains {
+                switch $0.session.terminalSession.state {
+                case .idle, .connecting: return true
+                default: return false
+                }
+            }
+            let failed = sessions.contains {
+                if case .failed = $0.session.terminalSession.state { return true }
+                return false
+            }
+            let cwdSource = connected.first { $0.id == selectedSessionID }
+                ?? connected.max { $0.createdAt < $1.createdAt }
+            return UploadHostCandidate(
+                id: host.id,
+                label: "\(host.user)@\(host.name.isEmpty ? host.address : host.name)",
+                isConnected: !connected.isEmpty,
+                isConnecting: connected.isEmpty && connecting,
+                isActiveSession: connected.contains { $0.id == selectedSessionID },
+                isFailed: connected.isEmpty && !connecting && failed,
+                sessionCwd: cwdSource?.session.terminalSession.remoteWorkingDirectory
+            )
+        }
+    }
+
+    private func performUpload(
+        request: UploadRequest,
+        candidate: UploadHostCandidate,
+        destination: UploadDestination,
+        pastePath: Bool
+    ) {
+        let bridge: FileBridge
+        if let live = activeSessions.first(where: { $0.persistedHostID == candidate.id }) {
+            // A live session exists: reuse ITS credential snapshot. The
+            // rebuilt-DTO path below would carry an empty transient
+            // password, and the registry refreshes the cached (shared!)
+            // bridge's credentials on every hit — rebuilding here would
+            // stomp the working password the session typed at connect.
+            switch live.session {
+            case .ssh(let s):
+                bridge = fileBridges.bridge(
+                    for: s.host,
+                    requireBiometric: s.requireBiometric,
+                    isSecureEnclave: s.isSecureEnclave
+                )
+            case .mosh(let s):
+                bridge = fileBridges.bridge(
+                    for: s.host,
+                    requireBiometric: s.requireBiometric,
+                    isSecureEnclave: s.isSecureEnclave
+                )
+            }
+        } else {
+            guard let persistedHost = fetchHost(candidate.id) else { return }
+            let storedKey = configuredStoredKey(for: persistedHost)
+            bridge = fileBridges.bridge(
+                for: Host(from: persistedHost),
+                requireBiometric: requiresBiometricForKeyUse(
+                    on: persistedHost, storedKey: storedKey),
+                isSecureEnclave: storedKey?.isSecureEnclave ?? false
+            )
+        }
+        let queue = fileBridges.transferQueue(for: bridge)
+        let item: TransferItem
+        switch destination {
+        case .sessionCwd(let directory):
+            item = queue.enqueueUpload(localURL: request.stagedURL, toDirectory: directory)
+        case .temp:
+            item = queue.enqueuePasteUpload(localURL: request.stagedURL)
+        }
+        // The sheet is gone by the time the transfer resolves and there
+        // may be no open panel (no transfer strip) for this host — a
+        // failure MUST surface here or it's silent.
+        let displayName = request.displayName
+        let hostID = candidate.id
+        Task {
+            await item.awaitFinished()
+            switch item.phase {
+            case .failed(let message):
+                uploadFailureMessage = "\(displayName): \(message)"
+            case .completed:
+                // Paste path: hand the resolved path to the host's live
+                // session; the session view types it (quoted, no Enter).
+                // Target resolved NOW, not at submit — a session that
+                // was still auto-reconnecting when the user tapped
+                // Upload is usually connected by the time the transfer
+                // lands.
+                if pastePath, let path = item.resolvedRemotePath {
+                    uploadTargetSession(for: hostID)?.pendingPathInjection = path
+                }
+            default:
+                break
+            }
+        }
+    }
+
+    /// The session whose terminal receives a paste-path injection: the
+    /// selected one when it belongs to this host, else the newest —
+    /// CONNECTED sessions only (failed/connecting ones linger in
+    /// activeSessions and would swallow the path).
+    private func uploadTargetSession(for hostID: UUID) -> (any TerminalSession)? {
+        let sessions = activeSessions.filter {
+            $0.persistedHostID == hostID
+                && $0.session.terminalSession.state == .connected
+        }
+        if case .session(let id) = selectedItem,
+           let selected = sessions.first(where: { $0.id == id }) {
+            return selected.session.terminalSession
+        }
+        return sessions.max { $0.createdAt < $1.createdAt }?.session.terminalSession
     }
 
     private func fetchHosts() -> [PersistedHost] {
@@ -611,6 +1717,14 @@ struct ContentView: View {
     /// every appearance.
     private func maybeBeginOnboarding() {
         guard activeSessions.isEmpty, selectedItem == nil else { return }
+        #if DEBUG
+        if let rawStep = ProcessInfo.processInfo.environment["TESSERA_FORCE_TOUR_STEP"],
+           let step = Int(rawStep),
+           onboarding.steps.indices.contains(step) {
+            onboarding.phase = .touring(step)
+            return
+        }
+        #endif
         onboarding.beginIfFirstLaunch(
             hasHosts: !fetchHosts().isEmpty,
             hasSeen: appearance.hasSeenWelcome
@@ -736,6 +1850,48 @@ struct ContentView: View {
         var firstRestoredID: UUID?
 
         for resolved in plan.sessions {
+            let snapshotIDs = Set(resolved.sourceSnapshotIDs)
+            let counterparts = activeSessions.filter { snapshotIDs.contains($0.id) }
+            let corpses = counterparts.filter { !isReusableLiveSession($0) }
+
+            // A foreground "missing" snapshot can still have its DEAD
+            // live session on screen (.failed/.disconnected is what
+            // made it missing). This restore is that session's
+            // replacement, so drop the corpse first — appending
+            // alongside it stacks a duplicate per foreground wake,
+            // and the persisted document snowballs them (one mosh
+            // host reached 4 copies, all bootstrapping at once).
+            // Mirrors the failed-overlay retry gesture.
+            let selectionWasCorpse = corpses.contains { selectedItem == .session($0.id) }
+            if !corpses.isEmpty {
+                let corpseIDs = Set(corpses.map(\.id))
+                activeSessions.removeAll { corpseIDs.contains($0.id) }
+                corpses.forEach { $0.session.terminalSession.disconnect() }
+                logRestoreDiag(
+                    "restore-replace corpses=\(corpses.map { shortID($0.id) }.joined(separator: ",")) snapshot=\(shortID(resolved.snapshot.liveSessionID))"
+                )
+            }
+
+            // Idempotency: a still-viable live counterpart means there
+            // is nothing left to restore for this snapshot. Re-entrant
+            // foreground triggers (grace, persist, repeated scene-phase
+            // flips) land here instead of stacking another duplicate.
+            if let alive = counterparts.first(where: { isReusableLiveSession($0) }) {
+                logRestoreDiag(
+                    "restore-session-reuse live=\(shortID(alive.id)) snapshot=\(shortID(resolved.snapshot.liveSessionID))"
+                )
+                if selectionWasCorpse {
+                    selectSession(alive.id)
+                }
+                if firstRestoredID == nil {
+                    firstRestoredID = alive.id
+                }
+                for sourceID in resolved.sourceSnapshotIDs {
+                    restoredIDsBySnapshotID[sourceID] = alive.id
+                }
+                continue
+            }
+
             let liveSessionID = preserveSnapshotLiveIDs
                 ? resolved.snapshot.liveSessionID
                 : UUID()
@@ -751,6 +1907,10 @@ struct ContentView: View {
                 logRestoreDiag(
                     "restore-session-skip snapshot=\(shortID(resolved.snapshot.liveSessionID)) host=\(shortID(resolved.snapshot.persistedHostID)) reason=host-missing-or-ineligible-or-connect-failed"
                 )
+                if selectionWasCorpse {
+                    selectedItem = nil
+                    columnVisibility = .automatic
+                }
                 continue
             }
 
@@ -758,6 +1918,9 @@ struct ContentView: View {
             logRestoreDiag(
                 "restore-session-opened live=\(shortID(live.id)) snapshot=\(shortID(resolved.snapshot.liveSessionID)) host=\(shortID(live.persistedHostID)) sources=\(sourceIDs) preserveIDs=\(preserveSnapshotLiveIDs)"
             )
+            if selectionWasCorpse {
+                selectSession(live.id)
+            }
             if firstRestoredID == nil {
                 firstRestoredID = live.id
             }
@@ -1217,18 +2380,69 @@ struct ContentView: View {
         columnVisibility = .detailOnly
     }
 
-    private func connect(to persistedHost: PersistedHost, password: String = "") {
-        _ = connectSavedHost(persistedHost, password: password, select: true)
+    private func connect(
+        to persistedHost: PersistedHost,
+        password: String = "",
+        jumpPasswords: [UUID: String] = [:]
+    ) {
+        _ = connectSavedHost(
+            persistedHost,
+            password: password,
+            jumpPasswords: jumpPasswords,
+            select: true
+        )
+    }
+
+    /// Rebuild a mosh session as plain SSH after its driver never made UDP
+    /// contact through a jump chain (the bastioned-topology common case —
+    /// `MoshSession.recommendsSSHFallback`). Same launch mode and host
+    /// snapshot, fresh LiveSession id so SessionView restarts its connect
+    /// task; selection follows.
+    private func attemptMoshJumpFallback(liveSessionID: UUID) {
+        guard let index = activeSessions.firstIndex(where: { $0.id == liveSessionID }),
+              case .mosh(let moshSession) = activeSessions[index].session,
+              moshSession.recommendsSSHFallback else { return }
+
+        let old = activeSessions[index]
+        var fallbackHost = moshSession.host
+        fallbackHost.transport = .ssh
+        let sshSession = SSHSession(
+            host: fallbackHost,
+            requireBiometric: moshSession.requireBiometric,
+            isSecureEnclave: moshSession.isSecureEnclave
+        )
+        // hostKey is deliberately kept: it is the logical endpoint identity
+        // used for singleton-tmux reuse and the landing tile's active badge,
+        // both of which compare against the persisted host's (still mosh)
+        // connectionKey. Only the running transport changed.
+        let replacement = LiveSession(
+            session: .ssh(sshSession),
+            hostName: old.hostName,
+            persistedHostID: old.persistedHostID,
+            hostKey: old.hostKey,
+            launchMode: old.launchMode,
+            pinnedSessionName: old.pinnedSessionName,
+            createdAt: old.createdAt
+        )
+        activeSessions[index] = replacement
+        if selectedItem == .session(old.id) {
+            selectedItem = .session(replacement.id)
+        }
+        logRestoreDiag(
+            "mosh-jump-fallback live=\(shortID(old.id)) replacement=\(shortID(replacement.id)) host=\(shortID(old.persistedHostID))"
+        )
     }
 
     @discardableResult
     private func connectSavedHost(
         _ persistedHost: PersistedHost,
         password: String = "",
+        jumpPasswords: [UUID: String] = [:],
         liveSessionID: UUID = UUID(),
         createdAt: Date = Date(),
         select: Bool
     ) -> LiveSession? {
+        SSHAuthenticationPolicyStore.shared.registerPersistedHost(persistedHost.id)
         let hostKey = persistedHost.connectionKey
         let mode = persistedHost.launchMode
 
@@ -1265,7 +2479,14 @@ struct ContentView: View {
             }
         }
 
-        let hostDTO = Host(from: persistedHost, transientPassword: password)
+        let transientJumpPasswords = jumpPasswords.mapValues {
+            HostTransientPasswordCredential(password: $0, revision: nil)
+        }
+        let hostDTO = Host(
+            from: persistedHost,
+            transientPassword: password,
+            transientJumpPasswords: transientJumpPasswords
+        )
         let session: Session
         let storedKey = configuredStoredKey(for: persistedHost)
         let requireBiometric = requiresBiometricForKeyUse(
@@ -1326,8 +2547,10 @@ struct ContentView: View {
             return false
         }
         let key = storedKey ?? fetchStoredKey(keyID)
-        return appearance.requireBiometricForKeyUse
-            || (key?.requiresBiometric ?? false)
+        return requiresOwnerPresenceForKeyUse(
+            key: key,
+            globalPreference: appearance.requireBiometricForKeyUse
+        )
     }
 
     private func configuredStoredKey(for host: PersistedHost) -> StoredKey? {
@@ -1371,7 +2594,75 @@ struct ContentView: View {
     private func openPalette() {
         commandPalette.open(
             sessions: activeSessions,
+            agents: appearance.agentCenterEnabled ? agentCenter.sortedAgents : [],
             lastTouched: sessionRegistry.lastTouched
+        )
+    }
+
+    private func refreshCommandPaletteSnapshot() {
+        commandPalette.refreshSnapshot(
+            sessions: activeSessions,
+            agents: appearance.agentCenterEnabled ? agentCenter.sortedAgents : [],
+            paneTitles: [:],
+            lastTouched: sessionRegistry.lastTouched
+        )
+    }
+
+    private func handleCommandPaletteCommit(_ result: CommandPaletteCommit) {
+        switch result {
+        case .agent(let id):
+            guard appearance.agentCenterEnabled else { return }
+            agentCenter.jump(agentID: id)
+        case .session(let id): selectSession(id)
+        }
+    }
+
+    private func handlePendingAgentNotification() {
+        guard appearance.agentCenterEnabled else {
+            _ = AgentNotificationRouter.shared.consume()
+            return
+        }
+        guard let route = AgentNotificationRouter.shared.consume() else { return }
+        agentCenter.jump(agentID: route)
+    }
+
+    private func toggleAgentCenter() {
+        guard appearance.agentCenterEnabled || selectedItem == .agents else { return }
+        if selectedItem == .agents {
+            if case .session(let id) = agentCenterReturnItem,
+               !activeSessions.contains(where: { $0.id == id }) {
+                selectedItem = nil
+                columnVisibility = .automatic
+            } else {
+                let target = agentCenterReturnItem
+                selectedItem = target
+                if case .some(.session) = target {
+                    columnVisibility = .detailOnly
+                } else {
+                    columnVisibility = .automatic
+                }
+            }
+        } else {
+            agentCenterReturnItem = selectedItem
+            selectedItem = .agents
+            columnVisibility = .automatic
+        }
+    }
+
+    private func updateAgentSurfaceDemand() {
+        agentCenter.setSurfaceDemand(
+            appearance.agentCenterEnabled
+                && (selectedItem == .agents || commandPalette.isOpen)
+        )
+    }
+
+    private func updateAgentAttentionBackgroundKeepAlive(reason: String) {
+        AgentAttentionBackgroundKeepAlive.shared.update(
+            enabled: appearance.agentCenterEnabled
+                && appearance.agentCenterNotificationsEnabled,
+            workingCount: agentCenter.workingCount,
+            appPhase: appPhase,
+            reason: reason
         )
     }
 
@@ -1433,6 +2724,8 @@ struct ContentView: View {
             return "host:\(shortID(id))"
         case .keys:
             return "keys"
+        case .agents:
+            return "agents"
         case .knownHosts:
             return "knownHosts"
         case .tunnels:
@@ -1465,6 +2758,18 @@ struct ContentView: View {
     private func shortID(_ id: UUID) -> String {
         String(id.uuidString.prefix(8))
     }
+}
+
+private func requiresOwnerPresenceForKeyUse(
+    key: StoredKey?,
+    globalPreference: Bool,
+    metadata: KeySecurityMetadataStore = KeySecurityMetadataStore()
+) -> Bool {
+    KeyOwnerPresencePolicy.isRequired(
+        globalPreference: globalPreference,
+        key: key,
+        metadata: metadata
+    )
 }
 
 #Preview {

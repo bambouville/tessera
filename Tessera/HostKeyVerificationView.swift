@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 /// Blocking sheet presented during SSH handshake when the host key
@@ -128,8 +129,7 @@ struct HostKeyVerificationRequest: Identifiable {
     let keyType: String
     let isChanged: Bool
     let oldFingerprint: String?
-    /// Continuation that the presenter resumes with the user's decision.
-    let continuation: CheckedContinuation<Bool, Never>
+    private let decision: HostKeyVerificationDecision
 
     init(
         challenge: HostKeyVerificationChallenge,
@@ -140,6 +140,121 @@ struct HostKeyVerificationRequest: Identifiable {
         keyType = challenge.keyType
         isChanged = challenge.isChanged
         oldFingerprint = challenge.oldFingerprint
-        self.continuation = continuation
+        decision = HostKeyVerificationDecision(continuation: continuation)
+    }
+
+    @MainActor
+    func accept() {
+        decision.resolve(true)
+    }
+
+    @MainActor
+    func reject() {
+        decision.resolve(false)
+    }
+
+    var isResolved: Bool {
+        decision.isResolved
+    }
+
+    func isSameChallenge(as other: HostKeyVerificationRequest) -> Bool {
+        endpoint == other.endpoint
+            && fingerprint == other.fingerprint
+            && keyType == other.keyType
+            && isChanged == other.isChanged
+            && oldFingerprint == other.oldFingerprint
+    }
+
+    func coalesce(_ other: HostKeyVerificationRequest) {
+        decision.coalesce(other.decision)
+    }
+}
+
+private final class HostKeyVerificationDecision {
+    private let lock = NSLock()
+    private var continuations: [CheckedContinuation<Bool, Never>]
+    private var resolvedValue: Bool?
+
+    init(continuation: CheckedContinuation<Bool, Never>) {
+        self.continuations = [continuation]
+    }
+
+    var isResolved: Bool {
+        lock.lock()
+        let resolved = resolvedValue != nil || continuations.isEmpty
+        lock.unlock()
+        return resolved
+    }
+
+    func resolve(_ accepted: Bool) {
+        let continuationsToResume: [CheckedContinuation<Bool, Never>]
+        lock.lock()
+        if resolvedValue != nil {
+            continuationsToResume = []
+        } else {
+            resolvedValue = accepted
+            continuationsToResume = continuations
+            continuations = []
+        }
+        lock.unlock()
+
+        guard !continuationsToResume.isEmpty else {
+            DiagnosticLogStore.appendSSH(
+                "hostkey prompt duplicate decision ignored accepted=\(accepted)"
+            )
+            return
+        }
+
+        for continuation in continuationsToResume {
+            continuation.resume(returning: accepted)
+        }
+    }
+
+    func coalesce(_ other: HostKeyVerificationDecision) {
+        let detached = other.detach()
+        switch detached {
+        case .resolved(let accepted):
+            resolve(accepted)
+        case .continuations(let detachedContinuations):
+            append(detachedContinuations)
+        }
+    }
+
+    private func append(_ newContinuations: [CheckedContinuation<Bool, Never>]) {
+        guard !newContinuations.isEmpty else { return }
+
+        let alreadyResolvedValue: Bool?
+        lock.lock()
+        if let resolvedValue {
+            alreadyResolvedValue = resolvedValue
+        } else {
+            alreadyResolvedValue = nil
+            continuations.append(contentsOf: newContinuations)
+        }
+        lock.unlock()
+
+        if let alreadyResolvedValue {
+            for continuation in newContinuations {
+                continuation.resume(returning: alreadyResolvedValue)
+            }
+        }
+    }
+
+    private func detach() -> DetachedDecision {
+        lock.lock()
+        if let resolvedValue {
+            lock.unlock()
+            return .resolved(resolvedValue)
+        }
+
+        let detached = continuations
+        continuations = []
+        lock.unlock()
+        return .continuations(detached)
+    }
+
+    private enum DetachedDecision {
+        case resolved(Bool)
+        case continuations([CheckedContinuation<Bool, Never>])
     }
 }

@@ -36,6 +36,27 @@ constexpr uint64_t kReplyLateThresholdMilliseconds = 10000;
 using NetworkType = Network::Transport<Network::UserStream, Terminal::Complete>;
 using NetworkPointer = shared::shared_ptr<NetworkType>;
 
+/// Volatile writes keep the compiler from eliding this erase before the
+/// string's storage is released. The printable bootstrap key is no longer
+/// needed after Network::Transport has decoded it into Crypto::Session.
+void secure_clear_string(std::string &value) {
+    volatile char *bytes = value.empty() ? nullptr : value.data();
+    for (size_t index = 0; index < value.size(); ++index) {
+        bytes[index] = 0;
+    }
+    value.clear();
+    value.shrink_to_fit();
+}
+
+class SensitiveStringScopeClear {
+public:
+    explicit SensitiveStringScopeClear(std::string &value) : value_(value) {}
+    ~SensitiveStringScopeClear() { secure_clear_string(value_); }
+
+private:
+    std::string &value_;
+};
+
 bool is_no_packet_exception(const Network::NetworkException &error) {
     return error.function == "No packet received"
         || error.the_errno == EAGAIN
@@ -102,10 +123,10 @@ void ensure_utf8_ctype_locale() {
 
 class MoshClient::Impl {
 public:
-    Impl(std::string host, int port, std::string base64_key)
+    Impl(std::string host, int port, const std::string &base64_key)
         : host_(std::move(host)),
           port_string_(std::to_string(port)),
-          key_(std::move(base64_key)),
+          key_(base64_key),
           cols_(kDefaultColumns),
           rows_(kDefaultRows),
           local_framebuffer_(1, 1),
@@ -114,6 +135,13 @@ public:
           connecting_notification_(make_connecting_notification(port_string_)) {
         overlays_.get_prediction_engine().set_display_preference(
             Overlay::PredictionEngine::Never);
+    }
+
+    ~Impl() {
+        // Reset first so the transport's Crypto::Session destructor clears
+        // its AES context before the surrounding client storage is released.
+        network_.reset();
+        secure_clear_string(key_);
     }
 
     void set_output_callback(OutputCallback callback) {
@@ -125,6 +153,7 @@ public:
             return;
         }
 
+        SensitiveStringScopeClear clear_key_on_return(key_);
         ensure_utf8_ctype_locale();
         freeze_timestamp();
 
@@ -324,6 +353,11 @@ public:
         return local_framebuffer_.ds.application_mode_cursor_keys;
     }
 
+    bool retains_bootstrap_key_material() const {
+        return !key_.empty()
+            || (network_ && network_->retains_raw_key_material());
+    }
+
 private:
     std::string host_;
     std::string port_string_;
@@ -488,8 +522,8 @@ private:
     }
 };
 
-MoshClient::MoshClient(std::string host, int port, std::string base64_key)
-    : impl_(std::make_unique<Impl>(std::move(host), port, std::move(base64_key))) {}
+MoshClient::MoshClient(std::string host, int port, const std::string &base64_key)
+    : impl_(std::make_unique<Impl>(std::move(host), port, base64_key)) {}
 
 MoshClient::~MoshClient() = default;
 
@@ -539,4 +573,8 @@ bool MoshClient::shutdown_complete() const {
 
 bool MoshClient::application_mode_cursor_keys() const {
     return impl_->application_mode_cursor_keys();
+}
+
+bool MoshClient::retains_bootstrap_key_material() const {
+    return impl_->retains_bootstrap_key_material();
 }

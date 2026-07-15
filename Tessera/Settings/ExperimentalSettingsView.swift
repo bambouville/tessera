@@ -1,15 +1,18 @@
 // Tessera/Settings/ExperimentalSettingsView.swift
 // Experimental swipe-pad settings: gesture guide, profiles, and voice input.
 import SwiftUI
+import UserNotifications
 
 struct ExperimentalSettingsView: View {
     @Environment(AppearancePreferences.self) private var appearance
+    @Environment(BellController.self) private var bellController
     @Environment(\.designTokens) private var T
 
     @Bindable var store: SwipePadProfileStore
 
     @State private var expandedProfileIDs: Set<UUID> = [SwipePadProfile.builtInClaudeCodeID]
     @State private var editor: MacroEditorDraft?
+    @State private var showNotificationDenialSheet = false
 
     var body: some View {
         @Bindable var appearance = appearance
@@ -18,6 +21,39 @@ struct ExperimentalSettingsView: View {
             SettingsH("experimental")
 
             warningRow
+                .padding(.bottom, 22)
+
+            ToggleRow(
+                title: "agent center",
+                subtitle: "discover Claude and Codex sessions · precise status requires an optional host hook · off by default · disabling does not uninstall host hooks",
+                isOn: $appearance.agentCenterEnabled
+            )
+            .onChange(of: appearance.agentCenterEnabled) { _, enabled in
+                guard enabled, appearance.agentCenterNotificationsEnabled else { return }
+                requestAgentNotificationPermission()
+            }
+
+            ToggleRow(
+                title: "agent attention notifications",
+                subtitle: "iOS notification when an off-screen agent finishes or needs input while Tessera is running in the background · iPadOS may suspend longer sessions",
+                isOn: $appearance.agentCenterNotificationsEnabled
+            )
+            .disabled(!appearance.agentCenterEnabled)
+            .onChange(of: appearance.agentCenterNotificationsEnabled) { _, enabled in
+                if enabled {
+                    requestAgentNotificationPermission()
+                } else {
+                    bellController.cancelAgentNotifications()
+                }
+            }
+
+            Text(agentNotificationCoordinationText)
+                .font(Typography.tesseraMono(size: 10))
+                .foregroundStyle(
+                    appearance.bellNotificationEnabled ? T.amber : T.fgDim
+                )
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 2)
                 .padding(.bottom, 22)
 
             ToggleRow(
@@ -65,7 +101,8 @@ struct ExperimentalSettingsView: View {
                 ProfileListCard(
                     profiles: store.profiles,
                     expandedProfileIDs: $expandedProfileIDs,
-                    editor: $editor
+                    editor: $editor,
+                    onUpdateProfile: store.upsert
                 )
 
                 addProfileButton
@@ -119,6 +156,31 @@ struct ExperimentalSettingsView: View {
                     editor = nil
                 }
             )
+        }
+        .sheet(isPresented: $showNotificationDenialSheet) {
+            NotificationPermissionDenialSheet(
+                detail: "Tessera can't notify you when an off-screen agent finishes or needs input while the app is backgrounded. Turn notifications on in Settings, then come back."
+            )
+        }
+        .task {
+            guard appearance.agentCenterEnabled,
+                  appearance.agentCenterNotificationsEnabled else { return }
+            let status = await bellController.requestPermissionIfNeeded()
+            if status == .denied { showNotificationDenialSheet = true }
+        }
+    }
+
+    private var agentNotificationCoordinationText: String {
+        if appearance.bellNotificationEnabled {
+            return "Terminal-bell background notifications are also enabled by your override. They can duplicate alerts and are less precise because any program can ring BEL. Without a notification server, completions after iPadOS suspends Tessera are recovered when you return."
+        }
+        return "Enabling precise agent alerts automatically turns off terminal-bell background notifications once. You can override that later under Terminal. Without a notification server, completions after iPadOS suspends Tessera are recovered when you return."
+    }
+
+    private func requestAgentNotificationPermission() {
+        Task {
+            let status = await bellController.requestPermissionIfNeeded()
+            if status == .denied { showNotificationDenialSheet = true }
         }
     }
 
@@ -374,6 +436,7 @@ private struct ProfileListCard: View {
     let profiles: [SwipePadProfile]
     @Binding var expandedProfileIDs: Set<UUID>
     @Binding var editor: MacroEditorDraft?
+    let onUpdateProfile: (SwipePadProfile) -> Void
 
     @Environment(\.designTokens) private var T
 
@@ -386,7 +449,8 @@ private struct ProfileListCard: View {
                     onToggle: { toggle(profile.id) },
                     onEdit: { direction in
                         editor = MacroEditorDraft(profile: profile, direction: direction)
-                    }
+                    },
+                    onUpdate: onUpdateProfile
                 )
 
                 if profile.id != profiles.last?.id {
@@ -416,6 +480,7 @@ private struct ProfileRow: View {
     let isExpanded: Bool
     let onToggle: () -> Void
     let onEdit: (SwipeDirection) -> Void
+    let onUpdate: (SwipePadProfile) -> Void
 
     @Environment(\.designTokens) private var T
 
@@ -475,6 +540,10 @@ private struct ProfileRow: View {
             .buttonStyle(.plain)
 
             if isExpanded {
+                if !profile.isBuiltIn {
+                    CustomAgentRuleEditor(profile: profile, onUpdate: onUpdate)
+                    Divider().background(T.border)
+                }
                 LazyVGrid(columns: columns, spacing: 1) {
                     ForEach(SwipeDirection.allCases, id: \.self) { direction in
                         BindingCell(
@@ -504,6 +573,148 @@ private struct ProfileRow: View {
             return "match: process matches regex /\(pattern)/"
         }
         return "match: process \(profile.matchProcess)"
+    }
+}
+
+private struct CustomAgentRuleEditor: View {
+    let profile: SwipePadProfile
+    let onUpdate: (SwipePadProfile) -> Void
+
+    @Environment(\.designTokens) private var T
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("profile + agent detection")
+                .font(Typography.tesseraMono(size: 10, weight: .semibold))
+                .foregroundStyle(T.fgMuted)
+
+            profileField("name", keyPath: \.name)
+            profileField("process or regex:…", keyPath: \.matchProcess)
+
+            Toggle(
+                "detect as an agent",
+                isOn: Binding(
+                    get: { profile.agentDetection != nil },
+                    set: setAgentDetectionEnabled
+                )
+            )
+            .font(Typography.tesseraMono(size: 11))
+            .tint(T.accent)
+
+            if let rules = profile.agentDetection {
+                ruleField(
+                    "blocking prompt regexes · one per line",
+                    value: rules.blockingPromptPatterns.joined(separator: "\n"),
+                    update: { text in
+                        updateRules { $0.blockingPromptPatterns = splitPatterns(text) }
+                    }
+                )
+                ruleField(
+                    "idle prompt regexes · one per line",
+                    value: rules.idlePromptPatterns.joined(separator: "\n"),
+                    update: { text in
+                        updateRules { $0.idlePromptPatterns = splitPatterns(text) }
+                    }
+                )
+                ruleField(
+                    "menu option regex · captures marker, number, label, shortcut",
+                    value: rules.menuOptionPattern,
+                    update: { text in updateRules { $0.menuOptionPattern = text } }
+                )
+                HStack(spacing: 8) {
+                    compactRuleField(
+                        "response · {index}/{shortcut}",
+                        value: rules.responseTemplate,
+                        update: { text in updateRules { $0.responseTemplate = text } }
+                    )
+                    compactRuleField(
+                        "fallback response",
+                        value: rules.fallbackResponseTemplate,
+                        update: { text in updateRules { $0.fallbackResponseTemplate = text } }
+                    )
+                }
+                Text("invalid or incomplete rules degrade to “status unavailable”; Agent Center never guesses controls.")
+                    .font(Typography.tesseraMono(size: 9.5))
+                    .foregroundStyle(T.fgFaint)
+            }
+        }
+        .padding(14)
+        .background(T.inputBgSoft)
+    }
+
+    private func profileField(
+        _ placeholder: String,
+        keyPath: WritableKeyPath<SwipePadProfile, String>
+    ) -> some View {
+        TextField(
+            placeholder,
+            text: Binding(
+                get: { profile[keyPath: keyPath] },
+                set: { value in
+                    var updated = profile
+                    updated[keyPath: keyPath] = value
+                    onUpdate(updated)
+                }
+            )
+        )
+        .agentRuleFieldStyle(tokens: T)
+    }
+
+    private func ruleField(
+        _ placeholder: String,
+        value: String,
+        update: @escaping (String) -> Void
+    ) -> some View {
+        TextField(placeholder, text: Binding(get: { value }, set: update), axis: .vertical)
+            .lineLimit(2...4)
+            .agentRuleFieldStyle(tokens: T)
+    }
+
+    private func compactRuleField(
+        _ placeholder: String,
+        value: String,
+        update: @escaping (String) -> Void
+    ) -> some View {
+        TextField(placeholder, text: Binding(get: { value }, set: update))
+            .agentRuleFieldStyle(tokens: T)
+    }
+
+    private func setAgentDetectionEnabled(_ enabled: Bool) {
+        var updated = profile
+        updated.agentDetection = enabled ? AgentDetectionRules(
+            blockingPromptPatterns: [],
+            idlePromptPatterns: [],
+            responseTemplate: "{index}↵"
+        ) : nil
+        onUpdate(updated)
+    }
+
+    private func updateRules(_ mutate: (inout AgentDetectionRules) -> Void) {
+        guard var rules = profile.agentDetection else { return }
+        mutate(&rules)
+        var updated = profile
+        updated.agentDetection = rules
+        onUpdate(updated)
+    }
+
+    private func splitPatterns(_ text: String) -> [String] {
+        text.split(whereSeparator: \.isNewline)
+            .map { String($0).trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+}
+
+private extension View {
+    func agentRuleFieldStyle(tokens: DesignTokens) -> some View {
+        self
+            .font(Typography.tesseraMono(size: 10.5))
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(tokens.inputBg)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(tokens.border, lineWidth: 1))
     }
 }
 

@@ -514,14 +514,19 @@ final class KittyPaneModeStore {
         snapshots.removeValue(forKey: paneId)
         bracketedPaste.removeValue(forKey: paneId)
     }
+
+    func bracketedPasteEnabled(for paneId: PaneId) -> Bool? {
+        bracketedPaste[paneId]
+    }
 }
 
 // MARK: - Pane header
 
-/// Slim per-pane title bar (iTerm2-style) shown only when a window has >1 pane.
-/// Carries the pane's own title and a close ✕. Minimal/flat per the design
-/// memories — frosted fill, hairline bottom border, monochrome glyph; the
-/// focused pane's header takes a soft accent tint (the only color cue).
+/// Slim per-pane title content (iTerm2-style) shown only when a window has
+/// >1 pane: the pane's own title and a close ✕, monochrome glyphs, accent
+/// tint as the focus cue. Content only — the bar background and hairline are
+/// drawn by `PaneHeaderBarLayer`, which merges adjacent headers into one
+/// continuous strip.
 struct PaneHeaderView: View {
     let title: String
     let isFocused: Bool
@@ -550,12 +555,158 @@ struct PaneHeaderView: View {
         }
         .padding(.trailing, 6)
         .frame(height: height)
-        .background(isFocused ? chrome.accentSoft : chrome.panelBg)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(isFocused ? chrome.accent.opacity(0.5) : chrome.border)
-                .frame(height: 1)
+    }
+}
+
+/// Fills for the pane header bar, shared by the SSH pane grid and the mosh
+/// chrome overlay so the two transports render identical chrome.
+enum PaneHeaderBarStyle {
+    /// Background fill for one pane's segment of the bar. Over a background
+    /// picture both states are theme-bg scrims — the focused pane lets most
+    /// of the picture through while unfocused panes sit dimmed, so selection
+    /// reads by brightness (plus the accent title/underline). On a solid
+    /// background the classic opaque fills stay.
+    static func fill(
+        isFocused: Bool,
+        hasImageBackground: Bool,
+        chrome: DesignTokens,
+        baseColor: SwiftUI.Color
+    ) -> SwiftUI.Color {
+        if hasImageBackground {
+            return baseColor.opacity(isFocused ? 0.18 : 0.60)
         }
+        return isFocused ? chrome.accentSoft : chrome.panelBg
+    }
+
+    static func underline(isFocused: Bool, chrome: DesignTokens) -> SwiftUI.Color {
+        isFocused ? chrome.accent.opacity(0.5) : chrome.border
+    }
+}
+
+/// Geometry that merges the per-pane header strips of one layout into
+/// continuous horizontal bars: segments snap to the canvas edges where the
+/// layout touches them, and `bridgeRects` cover the 1-cell gutters between
+/// headers that share a row — so two side-by-side panes read as ONE bar,
+/// not two bars separated by a sliver of canvas.
+struct PaneHeaderBarGeometry {
+    /// Edge-snapped background rect per pane header.
+    private(set) var segmentRects: [PaneId: CGRect] = [:]
+    /// Gutter connectors between same-row headers, filled like an unfocused
+    /// segment.
+    private(set) var bridgeRects: [CGRect] = []
+
+    /// Every rect the bar paints — the mosh overlay masks exactly these
+    /// (plus the gutters) over the shared terminal's native title row.
+    var allRects: [CGRect] { Array(segmentRects.values) + bridgeRects }
+
+    init(
+        frames: [PaneFrame],
+        layoutBounds: CGRect,
+        containerSize: CGSize,
+        maxBridgeWidth: CGFloat
+    ) {
+        let epsilon: CGFloat = 0.5
+        for frame in frames where frame.headerFrame.height > 0 {
+            var rect = frame.headerFrame
+            if abs(rect.minX - layoutBounds.minX) <= epsilon {
+                let oldMaxX = rect.maxX
+                rect.origin.x = 0
+                rect.size.width = oldMaxX
+            }
+            if abs(rect.maxX - layoutBounds.maxX) <= epsilon {
+                rect.size.width = max(0, containerSize.width - rect.minX)
+            }
+            segmentRects[frame.paneId] = rect
+        }
+
+        // Bridge only gaps that are genuinely gutters (≤ maxBridgeWidth).
+        // Two header rows can align in Y across a full-height middle pane;
+        // that gap spans the middle pane's live content and must stay open.
+        let rows = Dictionary(grouping: segmentRects.values) { rect in
+            Int((rect.minY * 2).rounded())
+        }
+        for row in rows.values {
+            let sorted = row.sorted { $0.minX < $1.minX }
+            for (left, right) in zip(sorted, sorted.dropFirst()) {
+                let gap = right.minX - left.maxX
+                guard gap > 0, gap <= maxBridgeWidth else { continue }
+                bridgeRects.append(CGRect(
+                    x: left.maxX,
+                    y: min(left.minY, right.minY),
+                    width: gap,
+                    height: max(left.height, right.height)
+                ))
+            }
+        }
+    }
+}
+
+/// The header bar chrome for one pane layout: per-segment fills (focused vs
+/// unfocused), gutter bridges, a bottom hairline, and the `PaneHeaderView`
+/// content on top. One shared implementation for the SSH grid and the mosh
+/// overlay — only the mount point and hit-testing differ.
+struct PaneHeaderBarLayer: View {
+    let frames: [PaneFrame]
+    let titles: [PaneId: String]
+    let activePaneId: PaneId?
+    let chrome: DesignTokens
+    let baseColor: SwiftUI.Color
+    let hasImageBackground: Bool
+    let layoutBounds: CGRect
+    let containerSize: CGSize
+    let cellWidth: CGFloat
+    let onClose: (PaneId) -> Void
+
+    var body: some View {
+        let geometry = PaneHeaderBarGeometry(
+            frames: frames,
+            layoutBounds: layoutBounds,
+            containerSize: containerSize,
+            maxBridgeWidth: cellWidth * 1.5
+        )
+
+        ZStack(alignment: .topLeading) {
+            ForEach(Array(geometry.bridgeRects.enumerated()), id: \.offset) { _, rect in
+                segmentBackground(rect: rect, isFocused: false)
+            }
+
+            ForEach(frames) { frame in
+                if let rect = geometry.segmentRects[frame.paneId] {
+                    let isFocused = frame.paneId == activePaneId
+
+                    segmentBackground(rect: rect, isFocused: isFocused)
+
+                    PaneHeaderView(
+                        title: titles[frame.paneId] ?? frame.paneId.description,
+                        isFocused: isFocused,
+                        height: frame.headerFrame.height,
+                        chrome: chrome,
+                        onClose: { onClose(frame.paneId) }
+                    )
+                    .frame(width: frame.headerFrame.width, height: frame.headerFrame.height)
+                    .offset(x: frame.headerFrame.minX, y: frame.headerFrame.minY)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func segmentBackground(rect: CGRect, isFocused: Bool) -> some View {
+        Rectangle()
+            .fill(PaneHeaderBarStyle.fill(
+                isFocused: isFocused,
+                hasImageBackground: hasImageBackground,
+                chrome: chrome,
+                baseColor: baseColor
+            ))
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(PaneHeaderBarStyle.underline(isFocused: isFocused, chrome: chrome))
+                    .frame(height: 1)
+            }
+            .frame(width: max(0, rect.width), height: max(0, rect.height))
+            .offset(x: rect.minX, y: rect.minY)
+            .allowsHitTesting(false)
     }
 }
 
@@ -577,6 +728,15 @@ struct MoshPaneChromeOverlay: View {
     let activePaneId: PaneId?
     let chrome: DesignTokens
     let backgroundColor: SwiftUI.Color
+    /// Non-nil while the user's background picture backs this canvas. The
+    /// masks that hide tmux's native title rows / border glyphs then paint
+    /// the aligned backdrop crop instead of the opaque theme color — so the
+    /// picture stays continuous under the (translucent) header bar, matching
+    /// the SSH grid.
+    let terminalBackground: ResolvedTerminalBackground?
+    /// Reconstructs the full-session image crop from inside the inset
+    /// terminal region (same value the mosh scrollback overlay uses).
+    let backdropBleed: EdgeInsets
 
     private let dividerThickness: CGFloat = 1
 
@@ -591,13 +751,18 @@ struct MoshPaneChromeOverlay: View {
         let layoutBounds = paneLayoutBounds(frames)
 
         GeometryReader { geo in
+            let barGeometry = PaneHeaderBarGeometry(
+                frames: frames,
+                layoutBounds: layoutBounds,
+                containerSize: geo.size,
+                maxBridgeWidth: cellSize.width * 1.5
+            )
+
             ZStack(alignment: .topLeading) {
-                ForEach(gutters, id: \.self) { gutter in
-                    Rectangle()
-                        .fill(backgroundColor)
-                        .frame(width: gutter.width, height: gutter.height)
-                        .offset(x: gutter.minX, y: gutter.minY)
-                }
+                // Masks over the shared terminal's native pane chrome: the
+                // reserved title rows (under the bar) and the split gutters
+                // (tmux's │/─ border glyphs).
+                nativeChromeMask(rects: gutters + barGeometry.allRects)
 
                 ForEach(dividers, id: \.self) { line in
                     Rectangle()
@@ -606,27 +771,24 @@ struct MoshPaneChromeOverlay: View {
                         .offset(x: line.minX, y: line.minY)
                 }
 
+                PaneHeaderBarLayer(
+                    frames: frames,
+                    titles: titles,
+                    activePaneId: activePaneId,
+                    chrome: chrome,
+                    baseColor: backgroundColor,
+                    hasImageBackground: terminalBackground != nil,
+                    layoutBounds: layoutBounds,
+                    containerSize: geo.size,
+                    cellWidth: cellSize.width,
+                    // Non-interactive overlay — close taps are resolved by
+                    // the shared terminal's recognizer via
+                    // PaneLayoutMath.headerCloseButtonRect.
+                    onClose: { _ in }
+                )
+
                 ForEach(frames) { frame in
-                    let isFocused = frame.paneId == activePaneId
-
-                    if frame.headerFrame.height > 0 {
-                        Rectangle()
-                            .fill(backgroundColor)
-                            .frame(width: frame.headerFrame.width, height: frame.headerFrame.height)
-                            .offset(x: frame.headerFrame.minX, y: frame.headerFrame.minY)
-
-                        PaneHeaderView(
-                            title: titles[frame.paneId] ?? frame.paneId.description,
-                            isFocused: isFocused,
-                            height: frame.headerFrame.height,
-                            chrome: chrome,
-                            onClose: {}
-                        )
-                        .frame(width: frame.headerFrame.width, height: frame.headerFrame.height)
-                        .offset(x: frame.headerFrame.minX, y: frame.headerFrame.minY)
-                    }
-
-                    if isFocused, frames.count > 1 {
+                    if frame.paneId == activePaneId, frames.count > 1 {
                         PaneFocusRing(
                             rect: paneFocusRingRect(
                                 for: frame,
@@ -642,6 +804,32 @@ struct MoshPaneChromeOverlay: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .allowsHitTesting(false)
+    }
+
+    /// Opaque cover for regions where the shared terminal paints native tmux
+    /// chrome. With a background picture this is the aligned backdrop crop
+    /// (image continuity, one backdrop pass clipped to all rects); otherwise
+    /// the plain theme color, as before.
+    @ViewBuilder
+    private func nativeChromeMask(rects: [CGRect]) -> some View {
+        if let terminalBackground {
+            TerminalBackdrop(
+                background: terminalBackground,
+                baseColor: backgroundColor,
+                bleed: backdropBleed
+            )
+            .clipShape(FixedRectsShape(rects: rects))
+        } else {
+            ZStack(alignment: .topLeading) {
+                ForEach(rects, id: \.self) { rect in
+                    Rectangle()
+                        .fill(backgroundColor)
+                        .frame(width: rect.width, height: rect.height)
+                        .offset(x: rect.minX, y: rect.minY)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
     }
 }
 
@@ -661,11 +849,20 @@ struct PaneGridView: View {
     let cellSize: CGSize
     let chrome: DesignTokens
     let backgroundColor: SwiftUI.Color
+    /// Non-nil while the user's background picture backs this canvas. The
+    /// session-level TerminalBackdrop sits *behind* the grid, so the grid's
+    /// own canvas fill goes clear and every pane surface renders its default
+    /// background transparent (headers/dividers stay opaque chrome).
+    let terminalBackground: ResolvedTerminalBackground?
     let tmuxShortcutsEnabled: Bool
     let onTmuxShortcut: (TesseraTmuxShortcut) -> Void
     let onFindShortcut: ((TesseraFindShortcut) -> Void)?
     let onSwitcherShortcut: ((TesseraSwitcherShortcut) -> Void)?
     let onOpenSettings: (() -> Void)?
+    let onOpenAgentCenter: (() -> Void)?
+    /// §3 selection-menu path actions, forwarded to every pane surface
+    /// (the handler resolves against the focused pane's cwd).
+    let onSelectionPathAction: ((TesseraTerminalSelectionPathAction, String) -> Void)?
     let onUserActivity: (() -> Void)?
     let suppressFindReclaim: Bool
 
@@ -679,6 +876,13 @@ struct PaneGridView: View {
     let onFocusedPaneRefreshed: () -> Void
     /// A visible pane rang its bell — ring with that pane's own title.
     let onPaneBell: (_ paneTitle: String?) -> Void
+
+    /// Per-pane scroll/repaint diagnostics (ScrollDiag category, gated by the
+    /// Settings → Diagnostics "scroll diagnostics" toggle upstream). Carries
+    /// the pane id so grid-pane events are attributable in exported logs —
+    /// scroll writes, inertia start/stop, size changes, and the post-repaint
+    /// local-terminal snapshot all flow through here.
+    let onScrollDiagnostic: (_ paneId: PaneId, _ message: String) -> Void
 
     /// Per-pane runtimes, persisted across re-renders (reset when the active
     /// window changes via `.id(window.id)` on this view).
@@ -733,7 +937,9 @@ struct PaneGridView: View {
             let layoutBounds = paneLayoutBounds(frames)
 
             ZStack(alignment: .topLeading) {
-                backgroundColor
+                if terminalBackground == nil {
+                    backgroundColor
+                }
 
                 // Hairline dividers in the 1-cell gutters between split panes.
                 // Drawn under the panes/headers (they only fill gutter gaps, so
@@ -746,33 +952,42 @@ struct PaneGridView: View {
                         .allowsHitTesting(false)
                 }
 
-                // Each pane emits up to three top-leading-anchored siblings,
-                // positioned by `.offset` (render-only, so it doesn't disturb
-                // the layout the way an explicit position would): the surface,
-                // its header strip above it, and the focus ring around both.
+                // Pane surfaces, positioned by `.offset` (render-only, so it
+                // doesn't disturb the layout the way an explicit position
+                // would). Header chrome and focus rings stack above them.
                 ForEach(frames) { frame in
-                    let isFocused = (frame.paneId == window.activePaneId)
+                    paneSurface(
+                        paneId: frame.paneId,
+                        isFocused: frame.paneId == window.activePaneId
+                    )
+                    .frame(width: frame.surfaceFrame.width, height: frame.surfaceFrame.height)
+                    .offset(x: frame.surfaceFrame.minX, y: frame.surfaceFrame.minY)
+                }
 
-                    paneSurface(paneId: frame.paneId, isFocused: isFocused)
-                        .frame(width: frame.surfaceFrame.width, height: frame.surfaceFrame.height)
-                        .offset(x: frame.surfaceFrame.minX, y: frame.surfaceFrame.minY)
+                // One continuous header bar per row of panes (segments merge
+                // across the gutters), shared with the mosh chrome overlay.
+                if showsHeaders {
+                    PaneHeaderBarLayer(
+                        frames: frames,
+                        titles: Dictionary(uniqueKeysWithValues: frames.map {
+                            ($0.paneId, paneTitle($0.paneId))
+                        }),
+                        activePaneId: window.activePaneId,
+                        chrome: chrome,
+                        baseColor: backgroundColor,
+                        hasImageBackground: terminalBackground != nil,
+                        layoutBounds: layoutBounds,
+                        containerSize: geo.size,
+                        cellWidth: cellSize.width,
+                        onClose: { paneId in
+                            onUserActivity?()
+                            tmux.killPane(paneId)
+                        }
+                    )
+                }
 
-                    if frame.headerFrame.height > 0 {
-                        PaneHeaderView(
-                            title: paneTitle(frame.paneId),
-                            isFocused: isFocused,
-                            height: frame.headerFrame.height,
-                            chrome: chrome,
-                            onClose: {
-                                onUserActivity?()
-                                tmux.killPane(frame.paneId)
-                            }
-                        )
-                        .frame(width: frame.headerFrame.width, height: frame.headerFrame.height)
-                        .offset(x: frame.headerFrame.minX, y: frame.headerFrame.minY)
-                    }
-
-                    if isFocused, frames.count > 1 {
+                ForEach(frames) { frame in
+                    if frame.paneId == window.activePaneId, frames.count > 1 {
                         PaneGridFocusRing(
                             frame: frame,
                             layoutBounds: layoutBounds,
@@ -844,12 +1059,18 @@ struct PaneGridView: View {
                 onFindShortcut: onFindShortcut,
                 onSwitcherShortcut: onSwitcherShortcut,
                 onOpenSettings: onOpenSettings,
+                onOpenAgentCenter: onOpenAgentCenter,
                 // Structural single-claimant: only the focused pane reclaims
                 // first responder (and not while the find bar holds it).
                 suppressFirstResponderReclaim: !isFocused || suppressFindReclaim,
                 onHardwareKey: nil,
+                onScrollDiagnostic: { [paneId] message in
+                    onScrollDiagnostic(paneId, message)
+                },
+                onSelectionPathAction: onSelectionPathAction,
                 // Bare ⌘[/⌘] cycle panes only while a grid is mounted.
-                paneCycleEnabled: true
+                paneCycleEnabled: true,
+                terminalBackground: terminalBackground
             )
 
             // Tap-to-focus on an unfocused pane: select-pane only, no click
@@ -923,7 +1144,15 @@ struct PaneGridView: View {
     /// (stored on `tmux`) doesn't retain it; the single-pane path never fires
     /// `refreshPane`, so a stale hook is inert until the next grid overwrites it.
     private func installPaneRefreshHook() {
-        tmux.paneDidRefresh = { [weak tmux, store, kittyPaneModes, onFocusedPaneRefreshed] paneId in
+        // Truthful local-buffer state for repaint assembly (same stale-hook
+        // reasoning as below: gated on this grid's store, overwritten by the
+        // incoming grid). Without it, refocusing a pane whose TUI is live on
+        // the alt screen prints the saved-primary rows INTO that alt screen.
+        tmux.paneLocalAltScreenProbe = { [store] paneId in
+            store.existingRuntime(for: paneId)?.box.view?
+                .getTerminal().isCurrentBufferAlternate ?? false
+        }
+        tmux.paneDidRefresh = { [weak tmux, store, kittyPaneModes, onFocusedPaneRefreshed, onScrollDiagnostic] paneId in
             guard let tmux else { return }
             // Gate the ENTIRE hook on this grid owning a runtime for the pane.
             // The closure captures THIS grid's `store`, which can only reach
@@ -934,6 +1163,19 @@ struct PaneGridView: View {
             // keeps the find re-search scoped to a pane this grid renders.
             guard let runtime = store.existingRuntime(for: paneId) else { return }
             kittyPaneModes.restore(paneId, into: runtime.box)
+            // Post-repaint local-terminal snapshot: pairs with TmuxControlDiag's
+            // repaint-width line (capture rows / client size) so a mismatch
+            // between what tmux painted and what the local surface holds —
+            // wrong row count, unexpected buffer, off-bottom offset — is
+            // visible in one log read.
+            if let view = runtime.box.view {
+                let terminal = view.getTerminal()
+                let maxOffsetY = max(0, view.contentSize.height - view.bounds.height)
+                onScrollDiagnostic(
+                    paneId,
+                    "pane-repaint-applied cols=\(terminal.cols) rows=\(terminal.rows) alt=\(terminal.isCurrentBufferAlternate) mouse=\(terminal.mouseMode != .off) off=\(String(format: "%.1f", view.contentOffset.y))/\(String(format: "%.1f", maxOffsetY)) content=\(String(format: "%.1f", view.contentSize.height)) bounds=\(String(format: "%.1f", view.bounds.height)) focused=\(paneId == tmux.activePaneId)"
+                )
+            }
             if paneId == tmux.activePaneId {
                 onFocusedPaneRefreshed()
             }

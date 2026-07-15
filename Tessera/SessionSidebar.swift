@@ -13,6 +13,8 @@ struct SessionSidebar: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.designTokens) private var T
     @Environment(AppearancePreferences.self) private var appearance
+    @Environment(HostTerminalBackgroundStore.self) private var hostBackgrounds
+    @Environment(AgentCenter.self) private var agentCenter
 
     @Binding var activeSessions: [LiveSession]
     @Binding var selectedItem: SidebarItem?
@@ -146,6 +148,10 @@ struct SessionSidebar: View {
                     action: { selectedItem = .host(host.id) },
                     onDelete: {
                         if selectedItem == .host(host.id) { selectedItem = nil }
+                        hostBackgrounds.removeOverride(for: host.id)
+                        // Outgoing link only — dependents keep their link
+                        // and fail closed (see HostJumpChainResolver).
+                        HostJumpChainResolver.removeOutgoingLink(for: host.id, in: modelContext)
                         modelContext.delete(host)
                         try? modelContext.save()
                     }
@@ -164,6 +170,22 @@ struct SessionSidebar: View {
                 .frame(height: 1)
 
             VStack(spacing: 2) {
+                if appearance.agentCenterEnabled {
+                    BottomNavigationRow(
+                        item: .agents,
+                        systemName: "sparkles",
+                        label: "agents",
+                        badges: AgentSidebarBadgeFactory.make(
+                            waitingCount: agentCenter.waitingCount,
+                            justFinishedCount: agentCenter.unreadJustFinishedCount,
+                            totalCount: agentCenter.agents.count
+                        ),
+                        isSelected: selectedItem == .agents
+                    ) {
+                        selectedItem = .agents
+                    }
+                }
+
                 BottomNavigationRow(
                     item: .keys,
                     systemName: "key.fill",
@@ -278,7 +300,9 @@ private struct ActiveSessionRowBody<S: ObservableObject & TerminalSession>: View
 
     @State private var confirmingDisconnect = false
     @Environment(\.designTokens) private var T
+    @Environment(AppearancePreferences.self) private var appearance
     @Environment(SessionRegistry.self) private var registry
+    @Environment(AgentCenter.self) private var agentCenter
 
     // Dot color mirrors `SessionTopBar.dotColor(for:)` so the sidebar
     // and the top-bar chrome agree on what each state looks like.
@@ -325,6 +349,12 @@ private struct ActiveSessionRowBody<S: ObservableObject & TerminalSession>: View
         let state: SessionState = (rawState == .connected && !registry.isRenderReady(live.id))
             ? .connecting
             : rawState
+        let sessionNeedsInput = agentCenter.agents.contains {
+            $0.id.sessionID == live.id && $0.status == .waitingForInput
+        }
+        let sessionHasUnreadFinished = agentCenter.hasUnreadJustFinished(
+            sessionID: live.id
+        )
 
         HStack(spacing: 6) {
             Button(action: action) {
@@ -353,6 +383,28 @@ private struct ActiveSessionRowBody<S: ObservableObject & TerminalSession>: View
                             .lineLimit(1)
                     }
 
+                    if appearance.agentCenterEnabled,
+                       agentCenter.sessionIDsWithAgents.contains(live.id) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(
+                                sessionNeedsInput
+                                    ? T.amber
+                                    : (sessionHasUnreadFinished ? T.green : T.fgMuted)
+                            )
+                            .shadow(
+                                color: sessionNeedsInput ? T.amber.opacity(0.55) : .clear,
+                                radius: 3
+                            )
+                            .accessibilityLabel(
+                                sessionNeedsInput
+                                    ? "agent needs input"
+                                    : (sessionHasUnreadFinished
+                                        ? "agent just finished"
+                                        : "agent active")
+                            )
+                    }
+
                     Spacer(minLength: 0)
                 }
                 .contentShape(Rectangle())
@@ -360,9 +412,12 @@ private struct ActiveSessionRowBody<S: ObservableObject & TerminalSession>: View
             .buttonStyle(.plain)
 
             // Explicit disconnect. Replaces the long-press context menu, whose
-            // system "lift" made the floating glass sidebar render transparent
-            // over the live terminal (Liquid Glass doesn't composite into the
-            // context-menu backdrop). A tap confirms, so it's hard to fat-finger.
+            // system "lift" suppressed the sidebar's glass rendering over the
+            // live terminal. That suppression is now solvable — see the opaque
+            // backstop in FilesPanelView (armed on touch-down, released after
+            // dismissal) — so a context menu could return here if ever wanted;
+            // the tap-to-confirm button stays because it's also harder to
+            // fat-finger than a long-press.
             RowActionButton(
                 systemName: "xmark",
                 tint: T.red,
@@ -483,14 +538,67 @@ private struct RowActionButton: View {
     }
 }
 
-private struct BottomNavigationRow: View {
+struct BottomNavigationBadge: Identifiable, Equatable {
+    enum Tone: Equatable {
+        case needsInput
+        case justFinished
+        case neutral
+    }
+
+    let id: String
+    let count: Int
+    let tone: Tone
+    let accessibilityLabel: String
+}
+
+enum AgentSidebarBadgeFactory {
+    static func make(
+        waitingCount: Int,
+        justFinishedCount: Int,
+        totalCount: Int
+    ) -> [BottomNavigationBadge] {
+        guard totalCount > 0 else { return [] }
+        return [
+            waitingCount > 0
+                ? BottomNavigationBadge(
+                    id: "needs-input",
+                    count: waitingCount,
+                    tone: .needsInput,
+                    accessibilityLabel: waitingCount == 1
+                        ? "1 agent needs input"
+                        : "\(waitingCount) agents need input"
+                ) : nil,
+            justFinishedCount > 0
+                ? BottomNavigationBadge(
+                    id: "just-finished",
+                    count: justFinishedCount,
+                    tone: .justFinished,
+                    accessibilityLabel: justFinishedCount == 1
+                        ? "1 agent just finished"
+                        : "\(justFinishedCount) agents just finished"
+                ) : nil,
+            BottomNavigationBadge(
+                id: "total",
+                count: totalCount,
+                tone: .neutral,
+                accessibilityLabel: totalCount == 1
+                    ? "1 agent total"
+                    : "\(totalCount) agents total"
+            ),
+        ].compactMap { $0 }
+    }
+}
+
+struct BottomNavigationRow: View {
     let item: SidebarItem
     let systemName: String
     let label: String
+    var badges: [BottomNavigationBadge] = []
     let isSelected: Bool
     let action: () -> Void
 
     @Environment(\.designTokens) private var T
+    @State private var attentionPulse = false
 
     var body: some View {
         Button(action: action) {
@@ -503,6 +611,25 @@ private struct BottomNavigationRow: View {
                     .lineLimit(1)
 
                 Spacer(minLength: 0)
+
+                HStack(spacing: 4) {
+                    ForEach(badges) { badge in
+                        let tint = badgeTint(badge.tone)
+                        Text("\(badge.count)")
+                            .font(Typography.tesseraMono(size: 9, weight: .medium))
+                            .foregroundStyle(tint)
+                            .frame(minWidth: 17, minHeight: 17)
+                            .padding(.horizontal, badge.count > 9 ? 2 : 0)
+                            .background(tint.opacity(badge.tone == .neutral ? 0.06 : 0.12))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(tint.opacity(0.38), lineWidth: 1))
+                            .opacity(
+                                badge.tone == .needsInput && attentionPulse ? 0.62 : 1
+                            )
+                            .accessibilityLabel(badge.accessibilityLabel)
+                            .accessibilityIdentifier("agent-sidebar-badge-\(badge.id)")
+                    }
+                }
             }
             .padding(.vertical, 8)
             .padding(.horizontal, 12)
@@ -512,6 +639,32 @@ private struct BottomNavigationRow: View {
             .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
+        .accessibilityValue(
+            badges.map(\.accessibilityLabel).joined(separator: ", ")
+        )
+        .accessibilityIdentifier(
+            item == .agents
+                ? "agent-sidebar-row"
+                : "sidebar-navigation-\(label.replacingOccurrences(of: " ", with: "-"))"
+        )
+        .onAppear { updateAttentionPulse() }
+        .onChange(of: badges) { _, _ in updateAttentionPulse() }
+    }
+
+    private func updateAttentionPulse() {
+        attentionPulse = false
+        guard badges.contains(where: { $0.tone == .needsInput }) else { return }
+        withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+            attentionPulse = true
+        }
+    }
+
+    private func badgeTint(_ tone: BottomNavigationBadge.Tone) -> Color {
+        switch tone {
+        case .needsInput: T.amber
+        case .justFinished: T.green
+        case .neutral: T.fgDim
+        }
     }
 
     private var navIcon: some View {
@@ -568,6 +721,7 @@ private struct PressableIconButtonStyle: ButtonStyle {
 enum SidebarItem: Hashable, Equatable {
     case session(UUID)
     case host(UUID)
+    case agents
     case keys
     case knownHosts
     case tunnels

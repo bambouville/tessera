@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tessera — Agent Center: states, badges, mechanics</title>
+<style>
+  :root{
+    --bg:#000; --panel:#0A0A0A; --input:#141414; --input-soft:#1C1C1E;
+    --fg:#FFF; --fg-muted:rgba(235,235,245,.60); --fg-dim:rgba(235,235,245,.35); --fg-faint:rgba(235,235,245,.18);
+    --accent:#5B9FFF; --accent-soft:rgba(91,159,255,.14);
+    --green:#30D158; --green-soft:rgba(48,209,88,.14);
+    --red:#FF453A; --amber:#FF9F0A; --amber-soft:rgba(255,159,10,.14);
+    --border:rgba(255,255,255,.08); --border-strong:rgba(255,255,255,.14);
+    --mono:"JetBrains Mono","JetBrainsMono",ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:#0A0A0A;font-family:var(--mono);color:var(--fg)}
+  .sheet{max-width:1080px;margin:0 auto;padding:40px 32px 80px}
+  h1{font-size:20px;font-weight:500;margin-bottom:6px}
+  .lede{font-size:12px;color:var(--fg-muted);margin-bottom:36px}
+  h2{font-size:11px;letter-spacing:.5px;color:var(--fg-muted);font-weight:400;margin:34px 0 12px;
+     display:flex;align-items:center;gap:10px}
+  h2::after{content:"";flex:1;height:1px;background:var(--border)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
+  .spec{border:1px solid var(--border);border-radius:10px;background:var(--input);padding:14px}
+  .spec .cap{font-size:10px;color:var(--fg-dim);margin-top:10px;line-height:1.5}
+  .chip{font-size:10px;padding:2px 8px;border-radius:9px;display:inline-block}
+  .chip.amber{color:var(--amber);background:var(--amber-soft);border:1px solid rgba(255,159,10,.28)}
+  .chip.green{color:var(--green);background:var(--green-soft);border:1px solid rgba(48,209,88,.25)}
+  .chip.dim{color:var(--fg-dim);border:1px solid var(--border)}
+  .chip.faint{color:var(--fg-faint);border:1px dashed var(--border)}
+  .pulse{animation:pulse 1.6s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+
+  .nrow{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;font-size:13px;color:var(--fg-muted);width:224px}
+  .nrow svg{width:14px;height:14px}
+  .nrow.selected{background:var(--accent-soft);color:var(--fg)}
+  .nrow .count{margin-left:auto;font-size:10px;padding:1px 6px;border-radius:8px;color:var(--fg-dim);border:1px solid var(--border)}
+  .nrow .count.attn{color:var(--amber);border-color:rgba(255,159,10,.35);background:var(--amber-soft)}
+
+  .srow{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font-size:13px;width:224px}
+  .srow .dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 6px rgba(48,209,88,.55)}
+  .srow .lbl{flex:1}
+  .srow .sub{font-size:10px;color:var(--fg-dim)}
+  .spark{width:11px;height:11px;color:var(--fg-muted)}
+  .spark.attn{color:var(--amber);filter:drop-shadow(0 0 3px rgba(255,159,10,.6))}
+
+  .tabs{display:flex;gap:2px;background:rgba(210,210,214,.10);border-radius:8px;padding:3px;width:max-content}
+  .tab{padding:3px 12px;border-radius:6px;font-size:11px;color:var(--fg-dim)}
+  .tab.on{background:rgba(255,255,255,.10);color:var(--fg)}
+  .tab .sp{color:var(--amber)}
+  .tab.glow{box-shadow:inset 0 -2px 0 rgba(255,159,10,.7)}
+
+  .notif{width:420px;background:rgba(28,28,30,.92);backdrop-filter:blur(20px);border:1px solid var(--border-strong);
+         border-radius:16px;padding:12px 14px;display:flex;gap:12px;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+  .notif .appicon{width:34px;height:34px;border-radius:8px;background:#000;border:1px solid var(--border-strong);
+                  display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:2px;padding:8px;flex:0 0 auto}
+  .notif .appicon i{background:var(--fg);border-radius:1.5px}
+  .notif .appicon i:nth-child(4){opacity:.45}
+  .notif .body{flex:1;font-family:-apple-system,system-ui,sans-serif}
+  .notif .t{font-size:13px;font-weight:600}
+  .notif .s{font-size:12px;color:var(--fg-muted);margin-top:1px}
+  .notif .when{font-size:11px;color:var(--fg-dim)}
+
+  table{border-collapse:collapse;width:100%;font-size:11px}
+  th,td{text-align:left;padding:8px 12px;border:1px solid var(--border);color:var(--fg-muted);vertical-align:top;line-height:1.5}
+  th{color:var(--fg-dim);font-weight:400;letter-spacing:.3px;background:var(--input)}
+  td b{color:var(--fg);font-weight:500}
+  .k{font-size:10px;color:var(--fg-muted);background:var(--input-soft);border:1px solid var(--border);border-radius:3px;padding:1px 5px}
+  ul{margin:8px 0 0 16px;font-size:11px;color:var(--fg-muted);line-height:1.7}
+  .note{font-size:11px;color:var(--fg-dim);line-height:1.7;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="sheet">
+  <h1>agent center — states &amp; mechanics</h1>
+  <div class="lede">Mock 3 / 3 · component states, attention plumbing, and the per-transport detection matrix</div>
+
+  <h2>agent status chips</h2>
+  <div class="grid">
+    <div class="spec"><span class="chip amber pulse">waiting for input</span>
+      <div class="cap">Pane output tail matches the profile's blocking-prompt needle (Claude Code approval menu, Codex confirm). Pulses; sorts first everywhere; the only state that can notify.</div></div>
+    <div class="spec"><span class="chip green">working</span>
+      <div class="cap">Output flowing within the last ~10s, no blocking needle. Duration = time since the agent process appeared.</div></div>
+    <div class="spec"><span class="chip dim">idle at prompt</span>
+      <div class="cap">Agent process alive, no output ≥ 60s, no blocking needle. Shows time since last output.</div></div>
+    <div class="spec"><span class="chip faint">status unavailable</span>
+      <div class="cap">Process detected but no output tap (e.g. un-mounted background tmux window before hydration). Listed with location only — never guessed.</div></div>
+  </div>
+
+  <h2>sidebar — nav row states</h2>
+  <div class="grid">
+    <div class="spec">
+      <div class="nrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2.5 14.4 9.6 21.5 12 14.4 14.4 12 21.5 9.6 14.4 2.5 12 9.6 9.6Z"/></svg><span>agents</span><span class="count">4</span></div>
+      <div class="cap">Default: dim total-count chip. Row hidden entirely when zero agents are detected (no empty tab noise).</div></div>
+    <div class="spec">
+      <div class="nrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2.5 14.4 9.6 21.5 12 14.4 14.4 12 21.5 9.6 14.4 2.5 12 9.6 9.6Z"/></svg><span>agents</span><span class="count attn pulse">1 waiting</span></div>
+      <div class="cap">Attention: any agent in <i>waiting for input</i> flips the chip amber with the blocked count. Same pulse cadence as the connecting dot.</div></div>
+    <div class="spec">
+      <div class="nrow selected"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2.5 14.4 9.6 21.5 12 14.4 14.4 12 21.5 9.6 14.4 2.5 12 9.6 9.6Z"/></svg><span>agents</span><span class="count attn">1 waiting</span></div>
+      <div class="cap">Selected: accent-soft fill, identical to other nav rows.</div></div>
+    <div class="spec">
+      <div class="srow"><span class="dot"></span><span class="lbl">prod-api</span>
+        <svg class="spark attn" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5 14.4 9.6 21.5 12 14.4 14.4 12 21.5 9.6 14.4 2.5 12 9.6 9.6Z"/></svg>
+        <span class="sub">mosh+t</span></div>
+      <div class="cap">Session row: 11px sparkle when the session hosts ≥1 agent; amber + glow when one is blocked. Monochrome otherwise.</div></div>
+  </div>
+
+  <h2>tab strip — window with a blocked agent</h2>
+  <div class="spec" style="max-width:460px">
+    <div class="tabs">
+      <span class="tab">1 shell</span>
+      <span class="tab">2 htop</span>
+      <span class="tab glow"><span class="sp">✦</span> 3 deploy</span>
+      <span class="tab on">4 logs</span>
+    </div>
+    <div class="cap">A background tmux window whose agent blocks gets the amber sparkle + underline glow — the exact
+      bell-glow mechanic (BL1) with a different trigger, so the code path and its cross-session isolation (P11 latch) are already proven.
+      Selecting the window clears the glow; the sparkle stays while the agent runs.</div>
+  </div>
+
+  <h2>local notification — agent blocked while backgrounded</h2>
+  <div class="notif">
+    <div class="appicon"><i></i><i></i><i></i><i></i></div>
+    <div class="body">
+      <div class="t">claude code needs input</div>
+      <div class="s">prod-api · deploy — Allow Bash(git push origin main)?</div>
+    </div>
+    <div class="when">now</div>
+  </div>
+  <div class="note">Rides the existing bell notification pipeline (BL2): local notification, host + window attribution,
+    2s/source rate limit. Fires only on the working → waiting-for-input transition, only while the app is backgrounded
+    or another session is focused. No backend, no push relay — within the no-accounts constraint. Tap → deep-link to the pane (same route as ⌘K commit).</div>
+
+  <h2>detection matrix — one shared implementation, per-transport probes</h2>
+  <table>
+    <tr><th>transport</th><th>discovery (which panes run an agent)</th><th>status signal (working / blocked / idle)</th></tr>
+    <tr><td><b>ssh + tmux</b></td><td rowspan="2">one <span class="k">list-panes -a</span> over the -CC channel returns
+      <span class="k">pane_current_command</span> for every window/pane in one round trip; matched against the
+      SwipePad profile regexes (<span class="k">^(\d+\.\d+\.\d+|claude(-code)?)$</span>, <span class="k">^codex</span>)</td>
+      <td rowspan="2">output taps already exist per pane (capture-pane hydration + live feed); tail matched against
+      per-profile blocking needles, flush-immediate per the echo-path rule</td></tr>
+    <tr><td><b>mosh + tmux</b></td></tr>
+    <tr><td><b>plain ssh</b></td><td><span class="k">ps</span> probe on the existing connection (same provider the swipe pad uses)</td>
+      <td>terminal output tap + needle match on the single stream</td></tr>
+    <tr><td><b>plain mosh</b></td><td><span class="k">ps</span> probe over the side-channel SSH / cwd-poller path (the F2 machinery)</td>
+      <td>output tap on the SSP stream + needle match</td></tr>
+  </table>
+  <div class="note">Cadence: refresh on output pulses (coalesced, like SwipePadActiveProfileResolver) + a 5s idle poll while
+    the Agent Center page or palette is open; no persistent cache (process identity goes stale silently — resolver comment).
+    Multi-session hosts: pane addresses latch <span class="k">ownSessionId</span>, so another Tessera session's agents on the
+    same tmux server are attributed to <i>their</i> session, never cross-fed (W4 discipline).</div>
+
+  <h2>acting from a card — send routing &amp; safety</h2>
+  <table>
+    <tr><th>action</th><th>what is sent</th><th>routing per transport</th></tr>
+    <tr><td><b>answer button</b> (blocked prompt)</td><td>the option's key from the parsed menu (digit for Claude-style menus, <span class="k">y</span>/<span class="k">n</span> for bare confirms) — per-profile response map</td>
+      <td rowspan="4">tmux transports: <span class="k">send-keys -t %pane</span> over the -CC channel — targets any window/pane
+      without switching, works identically on ssh+tmux and mosh+tmux. Raw ssh/mosh: bytes written to the session channel
+      (the agent is the foreground process). One shared dispatch, transport picks the carrier.</td></tr>
+    <tr><td><b>message / prompt input</b></td><td>UTF-8 text + CR (bracketed-paste wrapped when the pane has it enabled — same rule as K5)</td></tr>
+    <tr><td><b>queue while working</b></td><td>same as message — Claude Code queues typed input mid-run; labeled “queue” so the semantics are honest</td></tr>
+    <tr><td><b>⎋ interrupt</b></td><td>a single ESC byte</td></tr>
+  </table>
+  <ul>
+    <li><b>Stale-prompt guard:</b> before an answer button dispatches, the pane tail is re-matched against the needle that
+      produced the buttons. If the prompt moved on (agent proceeded, output scrolled), nothing is sent — the card refreshes
+      and flashes “prompt changed”. No blind keystrokes into a changed screen.</li>
+    <li><b>Echo verification:</b> every send is confirmed by watching the pane echo; a send with no echo within 2s surfaces
+      a “didn't land — open the pane” error on the card instead of silently pretending.</li>
+    <li><b>One in flight per pane:</b> card controls disable while a send awaits its echo; no double-fire from taps + digits.</li>
+    <li>Buttons are parsed from the pane's actual menu text — labels, count, and default come from the agent, never hardcoded,
+      so new prompt styles degrade to “answer with a message…” instead of wrong buttons.</li>
+  </ul>
+
+  <h2>keyboard &amp; entry points</h2>
+  <ul>
+    <li><span class="k">⌘⇧A</span> — toggle Agent Center (⌘A is select-all; ⌘⇧A unclaimed by iPadOS per the reserved-chord audit; letter+⌘⇧ per capture limits).</li>
+    <li><span class="k">⇥</span> cycles cards · <span class="k">1–9</span> answers the focused prompt · <span class="k">↩</span> sends the focused input · <span class="k">⌥↩</span> typed reply on a blocked card · <span class="k">⌘↩</span> opens the pane.</li>
+    <li><span class="k">⌘K</span> — agents indexed in the palette; <span class="k">@</span> prefix scopes to agents only; needs-input ranks first.</li>
+    <li>Sidebar “agents” row · sparkle on session rows · tab-strip sparkle — all tap-through to the pane.</li>
+    <li>Settings → notifications: “notify when an agent needs input” (default on), per-host override; reuses bell rate-limit tiers.</li>
+  </ul>
+
+  <h2>scope guards</h2>
+  <ul>
+    <li>Detection = the two shipped profiles (claude code, codex cli) + user-added profiles from SwipePad settings; one profile store, no second registry.</li>
+    <li>No remote helpers, no shell integration required, no backend — probes and sends ride existing channels only.</li>
+    <li>Status is inferred, never claimed: chips say what was observed (“no output 38m”), the terminal remains the source of truth —
+      which is why every card shows the live tail it's acting on, and why unparseable prompts fall back to open-the-pane.</li>
+    <li>v1 still excludes: diff viewer, Watch/widgets, multi-pane broadcast. Answer, message, interrupt, jump — nothing else.</li>
+  </ul>
+</div>
+</body>
+</html>

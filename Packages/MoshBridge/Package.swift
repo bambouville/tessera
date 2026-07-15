@@ -162,6 +162,11 @@ let package = Package(
                 .headerSearchPath("."),
             ]
         ),
+        .testTarget(
+            name: "MoshBridgeSecurityTests",
+            dependencies: ["MoshBridge"],
+            path: "Tests/MoshBridgeSecurityTests"
+        ),
     ],
     cxxLanguageStandard: .cxx17
 )

@@ -19,6 +19,16 @@ enum OnboardingIllustration: Equatable {
     case claudeCodePromptWithPuck
     /// A two-column keyboard-shortcut cheat grid.
     case shortcuts
+    /// The Remote Files panel carved out beside a mock terminal: the panel
+    /// breadcrumb follows the terminal's cwd (link glyph in accent), with a few
+    /// file rows and an in-flight download.
+    case filesPanel
+    /// The native iOS share sheet, both directions: a remote file exported OUT to
+    /// Files / Mail / Messages, and a photo shared IN so it lands on the host.
+    case shareInOut
+    /// The "paste a screenshot" gesture: a share/drop pill, upload, and the agent
+    /// composer showing the `[Image #1]` token Claude Code / Codex render.
+    case agentImagePaste
 }
 
 /// A spotlight step points at a real element; an illustration step draws a card.
@@ -36,9 +46,12 @@ struct OnboardingStep {
 }
 
 extension OnboardingStep {
-    /// The five first-run steps, in order. Copy is lifted verbatim from the
-    /// approved mockup (`/tmp/tessera-firstlaunch-mockups/index.html`); the
-    /// shortcut chords are verified against `TesseraTerminalView.swift`.
+    /// The eight first-run steps, in order. The original five came from the
+    /// approved mockup (`/tmp/tessera-firstlaunch-mockups/index.html`, since
+    /// gone — the in-code copy IS the record); the three Remote Files cards
+    /// (files panel / share / paste a screenshot) came from the approved mockup
+    /// `docs/mockups/onboarding-files/index.html`. Shortcut chords are verified
+    /// against `TesseraTerminalView.swift` (⌘⇧E → Files panel).
     static let firstRun: [OnboardingStep] = [
         OnboardingStep(
             title: "add your first host",
@@ -54,9 +67,10 @@ extension OnboardingStep {
             kind: .spotlight(.keysNav, .right)
         ),
         OnboardingStep(
-            title: "tmux, as tabs",
-            body: "Every tmux window is a tab up top. ⌘T opens one, ⌘1–9 jumps, "
-                + "⌘⇧[ ] cycle — native -CC, not a passthrough.",
+            title: "tmux windows & panes",
+            body: "Every tmux window is a tab up top — ⌘T opens one, ⌘1–9 jumps. "
+                + "Split a window into panes with ⌘D. Native -CC, not a "
+                + "passthrough.",
             kind: .illustration(.mockTerminal)
         ),
         OnboardingStep(
@@ -65,6 +79,27 @@ extension OnboardingStep {
                 + "prompts, double-tap to dictate. Auto-detects the app; "
                 + "fully customizable.",
             kind: .illustration(.claudeCodePromptWithPuck)
+        ),
+        OnboardingStep(
+            title: "files, beside your shell",
+            body: "A folder glyph up top — or ⌘⇧E — slides out a panel that "
+                + "tracks your shell's directory. Browse, download, and Quick "
+                + "Look files on the host, over SSH and mosh alike.",
+            kind: .illustration(.filesPanel)
+        ),
+        OnboardingStep(
+            title: "share, in and out",
+            body: "Drag or share a remote file out to Files, Mail, or Photos. "
+                + "Share a file into Tessera from any app and it lands on the "
+                + "host — the native iOS share sheet, both directions.",
+            kind: .illustration(.shareInOut)
+        ),
+        OnboardingStep(
+            title: "paste a screenshot",
+            body: "Share an image in, or drop one on the terminal — Tessera "
+                + "uploads it and types the path. Claude Code and Codex pick it "
+                + "up automatically, just like dragging a file in on the desktop.",
+            kind: .illustration(.agentImagePaste)
         ),
         OnboardingStep(
             title: "keyboard shortcuts",

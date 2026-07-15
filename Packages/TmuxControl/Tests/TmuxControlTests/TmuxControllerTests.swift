@@ -141,10 +141,12 @@ final class TmuxControllerTests: XCTestCase {
 
         if paneInAltScreen {
             appendLines(historyLines, to: &bytes)
+            // Segment reset precedes the seam CRLF so a scroll fill at the
+            // seam uses the default background (BCE ghost guard).
+            appendEscape("\u{1B}[0m", to: &bytes)
             if !historyLines.isEmpty && !savedPrimaryLines.isEmpty {
                 appendCRLF(to: &bytes)
             }
-            appendEscape("\u{1B}[0m", to: &bytes)
             appendLines(savedPrimaryLines, to: &bytes)
             let savedRow = max(1, (altSavedY ?? 0) + 1)
             let savedCol = max(1, (altSavedX ?? 0) + 1)
@@ -401,10 +403,15 @@ final class TmuxControllerTests: XCTestCase {
 
     func test_passthrough_sendInputForwardsRaw() {
         let (controller, _, sent) = makeController()
+        var observed: [(PaneId?, [UInt8])] = []
+        controller.inputObserver = { observed.append(($0, $1)) }
 
         controller.sendInput(Array("echo hi\r".utf8))
 
         XCTAssertEqual(sent.bytes, Array("echo hi\r".utf8))
+        XCTAssertEqual(observed.count, 1)
+        XCTAssertNil(observed.first?.0)
+        XCTAssertEqual(observed.first?.1, Array("echo hi\r".utf8))
     }
 
     // MARK: - DCS entry detection
@@ -495,6 +502,22 @@ final class TmuxControllerTests: XCTestCase {
                      "side-channel mode should not latch pane output as the render source")
         XCTAssertEqual(fed.bytes, [],
                        "side-channel control output must not reach the terminal renderer")
+    }
+
+    func test_paneOutputObserverSeesBackgroundSideChannelBytes() {
+        let (controller, _, _) = makeController(controlPath: .sideChannel)
+        var observed: [(PaneId, [UInt8])] = []
+        controller.paneOutputObserver = { paneID, data in
+            observed.append((paneID, Array(data)))
+        }
+
+        var chunk: [UInt8] = [0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70]
+        chunk.append(contentsOf: Array("%output %17 prompt-ready\r\n".utf8))
+        controller.ingest(chunk)
+
+        XCTAssertEqual(observed.count, 1)
+        XCTAssertEqual(observed.first?.0, PaneId(17))
+        XCTAssertEqual(observed.first?.1, Array("prompt-ready".utf8))
     }
 
     func test_ingest_exitMessageDropsBackToPassthrough() {
@@ -772,6 +795,47 @@ final class TmuxControllerTests: XCTestCase {
         controller.ingest(Array("%session-changed $0 main\r\n".utf8))
 
         XCTAssertEqual(controller.ownSessionId, SessionId(0))
+    }
+
+    func test_sessionChanged_toDifferentSessionBlocksOldWindowUntilRehydrated() {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        controller.ingest(Array("%session-changed $0 main\r\n%window-add @7\r\n".utf8))
+        controller.ingest(Array("%begin 0 9 1\r\n%end 0 9 1\r\n".utf8)) // @7 metadata query
+        XCTAssertTrue(controller.isWindowListHydrated)
+
+        let oldGeneration = controller.controlConnectionGeneration
+        sent.clear()
+        controller.ingest(Array("%session-changed $1 work\r\n".utf8))
+
+        XCTAssertEqual(controller.ownSessionId, SessionId(1))
+        XCTAssertNotEqual(controller.controlConnectionGeneration, oldGeneration)
+        XCTAssertFalse(controller.isWindowListHydrated)
+        XCTAssertTrue(
+            String(decoding: sent.bytes, as: UTF8.self).contains("list-windows -F"),
+            "switching sessions must request an authoritative window list"
+        )
+
+        sent.clear()
+        controller.killWindow(WindowId(7))
+        XCTAssertEqual(sent.bytes, [], "an old-session tab must not remain a valid kill target")
+
+        // history-limit, pause-after, bell subscription, then the new
+        // session's authoritative list-windows response.
+        controller.ingest(Array("%begin 0 10 1\r\n%end 0 10 1\r\n".utf8))
+        controller.ingest(Array("%begin 0 11 1\r\n%end 0 11 1\r\n".utf8))
+        controller.ingest(Array("%begin 0 12 1\r\n%end 0 12 1\r\n".utf8))
+        controller.ingest(Array(
+            "%begin 0 13 1\r\n@9\tb25d,80x24,0,0,70\tb25d,80x24,0,0,70\t0\twork\r\n%end 0 13 1\r\n".utf8
+        ))
+
+        XCTAssertTrue(controller.isWindowListHydrated)
+        XCTAssertEqual(controller.windows.map(\.id), [WindowId(9)])
+        sent.clear()
+
+        controller.killWindow(WindowId(9))
+
+        XCTAssertEqual(sent.bytes, Array("kill-window -t @9\n".utf8))
     }
 
     func test_clientSessionChanged_doesNotChangeOwnSession() {
@@ -1270,6 +1334,20 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertEqual(sent.bytes, Array("new-window -e COLORTERM=truecolor\n".utf8))
     }
 
+    func test_newWindow_replaysCachedClientSizeBeforeCommand() {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        controller.updateClientSize(cols: 166, rows: 54)
+        controller.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
+        sent.clear()
+
+        controller.newWindow()
+
+        XCTAssertEqual(
+            String(decoding: sent.bytes, as: UTF8.self),
+            "refresh-client -C 166,54\nnew-window -e COLORTERM=truecolor\n"
+        )
+    }
+
     func test_killCurrentWindow_sendsKillWindowCommand() {
         let (controller, _, sent) = makeController()
         controller.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
@@ -1278,6 +1356,66 @@ final class TmuxControllerTests: XCTestCase {
         controller.killCurrentWindow()
 
         XCTAssertEqual(sent.bytes, Array("kill-window\n".utf8))
+    }
+
+    func test_killWindow_targetsTrackedWindowById() {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        controller.ingest(Array("%window-add @7\r\n".utf8))
+        sent.clear()
+
+        controller.killWindow(WindowId(7))
+
+        XCTAssertEqual(sent.bytes, Array("kill-window -t @7\n".utf8))
+    }
+
+    func test_killWindow_unknownWindowIsNoOp() {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        controller.ingest(Array("%window-add @1\r\n".utf8))
+        sent.clear()
+
+        controller.killWindow(WindowId(9))
+
+        XCTAssertEqual(sent.bytes, [])
+    }
+
+    func test_killWindow_blocksPreservedSideChannelTabUntilRehydrated() {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        enterTmuxModeAndDrainAttachInit(controller)
+        controller.ingest(Array("%window-add @7\r\n".utf8))
+        XCTAssertTrue(controller.isWindowListHydrated)
+
+        let oldGeneration = controller.controlConnectionGeneration
+        controller.sideChannelDisconnected()
+        XCTAssertFalse(controller.isWindowListHydrated)
+        XCTAssertNotEqual(controller.controlConnectionGeneration, oldGeneration)
+
+        // Re-enter control mode, but leave the queued list-windows response
+        // pending. The preserved @7 is stale until that response arrives.
+        sent.clear()
+        controller.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
+        controller.ingest(Array("%begin 0 10 0\r\n%end 0 10 0\r\n".utf8))
+        XCTAssertEqual(controller.mode, .tmuxControl)
+        XCTAssertFalse(controller.isWindowListHydrated)
+        sent.clear()
+
+        controller.killWindow(WindowId(7))
+
+        XCTAssertEqual(sent.bytes, [], "a stale preserved tab must not emit a targeted kill")
+
+        // pause-after, bell subscription, then authoritative list-windows.
+        controller.ingest(Array("%begin 0 11 1\r\n%end 0 11 1\r\n".utf8))
+        controller.ingest(Array("%begin 0 12 1\r\n%end 0 12 1\r\n".utf8))
+        controller.ingest(Array(
+            "%begin 0 13 1\r\n@7\tb25d,80x24,0,0,70\tb25d,80x24,0,0,70\t0\tlogs\r\n%end 0 13 1\r\n".utf8
+        ))
+        XCTAssertTrue(controller.isWindowListHydrated)
+        sent.clear()
+
+        controller.killWindow(WindowId(7))
+
+        XCTAssertEqual(sent.bytes, Array("kill-window -t @7\n".utf8))
     }
 
     func test_previousWindow_sendsPreviousWindowCommand() {
@@ -1759,6 +1897,641 @@ final class TmuxControllerTests: XCTestCase {
         expectSent(sent, renderedMetadataCommand(windowId: 1))
     }
 
+    func test_foregroundRefreshRetriesViewportInPlaceWithoutReplayingHistory() async throws {
+        let (controller, fed, sent) = makeController()
+        controller.renderRefreshRetryDelay = 0.01
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        XCTAssertEqual(controller.activeWindowId, WindowId(1))
+        XCTAssertEqual(controller.activePaneId, PaneId(31))
+        XCTAssertEqual(controller.renderedWindowId, WindowId(1))
+        XCTAssertEqual(controller.renderedPaneId, PaneId(31))
+
+        var willSwapCount = 0
+        var didSwapCount = 0
+        controller.displayWillSwap = { _, _, _ in willSwapCount += 1 }
+        controller.displayDidSwap = { _ in didSwapCount += 1 }
+        fed.clear()
+        sent.clear()
+
+        controller.refreshActiveWindowOnForeground()
+        expectSent(sent, renderedMetadataCommand(windowId: 1))
+        sent.clear()
+
+        // Match the device log: metadata is temporarily unavailable after
+        // foregrounding. The existing terminal identity and scrollback must
+        // remain live while the controller retries.
+        controller.ingest(errorFrame(1, body: ["recovering"], time: 1))
+        XCTAssertEqual(controller.renderedWindowId, WindowId(1))
+        XCTAssertEqual(controller.renderedPaneId, PaneId(31))
+
+        // Foreground metadata/capture can take seconds while the SSH channel
+        // catches up. Same-pane output must be retained without presenting
+        // each queued redraw as a separate visible scroll step.
+        fed.clear()
+        controller.ingest(Array("%output %31 live-while-refreshing\r\n".utf8))
+        XCTAssertEqual(fed.bytes, [])
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+        expectSent(sent, renderedMetadataCommand(windowId: 1))
+        sent.clear()
+
+        let metadata = renderedPaneMetadataLine(
+            paneId: 31,
+            cursorX: 5,
+            cursorY: 6,
+            historySize: 1_000
+        )
+        controller.ingest(responseFrame(2, body: [metadata], time: 1))
+        expectSent(sent, "capture-pane -p -e -N -t @1\n")
+        sent.clear()
+
+        controller.ingest(responseFrame(3, body: ["visible viewport"], time: 1))
+
+        XCTAssertEqual(
+            fed.bytes,
+            Array("live-while-refreshing".utf8)
+                + expectedRepaintBytes(captureLines: ["visible viewport"], cursorX: 5, cursorY: 6)
+        )
+        XCTAssertEqual(fed.chunks.count, 2)
+        XCTAssertEqual(fed.chunks.first, Array("live-while-refreshing".utf8))
+        XCTAssertEqual(sent.bytes, [], "foreground repair must not request a deep capture")
+        XCTAssertEqual(willSwapCount, 0, "in-place repair must preserve local scrollback")
+        XCTAssertEqual(didSwapCount, 0)
+        XCTAssertEqual(controller.renderedWindowId, WindowId(1))
+        XCTAssertEqual(controller.renderedPaneId, PaneId(31))
+    }
+
+    func test_appInactivityCoalescesOutputBeforeForegroundRefreshAndPreservesScrollbackBytes() {
+        let (controller, fed, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        fed.clear()
+        sent.clear()
+
+        controller.prepareForAppInactivity()
+        controller.ingest(Array("%output %31 queued-one\r\n".utf8))
+        controller.ingest(Array("%output %31 -queued-two\r\n".utf8))
+        XCTAssertEqual(fed.bytes, [], "inactive output must not present intermediate redraws")
+
+        controller.refreshActiveWindowOnForeground()
+        expectSent(sent, renderedMetadataCommand(windowId: 1))
+        sent.clear()
+        controller.ingest(responseFrame(1, body: [
+            renderedPaneMetadataLine(paneId: 31, cursorX: 3, cursorY: 4, historySize: 1_000)
+        ], time: 1))
+        expectSent(sent, "capture-pane -p -e -N -t @1\n")
+        sent.clear()
+
+        controller.ingest(Array("%output %31 -queued-three\r\n".utf8))
+        XCTAssertEqual(fed.bytes, [])
+        controller.ingest(responseFrame(2, body: ["current viewport"], time: 1))
+
+        let retained = Array("queued-one-queued-two-queued-three".utf8)
+        XCTAssertEqual(fed.chunks.count, 2, "retained output and repaint should be atomic feed calls")
+        XCTAssertEqual(fed.chunks[0], retained)
+        XCTAssertEqual(
+            fed.chunks[1],
+            expectedRepaintBytes(captureLines: ["current viewport"], cursorX: 3, cursorY: 4)
+        )
+
+        fed.clear()
+        controller.ingest(Array("%output %31 live-after-refresh\r\n".utf8))
+        XCTAssertEqual(fed.bytes, Array("live-after-refresh".utf8))
+    }
+
+    func test_foregroundRefreshKeepsRetryingAndRetainingAfterOrdinaryAttemptLimit() async throws {
+        let (controller, fed, sent) = makeController()
+        controller.maxRenderRefreshAttempts = 2
+        controller.renderRefreshRetryDelay = 0.01
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        fed.clear()
+        sent.clear()
+
+        controller.prepareForAppInactivity()
+        controller.ingest(Array("%output %31 retained-during-failure\r\n".utf8))
+        controller.refreshActiveWindowOnForeground()
+        sent.clear()
+        controller.ingest(errorFrame(1, body: ["unavailable"], time: 1))
+        try await Task.sleep(nanoseconds: 100_000_000)
+        expectSent(sent, renderedMetadataCommand(windowId: 1))
+        sent.clear()
+        controller.ingest(errorFrame(2, body: ["still unavailable"], time: 1))
+        try await Task.sleep(nanoseconds: 100_000_000)
+        expectSent(sent, renderedMetadataCommand(windowId: 1))
+        sent.clear()
+        controller.ingest(errorFrame(3, body: ["exhausted"], time: 1))
+
+        controller.ingest(Array("%output %31 live-after-failure\r\n".utf8))
+        XCTAssertEqual(fed.bytes, [], "foreground recovery must remain gated past the ordinary retry limit")
+        try await Task.sleep(nanoseconds: 150_000_000)
+        expectSent(sent, renderedMetadataCommand(windowId: 1))
+        sent.clear()
+        controller.ingest(responseFrame(4, body: [
+            renderedPaneMetadataLine(paneId: 31, historySize: 1_000)
+        ], time: 1))
+        expectSent(sent, "capture-pane -p -e -N -t @1\n")
+        sent.clear()
+        controller.ingest(responseFrame(5, body: ["recovered viewport"], time: 1))
+
+        XCTAssertEqual(
+            fed.chunks.first,
+            Array("retained-during-failurelive-after-failure".utf8)
+        )
+        XCTAssertTrue(String(decoding: fed.bytes, as: UTF8.self).contains("recovered viewport"))
+    }
+
+    func test_foregroundRenderWaitsForOlderBackgroundQueryAndRejectsNewObservers() async throws {
+        let (controller, fed, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        fed.clear()
+        sent.clear()
+
+        var olderResult: Result<[String], TmuxController.CommandError>?
+        controller.sendBackgroundControlQuery(
+            "display-message -p -t %31 '#{cursor_y}'"
+        ) { olderResult = $0 }
+        expectSent(sent, "display-message -p -t %31 '#{cursor_y}'\n")
+        sent.clear()
+
+        controller.prepareForAppInactivity()
+        controller.refreshActiveWindowOnForeground()
+        XCTAssertEqual(sent.bytes, [], "render metadata must wait until older observer replies drain")
+
+        var rejectedResult: Result<[String], TmuxController.CommandError>?
+        controller.sendBackgroundControlQuery(
+            "display-message -p -t %31 '#{pane_current_command}'"
+        ) { rejectedResult = $0 }
+        guard case .failure(.cancelled)? = rejectedResult else {
+            return XCTFail("new background observers must fail fast while authoritative rendering owns the queue")
+        }
+        XCTAssertEqual(sent.bytes, [])
+
+        controller.ingest(responseFrame(1, body: ["51"], time: 1))
+        guard case .success(let lines)? = olderResult else {
+            return XCTFail("the older query should receive its own response")
+        }
+        XCTAssertEqual(lines, ["51"])
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+        expectSent(sent, renderedMetadataCommand(windowId: 1))
+    }
+
+    func test_pauseDuringForegroundBarrierWaitsForViewportThenContinuesPane() {
+        let (controller, fed, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        fed.clear()
+        sent.clear()
+
+        controller.prepareForAppInactivity()
+        controller.ingest(Array("%output %31 retained-before-pause\r\n".utf8))
+        controller.refreshActiveWindowOnForeground()
+        expectSent(sent, renderedMetadataCommand(windowId: 1))
+        sent.clear()
+
+        controller.ingest(Array("%pause %31\r\n".utf8))
+        XCTAssertEqual(sent.bytes, [], "pause must not supersede foreground recovery with a deep replay")
+        controller.ingest(responseFrame(1, body: [
+            renderedPaneMetadataLine(paneId: 31, cursorX: 1, cursorY: 2, historySize: 1_000)
+        ], time: 1))
+        expectSent(sent, "capture-pane -p -e -N -t @1\n")
+        sent.clear()
+        controller.ingest(responseFrame(2, body: ["authoritative viewport"], time: 1))
+
+        XCTAssertEqual(fed.chunks.first, Array("retained-before-pause".utf8))
+        XCTAssertTrue(String(decoding: fed.bytes, as: UTF8.self).contains("authoritative viewport"))
+        expectSent(sent, "refresh-client -A '%31:continue'\n")
+        XCTAssertFalse(String(decoding: sent.bytes, as: UTF8.self).contains("-S -2000"))
+    }
+
+    func test_captureCompletingAfterInactiveEdgeCannotFeedUntilNewForegroundCapture() {
+        let (controller, fed, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        fed.clear()
+        sent.clear()
+
+        controller.refreshActiveWindowOnForeground()
+        sent.clear()
+        controller.ingest(responseFrame(1, body: [
+            renderedPaneMetadataLine(paneId: 31, historySize: 1_000)
+        ], time: 1))
+        expectSent(sent, "capture-pane -p -e -N -t @1\n")
+        sent.clear()
+
+        controller.prepareForAppInactivity()
+        controller.ingest(Array("%output %31 arrived-while-inactive\r\n".utf8))
+        controller.ingest(responseFrame(2, body: ["stale in-flight capture"], time: 1))
+        XCTAssertEqual(fed.bytes, [], "an old capture completion must not paint while inactive")
+
+        controller.refreshActiveWindowOnForeground()
+        expectSent(sent, renderedMetadataCommand(windowId: 1))
+        sent.clear()
+        controller.ingest(responseFrame(3, body: [
+            renderedPaneMetadataLine(paneId: 31, historySize: 1_000)
+        ], time: 1))
+        sent.clear()
+        controller.ingest(responseFrame(4, body: ["fresh foreground capture"], time: 1))
+
+        XCTAssertEqual(fed.chunks.first, Array("arrived-while-inactive".utf8))
+        XCTAssertTrue(String(decoding: fed.bytes, as: UTF8.self).contains("fresh foreground capture"))
+        XCTAssertFalse(String(decoding: fed.bytes, as: UTF8.self).contains("stale in-flight capture"))
+    }
+
+    func test_metadataCompletingAfterInactiveEdgeDoesNotStartCapture() {
+        let (controller, fed, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        fed.clear()
+        sent.clear()
+
+        controller.refreshActiveWindowOnForeground()
+        sent.clear()
+        controller.prepareForAppInactivity()
+        controller.ingest(Array("%output %31 retained-before-metadata\r\n".utf8))
+        controller.ingest(responseFrame(1, body: [
+            renderedPaneMetadataLine(paneId: 31, historySize: 1_000)
+        ], time: 1))
+        XCTAssertEqual(sent.bytes, [], "inactive metadata completion must not start capture-pane")
+        XCTAssertEqual(fed.bytes, [])
+
+        controller.refreshActiveWindowOnForeground()
+        sent.clear()
+        controller.ingest(responseFrame(2, body: [
+            renderedPaneMetadataLine(paneId: 31, historySize: 1_000)
+        ], time: 1))
+        sent.clear()
+        controller.ingest(responseFrame(3, body: ["fresh capture after metadata deferral"], time: 1))
+
+        XCTAssertEqual(fed.chunks.first, Array("retained-before-metadata".utf8))
+        XCTAssertTrue(String(decoding: fed.bytes, as: UTF8.self).contains("fresh capture after metadata deferral"))
+    }
+
+    func test_foregroundBufferOverflowDropsWholeEscapeStreamBeforeViewportRepaint() {
+        let (controller, fed, sent) = makeController()
+        controller.maxForegroundOutputBytes = 8
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        fed.clear()
+        sent.clear()
+
+        controller.prepareForAppInactivity()
+        let oversizedEscapeStream = "\u{1B}[2J0123456789"
+        controller.ingest(Array("%output %31 \(oversizedEscapeStream)\r\n".utf8))
+        controller.refreshActiveWindowOnForeground()
+        sent.clear()
+        controller.ingest(responseFrame(1, body: [
+            renderedPaneMetadataLine(paneId: 31, cursorX: 2, cursorY: 3)
+        ], time: 1))
+        sent.clear()
+        controller.ingest(responseFrame(2, body: ["overflow-safe viewport"], time: 1))
+
+        XCTAssertEqual(fed.chunks.count, 1, "overflow must never feed a truncated retained stream")
+        XCTAssertTrue(String(decoding: fed.bytes, as: UTF8.self).contains("overflow-safe viewport"))
+        XCTAssertFalse(String(decoding: fed.bytes, as: UTF8.self).contains("0123456789"))
+
+        fed.clear()
+        controller.ingest(Array("%output %31 live-after-overflow\r\n".utf8))
+        XCTAssertEqual(fed.bytes, Array("live-after-overflow".utf8))
+    }
+
+    func test_enteringTmuxWhileInactiveKeepsFirstOutputBehindForegroundCapture() {
+        let (controller, fed, sent) = makeController()
+        controller.prepareForAppInactivity()
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        XCTAssertEqual(fed.bytes, [], "attach output must stay gated while the app remains inactive")
+        sent.clear()
+
+        controller.refreshActiveWindowOnForeground()
+        sent.clear()
+        controller.ingest(responseFrame(1, body: [
+            renderedPaneMetadataLine(paneId: 31, cursorX: 1, cursorY: 1)
+        ], time: 1))
+        sent.clear()
+        controller.ingest(responseFrame(2, body: ["foreground attach viewport"], time: 1))
+
+        XCTAssertTrue(String(decoding: fed.bytes, as: UTF8.self).contains("foreground attach viewport"))
+        XCTAssertFalse(String(decoding: fed.bytes, as: UTF8.self).contains("boot"))
+    }
+
+    func test_establishedWindowSwapMetadataFailuresNeverPaintIncrementalSliver() async throws {
+        let (controller, fed, sent) = makeController()
+        controller.maxRenderRefreshAttempts = 2
+        controller.renderRefreshRetryDelay = 0.01
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller, windowId: 1, paneId: 1)
+        fed.clear()
+        sent.clear()
+
+        controller.ingest(Array("%window-add @2\r\n".utf8))
+        // Drain the name lookup generated by %window-add before switching.
+        sent.clear()
+        controller.ingest(responseFrame(50, body: ["two"], time: 1))
+        sent.clear()
+        controller.ingest(Array("%window-pane-changed @2 %2\r\n".utf8))
+        controller.ingest(Array("%session-window-changed $0 @2\r\n".utf8))
+        expectSent(sent, renderedMetadataCommand(windowId: 2))
+        sent.clear()
+
+        controller.ingest(errorFrame(1, body: ["metadata unavailable"], time: 1))
+        try await Task.sleep(nanoseconds: 100_000_000)
+        expectSent(sent, renderedMetadataCommand(windowId: 2))
+        sent.clear()
+        controller.ingest(errorFrame(2, body: ["metadata unavailable again"], time: 1))
+
+        // Retry 2 also fails, exhausting the ordinary established-swap limit.
+        try await Task.sleep(nanoseconds: 150_000_000)
+        expectSent(sent, renderedMetadataCommand(windowId: 2))
+        sent.clear()
+        controller.ingest(errorFrame(3, body: ["metadata permanently unavailable"], time: 1))
+
+        // This is the user-visible corruption from the device log: once the
+        // retry limit was exhausted, a tiny TUI update from the new pane used
+        // to paint over the otherwise stale previous screen.
+        controller.ingest(Array("%output %2 NEW-WINDOW-SLIVER\r\n".utf8))
+        XCTAssertEqual(fed.bytes, [])
+        XCTAssertNil(controller.renderedWindowId)
+        XCTAssertNil(controller.renderedPaneId)
+
+        // Established swaps also keep retrying past the ordinary cap rather
+        // than leaving the selected tab stale forever.
+        try await Task.sleep(nanoseconds: 200_000_000)
+        expectSent(sent, renderedMetadataCommand(windowId: 2))
+        sent.clear()
+        controller.ingest(responseFrame(4, body: [
+            renderedPaneMetadataLine(paneId: 2, paneTitle: "two", windowName: "two")
+        ], time: 1))
+        expectSent(sent, "capture-pane -p -e -N -t @2\n")
+        sent.clear()
+        controller.ingest(responseFrame(5, body: ["authoritative window two"], time: 1))
+
+        XCTAssertTrue(String(decoding: fed.bytes, as: UTF8.self).contains("authoritative window two"))
+        XCTAssertFalse(String(decoding: fed.bytes, as: UTF8.self).contains("NEW-WINDOW-SLIVER"))
+        XCTAssertEqual(controller.renderedWindowId, WindowId(2))
+        XCTAssertEqual(controller.renderedPaneId, PaneId(2))
+    }
+
+    func test_establishedSharedRecoveryRetiresWhenTargetBecomesGrid() {
+        let (controller, _, sent) = makeController()
+        controller.renderRefreshRetryDelay = 10
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller, windowId: 1, paneId: 1)
+        sent.clear()
+
+        controller.ingest(Array("%window-add @2\r\n".utf8))
+        sent.clear()
+        controller.ingest(responseFrame(50, body: ["two"], time: 1))
+        sent.clear()
+        controller.ingest(Array("%window-pane-changed @2 %2\r\n".utf8))
+        controller.ingest(Array("%session-window-changed $0 @2\r\n".utf8))
+        sent.clear()
+        controller.ingest(errorFrame(1, body: ["metadata unavailable"], time: 1))
+
+        XCTAssertTrue(controller.isAuthoritativeRenderRefreshPending)
+
+        controller.ingest(Array(
+            "%layout-change @2 8205,80x24,0,0{40x24,0,0,2,39x24,41,0,3} 8205,80x24,0,0{40x24,0,0,2,39x24,41,0,3} *\r\n".utf8
+        ))
+
+        XCTAssertFalse(
+            controller.isAuthoritativeRenderRefreshPending,
+            "a grid has no shared terminal for the established retry to own"
+        )
+        sent.clear()
+        var observerResult: Result<[String], TmuxController.CommandError>?
+        controller.sendBackgroundControlQuery(
+            "display-message -p -t %2 '#{cursor_y}'"
+        ) { observerResult = $0 }
+        XCTAssertNil(observerResult)
+        XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).contains("#{cursor_y}"))
+    }
+
+    func test_establishedSharedRecoveryRetiresWhenLastWindowCloses() {
+        let (controller, _, sent) = makeController()
+        controller.renderRefreshRetryDelay = 10
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller, windowId: 1, paneId: 1)
+        sent.clear()
+
+        controller.ingest(Array("%window-add @2\r\n".utf8))
+        sent.clear()
+        controller.ingest(responseFrame(50, body: ["two"], time: 1))
+        sent.clear()
+        controller.ingest(Array("%window-pane-changed @2 %2\r\n".utf8))
+        controller.ingest(Array("%session-window-changed $0 @2\r\n".utf8))
+        sent.clear()
+        controller.ingest(errorFrame(1, body: ["metadata unavailable"], time: 1))
+        XCTAssertTrue(controller.isAuthoritativeRenderRefreshPending)
+
+        controller.ingest(Array("%window-close @2\r\n".utf8))
+        controller.ingest(Array("%window-close @1\r\n".utf8))
+
+        XCTAssertNil(controller.activeWindowId)
+        XCTAssertFalse(
+            controller.isAuthoritativeRenderRefreshPending,
+            "closing the final window must retire its ownerless shared retry"
+        )
+    }
+
+    func test_foregroundSharedCaptureTransfersToGridBeforeSinksMount() async throws {
+        let (controller, fed, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        fed.clear()
+        sent.clear()
+
+        controller.prepareForAppInactivity()
+        controller.ingest(Array("%output %31 retained-shared-output\r\n".utf8))
+        controller.refreshActiveWindowOnForeground()
+        sent.clear()
+
+        controller.ingest(Array(
+            "%layout-change @1 8205,80x24,0,0{40x24,0,0,31,39x24,41,0,32} 8205,80x24,0,0{40x24,0,0,31,39x24,41,0,32} *\r\n".utf8
+        ))
+        controller.ingest(Array("%output %31 grid-output-before-mount\r\n".utf8))
+        XCTAssertEqual(fed.bytes, [])
+
+        let paneFeed = Accumulator<UInt8>()
+        controller.setPaneSink(PaneId(31)) { paneFeed.append(contentsOf: $0) }
+        controller.refreshPane(paneId: PaneId(31), deep: false)
+
+        // The obsolete shared metadata response is stale and must not start a
+        // hidden shared-terminal capture after the grid handoff. Once it drains,
+        // the mounted grid pane inherits recovery ownership and repaints.
+        sent.clear()
+        controller.ingest(responseFrame(1, body: [
+            renderedPaneMetadataLine(paneId: 31)
+        ], time: 1))
+        try await Task.sleep(nanoseconds: 100_000_000)
+        expectSent(sent, "display-message -p -t %31 '\(TmuxController.renderedPaneMetadataFormat)'\n")
+        sent.clear()
+        controller.ingest(responseFrame(2, body: [
+            renderedPaneMetadataLine(paneId: 31)
+        ], time: 1))
+        expectSent(sent, "capture-pane -p -e -N -t %31\n")
+        sent.clear()
+        controller.ingest(responseFrame(3, body: ["authoritative grid viewport"], time: 1))
+
+        XCTAssertEqual(
+            paneFeed.chunks.first,
+            Array("retained-shared-outputgrid-output-before-mount".utf8)
+        )
+        XCTAssertTrue(String(decoding: paneFeed.bytes, as: UTF8.self).contains("authoritative grid viewport"))
+        controller.ingest(Array("%output %31 grid-live-after-handoff\r\n".utf8))
+        XCTAssertTrue(String(decoding: paneFeed.bytes, as: UTF8.self).contains("grid-live-after-handoff"))
+    }
+
+    func test_inactiveSharedToGridKeepsOutputBarrierBeforeSinkRegistration() {
+        let (controller, fed, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        fed.clear()
+        sent.clear()
+
+        controller.prepareForAppInactivity()
+        controller.ingest(Array(
+            ("%layout-change @1 8205,80x24,0,0{40x24,0,0,31,39x24,41,0,32} "
+             + "8205,80x24,0,0{40x24,0,0,31,39x24,41,0,32} *\r\n"
+             + "%output %31 must-remain-buffered-before-grid-mount\r\n").utf8
+        ))
+
+        XCTAssertEqual(fed.bytes, [])
+        XCTAssertTrue(controller.isAuthoritativeRenderRefreshPending)
+
+        // Foreground activation can beat SwiftUI's grid mount. With no sinks
+        // yet, the barrier must stay armed rather than replaying into the old
+        // shared terminal during that gap.
+        controller.refreshActiveWindowOnForeground()
+        controller.ingest(Array("%output %31 still-buffered-after-activation\r\n".utf8))
+        XCTAssertEqual(fed.bytes, [])
+        XCTAssertTrue(controller.isAuthoritativeRenderRefreshPending)
+
+        let paneFeed = Accumulator<UInt8>()
+        controller.setPaneSink(PaneId(31)) { paneFeed.append(contentsOf: $0) }
+        controller.refreshPane(paneId: PaneId(31), deep: false)
+        expectSent(sent, "display-message -p -t %31 '\(TmuxController.renderedPaneMetadataFormat)'\n")
+        sent.clear()
+        controller.ingest(responseFrame(1, body: [
+            renderedPaneMetadataLine(paneId: 31)
+        ], time: 1))
+        expectSent(sent, "capture-pane -p -e -N -t %31\n")
+        controller.ingest(responseFrame(2, body: ["authoritative grid viewport"], time: 1))
+
+        XCTAssertEqual(
+            paneFeed.chunks.first,
+            Array(
+                "must-remain-buffered-before-grid-mountstill-buffered-after-activation".utf8
+            )
+        )
+        XCTAssertTrue(String(decoding: paneFeed.bytes, as: UTF8.self).contains("authoritative grid viewport"))
+        XCTAssertFalse(controller.isAuthoritativeRenderRefreshPending)
+    }
+
+    func test_foregroundBarrierReleasesWhenLastActiveWindowCloses() {
+        let (controller, fed, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        fed.clear()
+        sent.clear()
+
+        controller.prepareForAppInactivity()
+        controller.ingest(Array("%output %31 retained-before-close\r\n".utf8))
+        controller.refreshActiveWindowOnForeground()
+        controller.ingest(Array("%window-close @1\r\n".utf8))
+
+        controller.ingest(Array("%window-add @2\r\n".utf8))
+        sent.clear()
+        controller.ingest(responseFrame(50, body: ["two"], time: 1))
+        controller.ingest(Array("%output %2 live-new-window\r\n".utf8))
+
+        XCTAssertEqual(fed.bytes, Array("live-new-window".utf8))
+    }
+
+    func test_foregroundRefreshRepaintsAlternateBufferWithoutSwitchingBuffers() {
+        let (controller, fed, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        controller.terminalIsInAltScreen = { true }
+
+        var willSwapCount = 0
+        var didSwapCount = 0
+        var didRefreshCount = 0
+        controller.displayWillSwap = { _, _, _ in willSwapCount += 1 }
+        controller.displayDidSwap = { _ in didSwapCount += 1 }
+        controller.displayDidRefresh = { _ in didRefreshCount += 1 }
+        fed.clear()
+        sent.clear()
+
+        controller.refreshActiveWindowOnForeground()
+        sent.clear()
+        let metadata = renderedPaneMetadataLine(
+            paneId: 31,
+            cursorX: 2,
+            cursorY: 3,
+            alternateOn: true,
+            historySize: 1_000,
+            altSavedX: 7,
+            altSavedY: 8
+        )
+        controller.ingest(responseFrame(1, body: [metadata], time: 1))
+        expectSent(sent, "capture-pane -p -e -N -t @1\n")
+        sent.clear()
+
+        controller.ingest(responseFrame(2, body: ["alternate viewport"], time: 1))
+
+        let repaint = String(decoding: fed.bytes, as: UTF8.self)
+        XCTAssertTrue(repaint.contains("alternate viewport"))
+        XCTAssertFalse(repaint.contains("\u{1B}[?1049l"), "in-place alt repair must preserve the saved primary buffer")
+        XCTAssertFalse(repaint.contains("\u{1B}[?1049h"), "in-place alt repair must stay in the current alternate buffer")
+        XCTAssertEqual(sent.bytes, [], "in-place alt repair must not request primary/history captures")
+        XCTAssertEqual(willSwapCount, 0)
+        XCTAssertEqual(didSwapCount, 0)
+        XCTAssertEqual(didRefreshCount, 1)
+    }
+
+    func test_foregroundRefreshFallsBackToDeepRebuildWhenPaneIdentityChanged() {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        sent.clear()
+
+        controller.refreshActiveWindowOnForeground()
+        sent.clear()
+
+        let metadata = renderedPaneMetadataLine(paneId: 32, historySize: 1_000)
+        controller.ingest(responseFrame(1, body: [metadata], time: 1))
+        expectSent(sent, "capture-pane -p -e -N -t @1\n")
+        sent.clear()
+
+        controller.ingest(responseFrame(2, body: ["new pane viewport"], time: 1))
+        expectSent(sent, renderedMetadataCommand(windowId: 1))
+    }
+
+    func test_foregroundRefreshPromotesPaneMismatchBeforeCaptureFailure() {
+        let (controller, _, sent) = makeController()
+        controller.renderRefreshRetryDelay = 10
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        sent.clear()
+
+        controller.refreshActiveWindowOnForeground()
+        sent.clear()
+        controller.ingest(responseFrame(1, body: [
+            renderedPaneMetadataLine(paneId: 32, historySize: 1_000)
+        ], time: 1))
+        expectSent(sent, "capture-pane -p -e -N -t @1\n")
+        sent.clear()
+
+        controller.ingest(errorFrame(2, body: ["capture unavailable"], time: 1))
+
+        XCTAssertNil(controller.renderedWindowId, "a confirmed pane change must use real-swap failure semantics")
+        XCTAssertNil(controller.renderedPaneId)
+    }
+
     func test_repaintBytes_nonAltDeepStage_matchesSpec() {
         let (controller, fed, sent) = makeController()
         controller.deepRepaintHistoryDepth = 42
@@ -1797,6 +2570,194 @@ final class TmuxControllerTests: XCTestCase {
             expectedRepaintBytes(captureLines: deepLines, cursorX: 6, cursorY: 4)
         )
         XCTAssertEqual(sent.bytes, [])
+    }
+
+    /// Regression: capture-pane -e emits SGR cumulatively, so a suffix slice
+    /// of the deep capture strands bg openers above the slice boundary — the
+    /// old slice-based scrub repainted a colored panel's visible rows in
+    /// default black (full-width black band). The scrub must instead paint
+    /// from a fresh viewport capture chained after the deep one, where tmux
+    /// re-serializes all open SGR state at row 0.
+    func test_deepScrubPaintsFromFreshViewportCapture_notDeepSuffixSlice() {
+        let (controller, fed, sent) = makeController()
+        controller.deepRepaintHistoryDepth = 42
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller)
+        controller.updateClientSize(cols: 80, rows: 2)
+        controller.ingest(responseFrame(60)) // drain refresh-client -C
+        fed.clear()
+        sent.clear()
+
+        controller.ingest(Array("%session-window-changed $0 @1\r\n".utf8))
+        sent.clear()
+        let metadata = renderedPaneMetadataLine(
+            paneId: 32,
+            cursorX: 6,
+            cursorY: 1,
+            paneTitle: "deep pane",
+            windowName: "editor"
+        )
+        controller.ingest(responseFrame(1, body: [metadata], time: 1))
+        expectSent(sent, "capture-pane -p -e -N -t @1\n")
+        sent.clear()
+
+        controller.ingest(responseFrame(2, body: ["viewport"], time: 1))
+        expectSent(sent, renderedMetadataCommand(windowId: 1))
+        sent.clear()
+        fed.clear()
+
+        controller.ingest(responseFrame(3, body: [metadata], time: 1))
+        expectSent(sent, "capture-pane -p -e -N -S -42 -t @1\n")
+        sent.clear()
+
+        // The grey panel's bg opener appears exactly once, in the history
+        // prefix; the visible suffix rows carry NO bg SGR of their own
+        // (cumulative emission) — the shape that broke the slice-based scrub.
+        let greyOpener = "\u{1B}[48;2;30;30;30m"
+        let deepLines = [
+            greyOpener + "panel top (history)",
+            "panel body (history)",
+            "plain paragraph one",
+            "plain paragraph two",
+        ]
+        controller.ingest(responseFrame(4, body: deepLines, time: 1))
+
+        // History scrolled (4 captured rows > 2 visible) → the controller
+        // must chain a fresh viewport capture instead of slicing, and the
+        // deep repaint must wait for it.
+        expectSent(sent, "capture-pane -p -e -N -t @1\n")
+        sent.clear()
+        XCTAssertEqual(fed.bytes, [], "deep repaint must land together with its scrub")
+
+        // tmux re-serializes the open bg state at row 0 of a viewport capture.
+        let scrubLines = [greyOpener + "plain paragraph one", "plain paragraph two"]
+        controller.ingest(responseFrame(5, body: scrubLines, time: 1))
+
+        // Assemble the golden through RepaintAssembly itself (its seam
+        // neutralization re-opens the tracked pen per row — byte details are
+        // pinned by RepaintAssemblyTests); THIS test pins which lines the
+        // controller feeds: the deep capture, then the fresh viewport lines.
+        let state = TmuxController.parseRenderedPaneState(metadata)!
+        let expectedDeep = RepaintAssembly.assemble(
+            state: state,
+            captureLines: deepLines,
+            historyLines: [],
+            savedPrimaryLines: [],
+            altScreenLines: nil,
+            terminalIsInAltScreen: false,
+            clientRows: 2
+        )
+        let expectedScrub = RepaintAssembly.assemble(
+            state: state,
+            captureLines: scrubLines,
+            historyLines: [],
+            savedPrimaryLines: [],
+            altScreenLines: nil,
+            terminalIsInAltScreen: false,
+            clientRows: 2
+        )
+        XCTAssertEqual(fed.bytes, expectedDeep + expectedScrub)
+
+        let scrubSegment = String(decoding: fed.bytes.dropFirst(expectedDeep.count), as: UTF8.self)
+        XCTAssertTrue(
+            scrubSegment.contains(greyOpener + "plain paragraph one"),
+            "scrub must carry the panel's bg opener ahead of the SGR-free paragraph rows"
+        )
+        XCTAssertEqual(sent.bytes, [])
+        XCTAssertEqual(controller.renderedWindowId, WindowId(1))
+        XCTAssertEqual(controller.renderedPaneId, PaneId(32))
+    }
+
+    func test_deepStageWithoutScrolledHistory_skipsScrubCapture() {
+        let (controller, fed, sent) = makeController()
+        controller.deepRepaintHistoryDepth = 42
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller)
+        controller.updateClientSize(cols: 80, rows: 30)
+        controller.ingest(responseFrame(60)) // drain refresh-client -C
+        fed.clear()
+        sent.clear()
+
+        controller.ingest(Array("%session-window-changed $0 @1\r\n".utf8))
+        sent.clear()
+        let metadata = renderedPaneMetadataLine(
+            paneId: 32,
+            cursorX: 6,
+            cursorY: 4,
+            paneTitle: "deep pane",
+            windowName: "editor"
+        )
+        controller.ingest(responseFrame(1, body: [metadata], time: 1))
+        sent.clear()
+        controller.ingest(responseFrame(2, body: ["viewport"], time: 1))
+        expectSent(sent, renderedMetadataCommand(windowId: 1))
+        sent.clear()
+        fed.clear()
+
+        controller.ingest(responseFrame(3, body: [metadata], time: 1))
+        expectSent(sent, "capture-pane -p -e -N -S -42 -t @1\n")
+        sent.clear()
+
+        // 2 captured rows fit inside the 30 visible rows: nothing scrolled,
+        // so no scrub — and therefore no chained viewport capture.
+        let deepLines = ["history line", "visible line"]
+        controller.ingest(responseFrame(4, body: deepLines, time: 1))
+
+        XCTAssertEqual(
+            fed.bytes,
+            expectedRepaintBytes(captureLines: deepLines, cursorX: 6, cursorY: 4)
+        )
+        XCTAssertEqual(sent.bytes, [], "no scrub capture when history did not scroll")
+    }
+
+    func test_deepScrubCaptureFailureKeepsRenderedIdsAndRetriesDeepStage() async throws {
+        let (controller, fed, sent) = makeController()
+        controller.renderRefreshRetryDelay = 0.05
+        controller.deepRepaintHistoryDepth = 42
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller, windowId: 1, paneId: 1)
+        controller.updateClientSize(cols: 80, rows: 2)
+        controller.ingest(responseFrame(60)) // drain refresh-client -C
+        fed.clear()
+        sent.clear()
+
+        controller.ingest(Array("%session-window-changed $0 @2\r\n".utf8))
+        sent.clear()
+        let metadata = renderedPaneMetadataLine(
+            paneId: 2,
+            paneTitle: "two",
+            windowName: "two"
+        )
+        controller.ingest(responseFrame(1, body: [metadata], time: 1))
+        sent.clear()
+        controller.ingest(responseFrame(2, body: ["viewport two"], time: 1))
+        XCTAssertEqual(controller.renderedWindowId, WindowId(2))
+        XCTAssertEqual(controller.renderedPaneId, PaneId(2))
+        expectSent(sent, renderedMetadataCommand(windowId: 2))
+        sent.clear()
+
+        controller.ingest(responseFrame(3, body: [metadata], time: 1))
+        expectSent(sent, "capture-pane -p -e -N -S -42 -t @2\n")
+        sent.clear()
+        fed.clear()
+
+        // Deep capture succeeds with scrolled history → scrub capture chains.
+        controller.ingest(responseFrame(4, body: ["h1", "h2", "v1", "v2"], time: 1))
+        expectSent(sent, "capture-pane -p -e -N -t @2\n")
+        sent.clear()
+
+        // The chained scrub capture fails → same semantics as any deep-chain
+        // capture failure: nothing feeds, rendered ids survive, and one retry
+        // re-runs the deep stage from the metadata query.
+        controller.ingest(errorFrame(5, body: ["scrub failed"], time: 1))
+
+        XCTAssertEqual(fed.bytes, [], "no partial repaint may land when the scrub capture fails")
+        XCTAssertEqual(controller.renderedWindowId, WindowId(2))
+        XCTAssertEqual(controller.renderedPaneId, PaneId(2))
+        XCTAssertEqual(sent.bytes, [])
+
+        try await Task.sleep(nanoseconds: 300_000_000)
+        expectSent(sent, renderedMetadataCommand(windowId: 2))
     }
 
     func test_repaintBytes_altDeepWithHistory_chainsHistoryPrimaryAltAndMatchesSpec() {
@@ -2017,7 +2978,7 @@ final class TmuxControllerTests: XCTestCase {
         assertMarker("\u{1B}[?25l", precedes: "\u{1B}[4;3H", in: vimText)
     }
 
-    func test_windowSwitchDeepStageAbortsWhenGenerationChanges() {
+    func test_windowSwitchDeepStageAbortsWhenGenerationChanges() async throws {
         let (controller, fed, sent) = makeController()
         enterTmuxModeAndDrainAttachInit(controller)
         seedInlineRenderedWindow(controller)
@@ -2039,8 +3000,10 @@ final class TmuxControllerTests: XCTestCase {
         sent.clear()
 
         controller.ingest(Array("%session-window-changed $0 @2\r\n".utf8))
-        expectSent(sent, renderedMetadataCommand(windowId: 2))
+        XCTAssertEqual(sent.bytes, [], "replacement metadata waits for the stale deep command to drain")
         controller.ingest(responseFrame(4, body: ["stale deep"], time: 1))
+        try await Task.sleep(nanoseconds: 100_000_000)
+        expectSent(sent, renderedMetadataCommand(windowId: 2))
 
         XCTAssertEqual(fed.bytes, [], "stale deep capture must not feed after a newer window switch")
         XCTAssertEqual(controller.activeWindowId, WindowId(2))
@@ -2928,7 +3891,7 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertNil(controller.renderedPaneId)
     }
 
-    func test_displaySwap_fastSwitchIgnoresLateFirstRefresh() {
+    func test_displaySwap_fastSwitchIgnoresLateFirstRefresh() async throws {
         let (controller, fed, sent) = makeController()
         enterTmuxModeAndDrainAttachInit(controller)
         seedInlineRenderedWindow(controller)
@@ -2944,15 +3907,16 @@ final class TmuxControllerTests: XCTestCase {
 
         controller.ingest(Array("%session-window-changed $0 @2\r\n".utf8))
         XCTAssertEqual(controller.activeWindowId, WindowId(2))
-        XCTAssertEqual(
-            String(decoding: sent.bytes, as: UTF8.self),
-            renderedMetadataCommand(windowId: 2)
-        )
-        sent.clear()
+        XCTAssertEqual(sent.bytes, [], "the replacement refresh waits for the older metadata response")
 
         controller.ingest(Array("%begin 1 1 1\r\n%11\t4\t5\tlate one\tone\r\n%end 1 1 1\r\n".utf8))
-        XCTAssertEqual(sent.bytes, [],
-                       "late @1 metadata must not enqueue capture after focus moved to @2")
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(
+            String(decoding: sent.bytes, as: UTF8.self),
+            renderedMetadataCommand(windowId: 2),
+            "late @1 metadata must not capture, then @2 should run alone"
+        )
+        sent.clear()
 
         controller.ingest(Array("%begin 1 2 1\r\n%22\t6\t7\tcurrent two\ttwo\r\n%end 1 2 1\r\n".utf8))
         XCTAssertEqual(
@@ -3297,7 +4261,7 @@ final class TmuxControllerTests: XCTestCase {
         )
     }
 
-    func test_updateClientSize_sideChannelModeDoesNotSendRefreshClient() {
+    func test_updateClientSize_sideChannelModeSendsRefreshClient() {
         let (controller, _, sent) = makeController(controlPath: .sideChannel)
         enterTmuxModeAndDrainAttachInit(controller)
         sent.clear()
@@ -3306,8 +4270,8 @@ final class TmuxControllerTests: XCTestCase {
 
         XCTAssertEqual(
             sent.bytes,
-            [],
-            "side-channel mode must not send refresh-client -C on the control-only SSH connection"
+            Array("refresh-client -C 130,40\n".utf8),
+            "side-channel tmux -CC also ignores PTY resize; keep command context at the visible mosh size"
         )
     }
 
@@ -3372,7 +4336,7 @@ final class TmuxControllerTests: XCTestCase {
         )
     }
 
-    func test_enteringTmuxMode_sideChannelSkipsRefreshClientButStillQueriesWindows() {
+    func test_enteringTmuxMode_sideChannelPushesCachedSizeAndStillQueriesWindows() {
         let (controller, _, sent) = makeController(controlPath: .sideChannel)
         controller.updateClientSize(cols: 130, rows: 40)
         XCTAssertEqual(sent.bytes, [])
@@ -3385,9 +4349,9 @@ final class TmuxControllerTests: XCTestCase {
             actual.contains("set-option -g history-limit"),
             "side-channel mode should not mutate server options on the control-only channel"
         )
-        XCTAssertFalse(
-            actual.contains("refresh-client -C"),
-            "side-channel mode should never emit refresh-client -C, even with a cached size"
+        XCTAssertTrue(
+            actual.contains("refresh-client -C 130,40\n"),
+            "side-channel mode should replay cached size so new tmux windows use the visible mosh geometry"
         )
         XCTAssertTrue(
             actual.contains("list-windows -F"),
@@ -4377,13 +5341,17 @@ final class TmuxControllerTests: XCTestCase {
 @MainActor
 private final class Accumulator<Element> {
     private(set) var bytes: [Element] = []
+    private(set) var chunks: [[Element]] = []
 
     func append(contentsOf sequence: some Sequence<Element>) {
-        bytes.append(contentsOf: sequence)
+        let chunk = Array(sequence)
+        chunks.append(chunk)
+        bytes.append(contentsOf: chunk)
     }
 
     func clear() {
         bytes.removeAll(keepingCapacity: true)
+        chunks.removeAll(keepingCapacity: true)
     }
 }
 

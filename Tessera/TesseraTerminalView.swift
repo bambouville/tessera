@@ -32,6 +32,15 @@ import UIKit
 /// action when the method takes an argument, so one handler can read
 /// `sender.input` and pick off the digit — avoids nine near-identical
 /// `@objc` trampolines.
+/// Path actions offered on a terminal text selection (§3 of the
+/// files-panel improvements): both resolve the selected text over the
+/// session's per-host file bridge, so they behave identically on all
+/// four transports.
+enum TesseraTerminalSelectionPathAction {
+    case quickLook
+    case reveal
+}
+
 final class TesseraTerminalContainer: UIView {
 
     /// The hosted SwiftTerm view. Pinned to the container's bounds
@@ -79,18 +88,66 @@ final class TesseraTerminalContainer: UIView {
     /// ⌘[/⌘] switcher chords ride). nil means the chord is a no-op.
     var onOpenSettings: (() -> Void)?
 
+    /// Invoked when ⌘⇧A fires. Registered on the terminal container because
+    /// SwiftTerm owns first responder while a session is active, so the
+    /// SwiftUI-level shortcut alone cannot reliably receive the chord.
+    var onOpenAgentCenter: (() -> Void)?
+
+    /// Invoked when ⌘⇧E fires — toggles the Remote Files panel. Rides
+    /// the same ⌘⇧+letter path as the switcher chords (Shift doesn't
+    /// remap the base char, so the command matches from an ancestor
+    /// even while SwiftTerm holds first responder). nil = no-op.
+    var onFilesShortcut: (() -> Void)?
+
+    /// Invoked when the user picks a path action from the selection
+    /// edit menu ("Quick Look" / "Reveal in Files"). Carries the raw
+    /// selected text; the owner normalizes and resolves it over the
+    /// file bridge. nil hides both items (see canPerformAction).
+    var onSelectionPathAction: ((TesseraTerminalSelectionPathAction, String) -> Void)?
+
     /// ID of the TerminalTheme last installed via `installColors`. Cached so
     /// `TerminalSurfaceBound.applyAppearance` only re-paints the canvas + ANSI
     /// palette when the user actually picks a different theme — avoids a full
     /// repaint on every font-size or cursor-blink tweak in updateUIView.
     var appliedThemeID: String?
     var appliedScrollbackLines: Int?
+    /// Whether the canvas was last configured transparent (background-picture
+    /// mode) — cached like `appliedThemeID` so applyAppearance only repaints
+    /// when the on/off state actually flips.
+    var appliedTransparentCanvas: Bool?
 
     /// Default terminal colors reported for OSC 10/11 queries and used
     /// for iTerm-style minimum contrast adjustment.
     var terminalDefaultBackgroundRGB = 0x000000
     var terminalDefaultForegroundRGB = 0xD4D4D4
     var terminalMinimumContrast = 0.30
+
+    /// Scroll-only hit-testing for the mosh pane-scrollback overlay: the
+    /// overlay must scroll natively (its own UIScrollView receives the
+    /// trackpad pan) while every click/tap keeps falling through to the
+    /// live shared surface underneath, exactly as when the overlay was
+    /// hit-test-disabled entirely. `nil` events are treated as non-scroll
+    /// on purpose — passing through is the conservative direction (worst
+    /// case a scroll also falls through and rides the bridge path).
+    var passthroughNonScrollHits = false
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        if passthroughNonScrollHits {
+            if event?.type != .scroll { return nil }
+            // Non-scrollable content can't move under a native pan (bounces
+            // off, offset pinned), so no didScroll would ever fire and the
+            // overlay's boundary logic would starve — every scroll over the
+            // pane would be dead in both directions. Fall through to the
+            // shared surface's bridge path instead: it fetches deeper at
+            // the top and dismisses at the bottom, and once a fetch grows
+            // the content past one screen the native path takes over on
+            // the next gesture.
+            if terminalView.contentSize.height <= terminalView.bounds.height + 0.5 {
+                return nil
+            }
+        }
+        return super.hitTest(point, with: event)
+    }
 
     override init(frame: CGRect) {
         self.terminalView = TerminalView(frame: .zero)
@@ -103,6 +160,18 @@ final class TesseraTerminalContainer: UIView {
             terminalView.trailingAnchor.constraint(equalTo: trailingAnchor),
             terminalView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+
+        // §3 selection path actions. SwiftTerm rebuilds its menu items on
+        // every presentation, so the fork exposes `additionalMenuItems`
+        // (appended each show). Per-presentation availability is gated in
+        // canPerformAction below: UIKit validates each item against the
+        // responder chain, and SwiftTerm's own canPerformAction returns
+        // false for foreign selectors, so the walk lands here — the same
+        // mechanism the tmux key commands ride (see the class comment).
+        terminalView.additionalMenuItems = [
+            UIMenuItem(title: "Quick Look", action: #selector(selectionQuickLook(_:))),
+            UIMenuItem(title: "Reveal in Files", action: #selector(selectionRevealInFiles(_:))),
+        ]
     }
 
     required init?(coder: NSCoder) {
@@ -182,6 +251,22 @@ final class TesseraTerminalContainer: UIView {
                          modifierFlags: .command,
                          action: #selector(openSettings))
         )
+
+        let agentCenterCommand = UIKeyCommand(
+            input: "a",
+            modifierFlags: [.command, .shift],
+            action: #selector(openAgentCenter)
+        )
+        agentCenterCommand.wantsPriorityOverSystemBehavior = true
+        commands.append(agentCenterCommand)
+
+        // ⌘⇧E → toggle the Remote Files panel. Always on, like find and
+        // the switcher — cwd-following handles tmux/non-tmux internally.
+        let filesCommand = UIKeyCommand(input: "e",
+                                        modifierFlags: [.command, .shift],
+                                        action: #selector(filesToggle))
+        filesCommand.wantsPriorityOverSystemBehavior = true
+        commands.append(filesCommand)
 
         if tmuxShortcutsEnabled {
             let splitPaneHorizontalCommand = UIKeyCommand(input: "d",
@@ -283,9 +368,36 @@ final class TesseraTerminalContainer: UIView {
             return onSwitcherShortcut != nil
         case #selector(openSettings):
             return onOpenSettings != nil
+        case #selector(openAgentCenter):
+            return onOpenAgentCenter != nil
+        case #selector(filesToggle):
+            return onFilesShortcut != nil
+        case #selector(selectionQuickLook(_:)),
+             #selector(selectionRevealInFiles(_:)):
+            // Only when the selection plausibly IS a path — everyday
+            // copy flows must not grow menu clutter. The real existence
+            // check (bridge stat) runs when the action fires.
+            guard onSelectionPathAction != nil,
+                  terminalView.selectionActive,
+                  let text = terminalView.getSelection() else { return false }
+            return RemotePathResolver.isPlausiblePath(text)
         default:
             return super.canPerformAction(action, withSender: sender)
         }
+    }
+
+    @objc private func filesToggle() {
+        onFilesShortcut?()
+    }
+
+    @objc private func selectionQuickLook(_ sender: Any?) {
+        guard let text = terminalView.getSelection() else { return }
+        onSelectionPathAction?(.quickLook, text)
+    }
+
+    @objc private func selectionRevealInFiles(_ sender: Any?) {
+        guard let text = terminalView.getSelection() else { return }
+        onSelectionPathAction?(.reveal, text)
     }
 
     @objc private func tmuxNewWindow() {
@@ -361,6 +473,10 @@ final class TesseraTerminalContainer: UIView {
 
     @objc private func openSettings() {
         onOpenSettings?()
+    }
+
+    @objc private func openAgentCenter() {
+        onOpenAgentCenter?()
     }
 
 }
@@ -1042,15 +1158,25 @@ enum TesseraTerminalHardwareKey {
 }
 
 /// Converts SwiftTerm's enhanced keyboard encodings back to the legacy bytes
-/// readline-oriented shells expect when we are at the shell prompt.
+/// readline-oriented shells and terminal apps expect.
 enum TerminalInputNormalizer {
-    static func normalizeNormalBufferInput(_ data: ArraySlice<UInt8>) -> [UInt8] {
-        normalizeCompleteInput(Array(data))
+    static func normalizeInput(
+        _ data: ArraySlice<UInt8>,
+        naturalTextEditingEnabled: Bool = true,
+        commandKeyActive: Bool = false
+    ) -> [UInt8] {
+        normalizeCompleteInput(
+            Array(data),
+            naturalTextEditingEnabled: naturalTextEditingEnabled,
+            commandKeyActive: commandKeyActive
+        )
     }
 
-    static func normalizeNormalBufferInput(
+    static func normalizeInput(
         _ data: ArraySlice<UInt8>,
-        pending: inout [UInt8]
+        pending: inout [UInt8],
+        naturalTextEditingEnabled: Bool = true,
+        commandKeyActive: Bool = false
     ) -> [UInt8] {
         var bytes = pending
         bytes.append(contentsOf: data)
@@ -1060,6 +1186,22 @@ enum TerminalInputNormalizer {
         var index = 0
 
         while index < bytes.count {
+            if naturalTextEditingEnabled,
+               commandKeyActive,
+               isRawBackspaceByte(bytes[index]) {
+                output.append(0x15)
+                index += 1
+                continue
+            }
+
+            if naturalTextEditingEnabled,
+               commandKeyActive,
+               let commandMovement = naturalCommandEscapeBytes(in: bytes, startingAt: index) {
+                output.append(contentsOf: commandMovement.bytes)
+                index = commandMovement.endIndex + 1
+                continue
+            }
+
             guard bytes[index] == 0x1B,
                   index + 1 < bytes.count,
                   bytes[index + 1] == 0x5B
@@ -1081,22 +1223,53 @@ enum TerminalInputNormalizer {
             }
 
             let sequence = ArraySlice(bytes[index...finalIndex])
-            output.append(contentsOf: normalizeCompleteInput(sequence))
+            output.append(contentsOf: normalizeCompleteInput(
+                sequence,
+                naturalTextEditingEnabled: naturalTextEditingEnabled,
+                commandKeyActive: commandKeyActive
+            ))
             index = finalIndex + 1
         }
 
         return output
     }
 
-    private static func normalizeCompleteInput(_ data: ArraySlice<UInt8>) -> [UInt8] {
-        legacyControlBytes(forExactCSIu: data)
-            ?? legacyOptionArrowBytes(forExactCSI: data)
-            ?? legacyOptionBackspaceBytes(forExactCSIu: data)
+    private static func normalizeCompleteInput(
+        _ data: ArraySlice<UInt8>,
+        naturalTextEditingEnabled: Bool,
+        commandKeyActive: Bool
+    ) -> [UInt8] {
+        if naturalTextEditingEnabled,
+           commandKeyActive,
+           let commandMovement = naturalCommandEscapeBytes(forExactInput: data) {
+            return commandMovement
+        }
+
+        if naturalTextEditingEnabled,
+           commandKeyActive,
+           data.count == 1,
+           let byte = data.first,
+           isRawBackspaceByte(byte) {
+            return [0x15]
+        }
+
+        return legacyControlBytes(forExactCSIu: data)
+            ?? (naturalTextEditingEnabled
+                ? naturalTextEditingBytes(forExactCSI: data, commandKeyActive: commandKeyActive)
+                : nil)
             ?? Array(data)
     }
 
-    private static func normalizeCompleteInput(_ bytes: [UInt8]) -> [UInt8] {
-        normalizeCompleteInput(bytes[...])
+    private static func normalizeCompleteInput(
+        _ bytes: [UInt8],
+        naturalTextEditingEnabled: Bool,
+        commandKeyActive: Bool
+    ) -> [UInt8] {
+        normalizeCompleteInput(
+            bytes[...],
+            naturalTextEditingEnabled: naturalTextEditingEnabled,
+            commandKeyActive: commandKeyActive
+        )
     }
 
     private static func legacyControlBytes(forExactCSIu data: ArraySlice<UInt8>) -> [UInt8]? {
@@ -1124,39 +1297,136 @@ enum TerminalInputNormalizer {
         return [byte]
     }
 
-    private static func legacyOptionArrowBytes(forExactCSI data: ArraySlice<UInt8>) -> [UInt8]? {
-        guard let sequence = parseExactCSI(data),
-              sequence.final == 0x44 || sequence.final == 0x43,
-              sequence.leadingNumber == 1,
-              let modifier = sequence.modifier,
-              modifier.value == 3
-        else { return nil }
+    private static func naturalTextEditingBytes(
+        forExactCSI data: ArraySlice<UInt8>,
+        commandKeyActive: Bool
+    ) -> [UInt8]? {
+        guard let sequence = parseExactCSI(data) else { return nil }
 
-        let eventType = parseEventType(in: sequence.body, afterModifierFieldEndingAt: modifier.endIndex)
-        if eventType == 3 {
-            return []
+        switch sequence.final {
+        case 0x43, 0x44: // right / left arrow
+            if commandKeyActive,
+               let bytes = naturalCommandArrowBytes(for: sequence) {
+                return bytes
+            }
+            return naturalArrowBytes(for: sequence)
+        case 0x75: // CSI u
+            return naturalCSIuBytes(for: sequence)
+        default:
+            return nil
         }
-        guard eventType == nil || eventType == 1 || eventType == 2 else { return nil }
-
-        // readline's default macOS-compatible word movement bindings.
-        return sequence.final == 0x44 ? [0x1B, 0x62] : [0x1B, 0x66]
     }
 
-    private static func legacyOptionBackspaceBytes(forExactCSIu data: ArraySlice<UInt8>) -> [UInt8]? {
-        guard let sequence = parseExactCSI(data),
-              sequence.final == 0x75,
-              sequence.leadingNumber == 127 || sequence.leadingNumber == 8,
-              let modifier = sequence.modifier,
-              modifier.value == 3
+    private static func naturalCommandEscapeBytes(forExactInput data: ArraySlice<UInt8>) -> [UInt8]? {
+        let bytes = Array(data)
+        guard let match = naturalCommandEscapeBytes(in: bytes, startingAt: 0),
+              match.endIndex == bytes.count - 1
+        else { return nil }
+        return match.bytes
+    }
+
+    private static func naturalCommandEscapeBytes(
+        in bytes: [UInt8],
+        startingAt index: Int
+    ) -> (endIndex: Int, bytes: [UInt8])? {
+        guard index + 1 < bytes.count,
+              bytes[index] == 0x1B
         else { return nil }
 
-        let eventType = parseEventType(in: sequence.body, afterModifierFieldEndingAt: modifier.endIndex)
+        switch bytes[index + 1] {
+        case 0x62: // ESC b, SwiftTerm's option-left fallback.
+            return (index + 1, [0x01])
+        case 0x66: // ESC f, SwiftTerm's option-right fallback.
+            return (index + 1, [0x05])
+        case 0x4F: // SS3 application-cursor arrows.
+            guard index + 2 < bytes.count,
+                  let movement = commandLineMovementBytes(forArrowFinal: bytes[index + 2])
+            else { return nil }
+            return (index + 2, movement)
+        default:
+            return nil
+        }
+    }
+
+    private static func naturalArrowBytes(for sequence: CSISequence) -> [UInt8]? {
+        guard sequence.leadingNumber == 1,
+              let modifier = sequence.modifier
+        else { return nil }
+
+        let bytes: [UInt8]
+        switch modifier.value {
+        case 3:
+            // Option-left/right: readline word movement.
+            bytes = sequence.final == 0x44 ? [0x1B, 0x62] : [0x1B, 0x66]
+        case 9:
+            // Command-left/right: beginning/end of line.
+            bytes = sequence.final == 0x44 ? [0x01] : [0x05]
+        default:
+            return nil
+        }
+
+        return bytesForHandledEvent(in: sequence, afterFieldEndingAt: modifier.endIndex, bytes: bytes)
+    }
+
+    private static func naturalCommandArrowBytes(for sequence: CSISequence) -> [UInt8]? {
+        guard let bytes = commandLineMovementBytes(forArrowFinal: sequence.final) else { return nil }
+
+        if sequence.body.isEmpty {
+            return bytes
+        }
+
+        guard sequence.leadingNumber == 1,
+              let modifier = sequence.modifier
+        else { return nil }
+        return bytesForHandledEvent(in: sequence, afterFieldEndingAt: modifier.endIndex, bytes: bytes)
+    }
+
+    private static func commandLineMovementBytes(forArrowFinal final: UInt8) -> [UInt8]? {
+        switch final {
+        case 0x44:
+            return [0x01]
+        case 0x43:
+            return [0x05]
+        default:
+            return nil
+        }
+    }
+
+    private static func naturalCSIuBytes(for sequence: CSISequence) -> [UInt8]? {
+        guard sequence.leadingNumber == 127 || sequence.leadingNumber == 8,
+              let modifier = sequence.modifier
+        else { return nil }
+
+        let bytes: [UInt8]
+        switch modifier.value {
+        case 3:
+            // Option-backspace: delete word left.
+            bytes = [0x1B, 0x7F]
+        case 9:
+            // Command-backspace: delete to beginning of line.
+            bytes = [0x15]
+        default:
+            return nil
+        }
+
+        return bytesForHandledEvent(in: sequence, afterFieldEndingAt: modifier.endIndex, bytes: bytes)
+    }
+
+    private static func bytesForHandledEvent(
+        in sequence: CSISequence,
+        afterFieldEndingAt index: Int,
+        bytes: [UInt8]
+    ) -> [UInt8]? {
+        let eventType = parseEventType(in: sequence.body, afterModifierFieldEndingAt: index)
         if eventType == 3 {
             return []
         }
         guard eventType == nil || eventType == 1 || eventType == 2 else { return nil }
+        return bytes
+    }
 
-        return [0x1B, 0x7F]
+    private static func isRawBackspaceByte(_ byte: UInt8) -> Bool {
+        byte == 0x7F || byte == 0x08
     }
 
     private struct CSISequence {

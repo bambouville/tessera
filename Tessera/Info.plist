@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- This file is merged with the generated Info.plist via
+	     INFOPLIST_FILE (GENERATE_INFOPLIST_FILE stays YES). The two
+	     file-sharing booleans live HERE, not as INFOPLIST_KEY_* build
+	     settings: Xcode dropped INFOPLIST_KEY_UIFileSharingEnabled
+	     from the built product (while honoring the
+	     LSSupportsOpeningDocumentsInPlace one), and Files.app lists
+	     the app under On My iPad only when BOTH keys are true. -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.bambouville.TesseraApp.share-inbox</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>tessera</string>
+			</array>
+		</dict>
+	</array>
+	<!-- Single-scene on purpose (manifest declared here; the
+	     INFOPLIST_KEY_UIApplicationSceneManifest_Generation build
+	     setting is removed): sessions live in ContentView @State and
+	     every scene persists to the one shared restore document. With
+	     multiple scenes enabled, iPadOS spawned a NEW window per
+	     share-in, whose fresh ContentView re-restored every host —
+	     duplicate concurrent mosh bootstraps overloaded hosts (exec
+	     channel open timeouts) and the scenes' persists ping-ponged
+	     the restore document into duplicate snapshots. Multi-window
+	     needs sessions hoisted to a process-wide store first. -->
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+	</dict>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Image</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.image</string>
+				<string>public.png</string>
+				<string>public.jpeg</string>
+				<string>public.heic</string>
+				<string>public.heif</string>
+				<string>com.compuserve.gif</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>File</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.data</string>
+				<string>public.content</string>
+				<string>public.folder</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

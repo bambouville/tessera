@@ -220,77 +220,228 @@ final class AccessoryChipEncoderTests: XCTestCase {
 }
 
 final class TerminalInputNormalizerTests: XCTestCase {
+    private func normalize(
+        _ bytes: [UInt8],
+        enabled: Bool = true,
+        commandKeyActive: Bool = false
+    ) -> [UInt8] {
+        TerminalInputNormalizer.normalizeInput(
+            bytes[...],
+            naturalTextEditingEnabled: enabled,
+            commandKeyActive: commandKeyActive
+        )
+    }
+
+    private func normalize(
+        _ bytes: [UInt8],
+        pending: inout [UInt8],
+        enabled: Bool = true,
+        commandKeyActive: Bool = false
+    ) -> [UInt8] {
+        TerminalInputNormalizer.normalizeInput(
+            bytes[...],
+            pending: &pending,
+            naturalTextEditingEnabled: enabled,
+            commandKeyActive: commandKeyActive
+        )
+    }
+
     func test_ctrlCCSIuBecomesETX() {
         XCTAssertEqual(
-            TerminalInputNormalizer.normalizeNormalBufferInput([0x1B, 0x5B, 0x39, 0x39, 0x3B, 0x35, 0x75][...]),
+            normalize([0x1B, 0x5B, 0x39, 0x39, 0x3B, 0x35, 0x75]),
             [0x03]
         )
     }
 
     func test_ctrlTabCSIuBecomesTab() {
         XCTAssertEqual(
-            TerminalInputNormalizer.normalizeNormalBufferInput([0x1B, 0x5B, 0x39, 0x3B, 0x35, 0x75][...]),
+            normalize([0x1B, 0x5B, 0x39, 0x3B, 0x35, 0x75]),
             [0x09]
         )
     }
 
     func test_ctrlCSIuReleaseIsDropped() {
         XCTAssertEqual(
-            TerminalInputNormalizer.normalizeNormalBufferInput([0x1B, 0x5B, 0x39, 0x39, 0x3B, 0x35, 0x3A, 0x33, 0x75][...]),
+            normalize([0x1B, 0x5B, 0x39, 0x39, 0x3B, 0x35, 0x3A, 0x33, 0x75]),
             []
         )
     }
 
     func test_optionArrowsBecomeReadlineWordMovement() {
         XCTAssertEqual(
-            TerminalInputNormalizer.normalizeNormalBufferInput([0x1B, 0x5B, 0x31, 0x3B, 0x33, 0x44][...]),
+            normalize([0x1B, 0x5B, 0x31, 0x3B, 0x33, 0x44]),
             [0x1B, 0x62]
         )
         XCTAssertEqual(
-            TerminalInputNormalizer.normalizeNormalBufferInput([0x1B, 0x5B, 0x31, 0x3B, 0x33, 0x43][...]),
+            normalize([0x1B, 0x5B, 0x31, 0x3B, 0x33, 0x43]),
             [0x1B, 0x66]
         )
     }
 
     func test_optionArrowRepeatBecomesReadlineWordMovement() {
         XCTAssertEqual(
-            TerminalInputNormalizer.normalizeNormalBufferInput([0x1B, 0x5B, 0x31, 0x3B, 0x33, 0x3A, 0x32, 0x44][...]),
+            normalize([0x1B, 0x5B, 0x31, 0x3B, 0x33, 0x3A, 0x32, 0x44]),
             [0x1B, 0x62]
         )
     }
 
     func test_optionArrowReleaseIsDropped() {
         XCTAssertEqual(
-            TerminalInputNormalizer.normalizeNormalBufferInput([0x1B, 0x5B, 0x31, 0x3B, 0x33, 0x3A, 0x33, 0x44][...]),
+            normalize([0x1B, 0x5B, 0x31, 0x3B, 0x33, 0x3A, 0x33, 0x44]),
             []
         )
     }
 
     func test_optionBackspaceBecomesReadlineBackwardKillWord() {
         XCTAssertEqual(
-            TerminalInputNormalizer.normalizeNormalBufferInput([0x1B, 0x5B, 0x31, 0x32, 0x37, 0x3B, 0x33, 0x75][...]),
+            normalize([0x1B, 0x5B, 0x31, 0x32, 0x37, 0x3B, 0x33, 0x75]),
             [0x1B, 0x7F]
         )
     }
 
     func test_optionBackspaceControlHCSIuBecomesReadlineBackwardKillWord() {
         XCTAssertEqual(
-            TerminalInputNormalizer.normalizeNormalBufferInput([0x1B, 0x5B, 0x38, 0x3B, 0x33, 0x75][...]),
+            normalize([0x1B, 0x5B, 0x38, 0x3B, 0x33, 0x75]),
             [0x1B, 0x7F]
         )
     }
 
     func test_optionBackspaceReleaseIsDropped() {
         XCTAssertEqual(
-            TerminalInputNormalizer.normalizeNormalBufferInput([0x1B, 0x5B, 0x31, 0x32, 0x37, 0x3B, 0x33, 0x3A, 0x33, 0x75][...]),
+            normalize([0x1B, 0x5B, 0x31, 0x32, 0x37, 0x3B, 0x33, 0x3A, 0x33, 0x75]),
             []
         )
     }
 
     func test_optionBackspaceControlHReleaseIsDropped() {
         XCTAssertEqual(
-            TerminalInputNormalizer.normalizeNormalBufferInput([0x1B, 0x5B, 0x38, 0x3B, 0x33, 0x3A, 0x33, 0x75][...]),
+            normalize([0x1B, 0x5B, 0x38, 0x3B, 0x33, 0x3A, 0x33, 0x75]),
             []
+        )
+    }
+
+    func test_commandArrowsBecomeReadlineLineMovement() {
+        XCTAssertEqual(
+            normalize([0x1B, 0x5B, 0x31, 0x3B, 0x39, 0x44]),
+            [0x01]
+        )
+        XCTAssertEqual(
+            normalize([0x1B, 0x5B, 0x31, 0x3B, 0x39, 0x43]),
+            [0x05]
+        )
+    }
+
+    func test_commandArrowRepeatAndRelease() {
+        XCTAssertEqual(
+            normalize([0x1B, 0x5B, 0x31, 0x3B, 0x39, 0x3A, 0x32, 0x43]),
+            [0x05]
+        )
+        XCTAssertEqual(
+            normalize([0x1B, 0x5B, 0x31, 0x3B, 0x39, 0x3A, 0x33, 0x43]),
+            []
+        )
+    }
+
+    func test_commandActivePlainArrowsBecomeReadlineLineMovement() {
+        XCTAssertEqual(
+            normalize([0x1B, 0x5B, 0x44], commandKeyActive: true),
+            [0x01]
+        )
+        XCTAssertEqual(
+            normalize([0x1B, 0x5B, 0x43], commandKeyActive: true),
+            [0x05]
+        )
+    }
+
+    func test_commandActiveApplicationCursorArrowsBecomeReadlineLineMovement() {
+        XCTAssertEqual(
+            normalize([0x1B, 0x4F, 0x44], commandKeyActive: true),
+            [0x01]
+        )
+        XCTAssertEqual(
+            normalize([0x1B, 0x4F, 0x43], commandKeyActive: true),
+            [0x05]
+        )
+    }
+
+    func test_commandActiveSwiftTermOptionArrowFallbackBecomesLineMovement() {
+        XCTAssertEqual(
+            normalize([0x1B, 0x62], commandKeyActive: true),
+            [0x01]
+        )
+        XCTAssertEqual(
+            normalize([0x1B, 0x66], commandKeyActive: true),
+            [0x05]
+        )
+    }
+
+    func test_commandActiveEnhancedOptionArrowsBecomeLineMovement() {
+        XCTAssertEqual(
+            normalize([0x1B, 0x5B, 0x31, 0x3B, 0x33, 0x44], commandKeyActive: true),
+            [0x01]
+        )
+        XCTAssertEqual(
+            normalize([0x1B, 0x5B, 0x31, 0x3B, 0x33, 0x43], commandKeyActive: true),
+            [0x05]
+        )
+    }
+
+    func test_commandActiveRawBackspaceBecomesReadlineLineDiscard() {
+        XCTAssertEqual(
+            normalize([0x7F], commandKeyActive: true),
+            [0x15]
+        )
+        XCTAssertEqual(
+            normalize([0x08], commandKeyActive: true),
+            [0x15]
+        )
+    }
+
+    func test_commandBackspaceBecomesReadlineLineDiscard() {
+        XCTAssertEqual(
+            normalize([0x1B, 0x5B, 0x31, 0x32, 0x37, 0x3B, 0x39, 0x75]),
+            [0x15]
+        )
+        XCTAssertEqual(
+            normalize([0x1B, 0x5B, 0x38, 0x3B, 0x39, 0x75]),
+            [0x15]
+        )
+    }
+
+    func test_commandBackspaceReleaseIsDropped() {
+        XCTAssertEqual(
+            normalize([0x1B, 0x5B, 0x31, 0x32, 0x37, 0x3B, 0x39, 0x3A, 0x33, 0x75]),
+            []
+        )
+    }
+
+    func test_naturalTextEditingCanBeDisabled() {
+        let sequences: [[UInt8]] = [
+            [0x1B, 0x5B, 0x31, 0x3B, 0x33, 0x44],
+            [0x1B, 0x5B, 0x31, 0x3B, 0x33, 0x43],
+            [0x1B, 0x5B, 0x31, 0x32, 0x37, 0x3B, 0x33, 0x75],
+            [0x1B, 0x5B, 0x31, 0x3B, 0x39, 0x44],
+            [0x1B, 0x5B, 0x31, 0x3B, 0x39, 0x43],
+            [0x1B, 0x5B, 0x31, 0x32, 0x37, 0x3B, 0x39, 0x75],
+            [0x1B, 0x5B, 0x44],
+            [0x1B, 0x5B, 0x43],
+            [0x1B, 0x4F, 0x44],
+            [0x1B, 0x4F, 0x43],
+            [0x1B, 0x62],
+            [0x1B, 0x66],
+            [0x7F],
+            [0x08],
+        ]
+
+        for bytes in sequences {
+            XCTAssertEqual(normalize(bytes, enabled: false, commandKeyActive: true), bytes)
+        }
+    }
+
+    func test_disabledNaturalTextEditingStillNormalizesControlCSIu() {
+        XCTAssertEqual(
+            normalize([0x1B, 0x5B, 0x39, 0x39, 0x3B, 0x35, 0x75], enabled: false),
+            [0x03]
         )
     }
 
@@ -298,11 +449,11 @@ final class TerminalInputNormalizerTests: XCTestCase {
         var pending: [UInt8] = []
 
         XCTAssertEqual(
-            TerminalInputNormalizer.normalizeNormalBufferInput([0x1B, 0x5B, 0x38][...], pending: &pending),
+            normalize([0x1B, 0x5B, 0x38], pending: &pending),
             []
         )
         XCTAssertEqual(
-            TerminalInputNormalizer.normalizeNormalBufferInput([0x3B, 0x33, 0x75][...], pending: &pending),
+            normalize([0x3B, 0x33, 0x75], pending: &pending),
             [0x1B, 0x7F]
         )
         XCTAssertTrue(pending.isEmpty)
@@ -312,11 +463,11 @@ final class TerminalInputNormalizerTests: XCTestCase {
         var pending: [UInt8] = []
 
         XCTAssertEqual(
-            TerminalInputNormalizer.normalizeNormalBufferInput([0x1B, 0x5B, 0x38][...], pending: &pending),
+            normalize([0x1B, 0x5B, 0x38], pending: &pending),
             []
         )
         XCTAssertEqual(
-            TerminalInputNormalizer.normalizeNormalBufferInput([0x3B, 0x33, 0x3A, 0x33, 0x75][...], pending: &pending),
+            normalize([0x3B, 0x33, 0x3A, 0x33, 0x75], pending: &pending),
             []
         )
         XCTAssertTrue(pending.isEmpty)
@@ -326,7 +477,16 @@ final class TerminalInputNormalizerTests: XCTestCase {
         let bytes: [UInt8] = [0x1B, 0x5B, 0x39, 0x39, 0x3B, 0x36, 0x75]
 
         XCTAssertEqual(
-            TerminalInputNormalizer.normalizeNormalBufferInput(bytes[...]),
+            normalize(bytes),
+            bytes
+        )
+    }
+
+    func test_unhandledCommandArrowIsPreserved() {
+        let bytes: [UInt8] = [0x1B, 0x5B, 0x31, 0x3B, 0x39, 0x41]
+
+        XCTAssertEqual(
+            normalize(bytes),
             bytes
         )
     }
@@ -335,7 +495,7 @@ final class TerminalInputNormalizerTests: XCTestCase {
         let bytes = Array("hello".utf8)
 
         XCTAssertEqual(
-            TerminalInputNormalizer.normalizeNormalBufferInput(bytes[...]),
+            normalize(bytes),
             bytes
         )
     }

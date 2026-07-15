@@ -28,8 +28,11 @@ import PortForwarding
 public final class SSHSession: ObservableObject, TerminalSession {
 
     public let host: Host
-    private let requireBiometric: Bool
-    private let isSecureEnclave: Bool
+    // Internal (not private) so the session view can hand the same
+    // auth-gating flags to the per-host FileBridge, which reuses this
+    // session's credential resolution for its own SSH connection.
+    let requireBiometric: Bool
+    let isSecureEnclave: Bool
 
     /// Owns the live `PortForwarder` instances for this session's host.
     /// SessionView reads it for the top-bar chip; TunnelsRegistry
@@ -39,6 +42,12 @@ public final class SSHSession: ObservableObject, TerminalSession {
 
     @Published public private(set) var state: SessionState = .idle
     @Published public private(set) var detectedOSHint: String?
+
+    // TerminalSession cwd/injection surface — see the protocol docs.
+    // Published: the Upload sheet's host rows refresh live when a cwd
+    // arrives (tmux pane metadata lands seconds after a reattach).
+    @Published public var remoteWorkingDirectory: String?
+    @Published public var pendingPathInjection: String?
 
     /// Set by the host key validator when the server's key is unknown
     /// or has changed. ContentView presents `HostKeyVerificationView`
@@ -71,6 +80,9 @@ public final class SSHSession: ObservableObject, TerminalSession {
 
     private var runTask: Task<Void, Never>?
     private var client: SSHClient?
+    /// Bastion clients when the host connects through a jump chain,
+    /// outermost first. Closed explicitly in run()'s epilogues.
+    private var upstreamClients: [SSHClient] = []
 
     public init(
         host: Host,
@@ -134,7 +146,7 @@ public final class SSHSession: ObservableObject, TerminalSession {
         // Resume any pending host key verification with rejection
         // so the CheckedContinuation doesn't leak.
         if let pending = pendingHostKeyVerification {
-            pending.continuation.resume(returning: false)
+            pending.reject()
             pendingHostKeyVerification = nil
         }
         client = nil
@@ -150,13 +162,28 @@ public final class SSHSession: ObservableObject, TerminalSession {
     /// process snapshot over an SSH exec channel so no probe bytes are written
     /// into the user's interactive terminal.
     public func detectForegroundProcessNames(rootPID: Int? = nil) async -> [String] {
+        await detectForegroundProcessNamesIfAvailable(rootPID: rootPID) ?? []
+    }
+
+    /// Agent Center needs to distinguish a failed exec-channel probe from a
+    /// successful snapshot containing no agents. Swipe Pad keeps using the
+    /// compatibility wrapper above, where both cases mean “no profile”.
+    public func detectForegroundProcessNamesIfAvailable(
+        rootPID: Int? = nil
+    ) async -> [String]? {
+        await detectForegroundProcessSnapshotIfAvailable(rootPID: rootPID)?.processNames
+    }
+
+    func detectForegroundProcessSnapshotIfAvailable(
+        rootPID: Int? = nil
+    ) async -> SwipePadPlainSSHProcessProbe.Snapshot? {
         guard case .connected = state else {
             SwipePadDiagnostics.log("plain-ssh detect skipped state=\(state)")
-            return []
+            return nil
         }
         guard let client else {
             SwipePadDiagnostics.log("plain-ssh detect skipped connected-without-client")
-            return []
+            return nil
         }
 
         do {
@@ -170,55 +197,75 @@ public final class SSHSession: ObservableObject, TerminalSession {
             )
             let bytes = output.readBytes(length: output.readableBytes) ?? []
             let text = String(decoding: bytes, as: UTF8.self)
-            let names = SwipePadPlainSSHProcessProbe.processNames(from: text)
+            let snapshot = SwipePadPlainSSHProcessProbe.snapshot(from: text)
             SwipePadDiagnostics.log(
-                "plain-ssh detect result candidateCount=\(names.count) bytes=\(bytes.count)"
+                "plain-ssh detect result candidateCount=\(snapshot.processNames.count) bytes=\(bytes.count)"
             )
-            return names
+            return snapshot
         } catch {
             SwipePadDiagnostics.log("plain-ssh detect failed error='\(error)'")
-            return []
+            return nil
         }
+    }
+
+    /// Runs a small, non-interactive command on the already-authenticated
+    /// terminal connection. Agent Center uses this for its read-only hook
+    /// check so opening the surface never creates a second SSH authentication
+    /// attempt or owner-presence prompt.
+    func executeConnectedCommand(_ command: String) async throws -> String {
+        guard case .connected = state, let client else {
+            throw NSError(
+                domain: "Tessera.SSHSession",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "The terminal session is not connected."]
+            )
+        }
+        var output = try await client.executeCommand(
+            command,
+            maxResponseSize: 256 * 1024,
+            mergeStreams: true,
+            inShell: true
+        )
+        let bytes = output.readBytes(length: output.readableBytes) ?? []
+        return String(decoding: bytes, as: UTF8.self)
     }
 
     // MARK: - Connection lifecycle
 
     private func run() async {
-        let capturedHost = host
+        let fallbackHost = host
         let requireBiometric = self.requireBiometric
         let isSecureEnclave = self.isSecureEnclave
         var didConnect = false
         var connectedClient: SSHClient?
+        var connectedChain: EstablishedSSHChain?
         let startedAt = Date()
         do {
             DiagnosticLogStore.appendSSH("connect step=auth-resolve")
-            let authMethod = try await resolveSSHAuthMethod(
-                for: capturedHost,
-                requireBiometric: requireBiometric,
-                isSecureEnclave: isSecureEnclave
-            )
-            DiagnosticLogStore.appendSSH("connect step=ssh-handshake port=\(capturedHost.port)")
-            let endpoint = "\(capturedHost.address):\(capturedHost.port)"
-            let validator = TesseraHostKeyValidator(
-                endpoint: endpoint,
-                prompt: { [weak self] challenge in
-                    await self?.promptForHostKeyVerification(challenge) ?? false
-                }
-            )
-            let client = try await SSHClient.connect(
-                host: capturedHost.address,
-                port: capturedHost.port,
-                authenticationMethod: authMethod,
-                hostKeyValidator: .custom(validator),
-                reconnect: .never
-            )
+            let (chain, connectedHost) = try await withPendingSSHConnectionAttempt {
+                DiagnosticLogStore.appendSSH(
+                    "connect step=ssh-handshake hops=\(fallbackHost.jumpChain.count + 1)"
+                )
+                let chain = try await establishSSHChain(
+                    for: fallbackHost,
+                    requireBiometric: requireBiometric,
+                    isSecureEnclave: isSecureEnclave,
+                    hostKeyPrompt: { [weak self] challenge in
+                        await self?.promptForHostKeyVerification(challenge) ?? false
+                    }
+                )
+                return (chain, chain.resolvedHost)
+            }
+            let client = chain.client
             connectedClient = client
+            connectedChain = chain
             didConnect = true
             DiagnosticLogStore.appendSSH(
-                "connect result=connected durationMs=\(Self.durationMs(since: startedAt)) rules=\(capturedHost.portForwardRules.count)"
+                "connect result=connected durationMs=\(Self.durationMs(since: startedAt)) rules=\(connectedHost.portForwardRules.count)"
             )
             await MainActor.run {
                 self.client = client
+                self.upstreamClients = chain.upstream
                 self.state = .connected
             }
             Task.detached(priority: .utility) { [weak self, client] in
@@ -228,7 +275,7 @@ public final class SSHSession: ObservableObject, TerminalSession {
                 await self?.assignDetectedOSHint(detected)
             }
 
-            let rulesToAttach = capturedHost.portForwardRules
+            let rulesToAttach = connectedHost.portForwardRules
             await MainActor.run {
                 self.portForwarderManager.attach(to: client, rules: rulesToAttach)
             }
@@ -249,9 +296,11 @@ public final class SSHSession: ObservableObject, TerminalSession {
             }
 
             await self.portForwarderManager.detach()
+            await chain.closeAll()
             await MainActor.run {
                 if self.client === client {
                     self.client = nil
+                    self.upstreamClients = []
                 }
                 self.state = .disconnected
             }
@@ -260,9 +309,11 @@ public final class SSHSession: ObservableObject, TerminalSession {
             )
         } catch is CancellationError {
             await self.portForwarderManager.detach()
+            if let connectedChain { await connectedChain.closeAll() }
             await MainActor.run {
                 if let connectedClient, self.client === connectedClient {
                     self.client = nil
+                    self.upstreamClients = []
                 }
                 self.state = .disconnected
             }
@@ -279,9 +330,11 @@ public final class SSHSession: ObservableObject, TerminalSession {
             // — only pre-connect errors (auth failed, host unreachable)
             // deserve the red failed banner.
             if didConnect {
+                if let connectedChain { await connectedChain.closeAll() }
                 await MainActor.run {
                     if let connectedClient, self.client === connectedClient {
                         self.client = nil
+                        self.upstreamClients = []
                     }
                     self.state = .disconnected
                 }

@@ -26,7 +26,8 @@ struct SecuritySettingsView: View {
             SettingsH("security")
 
             ToggleRow(
-                title: "require face id to unlock",
+                title: "require device owner authentication to unlock",
+                subtitle: "Face ID first, with device-passcode fallback",
                 isOn: $appearance.requireFaceIDToUnlock
             )
             .padding(.bottom, 18)
@@ -66,8 +67,8 @@ struct SecuritySettingsView: View {
             .padding(.bottom, 18)
 
             ToggleRow(
-                title: "require biometric for key use",
-                subtitle: "applies per-key; overridden by key settings",
+                title: "authorize key connection bursts",
+                subtitle: "Face ID or passcode; a grant may cover the same endpoint and key for 30 seconds",
                 isOn: $appearance.requireBiometricForKeyUse
             )
         }

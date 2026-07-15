@@ -67,15 +67,35 @@ enum TesseraSchemaV1: VersionedSchema {
 /// rows and re-write the array explicitly instead of relying on lightweight
 /// inference. Until a stage like that exists, the established workaround is to
 /// put new fields on `Identity` (which has no array columns).
+/// V2 adds the standalone `HostJumpLink` join table (jump hosts / ProxyJump).
+///
+/// The three V1 models are **byte-for-byte untouched** — V2 only introduces a
+/// new entity — so V1 referencing the live types still accurately describes
+/// the old shape (step 1 of the recipe above is satisfied without freezing).
+/// A brand-new entity adds no column to `PersistedHost`, so the `[String]`
+/// array trap does not apply and the stage can stay lightweight; the MG1
+/// migration oracle in the integration suite exercises exactly this stage
+/// against a populated V1 store.
+enum TesseraSchemaV2: VersionedSchema {
+    static var versionIdentifier = Schema.Version(2, 0, 0)
+
+    static var models: [any PersistentModel.Type] {
+        [PersistedHost.self, Identity.self, StoredKey.self, HostJumpLink.self]
+    }
+}
+
 enum TesseraMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [TesseraSchemaV1.self]
+        [TesseraSchemaV1.self, TesseraSchemaV2.self]
     }
 
     static var stages: [MigrationStage] {
-        // No migrations yet — V1 is the baseline. The first real schema bump
-        // appends a stage here. See the doc comment above for the procedure.
-        []
+        [
+            .lightweight(
+                fromVersion: TesseraSchemaV1.self,
+                toVersion: TesseraSchemaV2.self
+            )
+        ]
     }
 }
 
@@ -86,7 +106,7 @@ enum TesseraMigrationPlan: SchemaMigrationPlan {
 /// there is exactly one model list + migration plan governing the on-disk store.
 enum TesseraModelContainer {
     /// The destination schema — always the newest `VersionedSchema` in the plan.
-    static let currentSchema = Schema(versionedSchema: TesseraSchemaV1.self)
+    static let currentSchema = Schema(versionedSchema: TesseraSchemaV2.self)
 
     /// Create the container. `inMemory` is for tests / previews; the production
     /// path uses the default on-disk store (`default.store`) — the same URL the

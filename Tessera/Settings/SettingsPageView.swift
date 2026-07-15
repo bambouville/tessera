@@ -6,6 +6,8 @@ struct SettingsPageView: View {
     @Environment(\.designTokens) private var T
     @Environment(SwipePadProfileStore.self) private var swipePadStore
 
+    var onUploadDiagnosticLog: () -> Void = {}
+
     @State private var selectedSection: SettingsSection = .appearance
 
     var body: some View {
@@ -74,6 +76,11 @@ struct SettingsPageView: View {
                         .font(Typography.tesseraMono(size: 12))
                         .foregroundStyle(isSelected ? T.accent : T.fgMuted)
                 }
+                if section == .files {
+                    Image(systemName: "folder")
+                        .font(Typography.tesseraMono(size: 12))
+                        .foregroundStyle(isSelected ? T.accent : T.fgMuted)
+                }
 
                 Text(section.rawValue)
                     .font(Typography.tesseraMono(size: 13))
@@ -98,6 +105,8 @@ struct SettingsPageView: View {
             AppearanceSettingsView()
         case .terminal:
             TerminalSettingsView()
+        case .files:
+            FilesSettingsView()
         case .themes:
             ThemeSettingsView()
         case .keyboard:
@@ -107,7 +116,7 @@ struct SettingsPageView: View {
         case .experimental:
             ExperimentalSettingsView(store: swipePadStore)
         case .diagnostics:
-            DiagnosticsSettingsView()
+            DiagnosticsSettingsView(onUploadLog: onUploadDiagnosticLog)
         case .about:
             AboutSettingsView()
         }
@@ -134,8 +143,9 @@ struct SettingsH: View {
 private enum SettingsSection: String, CaseIterable {
     case appearance
     case terminal
+    case files
     case themes
-    case keyboard
+    case keyboard = "keyboard & input"
     case security
     case experimental
     case diagnostics
@@ -163,6 +173,7 @@ struct DiagnosticLogInfo: Equatable {
 }
 
 enum DiagnosticLogCategory: String {
+    case agentCenter = "AgentCenterDiag"
     case app = "AppDiag"
     case forwarding = "ForwardingDiag"
     case knownHosts = "KnownHostsDiag"
@@ -216,6 +227,10 @@ enum DiagnosticLogStore {
 
     static func appendApp(_ message: @autoclosure () -> String) {
         append(.app, message())
+    }
+
+    static func appendAgentCenter(_ message: @autoclosure () -> String) {
+        append(.agentCenter, message())
     }
 
     static func appendForwarding(_ message: @autoclosure () -> String) {
@@ -404,7 +419,15 @@ enum DiagnosticLogStore {
             state = RateState(windowStart: now, emitted: 0, suppressed: 0)
         }
 
-        let maxEntries = category == .scroll ? 240 : maxEntriesPerSignaturePerWindow
+        let maxEntries: Int
+        switch category {
+        case .agentCenter, .scroll:
+            // Lifecycle/tool transitions and gesture frames are bounded at
+            // their producers. Preserve a complete short repro timeline.
+            maxEntries = 240
+        default:
+            maxEntries = maxEntriesPerSignaturePerWindow
+        }
         guard state.emitted < maxEntries else {
             state.suppressed += 1
             rateStates[signature] = state
@@ -422,7 +445,7 @@ enum DiagnosticLogStore {
         }
 
         switch category {
-        case .app, .forwarding, .knownHosts, .keys, .ssh, .speech:
+        case .agentCenter, .app, .forwarding, .knownHosts, .keys, .ssh, .speech:
             return true
         case .sessionRestore:
             return shouldEmitStandardRestore(message)
@@ -464,6 +487,7 @@ enum DiagnosticLogStore {
             || message.hasPrefix("connect result=")
             || message.hasPrefix("bootstrap begin ")
             || message.hasPrefix("bootstrap success ")
+            || message.hasPrefix("bootstrap retry ")
             || message.hasPrefix("driver connected ")
             || message.hasPrefix("driver finished ")
             || message.hasPrefix("driver transport reachability=")
@@ -499,7 +523,7 @@ enum DiagnosticLogStore {
     }
 
     private static func sanitize(_ message: String) -> String {
-        var sanitized = message
+        var sanitized = SensitiveDataRedactor.redact(message)
             .replacingOccurrences(of: "\r", with: " ")
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\t", with: " ")
@@ -511,7 +535,7 @@ enum DiagnosticLogStore {
         )
         sanitized = replacingMatches(
             in: sanitized,
-            pattern: #"(?i)\b(commandLine|command|preview|payload|summary|target|endpoint|user|address|remoteHost|names|process|profile|session|spec|matchProcess|pane_current_command|path|error)=('.*?'|".*?"|[^\s]+)"#,
+            pattern: #"(?i)\b(commandLine|command|preview|payload|prompt|summary|target|endpoint|user|address|remoteHost|names|process|profile|session|spec|matchProcess|pane_current_command|path|env|environment|error)=('.*?'|".*?"|[^\s]+)"#,
             template: "$1=<redacted>"
         )
         sanitized = replacingMatches(
@@ -536,6 +560,14 @@ enum DiagnosticLogStore {
         )
         return sanitized.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    #if DEBUG
+    /// Exercises the exact diagnostic-file boundary without mutating the
+    /// user's diagnostic log from a unit test.
+    static func sanitizedMessageForTesting(_ message: String) -> String {
+        sanitize(message)
+    }
+    #endif
 
     private static func bounded(_ message: String) -> String {
         guard message.count > maxLineCharacters else {
@@ -589,6 +621,8 @@ private struct DiagnosticsSettingsView: View {
     @AppStorage(DiagnosticLogStore.verboseDiagnosticsDefaultsKey) private var verboseDiagnostics = false
     @AppStorage(DiagnosticLogStore.scrollDiagnosticsDefaultsKey) private var scrollDiagnostics = false
 
+    var onUploadLog: () -> Void
+
     @State private var logInfo = DiagnosticLogStore.info()
 
     var body: some View {
@@ -634,6 +668,13 @@ private struct DiagnosticsSettingsView: View {
                             )
                     }
                     .buttonStyle(.plain)
+                    .disabled(logInfo.isEmpty)
+                    .opacity(logInfo.isEmpty ? 0.45 : 1)
+
+                    Btn("upload log", compact: true) {
+                        onUploadLog()
+                        refresh()
+                    }
                     .disabled(logInfo.isEmpty)
                     .opacity(logInfo.isEmpty ? 0.45 : 1)
 

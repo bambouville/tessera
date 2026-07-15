@@ -37,6 +37,9 @@ typedef void (^MoshBridgeOutputHandler)(NSData *data);
 @property (nonatomic, readonly, getter=isTransportReachable) BOOL transportReachable;
 @property (nonatomic, readonly, getter=isShutdownComplete) BOOL shutdownComplete;
 @property (nonatomic, readonly) BOOL applicationModeCursorKeys;
+/// Testable lifetime invariant: false immediately after `start` initializes
+/// the binary crypto session, and after teardown.
+@property (nonatomic, readonly) BOOL retainsBootstrapKeyMaterial;
 
 - (BOOL)start:(NSError * _Nullable * _Nullable)error;
 - (NSUInteger)tick:(NSError * _Nullable * _Nullable)error;

@@ -102,6 +102,201 @@ final class PaneRenderingTests: XCTestCase {
         XCTAssertTrue(paneFeed.bytes.isEmpty, "output must be dropped while a pane refresh is in flight")
     }
 
+    func test_gridForegroundRefreshCoalescesEachPaneWithoutLosingOutput() {
+        let (controller, sharedFeed, sent) = makeGridController()
+        let paneFeed = ByteSink()
+        controller.setPaneSink(PaneId(11)) { slice in paneFeed.append(contentsOf: slice) }
+        sent.clear()
+
+        controller.prepareForAppInactivity()
+        controller.ingest(Array("%output %11 retained-grid-output\r\n".utf8))
+        XCTAssertTrue(paneFeed.bytes.isEmpty)
+
+        controller.refreshActiveWindowOnForeground()
+        XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).hasPrefix("display-message -p -t %11"))
+        sent.clear()
+        controller.ingest(Array("%begin 0 20 1\r\n%11\t0\t0\r\n%end 0 20 1\r\n".utf8))
+        XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).contains("capture-pane -p -e -N -t %11"))
+        sent.clear()
+        controller.ingest(Array("%begin 0 21 1\r\ngrid viewport\r\n%end 0 21 1\r\n".utf8))
+
+        XCTAssertEqual(paneFeed.chunks.count, 2)
+        XCTAssertEqual(paneFeed.chunks[0], Array("retained-grid-output".utf8))
+        XCTAssertTrue(String(decoding: paneFeed.chunks[1], as: UTF8.self).contains("grid viewport"))
+        XCTAssertTrue(sharedFeed.bytes.isEmpty)
+
+        paneFeed.clear()
+        controller.ingest(Array("%output %11 live-grid-output\r\n".utf8))
+        XCTAssertEqual(paneFeed.bytes, Array("live-grid-output".utf8))
+    }
+
+    func test_gridForegroundRefreshSupersedesOlderPaneCaptureByRequestIdentity() async throws {
+        let (controller, _, sent) = makeGridController()
+        let paneFeed = ByteSink()
+        controller.setPaneSink(PaneId(11)) { slice in paneFeed.append(contentsOf: slice) }
+        sent.clear()
+
+        controller.refreshPane(paneId: PaneId(11), deep: false)
+        sent.clear()
+        controller.ingest(Array("%begin 0 20 1\r\n%11\t0\t0\r\n%end 0 20 1\r\n".utf8))
+        XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).contains("capture-pane"))
+
+        controller.prepareForAppInactivity()
+        controller.ingest(Array("%output %11 retained-after-old-capture\r\n".utf8))
+        controller.refreshActiveWindowOnForeground()
+        sent.clear()
+
+        // The old capture response arrives first. Its request id is stale and
+        // must neither consume retained bytes nor complete the new recovery.
+        controller.ingest(Array("%begin 0 21 1\r\nold viewport\r\n%end 0 21 1\r\n".utf8))
+        XCTAssertTrue(paneFeed.bytes.isEmpty)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).contains("display-message -p -t %11"))
+        sent.clear()
+        controller.ingest(Array("%begin 0 22 1\r\n%11\t0\t0\r\n%end 0 22 1\r\n".utf8))
+        sent.clear()
+        controller.ingest(Array("%begin 0 23 1\r\nnew viewport\r\n%end 0 23 1\r\n".utf8))
+
+        XCTAssertEqual(paneFeed.chunks.count, 2)
+        XCTAssertEqual(paneFeed.chunks[0], Array("retained-after-old-capture".utf8))
+        XCTAssertTrue(String(decoding: paneFeed.chunks[1], as: UTF8.self).contains("new viewport"))
+        XCTAssertFalse(String(decoding: paneFeed.bytes, as: UTF8.self).contains("old viewport"))
+    }
+
+    func test_gridForegroundCaptureFailureRetriesWithoutReopeningLiveOutput() async throws {
+        let (controller, _, sent) = makeGridController()
+        controller.renderRefreshRetryDelay = 0.01
+        let paneFeed = ByteSink()
+        controller.setPaneSink(PaneId(11)) { slice in paneFeed.append(contentsOf: slice) }
+        sent.clear()
+
+        controller.prepareForAppInactivity()
+        controller.ingest(Array("%output %11 retained-grid-retry\r\n".utf8))
+        controller.refreshActiveWindowOnForeground()
+        sent.clear()
+        controller.ingest(Array("%begin 0 20 1\r\nfailed\r\n%error 0 20 1\r\n".utf8))
+        controller.ingest(Array("%output %11 still-gated\r\n".utf8))
+        XCTAssertTrue(paneFeed.bytes.isEmpty)
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).contains("display-message -p -t %11"))
+        sent.clear()
+        controller.ingest(Array("%begin 0 21 1\r\n%11\t0\t0\r\n%end 0 21 1\r\n".utf8))
+        sent.clear()
+        controller.ingest(Array("%begin 0 22 1\r\ngrid recovered\r\n%end 0 22 1\r\n".utf8))
+
+        XCTAssertEqual(
+            paneFeed.chunks.first,
+            Array("retained-grid-retrystill-gated".utf8)
+        )
+        XCTAssertTrue(String(decoding: paneFeed.bytes, as: UTF8.self).contains("grid recovered"))
+    }
+
+    func test_gridForegroundRefreshDeepLoadsNewlyMountedFocusedPane() {
+        let (controller, _, sent) = makeGridController()
+        controller.setPaneSink(PaneId(10)) { _ in }
+        sent.clear()
+
+        controller.prepareForAppInactivity()
+        controller.refreshActiveWindowOnForeground()
+        XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).contains("display-message -p -t %10"))
+        sent.clear()
+        controller.ingest(Array("%begin 0 20 1\r\n%10\t0\t0\t\t\t\t0\t100\r\n%end 0 20 1\r\n".utf8))
+
+        XCTAssertTrue(
+            String(decoding: sent.bytes, as: UTF8.self).contains("capture-pane -p -e -N -S -2000 -t %10"),
+            "a focused pane whose inactive mount skipped deep load must recover its scrollback"
+        )
+    }
+
+    func test_gridForegroundRenderWaitsForOlderBackgroundQuery() async throws {
+        let (controller, _, sent) = makeGridController()
+        let paneFeed = ByteSink()
+        controller.setPaneSink(PaneId(10)) { paneFeed.append(contentsOf: $0) }
+        sent.clear()
+
+        var olderResult: Result<[String], TmuxController.CommandError>?
+        controller.sendBackgroundControlQuery(
+            "display-message -p -t %10 '#{cursor_y}'"
+        ) { olderResult = $0 }
+        XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).contains("#{cursor_y}"))
+        sent.clear()
+
+        controller.prepareForAppInactivity()
+        controller.ingest(Array("%output %10 retained-grid-output\r\n".utf8))
+        controller.refreshActiveWindowOnForeground()
+        XCTAssertEqual(sent.bytes, [], "grid metadata must wait for the older observer reply")
+
+        var rejectedResult: Result<[String], TmuxController.CommandError>?
+        controller.sendBackgroundControlQuery(
+            "display-message -p -t %10 '#{pane_current_command}'"
+        ) { rejectedResult = $0 }
+        guard case .failure(.cancelled)? = rejectedResult else {
+            return XCTFail("new observers must fail fast while grid recovery owns the queue")
+        }
+
+        controller.ingest(Array("%begin 0 20 1\r\n51\r\n%end 0 20 1\r\n".utf8))
+        guard case .success(let lines)? = olderResult else {
+            return XCTFail("the older observer should receive its own result")
+        }
+        XCTAssertEqual(lines, ["51"])
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).contains("display-message -p -t %10"))
+        sent.clear()
+        controller.ingest(Array("%begin 0 21 1\r\n%10\t0\t0\r\n%end 0 21 1\r\n".utf8))
+        controller.ingest(Array("%begin 0 22 1\r\ngrid viewport\r\n%end 0 22 1\r\n".utf8))
+
+        XCTAssertEqual(paneFeed.chunks.first, Array("retained-grid-output".utf8))
+        XCTAssertTrue(String(decoding: paneFeed.bytes, as: UTF8.self).contains("grid viewport"))
+    }
+
+    func test_gridForegroundCompletionCannotReleaseReplacementSharedRefresh() async throws {
+        let (controller, sharedFeed, sent) = makeGridController()
+        controller.setPaneSink(PaneId(10)) { _ in }
+        sent.clear()
+
+        controller.prepareForAppInactivity()
+        controller.ingest(Array("%output %10 retained-grid-output\r\n".utf8))
+        controller.refreshActiveWindowOnForeground()
+        XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).contains("display-message -p -t %10"))
+
+        // The active window collapses to one pane while its grid foreground
+        // metadata is still in flight. The shared surface takes ownership of
+        // the same barrier before SwiftUI dismantles the old pane sink.
+        controller.ingest(Array(
+            "%layout-change @1 b25f,80x24,0,0,10 b25f,80x24,0,0,10 *\r\n".utf8
+        ))
+        controller.resyncRenderedWindowAfterGridCollapse(cols: 80, rows: 24)
+        // PaneGridView dismantles surfaces one at a time through this API.
+        // Removing the last old pane must not release the replacement shared
+        // refresh owner before its authoritative capture lands.
+        controller.setPaneSink(PaneId(10), nil)
+
+        // First response belongs to the obsolete grid request. It must not
+        // release the replacement shared owner or let incremental output paint.
+        controller.ingest(Array("%begin 0 20 1\r\n%10\t0\t0\r\n%end 0 20 1\r\n".utf8))
+        controller.ingest(Array("%output %10 must-stay-gated\r\n".utf8))
+        XCTAssertTrue(sharedFeed.bytes.isEmpty)
+
+        // The shared metadata/capture pair is now authoritative and releases
+        // the barrier only after the full viewport has painted.
+        sent.clear()
+        controller.ingest(Array("%begin 0 21 1\r\n%end 0 21 1\r\n".utf8)) // refresh-client -C
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).contains("display-message -p -t @1"))
+        sent.clear()
+        controller.ingest(Array("%begin 0 22 1\r\n%10\t0\t0\r\n%end 0 22 1\r\n".utf8))
+        XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).contains("capture-pane -p -e -N -t @1"))
+        controller.ingest(Array("%begin 0 23 1\r\nauthoritative shared viewport\r\n%end 0 23 1\r\n".utf8))
+
+        XCTAssertTrue(String(decoding: sharedFeed.bytes, as: UTF8.self).contains("authoritative shared viewport"))
+        controller.ingest(Array("%begin 0 24 1\r\n%10\t0\t0\r\n%end 0 24 1\r\n".utf8))
+        controller.ingest(Array("%begin 0 25 1\r\nauthoritative shared history\r\n%end 0 25 1\r\n".utf8))
+        controller.ingest(Array("%output %10 live-after-shared-recovery\r\n".utf8))
+        XCTAssertTrue(String(decoding: sharedFeed.bytes, as: UTF8.self).contains("live-after-shared-recovery"))
+    }
+
     func test_clearAllPaneSinks_stopsRoutingToSinks() {
         let (controller, _, _) = makeGridController()
         let paneFeed = ByteSink()
@@ -119,8 +314,14 @@ final class PaneRenderingTests: XCTestCase {
 
 private final class ByteSink {
     private(set) var bytes: [UInt8] = []
+    private(set) var chunks: [[UInt8]] = []
     func append<S: Sequence>(contentsOf seq: S) where S.Element == UInt8 {
-        bytes.append(contentsOf: seq)
+        let chunk = Array(seq)
+        chunks.append(chunk)
+        bytes.append(contentsOf: chunk)
     }
-    func clear() { bytes.removeAll(keepingCapacity: true) }
+    func clear() {
+        bytes.removeAll(keepingCapacity: true)
+        chunks.removeAll(keepingCapacity: true)
+    }
 }
