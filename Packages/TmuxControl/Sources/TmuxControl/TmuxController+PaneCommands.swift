@@ -5,6 +5,21 @@ public enum PaneSplitAxis: Sendable {
     case vertical   // tmux `split-window -v` -> stacked []       ; iTerm2 Cmd-Shift-D
 }
 
+/// Semantic keys must stay semantic when tmux's pane application negotiated
+/// an extended keyboard protocol. Sending a literal CR/ESC byte with `-H`
+/// can be interpreted as composer text by modern TUIs instead of Enter/Escape.
+public enum PaneInputKey: Sendable {
+    case enter
+    case escape
+
+    fileprivate var tmuxName: String {
+        switch self {
+        case .enter: "Enter"
+        case .escape: "Escape"
+        }
+    }
+}
+
 @MainActor
 public extension TmuxController {
     func splitActivePane(_ axis: PaneSplitAxis) {
@@ -71,8 +86,38 @@ public extension TmuxController {
     func sendInput(_ bytes: [UInt8], toPane paneId: PaneId) {
         guard mode == .tmuxControl, !bytes.isEmpty else { return }
 
+        inputObserver?(paneId, bytes)
         let hex = bytes.map { String(format: "%02x", $0) }.joined(separator: " ")
         sendControlCommand("send-keys -t \(paneId.description) -H \(hex)")
+    }
+
+    /// Agent Center needs to distinguish local enqueue from tmux accepting
+    /// the pane-targeted input. Agent Center deliberately does not publish the
+    /// ordinary user-input observer here: tmux accepting Return is not proof
+    /// that an agent composer submitted it.
+    func sendInputAcknowledged(_ bytes: [UInt8], toPane paneId: PaneId) async -> Bool {
+        guard mode == .tmuxControl, !bytes.isEmpty else { return false }
+
+        let hex = bytes.map { String(format: "%02x", $0) }.joined(separator: " ")
+        let result = await withCheckedContinuation { continuation in
+            sendControlCommand("send-keys -t \(paneId.description) -H \(hex)") { result in
+                continuation.resume(returning: result)
+            }
+        }
+        guard case .success = result else { return false }
+        return true
+    }
+
+    func sendKeyAcknowledged(_ key: PaneInputKey, toPane paneId: PaneId) async -> Bool {
+        guard mode == .tmuxControl else { return false }
+
+        let result = await withCheckedContinuation { continuation in
+            sendControlCommand("send-keys -t \(paneId.description) \(key.tmuxName)") { result in
+                continuation.resume(returning: result)
+            }
+        }
+        guard case .success = result else { return false }
+        return true
     }
 
     private func sendPaneOperationCommand(_ command: String) {

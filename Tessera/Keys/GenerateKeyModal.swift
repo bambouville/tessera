@@ -10,8 +10,18 @@ struct GenerateKeyModal: View {
 
     @State private var name = ""
     @State private var algorithm: KeyAlgorithm = .ed25519
-    @State private var enclave = false
+    @State private var protectWithUserPresence: Bool
     @State private var errorText: String?
+
+    init(
+        initialProtection: Bool,
+        onClose: @escaping () -> Void,
+        onCreated: @escaping (StoredKey) -> Void
+    ) {
+        self.onClose = onClose
+        self.onCreated = onCreated
+        _protectWithUserPresence = State(initialValue: initialProtection)
+    }
 
     var body: some View {
         ZStack {
@@ -52,13 +62,13 @@ struct GenerateKeyModal: View {
 
                         algorithmCard(
                             algorithm: .ecdsaP256,
-                            title: "ECDSA",
-                            subtitle: "NIST curve"
+                            title: "P-256 Enclave",
+                            subtitle: "device-bound"
                         )
                     }
                 }
 
-                enclaveOptions
+                protectionOptions
 
                 HStack(spacing: 10) {
                     Spacer()
@@ -85,49 +95,46 @@ struct GenerateKeyModal: View {
                 errorText = nil
             }
         }
-        .onChange(of: algorithm) { _, newAlgorithm in
-            if newAlgorithm != .ecdsaP256 {
-                enclave = false
-            }
-        }
     }
 
     @ViewBuilder
-    private var enclaveOptions: some View {
+    private var protectionOptions: some View {
         if algorithm == .ecdsaP256 {
             VStack(spacing: 0) {
                 Rectangle()
                     .fill(T.border)
                     .frame(height: 1)
 
-                ToggleRow(
-                    title: "store in secure enclave",
-                    subtitle: "key never leaves this device",
-                    isOn: $enclave
+                enclaveNote(
+                    "P-256 keys are generated in the Secure Enclave. They cannot be exported or moved to another device. Install a separate recoverable Ed25519 key before relying on this credential."
                 )
                 .padding(.vertical, 12)
-
-                if enclave {
-                    enclaveNote(
-                        "private key never leaves this device. you cannot export or back up this key — losing the device loses the key. tessera's biometric gate still applies if 'require face id per use' is on."
-                    )
-                    .padding(.bottom, 12)
-                }
 
                 Rectangle()
                     .fill(T.border)
                     .frame(height: 1)
             }
             .padding(.top, -2)
-            .padding(.bottom, 20)
         } else {
-            Text("ed25519 keys are stored in the iOS keychain. the enclave option appears when ECDSA is selected.")
+            Text("Ed25519 keys are stored in the iOS Keychain and can be exported as a passphrase-encrypted standard OpenSSH recovery file.")
                 .font(Typography.tesseraMono(size: 11))
                 .foregroundStyle(T.fgDim)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, -2)
-                .padding(.bottom, 20)
         }
+
+        ToggleRow(
+            title: "require biometrics or passcode",
+            subtitle: "Face ID/Touch ID or passcode whenever Tessera accesses this key",
+            isOn: $protectWithUserPresence
+        )
+        .padding(.vertical, 12)
+
+        Text("This protection is enforced by iOS at the key boundary. It is separate from the recovery-file passphrase.")
+            .font(Typography.tesseraMono(size: 10))
+            .foregroundStyle(T.fgDim)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.bottom, 20)
     }
 
     private func algorithmCard(algorithm: KeyAlgorithm, title: String, subtitle: String) -> some View {
@@ -135,9 +142,6 @@ struct GenerateKeyModal: View {
 
         return Button {
             self.algorithm = algorithm
-            if algorithm != .ecdsaP256 {
-                enclave = false
-            }
         } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -170,19 +174,43 @@ struct GenerateKeyModal: View {
         }
 
         do {
+            let protection: KeyStore.KeyProtection = protectWithUserPresence
+                ? .userPresence
+                : .deviceUnlocked
             let stored: StoredKey
             switch algorithm {
             case .ed25519:
-                stored = try KeyStore.generateEd25519(name: trimmedName, context: modelContext)
+                stored = try KeyStore.generateEd25519(
+                    name: trimmedName,
+                    context: modelContext,
+                    protection: protection
+                )
             case .ecdsaP256:
-                stored = try KeyStore.generateP256(name: trimmedName, enclave: enclave)
+                stored = try KeyStore.generateP256(
+                    name: trimmedName,
+                    enclave: true,
+                    protection: protection
+                )
             case .rsa:
                 errorText = "RSA generation is not supported"
                 return
             }
+            stored.requiresBiometric = protectWithUserPresence
 
-            modelContext.insert(stored)
-            try modelContext.save()
+            try StoredKeyLifecycle.persistCreatedKey(
+                stored,
+                boundary: .generation,
+                persistence: KeyLifecyclePersistence.live(modelContext)
+            )
+            let metadata = KeySecurityMetadataStore()
+            metadata.markBoundaryProtection(
+                protectWithUserPresence ? .userPresence : .deviceUnlocked,
+                for: stored.id
+            )
+            metadata.markMaterialIntegrity(
+                protectWithUserPresence ? .authenticationRequired : .valid,
+                for: stored.id
+            )
             onCreated(stored)
             onClose()
         } catch {

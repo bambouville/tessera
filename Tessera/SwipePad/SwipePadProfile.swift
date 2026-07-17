@@ -28,6 +28,38 @@ public struct SwipePadBinding: Codable, Equatable, Hashable {
     public var isBound: Bool { !macro.isEmpty }
 }
 
+/// Declarative rules that let Agent Center recognize and act on a terminal
+/// harness without adding harness-specific branches to the detector. The same
+/// profile that identifies the foreground process therefore owns the prompt
+/// grammar and response encoding for that process.
+///
+/// Regexes are matched case-insensitively against the current visible terminal
+/// text after ANSI/control sequences are removed. `menuOptionPattern` uses four
+/// capture groups: selection marker, option number, label, and optional
+/// shortcut. Response templates support `{index}`, `{shortcut}`, `↵`, and
+/// `esc`; they are encoded by `MacroEncoder` at dispatch time.
+public struct AgentDetectionRules: Codable, Equatable, Hashable {
+    public var blockingPromptPatterns: [String]
+    public var idlePromptPatterns: [String]
+    public var menuOptionPattern: String
+    public var responseTemplate: String
+    public var fallbackResponseTemplate: String
+
+    public init(
+        blockingPromptPatterns: [String],
+        idlePromptPatterns: [String],
+        menuOptionPattern: String = #"(?m)^\s*([›❯>]?)\s*(\d+)\.\s+(.+?)(?:\s+\(([^()]*)\))?\s*$"#,
+        responseTemplate: String,
+        fallbackResponseTemplate: String = "{index}↵"
+    ) {
+        self.blockingPromptPatterns = blockingPromptPatterns
+        self.idlePromptPatterns = idlePromptPatterns
+        self.menuOptionPattern = menuOptionPattern
+        self.responseTemplate = responseTemplate
+        self.fallbackResponseTemplate = fallbackResponseTemplate
+    }
+}
+
 public struct SwipePadProfile: Codable, Identifiable, Equatable, Hashable {
     public var id: UUID
     public var name: String
@@ -45,19 +77,24 @@ public struct SwipePadProfile: Codable, Identifiable, Equatable, Hashable {
     public var matchProcess: String
     public var bindings: [SwipeDirection: SwipePadBinding]
     public var isBuiltIn: Bool
+    /// nil means process discovery still works, but Agent Center deliberately
+    /// reports status as unavailable rather than guessing at an unknown TUI.
+    public var agentDetection: AgentDetectionRules?
 
     public init(
         id: UUID,
         name: String,
         matchProcess: String,
         bindings: [SwipeDirection: SwipePadBinding],
-        isBuiltIn: Bool
+        isBuiltIn: Bool,
+        agentDetection: AgentDetectionRules? = nil
     ) {
         self.id = id
         self.name = name
         self.matchProcess = matchProcess
         self.bindings = bindings
         self.isBuiltIn = isBuiltIn
+        self.agentDetection = agentDetection
     }
 
     public func binding(for direction: SwipeDirection) -> SwipePadBinding {
@@ -98,7 +135,21 @@ public extension SwipePadProfile {
                 .left:  SwipePadBinding(macro: "2↵"),
                 .up:    SwipePadBinding(macro: "3↵"),
             ],
-            isBuiltIn: true
+            isBuiltIn: true,
+            agentDetection: AgentDetectionRules(
+                blockingPromptPatterns: [
+                    #"(?m)^\s*Quick safety check:"#,
+                    #"(?m)^\s*Do you want to proceed\?\s*$"#,
+                ],
+                idlePromptPatterns: [
+                    // Current Claude versions render both an empty composer
+                    // and free-form typed text with either of these prompt
+                    // glyphs. Exclude numbered rows so an approval option
+                    // can never suppress its preceding blocking prompt.
+                    #"(?m)^\s*[›❯](?![ \t]*\d+\.)[^\r\n]*$"#,
+                ],
+                responseTemplate: "{index}↵"
+            )
         )
     }
 
@@ -119,7 +170,31 @@ public extension SwipePadProfile {
                 .left:  SwipePadBinding(macro: "esc"),
                 .up:    SwipePadBinding(macro: "p"),
             ],
-            isBuiltIn: true
+            isBuiltIn: true,
+            agentDetection: AgentDetectionRules(
+                blockingPromptPatterns: [
+                    #"(?m)^\s*Would you like to run the following command\?\s*$"#,
+                    #"(?m)^\s*Do you trust the contents of this directory\?"#,
+                    // Codex may pause after Stop on a provider-owned model
+                    // switch reminder. It is a real numbered modal, not an
+                    // idle composer, and can otherwise swallow the next send.
+                    #"(?mi)^\s*Approaching rate limits\s*$"#,
+                    // Plan-mode completion is a numbered confirmation menu
+                    // without the normal command-permission question. Anchor
+                    // to its provider-specific first choice so ordinary lists
+                    // containing the word "plan" cannot become actions.
+                    #"(?mi)^\s*[›❯>]?\s*1\.\s*Yes,\s+(?:implement (?:this|the) plan|start implementing)\b.*$"#,
+                ],
+                idlePromptPatterns: [
+                    // Placeholder copy changes between Codex releases (for
+                    // example “Write tests…” and “Implement {feature}”). The
+                    // stable signal is the composer glyph; numbered approval
+                    // rows are deliberately excluded.
+                    #"(?m)^\s*[›❯](?![ \t]*\d+\.)[^\r\n]*$"#,
+                ],
+                responseTemplate: "{shortcut}",
+                fallbackResponseTemplate: "{index}↵"
+            )
         )
     }
 

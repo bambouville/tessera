@@ -16,7 +16,6 @@ DerivedData/
 # Swift Package Manager
 .build/
 .swiftpm/
-# Package.resolved IS committed for reproducible app builds — intentionally not ignored.
 
 # Build products
 build/
@@ -35,8 +34,6 @@ fastlane/Preview.html
 fastlane/screenshots
 fastlane/test_output
 
-# Local agent / editor / build state
-.claude/
+# Local editor state
 *-review.md
-CLAUDE.md
 .release/

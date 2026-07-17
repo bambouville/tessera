@@ -8,7 +8,7 @@ import PortForwarding
 
 enum MoshDiagnostics {
     static func log(_ message: @autoclosure () -> String) {
-        DiagnosticLogStore.appendMosh(message())
+        DiagnosticLogStore.appendMosh(SensitiveDataRedactor.redact(message()))
     }
 
     static func stateDescription(_ state: SessionState) -> String {
@@ -152,16 +152,48 @@ public final class MoshSession: ObservableObject, TerminalSession {
     @Published var pendingHostKeyVerification: HostKeyVerificationRequest?
     @Published public private(set) var detectedOSHint: String?
 
+    // TerminalSession cwd/injection surface — see the protocol docs.
+    // Published: the Upload sheet's host rows refresh live when a cwd
+    // arrives (tmux pane metadata lands seconds after a reattach).
+    @Published public var remoteWorkingDirectory: String?
+    @Published public var pendingPathInjection: String?
+
     public let outputStream: AsyncStream<[UInt8]>
     private let outputContinuation: AsyncStream<[UInt8]>.Continuation
 
     private var driver: MoshTransportDriver?
     private var bootstrapTask: Task<Void, Never>?
+    /// Watchdog armed after `driver.connect()` when the host reaches its
+    /// server through a jump chain: the mosh UDP flow is device→host
+    /// direct and usually firewalled in bastioned topologies, so if the
+    /// driver never reports connected in time we recommend rebuilding
+    /// this session on the SSH transport (ContentView reacts).
+    private var jumpFallbackWatchdogTask: Task<Void, Never>?
+    private var jumpFallbackCleanupTask: Task<Void, Never>?
+    private static let jumpFallbackTimeoutNanos: UInt64 = 8_000_000_000
+    private var bootstrapJumpChainHopCount = 0
+    /// Consumed by ContentView on `.failed`: true means "the SSH ride
+    /// worked but mosh UDP never made contact through the jump chain" —
+    /// the session should be retried over plain SSH automatically.
+    @Published private(set) var recommendsSSHFallback = false
+    /// Transient bootstrap failures (network blip or the host slow to
+    /// open the exec channel right at reconnect time) retry on a fresh
+    /// SSH connection before the session declares .failed — a manual
+    /// retry seconds later reliably succeeds, so ride the blip out.
+    /// The escalating backoff spans the ~50 s outage window observed
+    /// in the field: attempt windows ≈ t+0, +18 s, +43 s.
+    private var bootstrapRetriesUsed = 0
+    private static let bootstrapRetryBackoffNanos: [UInt64] = [3_000_000_000, 10_000_000_000]
     private var remoteServerMonitorTask: Task<Void, Never>?
     private var didStart = false
     private var didReachConnectedState = false
     private var lastReportedSize: (cols: Int, rows: Int)?
-    private var remoteServerPID: Int?
+    /// PID of the detached remote mosh-server, parsed from its bootstrap
+    /// banner. `private(set)`: the session view reads it to locate the
+    /// server's child shell for the Files panel's cwd polling fallback
+    /// (plain mosh can't carry OSC 7 — stock mosh-servers drop it before
+    /// it ever reaches the state sync).
+    private(set) var remoteServerPID: Int?
     private var outputDeliveryCount = 0
     private var resizeRequestCount = 0
 
@@ -219,11 +251,16 @@ public final class MoshSession: ObservableObject, TerminalSession {
             "session disconnect requested state=\(MoshDiagnostics.stateDescription(state)) didReachConnected=\(didReachConnectedState)"
         )
         if let pending = pendingHostKeyVerification {
-            pending.continuation.resume(returning: false)
+            pending.reject()
             pendingHostKeyVerification = nil
         }
         bootstrapTask?.cancel()
         bootstrapTask = nil
+        jumpFallbackWatchdogTask?.cancel()
+        jumpFallbackWatchdogTask = nil
+        jumpFallbackCleanupTask?.cancel()
+        jumpFallbackCleanupTask = nil
+        bootstrapJumpChainHopCount = 0
         stopRemoteServerMonitor()
         driver?.disconnect()
         driver = nil
@@ -239,14 +276,30 @@ public final class MoshSession: ObservableObject, TerminalSession {
             "bootstrap start transport=\(host.transport.rawValue) launchMode=\(host.launchMode.rawValue) port=\(host.port)"
         )
         do {
-            let result = try await MoshBootstrap.bootstrap(
-                host: host,
-                requireBiometric: requireBiometric,
-                isSecureEnclave: isSecureEnclave,
-                hostKeyPrompt: { [weak self] challenge in
-                    await self?.promptForHostKeyVerification(challenge) ?? false
-                }
-            )
+            let fallbackHost = host
+            let requireBiometric = self.requireBiometric
+            let isSecureEnclave = self.isSecureEnclave
+            let result = try await withPendingSSHConnectionAttempt {
+                // Resolve the endpoint here because MoshBootstrap is owned by
+                // the parallel transcript-redaction remediation. Its common
+                // auth resolver fails closed if this policy changes again.
+                let policy = try await resolveSSHConnectionPolicy(
+                    for: fallbackHost,
+                    requireBiometric: requireBiometric,
+                    isSecureEnclave: isSecureEnclave
+                )
+                let result = try await MoshBootstrap.bootstrap(
+                    host: policy.host,
+                    requireBiometric: policy.requireBiometric,
+                    isSecureEnclave: policy.isSecureEnclave,
+                    hostKeyPrompt: { [weak self] challenge in
+                        await self?.promptForHostKeyVerification(challenge) ?? false
+                    }
+                )
+                try Task.checkCancellation()
+                try await SSHAuthenticationPolicyStore.shared.revalidate(policy)
+                return result
+            }
 
             guard !Task.isCancelled else { return }
 
@@ -254,10 +307,12 @@ public final class MoshSession: ObservableObject, TerminalSession {
                 detectedOSHint = detected
             }
             let driver = makeDriver(
+                targetAddress: result.targetAddress ?? host.address,
                 udpPort: result.udpPort,
                 base64Key: result.base64Key
             )
             remoteServerPID = result.serverPID
+            bootstrapJumpChainHopCount = result.jumpChainHopCount
             MoshDiagnostics.log(
                 "bootstrap success udpPort=\(result.udpPort) keyLength=\(result.base64Key.count) serverPID=\(result.serverPID.map(String.init) ?? "nil") lastSize=\(MoshDiagnostics.sizeDescription(lastReportedSize))"
             )
@@ -267,6 +322,7 @@ public final class MoshSession: ObservableObject, TerminalSession {
                 driver.resize(cols: size.cols, rows: size.rows)
             }
             driver.connect()
+            startJumpFallbackWatchdogIfNeeded()
         } catch is CancellationError {
             bootstrapTask = nil
             remoteServerPID = nil
@@ -276,24 +332,218 @@ public final class MoshSession: ObservableObject, TerminalSession {
                 state = .disconnected
             }
         } catch {
-            bootstrapTask = nil
             remoteServerPID = nil
-            MoshDiagnostics.log("bootstrap failed error=\(error.localizedDescription)")
+            if shouldRetryBootstrap(after: error) {
+                // bootstrapTask stays non-nil so disconnect() can still
+                // cancel the sleeping retry.
+                let backoff = Self.bootstrapRetryBackoffNanos[bootstrapRetriesUsed]
+                bootstrapRetriesUsed += 1
+                MoshDiagnostics.log(
+                    "bootstrap retry #\(bootstrapRetriesUsed) backoffSeconds=\(backoff / 1_000_000_000) error=\(SensitiveDataRedactor.redact(String(describing: error)))"
+                )
+                try? await Task.sleep(nanoseconds: backoff)
+                guard !Task.isCancelled, state == .connecting else {
+                    bootstrapTask = nil
+                    MoshDiagnostics.log("bootstrap cancelled")
+                    transportState = .disconnected
+                    if state != .disconnected {
+                        state = .disconnected
+                    }
+                    return
+                }
+                await bootstrapAndStart()
+                return
+            }
+            bootstrapTask = nil
+            MoshDiagnostics.log(
+                "bootstrap failed error=\(SensitiveDataRedactor.redact(error.localizedDescription))"
+            )
             transportState = .disconnected
-            state = .failed(
+            state = .failed(SensitiveDataRedactor.redact(
                 error.localizedDescription.isEmpty
                     ? describeSSHError(error)
                     : error.localizedDescription
-            )
+            ))
         }
     }
 
+    private func startJumpFallbackWatchdogIfNeeded() {
+        guard bootstrapJumpChainHopCount > 0 else { return }
+        jumpFallbackWatchdogTask?.cancel()
+        let armedAt = Date()
+        jumpFallbackWatchdogTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.jumpFallbackTimeoutNanos)
+            guard !Task.isCancelled else { return }
+            self?.handleJumpFallbackTimeout(armedAt: armedAt)
+        }
+    }
+
+    private func handleJumpFallbackTimeout(armedAt: Date) {
+        jumpFallbackWatchdogTask = nil
+        guard !didReachConnectedState, state == .connecting else { return }
+        // Task.sleep deadlines keep elapsing while the process is suspended;
+        // waking up long past the arm time means mosh never actually got 8
+        // continuous foreground seconds to make contact. Re-arm instead of
+        // condemning a transport that was frozen mid-handshake.
+        let elapsed = Date().timeIntervalSince(armedAt)
+        let budget = TimeInterval(Self.jumpFallbackTimeoutNanos) / 1_000_000_000
+        if elapsed > budget * 2 {
+            MoshDiagnostics.log(
+                "jump fallback watchdog woke after suspension (elapsed=\(Int(elapsed))s), re-arming"
+            )
+            startJumpFallbackWatchdogIfNeeded()
+            return
+        }
+        MoshDiagnostics.log(
+            "jump fallback: driver never connected through \(bootstrapJumpChainHopCount)-hop chain"
+        )
+        _ = beginJumpFallback(reason: "watchdog timeout")
+    }
+
+    /// Start the automatic SSH takeover only after the detached mosh-server
+    /// from this bootstrap has been stopped. Without that barrier, an
+    /// asymmetric UDP path can release the remote child while the client never
+    /// sees a reply, causing the SSH fallback to run a custom command or
+    /// startup snippet a second time.
+    @discardableResult
+    private func beginJumpFallback(reason: String) -> Bool {
+        guard bootstrapJumpChainHopCount > 0 else { return false }
+        guard state == .connecting else { return true }
+        guard !recommendsSSHFallback, jumpFallbackCleanupTask == nil else {
+            return true
+        }
+
+        jumpFallbackWatchdogTask?.cancel()
+        jumpFallbackWatchdogTask = nil
+
+        guard let serverPID = remoteServerPID, serverPID > 0 else {
+            failJumpFallbackCleanup(
+                "The remote mosh-server PID was unavailable, so Tessera did not start a second login command automatically."
+            )
+            return true
+        }
+
+        let cleanupHost = host
+        let requireBiometric = self.requireBiometric
+        let isSecureEnclave = self.isSecureEnclave
+        MoshDiagnostics.log(
+            "jump fallback cleanup start reason=\(reason) pid=\(serverPID)"
+        )
+        jumpFallbackCleanupTask = Task { [weak self] in
+            do {
+                try await Self.terminateRemoteMoshServerForFallback(
+                    on: cleanupHost,
+                    requireBiometric: requireBiometric,
+                    isSecureEnclave: isSecureEnclave,
+                    serverPID: serverPID
+                )
+                try Task.checkCancellation()
+                guard let self else { return }
+                self.jumpFallbackCleanupTask = nil
+                guard self.state == .connecting else { return }
+                self.remoteServerPID = nil
+                self.recommendsSSHFallback = true
+                self.updateTransportState(
+                    .disconnected,
+                    reason: "jump fallback cleanup complete"
+                )
+                // Set failed before disconnecting the driver so teardown
+                // callbacks cannot replace this takeover state.
+                self.state = .failed(
+                    "mosh is unreachable through the jump chain — UDP cannot traverse SSH bastions. Reconnecting over SSH…"
+                )
+                self.driver?.disconnect()
+                self.driver = nil
+                MoshDiagnostics.log(
+                    "jump fallback recommended reason=\(reason) pid=\(serverPID)"
+                )
+            } catch is CancellationError {
+                // An explicit session disconnect owns the final state.
+            } catch {
+                guard let self else { return }
+                self.jumpFallbackCleanupTask = nil
+                guard self.state == .connecting else { return }
+                self.failJumpFallbackCleanup(describeSSHError(error))
+            }
+        }
+        return true
+    }
+
+    private func failJumpFallbackCleanup(_ detail: String) {
+        MoshDiagnostics.log(
+            "jump fallback cleanup failed detail=\(SensitiveDataRedactor.redact(detail))"
+        )
+        updateTransportState(.disconnected, reason: "jump fallback cleanup failed")
+        state = .failed(
+            "mosh is unreachable through the jump chain, but Tessera could not safely stop its remote mosh-server before switching transports. \(SensitiveDataRedactor.redact(detail)) Connect with SSH manually."
+        )
+        driver?.disconnect()
+        driver = nil
+    }
+
+    private nonisolated static func terminateRemoteMoshServerForFallback(
+        on host: Host,
+        requireBiometric: Bool,
+        isSecureEnclave: Bool,
+        serverPID: Int
+    ) async throws {
+        let chain = try await withPendingSSHConnectionAttempt {
+            try await establishSSHChain(
+                for: host,
+                requireBiometric: requireBiometric,
+                isSecureEnclave: isSecureEnclave,
+                hostKeyPrompt: nil
+            )
+        }
+        do {
+            var output = try await chain.client.executeCommand(
+                remoteMoshServerTerminationCommand(serverPID: serverPID),
+                maxResponseSize: 4 * 1024
+            )
+            output.clear()
+            await chain.closeAll()
+        } catch {
+            await chain.closeAll()
+            throw error
+        }
+    }
+
+    /// PID comes from mosh-server's own detached banner. Verify the process
+    /// name again immediately before signalling so PID reuse cannot terminate
+    /// an unrelated process; treat an already-exited server as success.
+    nonisolated static func remoteMoshServerTerminationCommand(
+        serverPID: Int
+    ) -> String {
+        precondition(serverPID > 0)
+        return "sh -lc 'pid=\(serverPID); "
+            + "if ! kill -0 \"$pid\" 2>/dev/null; then exit 0; fi; "
+            + "set -- $(ps -p \"$pid\" -o comm= 2>/dev/null); "
+            + "case \"${1:-}\" in *mosh-server*) ;; *) exit 64;; esac; "
+            + "kill -TERM \"$pid\"; n=0; "
+            + "while kill -0 \"$pid\" 2>/dev/null && [ \"$n\" -lt 5 ]; do "
+            + "sleep 1; n=$((n+1)); done; "
+            + "! kill -0 \"$pid\" 2>/dev/null'"
+    }
+
+    /// Only the transient network class retries — auth failures would
+    /// loop biometric prompts, host-key rejections are a user decision,
+    /// and missing/garbled mosh-server output is deterministic.
+    private func shouldRetryBootstrap(after error: Error) -> Bool {
+        guard state == .connecting,
+              bootstrapRetriesUsed < Self.bootstrapRetryBackoffNanos.count,
+              let bootstrapError = error as? MoshBootstrapError,
+              case .connectionFailed = bootstrapError
+        else { return false }
+        return true
+    }
+
     private func makeDriver(
+        targetAddress: String,
         udpPort: Int,
         base64Key: String
     ) -> MoshTransportDriver {
         MoshTransportDriver(
-            host: host.address,
+            host: targetAddress,
             udpPort: udpPort,
             base64Key: base64Key,
             onOutput: { [weak self] bytes in
@@ -312,6 +562,8 @@ public final class MoshSession: ObservableObject, TerminalSession {
             onConnected: { [weak self] in
                 Task { @MainActor in
                     guard let self else { return }
+                    self.jumpFallbackWatchdogTask?.cancel()
+                    self.jumpFallbackWatchdogTask = nil
                     self.didReachConnectedState = true
                     MoshDiagnostics.log(
                         "session connected previousState=\(MoshDiagnostics.stateDescription(self.state))"
@@ -327,7 +579,6 @@ public final class MoshSession: ObservableObject, TerminalSession {
                 Task { @MainActor in
                     guard let self else { return }
                     self.bootstrapTask = nil
-                    self.stopRemoteServerMonitor()
                     self.driver = nil
                     MoshDiagnostics.log(
                         "session disconnected state=\(MoshDiagnostics.stateDescription(self.state)) didReachConnected=\(self.didReachConnectedState)"
@@ -340,8 +591,18 @@ public final class MoshSession: ObservableObject, TerminalSession {
                         return
                     }
                     if self.didReachConnectedState {
+                        self.stopRemoteServerMonitor()
                         self.state = .disconnected
                     } else {
+                        // A driver that dies before first contact on a
+                        // jump-chained host is the UDP-unreachable case
+                        // arriving early — same fallback as the watchdog.
+                        if self.beginJumpFallback(
+                            reason: "driver disconnected pre-connect"
+                        ) {
+                            return
+                        }
+                        self.stopRemoteServerMonitor()
                         self.state = .failed(
                             Self.userFacingStartupFailureMessage(from: nil)
                         )
@@ -352,19 +613,27 @@ public final class MoshSession: ObservableObject, TerminalSession {
                 Task { @MainActor in
                     guard let self else { return }
                     self.bootstrapTask = nil
-                    self.stopRemoteServerMonitor()
                     self.driver = nil
                     MoshDiagnostics.log(
                         "session failed didReachConnected=\(self.didReachConnectedState) message=\(message)"
                     )
                     self.updateTransportState(.disconnected, reason: "driver failed")
                     if self.didReachConnectedState {
+                        self.stopRemoteServerMonitor()
                         if Self.shouldTreatPostConnectFailureAsDisconnect(message) {
                             self.state = .disconnected
                         } else {
                             self.state = .failed(message)
                         }
                     } else {
+                        // Fast pre-contact failures (socket errors, blocked
+                        // UDP surfacing as an ICMP reject) on a jump-chained
+                        // host take the same SSH fallback as the watchdog —
+                        // it must not depend on WHICH way mosh fails.
+                        if self.beginJumpFallback(reason: "driver failed pre-connect") {
+                            return
+                        }
+                        self.stopRemoteServerMonitor()
                         self.state = .failed(
                             Self.userFacingStartupFailureMessage(from: message)
                         )
@@ -460,23 +729,15 @@ public final class MoshSession: ObservableObject, TerminalSession {
         isSecureEnclave: Bool,
         serverPID: Int
     ) async throws {
-        let authMethod = try await resolveSSHAuthMethod(
-            for: host,
-            requireBiometric: requireBiometric,
-            isSecureEnclave: isSecureEnclave
-        )
-        let endpoint = "\(host.address):\(host.port)"
-        let validator = TesseraHostKeyValidator(
-            endpoint: endpoint,
-            prompt: nil
-        )
-        let client = try await SSHClient.connect(
-            host: host.address,
-            port: host.port,
-            authenticationMethod: authMethod,
-            hostKeyValidator: .custom(validator),
-            reconnect: .never
-        )
+        let chain = try await withPendingSSHConnectionAttempt {
+            try await establishSSHChain(
+                for: host,
+                requireBiometric: requireBiometric,
+                isSecureEnclave: isSecureEnclave,
+                hostKeyPrompt: nil
+            )
+        }
+        let client = chain.client
 
         do {
             let command = remoteServerMonitorCommand(serverPID: serverPID)
@@ -498,7 +759,7 @@ public final class MoshSession: ObservableObject, TerminalSession {
                 MoshDiagnostics.log(
                     "remote exit monitor observed marker pid=\(serverPID) stdoutBytes=\(stdout.count) stderrBytes=\(stderr.count)"
                 )
-                try? await client.close()
+                await chain.closeAll()
                 return
             }
 
@@ -506,11 +767,11 @@ public final class MoshSession: ObservableObject, TerminalSession {
                 stdoutError: stdoutError,
                 stderrError: stderrError
             ) {
-                try? await client.close()
+                await chain.closeAll()
                 throw error
             }
 
-            try? await client.close()
+            await chain.closeAll()
             throw NSError(
                 domain: "Tessera.MoshSession",
                 code: 1,
@@ -520,7 +781,7 @@ public final class MoshSession: ObservableObject, TerminalSession {
                 ]
             )
         } catch {
-            try? await client.close()
+            await chain.closeAll()
             throw error
         }
     }
@@ -574,6 +835,12 @@ public final class MoshSession: ObservableObject, TerminalSession {
             || lowered.hasPrefix("could not start mosh")
         {
             return trimmed
+        }
+
+        // Citadel's exec/TTY channel open carries a hard 15 s timeout;
+        // its bare enum case would otherwise surface verbatim.
+        if trimmed == "channelCreationFailed" {
+            return "Could not start mosh: the host accepted the SSH connection but never opened the command channel (15 s). It may be overloaded or limiting sessions."
         }
 
         if lowered == "connection closed"
@@ -639,10 +906,13 @@ public final class MoshSession: ObservableObject, TerminalSession {
 
 private let remoteServerExitMarker = "__TESSERA_REMOTE_EXIT__"
 
-private final class MoshTransportDriver {
+final class MoshTransportDriver {
     private let host: String
     private let udpPort: Int
-    private let base64Key: String
+    /// The printable bootstrap credential is needed only until MoshCore has
+    /// initialized its binary crypto session. It must not live for the whole
+    /// terminal session alongside the bridge.
+    private var base64Key: String?
     private let queue = DispatchQueue(label: "mosh.transport")
 
     private var bridge: MoshBridgeClient?
@@ -695,11 +965,23 @@ private final class MoshTransportDriver {
             )
 
             do {
+                guard let base64Key = self.base64Key else {
+                    throw NSError(
+                        domain: "com.bambouville.Tessera.MoshTransport",
+                        code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "Mosh session key is unavailable."]
+                    )
+                }
                 let bridge = try MoshBridgeClient(
                     host: self.host,
                     port: self.udpPort,
-                    base64Key: self.base64Key
+                    base64Key: base64Key
                 )
+                // MoshCore owns a decoded, wipeable credential from here.
+                // Dropping this reference minimizes the immutable Swift
+                // String's lifetime even though Swift cannot guarantee that
+                // its former storage is overwritten.
+                self.base64Key = nil
                 bridge.outputHandler = { [weak self] data in
                     guard let self else { return }
                     let bytes = [UInt8](data)
@@ -729,6 +1011,7 @@ private final class MoshTransportDriver {
                 self.updateReadSourcesLocked()
                 self.tickLocked()
             } catch {
+                self.base64Key = nil
                 self.failLocked(error)
             }
         }
@@ -785,12 +1068,24 @@ private final class MoshTransportDriver {
                 "driver disconnect requested outputChunks=\(self.outputChunkCount) outputBytes=\(self.outputByteCount)"
             )
             self.finished = true
+            self.base64Key = nil
             self.cancelSourcesLocked()
             self.bridge?.shutdown()
             self.bridge = nil
             self.onDisconnected()
         }
     }
+
+    #if DEBUG
+    /// Reads both sides of the Swift/native ownership boundary on the driver's
+    /// serial queue so lifetime tests observe a completed handoff, not a race.
+    func retainsBootstrapKeyMaterialForTesting() -> Bool {
+        queue.sync {
+            base64Key != nil
+                || (bridge?.retainsBootstrapKeyMaterial ?? false)
+        }
+    }
+    #endif
 
     private func tickLocked() {
         guard !finished, let bridge else { return }
@@ -903,6 +1198,7 @@ private final class MoshTransportDriver {
     private func finishDisconnectedLocked() {
         guard !finished else { return }
         finished = true
+        base64Key = nil
         cancelSourcesLocked()
         bridge = nil
         MoshDiagnostics.log(
@@ -914,13 +1210,17 @@ private final class MoshTransportDriver {
     private func failLocked(_ error: Error) {
         guard !finished else { return }
         finished = true
+        base64Key = nil
         cancelSourcesLocked()
         bridge?.shutdown()
         bridge = nil
-        MoshDiagnostics.log(
-            "driver failed ticks=\(tickCount) outputChunks=\(outputChunkCount) outputBytes=\(outputByteCount) error=\((error as NSError).localizedDescription)"
+        let message = SensitiveDataRedactor.redact(
+            (error as NSError).localizedDescription
         )
-        onFailed((error as NSError).localizedDescription)
+        MoshDiagnostics.log(
+            "driver failed ticks=\(tickCount) outputChunks=\(outputChunkCount) outputBytes=\(outputByteCount) error=\(message)"
+        )
+        onFailed(message)
     }
 
     private func socketFDs(for bridge: MoshBridgeClient) -> [Int32] {
@@ -1056,11 +1356,21 @@ final class TmuxControlChannel {
     }
 
     func detectForegroundProcessNames(rootPID: Int) async -> [String] {
+        await detectForegroundProcessNamesIfAvailable(rootPID: rootPID) ?? []
+    }
+
+    func detectForegroundProcessNamesIfAvailable(rootPID: Int) async -> [String]? {
+        await detectForegroundProcessSnapshotIfAvailable(rootPID: rootPID)?.processNames
+    }
+
+    func detectForegroundProcessSnapshotIfAvailable(
+        rootPID: Int
+    ) async -> SwipePadPlainSSHProcessProbe.Snapshot? {
         guard let client else {
             SwipePadDiagnostics.log(
                 "mosh tmux-pane-ps skipped reason=no-client rootPID=\(rootPID)"
             )
-            return []
+            return nil
         }
 
         do {
@@ -1076,17 +1386,35 @@ final class TmuxControlChannel {
             )
             let bytes = output.readBytes(length: output.readableBytes) ?? []
             let text = String(decoding: bytes, as: UTF8.self)
-            let names = SwipePadPlainSSHProcessProbe.processNames(from: text)
+            let snapshot = SwipePadPlainSSHProcessProbe.snapshot(from: text)
             SwipePadDiagnostics.log(
-                "mosh tmux-pane-ps result rootPID=\(rootPID) candidateCount=\(names.count) bytes=\(bytes.count)"
+                "mosh tmux-pane-ps result rootPID=\(rootPID) candidateCount=\(snapshot.processNames.count) bytes=\(bytes.count)"
             )
-            return names
+            return snapshot
         } catch {
             SwipePadDiagnostics.log(
                 "mosh tmux-pane-ps failed rootPID=\(rootPID) error='\(error)'"
             )
-            return []
+            return nil
         }
+    }
+
+    func executeConnectedCommand(_ command: String) async throws -> String {
+        guard let client else {
+            throw NSError(
+                domain: "Tessera.TmuxControlChannel",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "The tmux control channel is not connected."]
+            )
+        }
+        var output = try await client.executeCommand(
+            command,
+            maxResponseSize: 256 * 1024,
+            mergeStreams: true,
+            inShell: true
+        )
+        let bytes = output.readBytes(length: output.readableBytes) ?? []
+        return String(decoding: bytes, as: UTF8.self)
     }
 
     static func attachCommand(sessionName: String) -> String {
@@ -1099,30 +1427,27 @@ final class TmuxControlChannel {
             "tmux sidechannel run start sessionNameLength=\(sessionName.count) transport=\(host.transport.rawValue) launchMode=\(host.launchMode.rawValue) port=\(host.port)"
         )
         var client: SSHClient?
+        var connectedChain: EstablishedSSHChain?
         var terminationReason: TmuxControlChannelTerminationReason = .streamEnded
 
         do {
-            let authMethod = try await resolveSSHAuthMethod(
-                for: host,
-                requireBiometric: requireBiometric,
-                isSecureEnclave: isSecureEnclave
-            )
-            let endpoint = "\(host.address):\(host.port)"
-            let validator = TesseraHostKeyValidator(
-                endpoint: endpoint,
-                prompt: nil
-            )
+            let fallbackHost = host
+            let requireBiometric = self.requireBiometric
+            let isSecureEnclave = self.isSecureEnclave
             MoshDiagnostics.log(
-                "tmux sidechannel ssh connect start port=\(host.port) sessionNameLength=\(sessionName.count)"
+                "tmux sidechannel ssh connect start port=\(fallbackHost.port) hops=\(fallbackHost.jumpChain.count + 1) sessionNameLength=\(self.sessionName.count)"
             )
-            let connectedClient = try await SSHClient.connect(
-                host: host.address,
-                port: host.port,
-                authenticationMethod: authMethod,
-                hostKeyValidator: .custom(validator),
-                reconnect: .never
-            )
+            let chain = try await withPendingSSHConnectionAttempt {
+                try await establishSSHChain(
+                    for: fallbackHost,
+                    requireBiometric: requireBiometric,
+                    isSecureEnclave: isSecureEnclave,
+                    hostKeyPrompt: nil
+                )
+            }
+            let connectedClient = chain.client
             client = connectedClient
+            connectedChain = chain
             self.client = connectedClient
             MoshDiagnostics.log(
                 "tmux sidechannel ssh connected sessionNameLength=\(sessionName.count)"
@@ -1206,8 +1531,8 @@ final class TmuxControlChannel {
             await portForwarderManager.detach()
         }
 
-        if let client {
-            try? await client.close()
+        if let connectedChain {
+            await connectedChain.closeAll()
             MoshDiagnostics.log(
                 "tmux sidechannel ssh closed sessionNameLength=\(sessionName.count)"
             )

@@ -124,9 +124,28 @@ final class PersistedHost {
 
     /// Transport-scoped key used for active-session reuse and
     /// duplicate labeling. SSH and mosh sessions to the same endpoint
-    /// must stay distinct now that transport is user-selectable.
+    /// must stay distinct now that transport is user-selectable, and a
+    /// jump-chained host must stay distinct from a direct host at the
+    /// same endpoint (behind a bastion the address names a different
+    /// machine). The complete resolved hop-ID path disambiguates nested
+    /// routes and changes whenever any transitive jump link is edited.
     var connectionKey: String {
-        "\(transport.rawValue):\(effectiveUser)@\(address):\(port)"
+        let base = "\(transport.rawValue):\(effectiveUser)@\(address):\(port)"
+        guard let context = modelContext else {
+            return base
+        }
+        let resolution = HostJumpChainResolver.resolve(for: self, in: context)
+        if resolution.isBroken {
+            // A broken route must never reuse a still-live session created
+            // through its formerly valid topology. Include the immediate
+            // dangling/cyclic link when readable to keep the key deterministic.
+            let linkID = HostJumpChainResolver.link(for: id, in: context)?
+                .jumpHostID.uuidString ?? "unknown"
+            return "\(base)&via=broken:\(linkID)"
+        }
+        guard !resolution.hops.isEmpty else { return base }
+        let path = resolution.hops.map { $0.id.uuidString }.joined(separator: ",")
+        return "\(base)&via=\(path)"
     }
 
     /// Typed accessor for `launchModeRaw`. Corrupt or unknown values

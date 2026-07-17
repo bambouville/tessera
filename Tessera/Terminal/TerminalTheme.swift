@@ -156,7 +156,12 @@ struct TerminalTheme: Identifiable, Equatable {
             ?? activeAccent.opacity(isLight ? 0.10 : 0.14)
         return DesignTokens(
             bg:            bg,
-            sidebarBg:     bg,
+            // Glass tint for `floatingGlass` chrome (SessionTopBar). Must be
+            // translucent: an opaque tint makes Liquid Glass / frosted render
+            // as a solid slab — pure black over a background picture. The
+            // wash keeps the theme's hue while letting the material (and the
+            // picture behind it) show through; `.solid` ignores it entirely.
+            sidebarBg:     bg.opacity(isLight ? 0.55 : 0.35),
             sidebarBorder: fg.opacity(0.06),
             panelBg:       bg,
             inputBg:       fg.opacity(0.06),

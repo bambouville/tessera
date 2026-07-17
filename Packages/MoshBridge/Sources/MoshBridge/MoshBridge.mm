@@ -35,6 +35,27 @@ static NSError *MoshBridgeErrorFromException(const std::exception &error) {
                            }];
 }
 
+static void MoshBridgeSecureClearString(std::string &value) {
+    volatile char *bytes = value.empty() ? nullptr : value.data();
+    for (size_t index = 0; index < value.size(); ++index) {
+        bytes[index] = 0;
+    }
+    value.clear();
+    value.shrink_to_fit();
+}
+
+class MoshBridgeSensitiveStringScopeClear {
+public:
+    explicit MoshBridgeSensitiveStringScopeClear(std::string &value)
+        : value_(value) {}
+    ~MoshBridgeSensitiveStringScopeClear() {
+        MoshBridgeSecureClearString(value_);
+    }
+
+private:
+    std::string &value_;
+};
+
 template <typename Fn>
 static BOOL MoshBridgePerformBool(NSError **error, Fn &&fn) {
     try {
@@ -116,10 +137,16 @@ static NSUInteger MoshBridgePerformTick(NSError **error, Fn &&fn) {
     }
 
     try {
+        // Keep exactly one explicit bridge-side native copy and wipe it on
+        // both success and every exception path. MoshClient takes this by
+        // const reference so 22-byte libc++ small-string storage is never
+        // moved through uncleared by-value constructor parameters.
+        std::string bootstrapKey(base64Key.UTF8String ?: "");
+        MoshBridgeSensitiveStringScopeClear clearBootstrapKey(bootstrapKey);
         _client = std::make_unique<MoshClient>(
             std::string(host.UTF8String ?: ""),
             static_cast<int>(port),
-            std::string(base64Key.UTF8String ?: ""));
+            bootstrapKey);
 
         __weak MoshBridgeClient *weakSelf = self;
         _client->set_output_callback([weakSelf](const uint8_t *bytes, size_t length) {
@@ -189,6 +216,9 @@ static NSUInteger MoshBridgePerformTick(NSError **error, Fn &&fn) {
     } catch (...) {
         // Never let C++ failures escape into Swift during teardown.
     }
+    // Deterministically run MoshClient/Network/Crypto destructors now instead
+    // of waiting for ARC to reclaim this Objective-C wrapper.
+    _client.reset();
 }
 
 - (int)socketFD {
@@ -227,6 +257,10 @@ static NSUInteger MoshBridgePerformTick(NSError **error, Fn &&fn) {
 
 - (BOOL)applicationModeCursorKeys {
     return _client != nullptr && _client->application_mode_cursor_keys();
+}
+
+- (BOOL)retainsBootstrapKeyMaterial {
+    return _client != nullptr && _client->retains_bootstrap_key_material();
 }
 
 @end

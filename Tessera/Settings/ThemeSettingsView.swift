@@ -23,9 +23,88 @@ struct ThemeSettingsView: View {
                         card(for: theme)
                     }
                 }
+
+                backgroundSection
+                    .padding(.top, 28)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .background(T.bg)
+    }
+
+    // MARK: - Background picture
+
+    private var selectedTheme: TerminalTheme {
+        TerminalTheme.find(id: appearance.terminalThemeID)
+    }
+
+    private var backgroundSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("background")
+                .font(Typography.tesseraMono(size: 11))
+                .foregroundStyle(T.fgMuted)
+
+            HStack(spacing: 8) {
+                backgroundModeButton(usesImage: false, label: "theme color")
+                backgroundModeButton(usesImage: true, label: "custom image")
+            }
+            .animation(.easeInOut(duration: 0.15), value: appearance.terminalBackgroundUsesImage)
+
+            if appearance.terminalBackgroundUsesImage {
+                TerminalBackgroundImageControls(
+                    imageID: appearance.terminalBackgroundImageID,
+                    dim: appearance.terminalBackgroundDim,
+                    blur: appearance.terminalBackgroundBlur,
+                    fillMode: TerminalBackgroundFillMode(
+                        rawValue: appearance.terminalBackgroundFillMode
+                    ) ?? .fill,
+                    theme: selectedTheme,
+                    onImport: { data in
+                        guard let imported = TerminalBackgroundImageStore.importImage(data: data) else {
+                            NSLog("[TerminalBackground] global import failed")
+                            return
+                        }
+                        if let old = appearance.terminalBackgroundImageID {
+                            TerminalBackgroundImageStore.delete(id: old)
+                        }
+                        appearance.terminalBackgroundImageID = imported.id
+                    },
+                    onRemove: {
+                        if let old = appearance.terminalBackgroundImageID {
+                            TerminalBackgroundImageStore.delete(id: old)
+                        }
+                        appearance.terminalBackgroundImageID = nil
+                        appearance.terminalBackgroundUsesImage = false
+                    },
+                    onDimChanged: { appearance.terminalBackgroundDim = $0 },
+                    onBlurChanged: { appearance.terminalBackgroundBlur = $0 },
+                    onFillModeChanged: { appearance.terminalBackgroundFillMode = $0.rawValue }
+                )
+
+                if appearance.terminalBackgroundImageID != nil {
+                    Text("applies to every session unless a host overrides it. full-screen apps that set their own colors (vim, htop) paint over the picture.")
+                        .font(Typography.tesseraMono(size: 11))
+                        .foregroundStyle(T.fgDim)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                Text("solid color from the selected theme.")
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.fgDim)
+            }
+        }
+    }
+
+    private func backgroundModeButton(usesImage: Bool, label: String) -> some View {
+        let isSelected = appearance.terminalBackgroundUsesImage == usesImage
+        return Btn(
+            style: isSelected ? .primary : .default,
+            full: true,
+            action: { appearance.terminalBackgroundUsesImage = usesImage }
+        ) {
+            Text(label)
+                .font(Typography.tesseraMono(size: 13, weight: isSelected ? .semibold : .regular))
+        }
     }
 
     private func card(for theme: TerminalTheme) -> some View {

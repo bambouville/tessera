@@ -72,6 +72,32 @@ final class AppearancePreferences {
     var scrollbackLines: Int = 10_000 {
         didSet { UserDefaults.standard.set(scrollbackLines, forKey: "tessera.pref.scrollbackLines") }
     }
+    /// Web-style momentum glide after trackpad scroll gestures in local
+    /// scrollback (primary screen only — alt-screen TUIs keep discrete
+    /// wheel/arrow semantics; discrete mouse-wheel notches never glide).
+    /// Default on.
+    var smoothScrollingEnabled: Bool = true {
+        didSet {
+            UserDefaults.standard.set(
+                smoothScrollingEnabled,
+                forKey: "tessera.pref.smoothScrollingEnabled"
+            )
+        }
+    }
+    /// Glide strength: multiplies the release velocity before the decay
+    /// starts, which scales glide speed and travel distance linearly
+    /// (distance ≈ v/2 under the UIKit-normal curve). 1.0 = raw tracked
+    /// velocity, which testing found too aggressive on iPad — default is
+    /// half that. Surfaced as an unlabeled slow↔fast slider.
+    static let smoothScrollingSpeedRange: ClosedRange<Double> = 0.15...1.25
+    var smoothScrollingSpeed: Double = 0.5 {
+        didSet {
+            UserDefaults.standard.set(
+                smoothScrollingSpeed,
+                forKey: "tessera.pref.smoothScrollingSpeed"
+            )
+        }
+    }
     var sessionRestorePolicy: SessionRestorePolicy = .ask {
         didSet {
             UserDefaults.standard.set(sessionRestorePolicy.rawValue, forKey: "tessera.pref.sessionRestorePolicy")
@@ -88,7 +114,74 @@ final class AppearancePreferences {
         didSet { UserDefaults.standard.set(terminalThemeID, forKey: "tessera.pref.terminalThemeID") }
     }
 
-    // MARK: - Keyboard (M4 §settings.keyboard + §14.8 customization)
+    // MARK: - Terminal background picture (settings.themes → background)
+    /// Whether the global background is the picture (true) or the theme's
+    /// solid color (false). Kept separate from `terminalBackgroundImageID`
+    /// so toggling back to "theme color" doesn't destroy the imported file —
+    /// the user can flip back without re-picking.
+    var terminalBackgroundUsesImage: Bool = false {
+        didSet {
+            UserDefaults.standard.set(
+                terminalBackgroundUsesImage,
+                forKey: "tessera.pref.terminalBackgroundUsesImage"
+            )
+        }
+    }
+    /// Filename inside TerminalBackgroundImageStore.directory; nil = never
+    /// imported (or removed). See Terminal/TerminalBackground.swift.
+    var terminalBackgroundImageID: String? = nil {
+        didSet {
+            if let id = terminalBackgroundImageID {
+                UserDefaults.standard.set(id, forKey: "tessera.pref.terminalBackgroundImageID")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "tessera.pref.terminalBackgroundImageID")
+            }
+        }
+    }
+    /// Opacity of the theme-bg-colored scrim over the picture (0…0.85).
+    var terminalBackgroundDim: Double = 0.5 {
+        didSet {
+            UserDefaults.standard.set(
+                terminalBackgroundDim,
+                forKey: "tessera.pref.terminalBackgroundDim"
+            )
+        }
+    }
+    /// TerminalBackgroundFillMode raw value ("fill" | "fit").
+    var terminalBackgroundFillMode: String = "fill" {
+        didSet {
+            UserDefaults.standard.set(
+                terminalBackgroundFillMode,
+                forKey: "tessera.pref.terminalBackgroundFillMode"
+            )
+        }
+    }
+    /// Gaussian blur radius in points applied to the picture (0 = off).
+    /// Pre-rendered into a variant file by TerminalBackgroundImageStore —
+    /// never blurred live in the terminal render path.
+    static let terminalBackgroundBlurRange: ClosedRange<Double> = 0...24
+    var terminalBackgroundBlur: Double = 0 {
+        didSet {
+            UserDefaults.standard.set(
+                terminalBackgroundBlur,
+                forKey: "tessera.pref.terminalBackgroundBlur"
+            )
+        }
+    }
+
+    // MARK: - Keyboard & Input (M4 §settings.keyboard + §14.8 customization)
+    /// Translate macOS-style text-editing chords (Option/Command arrows and
+    /// delete variants) into the readline/meta bytes expected by shells and
+    /// terminal apps. Default-on preserves the existing Option-arrow behavior.
+    var naturalTextEditingEnabled: Bool = true {
+        didSet {
+            UserDefaults.standard.set(
+                naturalTextEditingEnabled,
+                forKey: "tessera.pref.naturalTextEditingEnabled"
+            )
+        }
+    }
+
     /// Force-show or force-hide the on-screen accessory bar. When true, the bar
     /// still auto-hides via the GCKeyboard.coalesced rule. When false, the bar
     /// is hidden in all input modes.
@@ -115,6 +208,14 @@ final class AppearancePreferences {
         didSet { UserDefaults.standard.set(modifierBehavior, forKey: "tessera.pref.modifierBehavior") }
     }
 
+    // MARK: - Files
+    var filesReaperDays: Int = RemoteFilesConstants.defaultReaperDays {
+        didSet { UserDefaults.standard.set(filesReaperDays, forKey: RemoteFilesConstants.reaperDaysKey) }
+    }
+    var filesDefaultDestination: String = "temp" {
+        didSet { UserDefaults.standard.set(filesDefaultDestination, forKey: RemoteFilesConstants.defaultDestinationKey) }
+    }
+
     // MARK: - Security (M4 §settings.security)
     var requireFaceIDToUnlock: Bool = false {
         didSet { UserDefaults.standard.set(requireFaceIDToUnlock, forKey: "tessera.pref.requireFaceIDToUnlock") }
@@ -126,7 +227,8 @@ final class AppearancePreferences {
     var lockWhenBackgrounded: Bool = true {
         didSet { UserDefaults.standard.set(lockWhenBackgrounded, forKey: "tessera.pref.lockWhenBackgrounded") }
     }
-    /// Global default — per-key flag on StoredKey can override.
+    /// App-level authorization for a short connection burst. This complements,
+    /// but does not replace, each key item's OS-enforced Keychain ACL.
     var requireBiometricForKeyUse: Bool = false {
         didSet { UserDefaults.standard.set(requireBiometricForKeyUse, forKey: "tessera.pref.requireBiometricForKeyUse") }
     }
@@ -138,6 +240,39 @@ final class AppearancePreferences {
     }
     var bellNotificationEnabled: Bool = true {
         didSet { UserDefaults.standard.set(bellNotificationEnabled, forKey: "tessera.pref.bellNotificationEnabled") }
+    }
+
+    // MARK: - Experimental
+    /// Precise provider lifecycle notifications. Kept independent from the
+    /// terminal BEL channel because an arbitrary shell bell is not evidence
+    /// that an agent finished or needs input.
+    var agentCenterNotificationsEnabled: Bool = true {
+        didSet {
+            UserDefaults.standard.set(
+                agentCenterNotificationsEnabled,
+                forKey: "tessera.pref.agentCenterNotificationsEnabled"
+            )
+            DiagnosticLogStore.appendAgentCenter(
+                "notification-settings preciseAgent=\(agentCenterNotificationsEnabled) agentCenter=\(agentCenterEnabled) bell=\(bellNotificationEnabled)"
+            )
+            if agentCenterNotificationsEnabled {
+                coordinateAgentCenterAndBellNotificationsIfNeeded()
+            }
+        }
+    }
+
+    /// Master gate for Agent Center discovery, lifecycle processing, UI, and
+    /// shortcuts. Off by default while the feature is still baking.
+    var agentCenterEnabled: Bool = false {
+        didSet {
+            UserDefaults.standard.set(
+                agentCenterEnabled,
+                forKey: "tessera.pref.agentCenterEnabled"
+            )
+            if agentCenterEnabled {
+                coordinateAgentCenterAndBellNotificationsIfNeeded()
+            }
+        }
     }
 
     // MARK: - Swipe pad (experimental)
@@ -228,6 +363,13 @@ final class AppearancePreferences {
         }
         let storedScrollback = ud.integer(forKey: "tessera.pref.scrollbackLines")
         if storedScrollback >= 1000 { scrollbackLines = storedScrollback }
+        if ud.object(forKey: "tessera.pref.smoothScrollingEnabled") != nil {
+            smoothScrollingEnabled = ud.bool(forKey: "tessera.pref.smoothScrollingEnabled")
+        }
+        let storedGlideSpeed = ud.double(forKey: "tessera.pref.smoothScrollingSpeed")
+        if AppearancePreferences.smoothScrollingSpeedRange.contains(storedGlideSpeed) {
+            smoothScrollingSpeed = storedGlideSpeed
+        }
         if let raw = ud.string(forKey: "tessera.pref.sessionRestorePolicy"),
            let v = SessionRestorePolicy(rawValue: raw) {
             sessionRestorePolicy = v
@@ -237,6 +379,30 @@ final class AppearancePreferences {
             terminalThemeID = raw
         }
 
+        if ud.object(forKey: "tessera.pref.terminalBackgroundUsesImage") != nil {
+            terminalBackgroundUsesImage = ud.bool(forKey: "tessera.pref.terminalBackgroundUsesImage")
+        }
+        if let raw = ud.string(forKey: "tessera.pref.terminalBackgroundImageID"), !raw.isEmpty {
+            terminalBackgroundImageID = raw
+        }
+        if ud.object(forKey: "tessera.pref.terminalBackgroundDim") != nil {
+            let dim = ud.double(forKey: "tessera.pref.terminalBackgroundDim")
+            if (0...0.85).contains(dim) { terminalBackgroundDim = dim }
+        }
+        if let raw = ud.string(forKey: "tessera.pref.terminalBackgroundFillMode"),
+           TerminalBackgroundFillMode(rawValue: raw) != nil {
+            terminalBackgroundFillMode = raw
+        }
+        if ud.object(forKey: "tessera.pref.terminalBackgroundBlur") != nil {
+            let blur = ud.double(forKey: "tessera.pref.terminalBackgroundBlur")
+            if AppearancePreferences.terminalBackgroundBlurRange.contains(blur) {
+                terminalBackgroundBlur = blur
+            }
+        }
+
+        if ud.object(forKey: "tessera.pref.naturalTextEditingEnabled") != nil {
+            naturalTextEditingEnabled = ud.bool(forKey: "tessera.pref.naturalTextEditingEnabled")
+        }
         if ud.object(forKey: "tessera.pref.showAccessoryBar") != nil {
             showAccessoryBar = ud.bool(forKey: "tessera.pref.showAccessoryBar")
         }
@@ -246,6 +412,14 @@ final class AppearancePreferences {
         if let raw = ud.string(forKey: "tessera.pref.modifierBehavior"),
            raw == "oneShot" || raw == "sticky" {
             modifierBehavior = raw
+        }
+
+        if ud.object(forKey: RemoteFilesConstants.reaperDaysKey) != nil {
+            filesReaperDays = max(0, ud.integer(forKey: RemoteFilesConstants.reaperDaysKey))
+        }
+        if let raw = ud.string(forKey: RemoteFilesConstants.defaultDestinationKey),
+           raw == "cwd" || raw == "temp" {
+            filesDefaultDestination = raw
         }
 
         if ud.object(forKey: "tessera.pref.requireFaceIDToUnlock") != nil {
@@ -271,6 +445,14 @@ final class AppearancePreferences {
             bellNotificationEnabled = ud.bool(forKey: "tessera.pref.bellNotificationEnabled")
         }
 
+        if ud.object(forKey: "tessera.pref.agentCenterNotificationsEnabled") != nil {
+            agentCenterNotificationsEnabled = ud.bool(
+                forKey: "tessera.pref.agentCenterNotificationsEnabled"
+            )
+        }
+        if ud.object(forKey: "tessera.pref.agentCenterEnabled") != nil {
+            agentCenterEnabled = ud.bool(forKey: "tessera.pref.agentCenterEnabled")
+        }
         if ud.object(forKey: "tessera.pref.swipePadEnabled") != nil {
             swipePadEnabled = ud.bool(forKey: "tessera.pref.swipePadEnabled")
         }
@@ -304,6 +486,28 @@ final class AppearancePreferences {
         if ud.object(forKey: "tessera.pref.hasSeenWelcome") != nil {
             hasSeenWelcome = ud.bool(forKey: "tessera.pref.hasSeenWelcome")
         }
+
+        if agentCenterEnabled && agentCenterNotificationsEnabled {
+            coordinateAgentCenterAndBellNotificationsIfNeeded()
+        }
+    }
+
+    /// One-time coordination prevents duplicate, imprecise background alerts.
+    /// The marker is never cleared: if the user later re-enables terminal-bell
+    /// notifications, that explicit override remains untouched.
+    private func coordinateAgentCenterAndBellNotificationsIfNeeded() {
+        guard agentCenterEnabled, agentCenterNotificationsEnabled else { return }
+        let defaults = UserDefaults.standard
+        let key = "tessera.pref.agentCenterBellCoordinationPerformed"
+        guard !defaults.bool(forKey: key) else { return }
+        let disabledBell = bellNotificationEnabled
+        if bellNotificationEnabled {
+            bellNotificationEnabled = false
+        }
+        defaults.set(true, forKey: key)
+        DiagnosticLogStore.appendAgentCenter(
+            "notification-settings preciseAgent=true bellAutoDisabled=\(disabledBell) coordination=complete"
+        )
     }
 
     func resolvedMode(systemColorScheme: ColorScheme) -> AppearanceMode {

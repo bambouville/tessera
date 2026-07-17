@@ -78,8 +78,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-nio.git",
       "state" : {
-        "revision" : "558f24a4647193b5a0e2104031b71c55d31ff83a",
-        "version" : "2.97.1"
+        "revision" : "57c0a08a331aaea9f5d7a932ad94ef43be942a95",
+        "version" : "2.100.0"
       }
     },
     {
@@ -105,7 +105,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/bambouville/SwiftTerm",
       "state" : {
-        "revision" : "d34c15f76342ce66f717ac0830e0c0484b86a9dd"
+        "revision" : "d135aeb10108a3c11fb897aad656ea345545184c"
       }
     }
   ],

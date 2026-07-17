@@ -240,10 +240,77 @@ final class PaneCommandTests: XCTestCase {
     func test_sendInputToExplicitPaneSendsHexCommand() {
         let (controller, _, sent) = makeController()
         enterTmuxModeWithTwoPaneFixture(controller, sent: sent)
+        var observed: [(PaneId?, [UInt8])] = []
+        controller.inputObserver = { observed.append(($0, $1)) }
 
         controller.sendInput([0x61, 0x62], toPane: PaneId(6))
 
         expectSent(sent, "send-keys -t %6 -H 61 62\n")
+        XCTAssertEqual(observed.count, 1)
+        XCTAssertEqual(observed.first?.0, PaneId(6))
+        XCTAssertEqual(observed.first?.1, [0x61, 0x62])
+    }
+
+    func test_sendInputAcknowledgedWaitsForTmuxSuccess() async {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeWithTwoPaneFixture(controller, sent: sent)
+
+        let resultTask = Task {
+            await controller.sendInputAcknowledged([0x61, 0x62], toPane: PaneId(6))
+        }
+        await Task.yield()
+
+        expectSent(sent, "send-keys -t %6 -H 61 62\n")
+        controller.ingest(responseFrame(1))
+
+        let result = await resultTask.value
+        XCTAssertTrue(result)
+    }
+
+    func test_sendInputAcknowledgedReportsTmuxError() async {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeWithTwoPaneFixture(controller, sent: sent)
+
+        let resultTask = Task {
+            await controller.sendInputAcknowledged([0x0d], toPane: PaneId(6))
+        }
+        await Task.yield()
+
+        expectSent(sent, "send-keys -t %6 -H 0d\n")
+        controller.ingest(errorFrame(1, body: ["pane is gone"]))
+
+        let result = await resultTask.value
+        XCTAssertFalse(result)
+    }
+
+    func test_sendKeyAcknowledgedKeepsEnterSemantic() async {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeWithTwoPaneFixture(controller, sent: sent)
+
+        let resultTask = Task {
+            await controller.sendKeyAcknowledged(.enter, toPane: PaneId(6))
+        }
+        await Task.yield()
+
+        expectSent(sent, "send-keys -t %6 Enter\n")
+        controller.ingest(responseFrame(1))
+        let result = await resultTask.value
+        XCTAssertTrue(result)
+    }
+
+    func test_sendKeyAcknowledgedKeepsEscapeSemantic() async {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeWithTwoPaneFixture(controller, sent: sent)
+
+        let resultTask = Task {
+            await controller.sendKeyAcknowledged(.escape, toPane: PaneId(6))
+        }
+        await Task.yield()
+
+        expectSent(sent, "send-keys -t %6 Escape\n")
+        controller.ingest(responseFrame(1))
+        let result = await resultTask.value
+        XCTAssertTrue(result)
     }
 
     func test_paneCommandsAreNoOpsInPassthrough() {

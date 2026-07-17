@@ -62,6 +62,9 @@ public final class TmuxController {
 
     enum RenderStage: Equatable, Sendable {
         case viewport
+        /// Refresh the already-rendered window/pane in place. Unlike a real
+        /// window swap, this must not clear and rebuild local scrollback.
+        case viewportOnly
         case deep
     }
 
@@ -275,12 +278,28 @@ public final class TmuxController {
     /// `activeWindowId`. This is the input target and may differ from
     /// `renderedPaneId` while an inline display refresh is in flight.
     public private(set) var activePaneId: PaneId?
+    public private(set) var paneCurrentPaths: [PaneId: String] = [:]
+
+    public var activePaneCurrentPath: String? {
+        activePaneId.flatMap { paneCurrentPaths[$0] }
+    }
 
     /// All tmux windows currently known to the session, in tmux order.
     /// Fresh attaches do not replay `%window-add`; hydration rebuilds
     /// the list from `list-windows`, while later creates and closes
     /// arrive as normal notifications.
     public private(set) var windows: [WindowInfo] = []
+
+    /// True only after this control connection has completed an authoritative
+    /// `list-windows` response. Side-channel reconnects keep stale tabs visible,
+    /// but targeted commands must remain blocked until this flips back to true.
+    public private(set) var isWindowListHydrated = false
+
+    /// Changes whenever the underlying tmux control connection or attached
+    /// session identity is invalidated. UI confirmations capture this value so
+    /// an `@id` from an old tmux session/server can never target a different
+    /// window after a session switch, reconnect, or id reuse.
+    public private(set) var controlConnectionGeneration: UInt64 = 0
 
     public private(set) var bellingWindows: Set<Int> = []
 
@@ -311,6 +330,7 @@ public final class TmuxController {
     /// pushes a no-op completion so this queue always stays in sync
     /// with the responses on the wire.
     @ObservationIgnored private var pendingCommands: [PendingCommand] = []
+    @ObservationIgnored private var nextCommandSequence = 0
 
     /// Lines accumulated between the most recent `%begin` and the next
     /// `%end` / `%error`. Drained and handed to the head completion
@@ -353,9 +373,37 @@ public final class TmuxController {
     @ObservationIgnored private(set) var ownSessionId: SessionId?
 
     /// Inline render refresh currently waiting on tmux responses.
-    /// While set, old `%output` bytes are ignored so stale pane content
-    /// cannot bleed into the newly active tab before capture repaint.
-    @ObservationIgnored private var pendingRenderRefresh: (windowId: WindowId, generation: Int)?
+    /// All stages block direct `%output` presentation until their capture
+    /// repaint lands. Foreground repairs retain same-pane output separately and
+    /// flush it as one atomic batch immediately before the authoritative
+    /// viewport repaint, preserving local scrollback without presenting every
+    /// queued redraw frame on the way to the current screen.
+    @ObservationIgnored private var pendingRenderRefresh: (
+        windowId: WindowId,
+        generation: Int,
+        stage: RenderStage
+    )?
+
+    /// App-background and foreground-capture output barrier. iPadOS can resume
+    /// the SSH read path while the app is still inactive, before the foreground
+    /// capture is issued. Buffering from the inactive edge closes that gap.
+    /// Bytes remain partitioned by pane so a grid can flush each surface into
+    /// its own terminal model. Below the safety cap, buffered bytes are fed
+    /// synchronously and then the captured viewport is painted in the same
+    /// main-actor turn, so SwiftTerm keeps the output in scrollback but Core
+    /// Animation can only present the final frame. If the cap is exceeded, the
+    /// whole retained stream for that pane is discarded (never a partial escape
+    /// sequence) and the authoritative viewport capture supplies visible truth.
+    @ObservationIgnored private var isForegroundOutputCoalescing = false
+    @ObservationIgnored private var appIsInactive = false
+    @ObservationIgnored private var awaitingAppForegroundRefresh = false
+    @ObservationIgnored private var foregroundOutputRefreshGeneration: Int?
+    @ObservationIgnored private var coalescedForegroundOutput: [PaneId: [UInt8]] = [:]
+    @ObservationIgnored private var coalescedForegroundOutputByteCount = 0
+    @ObservationIgnored private var foregroundOutputOverflowedPanes: Set<PaneId> = []
+    @ObservationIgnored private var foregroundPaneRefreshTargets: [PaneId: Int] = [:]
+    @ObservationIgnored private var foregroundPaneRetryTasks: [PaneId: Task<Void, Never>] = [:]
+    @ObservationIgnored private var foregroundPaneRetryAttempts: [PaneId: Int] = [:]
     @ObservationIgnored private var pausedPanes: Set<PaneId> = []
     @ObservationIgnored private var windowBellFlags: [WindowId: Bool] = [:]
 
@@ -377,6 +425,7 @@ public final class TmuxController {
     /// dropped until the repaint lands (per-pane analog of `pendingRenderRefresh`
     /// for the shared swap), so stale bytes can't bleed in ahead of the capture.
     @ObservationIgnored private var pendingPaneRefreshes: [PaneId: Int] = [:]
+    @ObservationIgnored private var paneRefreshSequence = 0
 
     /// Panes that have already had a full deep capture since becoming visible.
     /// Drives deep-on-first-focus: siblings render shallow on swap-in and
@@ -414,8 +463,23 @@ public final class TmuxController {
     static let moshPaneBorderFormat =
         " #[align=left]#{?#{||:#{==:#{pane_title},#{host}},#{==:#{pane_title},#{host_short}}},#{pane_current_command},#{pane_title}} "
 
-    private static let paneMetadataSubscriptionName = "tessera-pane-meta"
+    static let paneMetadataSubscriptionName = "tessera-pane-meta"
     private static let bellSubscriptionName = "tessera-bell"
+    static let paneMetadataSubscriptionFormat = [
+        "#{window_id}",
+        "#{pane_id}",
+        "#{pane_active}",
+        "#{pane_left}",
+        "#{pane_top}",
+        "#{pane_width}",
+        "#{pane_height}",
+        "#{pane_current_command}",
+        "#{pane_title}",
+        "#{window_name}",
+        "#{host}",
+        "#{pane_current_path}",
+        "#{@tessera_agent_state}",
+    ].joined(separator: "\t")
     static let renderedPaneMetadataFormat = [
         "#{pane_id}",
         "#{cursor_x}",
@@ -446,14 +510,24 @@ public final class TmuxController {
     /// handshake and starts attach hydration.
     @ObservationIgnored private var attachInitFlushed = false
     @ObservationIgnored private var allowUngatedLatchFallback = false
+    /// A post-attach window swap whose authoritative capture has not landed.
+    /// While true, incremental `%output` must not latch a pane over the stale
+    /// full-screen image; only a successful capture-repaint clears the gate.
+    @ObservationIgnored private var establishedRenderIsFailClosed = false
     @ObservationIgnored private var initialRenderWatchdogTask: Task<Void, Never>?
     @ObservationIgnored private var renderRetryTask: Task<Void, Never>?
+    @ObservationIgnored private var renderCommandQueueWaitTask: Task<Void, Never>?
     @ObservationIgnored private var renderRetryAttemptsByGeneration: [Int: Int] = [:]
 
     private struct PendingCommand {
+        let sequence: Int
         let command: String
         let completion: (Result<[String], CommandError>) -> Void
     }
+
+    /// Opaque per-controller tag. Diagnostics exports can contain several live
+    /// sessions whose lines otherwise look identical after endpoint redaction.
+    private let diagnosticID = String(UUID().uuidString.prefix(8))
 
     /// Called with bytes destined for the terminal renderer.
     /// Set by the owner after construction; nil by default.
@@ -477,6 +551,10 @@ public final class TmuxController {
     /// rendered ids committed. App layer uses it to re-run find and restore
     /// per-window client-side modes.
     @ObservationIgnored public var displayDidSwap: ((_ windowId: WindowId) -> Void)?
+    /// Fired after an already-rendered pane is repaired in place. Unlike
+    /// `displayDidSwap`, this must not restore per-window modes; the app uses it
+    /// only to refresh derived viewport state such as Find matches.
+    @ObservationIgnored public var displayDidRefresh: ((_ windowId: WindowId) -> Void)?
     /// App-layer answer to "is the shared SwiftTerm terminal currently on
     /// the alternate-screen buffer". Consulted when assembling repaints.
     @ObservationIgnored public var terminalIsInAltScreen: (() -> Bool)?
@@ -485,6 +563,13 @@ public final class TmuxController {
 
     public var initialRenderWatchdogInterval: TimeInterval = 4.0
     public var renderRefreshRetryDelay: TimeInterval = 0.5
+
+    /// Hard cap for output retained across inactive→foreground recovery.
+    /// Normal Codex redraw bursts stay well below this (the live regression is
+    /// ~288 KiB). On overflow we discard that pane's whole retained stream —
+    /// never a truncated escape sequence — and trust the viewport capture for
+    /// visible truth, avoiding unbounded memory and multi-second parser stalls.
+    public var maxForegroundOutputBytes = 512 * 1024
 
     /// Max capture-repaint attempts per generation before we stop re-trying and
     /// rely on the live-output fallback alone. Must be > 1: tmux returns empty
@@ -508,6 +593,17 @@ public final class TmuxController {
     /// pre-validate. nil by default.
     @ObservationIgnored public var onCommandError: ((_ message: String) -> Void)?
 
+    /// Queried right before a per-pane capture-repaint is assembled: is the
+    /// pane's LOCAL terminal currently on the alternate screen? A pane
+    /// surface starts on the normal buffer at mount, but live `%output`
+    /// (vim/htop sending 1049h) moves it — and a repaint assembled for the
+    /// wrong buffer corrupts it: without a leading `?1049l`, the saved-
+    /// primary rows print INTO the live alt screen and the `?1049h` that
+    /// follows is a no-op on a terminal already in alt (no clear, no
+    /// switch), leaving stale primary fragments behind the TUI's rows.
+    /// nil / unset falls back to the mount-time assumption (normal buffer).
+    @ObservationIgnored public var paneLocalAltScreenProbe: ((_ paneId: PaneId) -> Bool)?
+
     /// Fired after a per-pane capture-repaint has been fed to a pane's sink.
     /// The app uses it to restore per-pane client-side modes (kitty), re-run
     /// find against the focused pane, and drive multi-pane launch readiness.
@@ -518,6 +614,23 @@ public final class TmuxController {
     /// pane id as a best-effort invalidation signal for derived UI such as
     /// pane-local scrollback overlays.
     @ObservationIgnored public var paneDidOutput: ((_ paneId: PaneId) -> Void)?
+
+    /// Raw per-pane output tap for consumers that need the bytes before render
+    /// routing (Agent Center prompt/echo observation). Kept separate from
+    /// `paneDidOutput` so existing mosh scrollback invalidation remains a
+    /// single-owner callback. The observer must stay cheap; expensive capture
+    /// work is expected to coalesce off this pulse.
+    @ObservationIgnored public var paneOutputObserver: ((_ paneId: PaneId, _ data: ArraySlice<UInt8>) -> Void)?
+
+    /// Retained semantic Agent Center state published by a remote hook as a
+    /// pane user option. Format subscriptions replay this value to a fresh
+    /// control client after app/session restoration.
+    @ObservationIgnored public var paneAgentStateObserver: ((_ paneId: PaneId, _ json: String) -> Void)?
+
+    /// User-originated bytes routed through this controller. Agent Center uses
+    /// this only to resolve an already-known blocking prompt immediately; it
+    /// never treats arbitrary typing as evidence of agent activity.
+    @ObservationIgnored public var inputObserver: ((_ paneId: PaneId?, _ bytes: [UInt8]) -> Void)?
 
     public init(controlPath: ControlPath = .inline) {
         self.controlPath = controlPath
@@ -554,6 +667,16 @@ public final class TmuxController {
             paneSinks.removeValue(forKey: paneId)
             pendingPaneRefreshes.removeValue(forKey: paneId)
             deepRefreshedPanes.remove(paneId)
+            discardCoalescedForegroundOutput(for: paneId)
+            foregroundPaneRefreshTargets.removeValue(forKey: paneId)
+            foregroundPaneRetryTasks.removeValue(forKey: paneId)?.cancel()
+            foregroundPaneRetryAttempts.removeValue(forKey: paneId)
+            if isForegroundOutputCoalescing,
+               !awaitingAppForegroundRefresh,
+               foregroundOutputRefreshGeneration == nil,
+               foregroundPaneRefreshTargets.isEmpty {
+                endForegroundOutputCoalescing()
+            }
         }
     }
 
@@ -561,9 +684,25 @@ public final class TmuxController {
     /// a single pane, or the session resets) so output falls back to the
     /// shared single-pane path.
     public func clearAllPaneSinks() {
+        let removedPaneIds = Set(paneSinks.keys)
         paneSinks.removeAll()
         pendingPaneRefreshes.removeAll()
         deepRefreshedPanes.removeAll()
+        for paneId in removedPaneIds {
+            discardCoalescedForegroundOutput(for: paneId)
+            foregroundPaneRefreshTargets.removeValue(forKey: paneId)
+            foregroundPaneRetryTasks.removeValue(forKey: paneId)?.cancel()
+            foregroundPaneRetryAttempts.removeValue(forKey: paneId)
+        }
+        // A grid can collapse while the app is inactive. Keep the lifecycle
+        // barrier armed in that case; the foreground shared-surface refresh
+        // will take ownership and release it. Once foreground recovery is
+        // already running, unmounting the target grid invalidates its buffers.
+        if isForegroundOutputCoalescing,
+           !awaitingAppForegroundRefresh,
+           foregroundOutputRefreshGeneration == nil {
+            endForegroundOutputCoalescing()
+        }
     }
 
     /// Capture pane `%P`'s current screen (and scrollback) from tmux and
@@ -572,33 +711,78 @@ public final class TmuxController {
     /// output. `deep` requests the full scrollback capture; a shallow refresh
     /// (viewport only) is used for swap-in siblings and upgraded to deep on
     /// first focus. No-op if the pane has no sink or we're not inline.
+    ///
+    /// Deep runs AT MOST ONCE per pane mount (`deepRefreshedPanes`): the
+    /// repaint stream's `ESC[2J` clears only the visible screen, so a deep
+    /// repaint's history lines APPEND to the client's local scrollback.
+    /// That's correct exactly once, into a freshly mounted (near-empty)
+    /// buffer; after that the sink's live `%output` keeps history current
+    /// and every further repaint must be viewport-only or each focus
+    /// switch/foreground restore would stack another full copy of history
+    /// into local scrollback.
     public func refreshPane(paneId: PaneId, deep: Bool = true) {
+        let inheritsForegroundRecovery = isForegroundOutputCoalescing
+            && !awaitingAppForegroundRefresh
+            && paneWindowTable[paneId] == activeWindowId
+            && activeWindowId.flatMap { window($0)?.rendersAsPaneGrid } == true
+        refreshPane(
+            paneId: paneId,
+            deep: deep,
+            foregroundRecovery: inheritsForegroundRecovery
+        )
+    }
+
+    private func refreshPane(
+        paneId: PaneId,
+        deep: Bool,
+        foregroundRecovery: Bool
+    ) {
         guard controlPath == .inline, paneSinks[paneId] != nil else { return }
-        let wantsDeep = deep || deepRefreshedPanes.contains(paneId)
-        let generation = stateGeneration
-        pendingPaneRefreshes[paneId] = generation
+        if awaitingAppForegroundRefresh, !foregroundRecovery { return }
+        let wantsDeep = deep && !deepRefreshedPanes.contains(paneId)
+        paneRefreshSequence &+= 1
+        let requestID = paneRefreshSequence
+        pendingPaneRefreshes[paneId] = requestID
+        if foregroundRecovery {
+            foregroundPaneRetryTasks.removeValue(forKey: paneId)?.cancel()
+            foregroundPaneRefreshTargets[paneId] = requestID
+            if !pendingCommands.isEmpty {
+                waitForCommandQueueBeforeForegroundPaneRender(
+                    paneId: paneId,
+                    requestID: requestID,
+                    deep: deep
+                )
+                return
+            }
+        }
         let target = paneId.description
         sendControlCommand(
             "display-message -p -t \(target) '\(Self.renderedPaneMetadataFormat)'"
         ) { [weak self] result in
             guard let self else { return }
+            if self.awaitingAppForegroundRefresh {
+                if self.pendingPaneRefreshes[paneId] == requestID {
+                    self.pendingPaneRefreshes.removeValue(forKey: paneId)
+                }
+                return
+            }
             guard self.paneSinks[paneId] != nil,
-                  self.pendingPaneRefreshes[paneId] == generation,
+                  self.pendingPaneRefreshes[paneId] == requestID,
                   case .success(let lines) = result,
                   let head = lines.first(where: { !$0.isEmpty }),
                   let state = Self.parseRenderedPaneState(head)
             else {
-                self.failPaneRefresh(paneId: paneId, generation: generation)
+                self.failPaneRefresh(paneId: paneId, requestID: requestID)
                 return
             }
-            self.capturePane(paneId: paneId, state: state, generation: generation, deep: wantsDeep)
+            self.capturePane(paneId: paneId, state: state, requestID: requestID, deep: wantsDeep)
         }
     }
 
     private func capturePane(
         paneId: PaneId,
         state: RenderedPaneState,
-        generation: Int,
+        requestID: Int,
         deep: Bool
     ) {
         let target = paneId.description
@@ -611,10 +795,10 @@ public final class TmuxController {
                 guard let self else { return }
                 self.sendPaneCapture(
                     "capture-pane -p -e -N -t \(target)",
-                    paneId: paneId, generation: generation
+                    paneId: paneId, requestID: requestID
                 ) { altLines in
                     self.finishPaneRefresh(
-                        paneId: paneId, state: state, generation: generation,
+                        paneId: paneId, state: state, requestID: requestID,
                         captureLines: altLines, historyLines: history,
                         savedPrimaryLines: savedPrimary, altScreenLines: altLines, deep: deep
                     )
@@ -624,7 +808,7 @@ public final class TmuxController {
                 guard let self else { return }
                 self.sendPaneCapture(
                     "capture-pane -p -e -N -a -q -t \(target)",
-                    paneId: paneId, generation: generation
+                    paneId: paneId, requestID: requestID
                 ) { savedPrimary in
                     captureAlt(history, savedPrimary)
                 }
@@ -632,7 +816,7 @@ public final class TmuxController {
             if deep, (state.historySize ?? 0) > 0 {
                 sendPaneCapture(
                     "capture-pane -p -e -N -S -\(depth) -E -1 -t \(target)",
-                    paneId: paneId, generation: generation
+                    paneId: paneId, requestID: requestID
                 ) { history in
                     captureSavedPrimary(history)
                 }
@@ -645,9 +829,9 @@ public final class TmuxController {
         let command = deep
             ? "capture-pane -p -e -N -S -\(depth) -t \(target)"
             : "capture-pane -p -e -N -t \(target)"
-        sendPaneCapture(command, paneId: paneId, generation: generation) { [weak self] lines in
+        sendPaneCapture(command, paneId: paneId, requestID: requestID) { [weak self] lines in
             self?.finishPaneRefresh(
-                paneId: paneId, state: state, generation: generation,
+                paneId: paneId, state: state, requestID: requestID,
                 captureLines: lines, historyLines: [], savedPrimaryLines: [],
                 altScreenLines: nil, deep: deep
             )
@@ -657,16 +841,16 @@ public final class TmuxController {
     private func sendPaneCapture(
         _ command: String,
         paneId: PaneId,
-        generation: Int,
+        requestID: Int,
         onSuccess: @escaping ([String]) -> Void
     ) {
         sendControlCommand(command) { [weak self] result in
             guard let self else { return }
             guard self.paneSinks[paneId] != nil,
-                  self.pendingPaneRefreshes[paneId] == generation,
+                  self.pendingPaneRefreshes[paneId] == requestID,
                   case .success(let lines) = result
             else {
-                self.failPaneRefresh(paneId: paneId, generation: generation)
+                self.failPaneRefresh(paneId: paneId, requestID: requestID)
                 return
             }
             onSuccess(lines)
@@ -676,7 +860,7 @@ public final class TmuxController {
     private func finishPaneRefresh(
         paneId: PaneId,
         state: RenderedPaneState,
-        generation: Int,
+        requestID: Int,
         captureLines: [String],
         historyLines: [String],
         savedPrimaryLines: [String],
@@ -684,22 +868,34 @@ public final class TmuxController {
         deep: Bool
     ) {
         guard let sink = paneSinks[paneId],
-              pendingPaneRefreshes[paneId] == generation
+              pendingPaneRefreshes[paneId] == requestID
         else {
-            failPaneRefresh(paneId: paneId, generation: generation)
+            failPaneRefresh(paneId: paneId, requestID: requestID)
             return
         }
-        // Each pane surface is dedicated to one pane and never swaps windows, so
-        // it starts on the normal buffer — pass terminalIsInAltScreen=false (the
-        // assembler still emits the ?1049h path when state.paneInAltScreen). The
-        // scroll region is pane-relative, so don't suppress it (clientRows=nil).
+        if awaitingAppForegroundRefresh {
+            pendingPaneRefreshes.removeValue(forKey: paneId)
+            return
+        }
+        let completesForegroundRecovery = foregroundPaneRefreshTargets[paneId] == requestID
+        if completesForegroundRecovery {
+            let retainedOutput = takeCoalescedForegroundOutput(for: paneId)
+            if !retainedOutput.bytes.isEmpty {
+                sink(ArraySlice(retainedOutput.bytes))
+            }
+        }
+        // A pane surface starts on the normal buffer at mount, but live
+        // %output (a TUI's 1049h) moves it — ask the app for the CURRENT
+        // local buffer so the assembler emits ?1049l first when needed
+        // (see paneLocalAltScreenProbe). The scroll region is pane-relative,
+        // so don't suppress it (clientRows=nil).
         let bytes = RepaintAssembly.assemble(
             state: state,
             captureLines: captureLines,
             historyLines: historyLines,
             savedPrimaryLines: savedPrimaryLines,
             altScreenLines: altScreenLines,
-            terminalIsInAltScreen: false,
+            terminalIsInAltScreen: paneLocalAltScreenProbe?(paneId) ?? false,
             clientRows: nil
         )
         let tailContentLines = state.paneInAltScreen ? (altScreenLines ?? captureLines) : captureLines
@@ -722,11 +918,79 @@ public final class TmuxController {
             markInitialRenderReady()
         }
         paneDidRefresh?(paneId)
+        foregroundPaneRetryTasks.removeValue(forKey: paneId)?.cancel()
+        foregroundPaneRetryAttempts.removeValue(forKey: paneId)
+        finishForegroundPaneRefresh(paneId, requestID: requestID)
     }
 
-    private func failPaneRefresh(paneId: PaneId, generation: Int) {
-        if pendingPaneRefreshes[paneId] == generation {
+    private func failPaneRefresh(paneId: PaneId, requestID: Int) {
+        if pendingPaneRefreshes[paneId] == requestID {
             pendingPaneRefreshes.removeValue(forKey: paneId)
+        }
+        if foregroundPaneRefreshTargets[paneId] == requestID {
+            // Keep the pane fail-closed and retain its output until an
+            // authoritative capture succeeds. Reopening live output here
+            // recreates the stale-grid/sliver failure seen on shared surfaces.
+            scheduleForegroundPaneRefreshRetry(paneId: paneId, requestID: requestID)
+            return
+        }
+        finishForegroundPaneRefresh(paneId, requestID: requestID)
+    }
+
+    private func scheduleForegroundPaneRefreshRetry(paneId: PaneId, requestID: Int) {
+        let attempt = (foregroundPaneRetryAttempts[paneId] ?? 0) + 1
+        foregroundPaneRetryAttempts[paneId] = attempt
+        foregroundPaneRetryTasks.removeValue(forKey: paneId)?.cancel()
+        let delay = renderRefreshRetryDelay * Double(min(attempt, 6))
+        Self.logDiagnostic(
+            "foreground-pane retry scheduled pane=\(paneId) request=\(requestID) attempt=\(attempt) delay=\(delay)"
+        )
+        foregroundPaneRetryTasks[paneId] = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.nanoseconds(for: delay))
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                guard let self,
+                      self.isForegroundOutputCoalescing,
+                      !self.awaitingAppForegroundRefresh,
+                      self.foregroundPaneRefreshTargets[paneId] == requestID,
+                      self.paneSinks[paneId] != nil
+                else { return }
+                self.foregroundPaneRetryTasks.removeValue(forKey: paneId)
+                self.refreshPane(
+                    paneId: paneId,
+                    deep: paneId == self.activePaneId,
+                    foregroundRecovery: true
+                )
+            }
+        }
+    }
+
+    private func waitForCommandQueueBeforeForegroundPaneRender(
+        paneId: PaneId,
+        requestID: Int,
+        deep: Bool
+    ) {
+        foregroundPaneRetryTasks.removeValue(forKey: paneId)?.cancel()
+        Self.logDiagnostic(
+            "foreground-pane wait-command-queue controller=\(diagnosticID) pane=\(paneId) request=\(requestID) pending=\(pendingCommands.count)"
+        )
+        foregroundPaneRetryTasks[paneId] = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.foregroundPaneRetryTasks.removeValue(forKey: paneId)
+                guard self.isForegroundOutputCoalescing,
+                      !self.awaitingAppForegroundRefresh,
+                      self.foregroundPaneRefreshTargets[paneId] == requestID,
+                      self.paneSinks[paneId] != nil
+                else { return }
+                self.refreshPane(
+                    paneId: paneId,
+                    deep: deep,
+                    foregroundRecovery: true
+                )
+            }
         }
     }
 
@@ -738,10 +1002,12 @@ public final class TmuxController {
     public func sendInput(_ bytes: [UInt8]) {
         switch mode {
         case .passthrough:
+            if !bytes.isEmpty { inputObserver?(nil, bytes) }
             sendBytes?(bytes)
         case .tmuxControl:
             guard let pane = activePaneId else { return }
             guard !bytes.isEmpty else { return }
+            inputObserver?(pane, bytes)
             let hex = bytes.map { String(format: "%02x", $0) }.joined(separator: " ")
             sendControlCommand("send-keys -t \(pane.description) -H \(hex)")
         }
@@ -763,7 +1029,7 @@ public final class TmuxController {
     /// we've negotiated the `-CC` session. A user pressing ⌘T before
     /// tmux has started has nothing to target.
     public func sendControlCommand(_ command: String) {
-        sendControlCommand(command) { _ in }
+        enqueueControlCommand(command) { _ in }
     }
 
     /// Send a raw tmux control-mode command line upstream and invoke
@@ -791,16 +1057,65 @@ public final class TmuxController {
         _ command: String,
         completion: @escaping (Result<[String], CommandError>) -> Void
     ) {
+        enqueueControlCommand(command, completion: completion)
+    }
+
+    /// Low-priority query surface for observers such as Swipe Pad and Agent
+    /// Center. An authoritative shared-terminal repaint must run alone after
+    /// all older replies drain: the device corruption log showed cursor/process
+    /// and capture bodies reaching render-metadata callbacks when those
+    /// consumers were pipelined together. Observers may retry on their normal
+    /// poll/output cadence; rendering cannot safely accept a foreign-shaped
+    /// body or paint incrementally over a stale window.
+    public func sendBackgroundControlQuery(
+        _ command: String,
+        completion: @escaping (Result<[String], CommandError>) -> Void
+    ) {
+        guard !isAuthoritativeRenderRefreshPending else {
+            Self.logDiagnostic(
+                "background-query skipped controller=\(diagnosticID) reason=authoritative-render commandCategory=\(Self.commandCategory(command))"
+            )
+            completion(.failure(.cancelled))
+            return
+        }
+        sendControlCommand(command, completion: completion)
+    }
+
+    public var isAuthoritativeRenderRefreshPending: Bool {
+        pendingRenderRefresh != nil
+            || isForegroundOutputCoalescing
+            || establishedRenderIsFailClosed
+    }
+
+    private func enqueueControlCommand(
+        _ command: String,
+        completion: @escaping (Result<[String], CommandError>) -> Void
+    ) {
         let category = Self.commandCategory(command)
         Self.logDiagnostic(
-            "sendControlCommand path=\(controlPath) mode=\(mode) pending=\(pendingCommands.count) activeWindowPresent=\(activeWindowId != nil) activePanePresent=\(activePaneId != nil) commandCategory=\(category)"
+            "sendControlCommand controller=\(diagnosticID) path=\(controlPath) mode=\(mode) pending=\(pendingCommands.count) activeWindowPresent=\(activeWindowId != nil) activePanePresent=\(activePaneId != nil) commandCategory=\(category)"
         )
         guard mode == .tmuxControl else {
-            Self.logDiagnostic("sendControlCommand rejected reason=not-in-tmux commandCategory=\(category)")
+            Self.logDiagnostic("sendControlCommand rejected controller=\(diagnosticID) reason=not-in-tmux commandCategory=\(category)")
             completion(.failure(.notInTmuxMode))
             return
         }
-        pendingCommands.append(PendingCommand(command: command, completion: completion))
+
+        nextCommandSequence &+= 1
+        let entry = PendingCommand(
+            sequence: nextCommandSequence,
+            command: command,
+            completion: completion
+        )
+        transmitControlCommand(entry)
+    }
+
+    private func transmitControlCommand(_ entry: PendingCommand) {
+        pendingCommands.append(entry)
+        Self.logDiagnostic(
+            "command-transmit controller=\(diagnosticID) sequence=\(entry.sequence) wirePending=\(pendingCommands.count) commandCategory=\(Self.commandCategory(entry.command))"
+        )
+        let command = entry.command
         let line = command.hasSuffix("\n") ? command : command + "\n"
         sendBytes?(Array(line.utf8))
     }
@@ -1028,6 +1343,7 @@ public final class TmuxController {
     /// auto-focuses it — the tab strip picks both up through the normal
     /// message flow.
     public func newWindow() {
+        replayClientSize(reason: "new-window")
         sendControlCommand("new-window -e COLORTERM=truecolor")
     }
 
@@ -1036,6 +1352,18 @@ public final class TmuxController {
     /// `%session-window-changed` naming the successor.
     public func killCurrentWindow() {
         sendControlCommand("kill-window")
+    }
+
+    /// Ask tmux to kill a specific tracked window. The explicit `@id` target
+    /// lets per-tab close controls remove an inactive window without first
+    /// selecting it. Reject unknown ids so a broadcast notification from a
+    /// different session can never turn into a command against that session.
+    public func killWindow(_ windowId: WindowId) {
+        guard mode == .tmuxControl,
+              isWindowListHydrated,
+              windows.contains(where: { $0.id == windowId })
+        else { return }
+        sendControlCommand("kill-window -t \(windowId.description)")
     }
 
     /// Previous tmux window in the session (wraps).
@@ -1074,11 +1402,11 @@ public final class TmuxController {
         }
     }
 
-    /// Tell the controller the current client size (cols × rows).
-    /// Cached so we can push `refresh-client -C` to tmux on the next
-    /// mode flip; also sent immediately when we're already in tmux
-    /// mode. Outer views should call this alongside the SSH-level
-    /// SIGWINCH any time the terminal view's dimensions change.
+    /// Tell the controller the current client size (cols × rows). Cached so we
+    /// can push `refresh-client -C` to tmux on the next mode flip; also sent
+    /// immediately when we're already in tmux mode. Outer views should call
+    /// this alongside the transport-level resize any time the terminal view's
+    /// dimensions change.
     ///
     /// Why this exists: tmux `-CC` ignores PTY `SIGWINCH` entirely.
     /// It reads the initial size from the controlling PTY's winsize
@@ -1088,21 +1416,32 @@ public final class TmuxController {
     /// SIGWINCH flipped the PTY winsize to 120×40, pane stayed at
     /// 80×24; `refresh-client -C 120,40` finally resized the pane.
     /// Without this method, tmux's pane drifts out of sync with
-    /// SwiftTerm's view as soon as the simulator rotates or Stage
-    /// Manager resizes the window, and `capture-pane` returns a
-    /// smaller grid than the SwiftTerm viewport — content shows up in
-    /// the top-left corner with large blank margins.
+    /// SwiftTerm's view as soon as the simulator rotates or Stage Manager
+    /// resizes the window, and `capture-pane` returns a smaller grid than the
+    /// SwiftTerm viewport — content shows up in the top-left corner with large
+    /// blank margins. The mosh side-channel needs the same replay: its PTY resize
+    /// is also ignored by `tmux -CC`, and commands issued by that client (notably
+    /// `new-window`) otherwise create panes at the side-channel's stale geometry
+    /// until user input through the visible mosh client forces a repaint.
     public func updateClientSize(cols: Int, rows: Int) {
         let previous = lastKnownSize
         lastKnownSize = (cols, rows)
-        if mode == .tmuxControl, controlPath == .inline {
-            // Logged so we can catch a transient bogus width (e.g. a half-width
-            // cols during a layout/font transition) being pushed to tmux — that
-            // would shrink the pane, and on the way back to full width the
-            // vacated columns can keep stale background (the half-row gray bleed).
-            Self.logDiagnostic("client-size cols=\(cols) rows=\(rows) prevCols=\(previous?.cols ?? -1) prevRows=\(previous?.rows ?? -1)")
-            sendControlCommand("refresh-client -C \(cols),\(rows)")
-        }
+        replayClientSize(reason: "size-change", previous: previous)
+    }
+
+    private func replayClientSize(
+        reason: String,
+        previous: (cols: Int, rows: Int)? = nil
+    ) {
+        guard mode == .tmuxControl, let size = lastKnownSize else { return }
+        // Logged so we can catch a transient bogus width (e.g. a half-width cols
+        // during a layout/font transition) being pushed to tmux — that would
+        // shrink the pane, and on the way back to full width the vacated columns
+        // can keep stale background (the half-row gray bleed).
+        Self.logDiagnostic(
+            "client-size cols=\(size.cols) rows=\(size.rows) prevCols=\(previous?.cols ?? -1) prevRows=\(previous?.rows ?? -1) path=\(controlPath) reason=\(reason)"
+        )
+        sendControlCommand("refresh-client -C \(size.cols),\(size.rows)")
     }
 
     /// Re-assert the client size AND repaint the active single-pane window from
@@ -1137,31 +1476,89 @@ public final class TmuxController {
         )
     }
 
-    /// Force a fresh full repaint of the active window. Call on foreground
+    /// Close the rendered-output gate as soon as the app leaves the active
+    /// phase. The SSH channel can resume before SwiftUI reports `.active` on
+    /// the way back from another app, so waiting until the foreground refresh
+    /// starts leaves a window where queued TUI redraws can visibly race through
+    /// SwiftTerm's existing deep buffer.
+    public func prepareForAppInactivity() {
+        appIsInactive = true
+        guard controlPath == .inline else { return }
+        awaitingAppForegroundRefresh = true
+        foregroundOutputRefreshGeneration = nil
+        guard mode == .tmuxControl else { return }
+        beginForegroundOutputCoalescing()
+        Self.logDiagnostic(
+            "foreground-output coalescing-begin window=\(activeWindowId?.description ?? "nil") renderedPane=\(renderedPaneId?.description ?? "nil")"
+        )
+    }
+
+    /// Force a fresh visible repaint of the active window. Call on foreground
     /// restore: when the app resumes, nothing else re-renders the visible
     /// window — the size replay only sends `refresh-client -C` — so any stale
     /// content left on the shared terminal (cross-window bleed from a pane that
     /// painted while we were rendering a different window, or a repaint that
     /// failed/aborted before backgrounding) persists until the user interacts.
-    /// A fresh capture-repaint clears the screen (`ED 2`) and repaints it from
+    /// A fresh capture-repaint clears the viewport (`ED 2`) and repaints it from
     /// tmux's authoritative grid; if the control channel is still recovering and
     /// the metadata comes back empty, the viewport retry/backoff rides it out.
+    /// When the same window/pane is already rendered, the repaint stays
+    /// viewport-only: replaying up to 2,000 history rows makes SwiftTerm visibly
+    /// race from old output to the bottom and briefly stalls the UI. A real
+    /// window/pane mismatch still takes the normal viewport+deep path so its
+    /// scrollback is rebuilt from tmux truth.
     public func refreshActiveWindowOnForeground() {
-        guard mode == .tmuxControl, controlPath == .inline else { return }
-        guard let activeWindowId else { return }
+        appIsInactive = false
+        guard controlPath == .inline else { return }
+        guard mode == .tmuxControl else {
+            // `prepareForAppInactivity()` also latches while passthrough is
+            // waiting to enter control mode. Clear that latch if the app became
+            // active before tmux attached, or future initial rendering would be
+            // deferred forever.
+            endForegroundOutputCoalescing()
+            return
+        }
+        guard let activeWindowId else {
+            endForegroundOutputCoalescing()
+            resumePausedForegroundRecoveryPanes()
+            return
+        }
+        awaitingAppForegroundRefresh = false
+        beginForegroundOutputCoalescing()
         Self.logDiagnostic("foreground-refresh window=\(activeWindowId)")
         if window(activeWindowId)?.rendersAsPaneGrid == true {
             // Grid windows are painted per-pane; repaint each visible pane.
-            for paneId in paneSinks.keys {
-                refreshPane(paneId: paneId, deep: false)
+            foregroundOutputRefreshGeneration = nil
+            relinquishForegroundPaneRefreshOwnership()
+            let paneIds = Set(paneSinks.keys)
+            guard !paneIds.isEmpty else {
+                // SwiftUI may not have mounted the grid surfaces yet. Keep the
+                // lifecycle barrier armed across that gap; the app follows
+                // each sink registration with refreshPane(), which inherits
+                // foreground ownership and releases after authoritative paint.
+                return
+            }
+            for paneId in paneIds {
+                refreshPane(
+                    paneId: paneId,
+                    deep: paneId == activePaneId,
+                    foregroundRecovery: true
+                )
             }
             return
         }
+        relinquishForegroundPaneRefreshOwnership()
+        let refreshesRenderedPaneInPlace = renderedWindowId == activeWindowId
+            && renderedPaneId != nil
+            && renderedPaneId == activePaneId
+        let stage: RenderStage = refreshesRenderedPaneInPlace ? .viewportOnly : .viewport
         let generation = advanceStateGeneration(reason: "foreground-refresh")
+        foregroundOutputRefreshGeneration = generation
         refreshRenderedWindow(
             windowId: activeWindowId,
             generation: generation,
-            reason: "foreground-refresh"
+            reason: "foreground-refresh",
+            stage: stage
         )
     }
 
@@ -1208,6 +1605,8 @@ public final class TmuxController {
     /// -reset controller.
     public func reset() {
         let cancelled = drainPendingCommands()
+        controlConnectionGeneration &+= 1
+        isWindowListHydrated = false
         advanceStateGeneration(reason: "reset")
         clearProtocolState(keepWindowModel: false)
         resetRenderHardeningState()
@@ -1223,6 +1622,7 @@ public final class TmuxController {
         pausedPanes.removeAll()
         windowBellFlags.removeAll()
         paneWindowTable.removeAll()
+        paneCurrentPaths.removeAll()
         paneSinks.removeAll()
         pendingPaneRefreshes.removeAll()
         deepRefreshedPanes.removeAll()
@@ -1249,6 +1649,8 @@ public final class TmuxController {
         }
 
         let cancelled = drainPendingCommands()
+        controlConnectionGeneration &+= 1
+        isWindowListHydrated = false
         advanceStateGeneration(reason: "sidechannel-disconnected")
         clearProtocolState(keepWindowModel: true)
         resetRenderHardeningState()
@@ -1353,6 +1755,10 @@ public final class TmuxController {
         isInitialRenderReady = controlPath == .sideChannel
         attachInitFlushed = false
         if controlPath == .inline {
+            if appIsInactive {
+                awaitingAppForegroundRefresh = true
+                beginForegroundOutputCoalescing()
+            }
             startInitialRenderWatchdog()
         }
         Self.logDiagnostic(
@@ -1432,8 +1838,112 @@ public final class TmuxController {
     private func resetRenderHardeningState() {
         cancelInitialRenderWatchdog()
         cancelRenderRetry(resetAttempts: true)
+        renderCommandQueueWaitTask?.cancel()
+        renderCommandQueueWaitTask = nil
         allowUngatedLatchFallback = false
+        establishedRenderIsFailClosed = false
         abortedRenderedWindowId = nil
+        endForegroundOutputCoalescing()
+    }
+
+    private func beginForegroundOutputCoalescing() {
+        guard controlPath == .inline else { return }
+        isForegroundOutputCoalescing = true
+    }
+
+    @discardableResult
+    private func coalesceForegroundOutputIfNeeded(paneId: PaneId, data: [UInt8]) -> Bool {
+        guard isForegroundOutputCoalescing else { return false }
+        if foregroundOutputOverflowedPanes.contains(paneId) { return true }
+        let limit = max(0, maxForegroundOutputBytes)
+        guard coalescedForegroundOutputByteCount + data.count <= limit else {
+            let discarded = coalescedForegroundOutput.removeValue(forKey: paneId)?.count ?? 0
+            coalescedForegroundOutputByteCount -= discarded
+            foregroundOutputOverflowedPanes.insert(paneId)
+            Self.logDiagnostic(
+                "foreground-output overflow pane=\(paneId) limit=\(limit) discarded=\(discarded) incoming=\(data.count)"
+            )
+            return true
+        }
+        coalescedForegroundOutput[paneId, default: []].append(contentsOf: data)
+        coalescedForegroundOutputByteCount += data.count
+        return true
+    }
+
+    private func takeCoalescedForegroundOutput(for paneId: PaneId) -> (bytes: [UInt8], overflowed: Bool) {
+        let bytes = coalescedForegroundOutput.removeValue(forKey: paneId) ?? []
+        coalescedForegroundOutputByteCount -= bytes.count
+        let overflowed = foregroundOutputOverflowedPanes.remove(paneId) != nil
+        return (bytes, overflowed)
+    }
+
+    private func discardCoalescedForegroundOutput(for paneId: PaneId) {
+        _ = takeCoalescedForegroundOutput(for: paneId)
+    }
+
+    private func finishForegroundPaneRefresh(_ paneId: PaneId, requestID: Int) {
+        guard foregroundPaneRefreshTargets[paneId] == requestID else { return }
+        foregroundPaneRefreshTargets.removeValue(forKey: paneId)
+        if foregroundPaneRefreshTargets.isEmpty {
+            endForegroundOutputCoalescing()
+        }
+    }
+
+    /// Invalidate grid-pane foreground work when the shared terminal becomes
+    /// the new recovery owner. Do not end the barrier or discard retained
+    /// bytes: the replacement shared capture must stay fail-closed until it
+    /// paints authoritative state. Old pane callbacks become harmless stale
+    /// completions because both their request ids and retry tasks are removed.
+    private func relinquishForegroundPaneRefreshOwnership() {
+        let targets = foregroundPaneRefreshTargets
+        foregroundPaneRefreshTargets.removeAll(keepingCapacity: true)
+        for (paneId, requestID) in targets {
+            if pendingPaneRefreshes[paneId] == requestID {
+                pendingPaneRefreshes.removeValue(forKey: paneId)
+            }
+            foregroundPaneRetryTasks.removeValue(forKey: paneId)?.cancel()
+            foregroundPaneRetryAttempts.removeValue(forKey: paneId)
+        }
+    }
+
+    /// Release the foreground barrier. Successful refreshes consume each
+    /// relevant pane buffer immediately before repaint. Overflow and surface
+    /// invalidation paths drop retained redraw streams atomically so they cannot
+    /// reintroduce the high-speed replay this barrier exists to prevent.
+    private func endForegroundOutputCoalescing() {
+        guard isForegroundOutputCoalescing || !coalescedForegroundOutput.isEmpty else {
+            awaitingAppForegroundRefresh = false
+            foregroundOutputRefreshGeneration = nil
+            coalescedForegroundOutputByteCount = 0
+            foregroundOutputOverflowedPanes.removeAll(keepingCapacity: true)
+            foregroundPaneRefreshTargets.removeAll(keepingCapacity: true)
+            for task in foregroundPaneRetryTasks.values { task.cancel() }
+            foregroundPaneRetryTasks.removeAll(keepingCapacity: true)
+            foregroundPaneRetryAttempts.removeAll(keepingCapacity: true)
+            return
+        }
+        let bufferedBytes = coalescedForegroundOutputByteCount
+        let overflowedPanes = foregroundOutputOverflowedPanes.count
+        Self.logDiagnostic(
+            "foreground-output coalescing-end bufferedBytes=\(bufferedBytes) overflowedPanes=\(overflowedPanes)"
+        )
+        isForegroundOutputCoalescing = false
+        awaitingAppForegroundRefresh = false
+        foregroundOutputRefreshGeneration = nil
+        coalescedForegroundOutput.removeAll(keepingCapacity: true)
+        coalescedForegroundOutputByteCount = 0
+        foregroundOutputOverflowedPanes.removeAll(keepingCapacity: true)
+        foregroundPaneRefreshTargets.removeAll(keepingCapacity: true)
+        for task in foregroundPaneRetryTasks.values { task.cancel() }
+        foregroundPaneRetryTasks.removeAll(keepingCapacity: true)
+        foregroundPaneRetryAttempts.removeAll(keepingCapacity: true)
+    }
+
+    private func resumePausedForegroundRecoveryPanes() {
+        let recoveryPaneIds = Set([activePaneId, renderedPaneId].compactMap { $0 })
+        for paneId in recoveryPaneIds where pausedPanes.contains(paneId) {
+            resumePausedPane(paneId)
+        }
     }
 
     /// The window whose content was on screen when an aborted swap
@@ -1453,6 +1963,55 @@ public final class TmuxController {
         renderRetryTask = nil
         if resetAttempts {
             renderRetryAttemptsByGeneration.removeAll(keepingCapacity: true)
+        }
+    }
+
+    /// A shared-terminal repaint can be superseded by a surface transition
+    /// that leaves no shared terminal to paint (the active window becomes a
+    /// pane grid or the final window closes). Retire every shared owner so a
+    /// failed established swap cannot keep observer queries fail-closed after
+    /// its retry target has disappeared. In-flight command replies are left in
+    /// the FIFO and made stale by the caller's generation advance.
+    private func abandonSharedRenderRecovery() {
+        pendingRenderRefresh = nil
+        cancelRenderRetry(resetAttempts: true)
+        renderCommandQueueWaitTask?.cancel()
+        renderCommandQueueWaitTask = nil
+        establishedRenderIsFailClosed = false
+        abortedRenderedWindowId = nil
+        foregroundOutputRefreshGeneration = nil
+    }
+
+    private func waitForCommandQueueBeforeRender(
+        windowId: WindowId,
+        generation: Int,
+        reason: String,
+        stage: RenderStage
+    ) {
+        renderCommandQueueWaitTask?.cancel()
+        Self.logDiagnostic(
+            "render-refresh wait-command-queue controller=\(diagnosticID) window=\(windowId) generation=\(generation) stage=\(stage) pending=\(pendingCommands.count) reason=\(reason)"
+        )
+        renderCommandQueueWaitTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.renderCommandQueueWaitTask = nil
+                guard self.isCurrentGeneration(generation),
+                      self.activeWindowId == windowId,
+                      let pending = self.pendingRenderRefresh,
+                      pending.windowId == windowId,
+                      pending.generation == generation,
+                      pending.stage == stage
+                else { return }
+                self.refreshRenderedWindow(
+                    windowId: windowId,
+                    generation: generation,
+                    reason: reason,
+                    stage: stage
+                )
+            }
         }
     }
 
@@ -1491,6 +2050,10 @@ public final class TmuxController {
 
     private func markInitialRenderReady() {
         isInitialRenderReady = true
+        // The ungated latch exists only to escape a failed cold attach. Once a
+        // complete terminal has rendered, carrying it into later window swaps
+        // would allow incremental output to paint over stale full-screen state.
+        allowUngatedLatchFallback = false
         cancelInitialRenderWatchdog()
     }
 
@@ -1506,7 +2069,14 @@ public final class TmuxController {
               activeWindowId == windowId
         else { return }
 
-        if stage == .viewport || !isInitialRenderReady {
+        // An in-place foreground repair must leave the already-rendered pane
+        // and its local scrollback intact while tmux's metadata channel rides
+        // out a transient post-background stall. Real swaps keep the existing
+        // fail-closed behavior.
+        if stage == .viewport || (stage == .deep && !isInitialRenderReady) {
+            if stage == .viewport, isInitialRenderReady {
+                establishedRenderIsFailClosed = true
+            }
             if renderedWindowId != nil {
                 abortedRenderedWindowId = renderedWindowId
             }
@@ -1528,21 +2098,23 @@ public final class TmuxController {
         reason: String
     ) {
         let nextAttempt = (renderRetryAttemptsByGeneration[generation] ?? 0) + 1
-        // Once the first retry has failed, open the live-output fallback so a
-        // genuine outage isn't frozen — but keep retrying the full
-        // capture-repaint below (the fallback only paints incremental %output
-        // onto whatever is already on screen; the repaint is what fully clears
-        // stale cross-window content). This boundary (nextAttempt > 1) matches
-        // the previous give-up point, so first-retry behaviour is unchanged.
-        if nextAttempt > 1 {
+        // Fail-open output is safe only during the initial attach, when there
+        // is no prior window on screen to corrupt. During a later window swap,
+        // latching the new pane after metadata stalls paints only its next few
+        // incremental updates over the old full-screen image — a mostly stale
+        // viewport with a small sliver from the newly active window. Keep
+        // established sessions fail-closed until an authoritative capture lands.
+        if nextAttempt > 1, !isInitialRenderReady {
             allowUngatedLatchFallback = true
         }
         // Only the viewport stage (the visible screen) self-heals with extra
         // attempts — that's the repaint whose failure leaves stale cross-window
         // content on screen. The deep stage is scrollback enrichment layered on
         // an already-rendered viewport, so it keeps the single-retry give-up.
-        let maxAttempts = stage == .viewport ? maxRenderRefreshAttempts : 1
-        guard nextAttempt <= maxAttempts else {
+        let isForegroundRecovery = foregroundOutputRefreshGeneration == generation
+        let isEstablishedSwapRecovery = stage == .viewport && establishedRenderIsFailClosed
+        let maxAttempts = stage == .deep ? 1 : maxRenderRefreshAttempts
+        guard isForegroundRecovery || isEstablishedSwapRecovery || nextAttempt <= maxAttempts else {
             Self.logDiagnostic(
                 "render-refresh retry exhausted window=\(windowId) generation=\(generation) stage=\(stage) attempt=\(nextAttempt) reason=\(reason)"
             )
@@ -1717,6 +2289,27 @@ public final class TmuxController {
             if let active = window.activePaneId { table[active] = window.id }
         }
         paneWindowTable = table
+        prunePaneCurrentPathsToKnownPanes()
+    }
+
+    private func prunePaneCurrentPathsToKnownPanes() {
+        let knownPaneIds = Set(paneWindowTable.keys)
+        paneCurrentPaths = paneCurrentPaths.filter { knownPaneIds.contains($0.key) }
+    }
+
+    private func updatePaneCurrentPath(_ currentPath: String?, for paneId: PaneId) {
+        // Skip no-op writes: the %* pane-metadata subscription fires for
+        // every pane on every change (command, title, …), and @Observable
+        // publishes on every set — an unconditional reassign would
+        // re-render every observer of `paneCurrentPaths` per message.
+        guard paneCurrentPaths[paneId] != currentPath else { return }
+        var paths = paneCurrentPaths
+        if let currentPath {
+            paths[paneId] = currentPath
+        } else {
+            paths.removeValue(forKey: paneId)
+        }
+        paneCurrentPaths = paths
     }
 
     /// Merge a fresh set of layout pane ids into a window's `panes`, preserving
@@ -1916,6 +2509,7 @@ public final class TmuxController {
 
     private func handlePaneOutput(paneId: PaneId, data: [UInt8]) {
         paneDidOutput?(paneId)
+        paneOutputObserver?(paneId, data[...])
         updatePaneTitleFromOutput(paneId: paneId, data: data)
         sendTerminalResponseForOutputIfNeeded(paneId: paneId, data: data)
 
@@ -1926,14 +2520,21 @@ public final class TmuxController {
         // flight so stale bytes can't bleed in ahead of the capture.
         if let sink = paneSinks[paneId] {
             guard controlPath == .inline else { return }
+            if coalesceForegroundOutputIfNeeded(paneId: paneId, data: data) { return }
             if pendingPaneRefreshes[paneId] != nil { return }
             sink(ArraySlice(data))
             return
         }
 
-        if controlPath == .inline, pendingRenderRefresh != nil {
+        guard controlPath == .inline else { return }
+        let isForegroundRecoveryPane = paneId == renderedPaneId
+            || paneId == activePaneId
+            || (renderedPaneId == nil && activePaneId == nil)
+        if isForegroundRecoveryPane,
+           coalesceForegroundOutputIfNeeded(paneId: paneId, data: data) {
             return
         }
+        if pendingRenderRefresh != nil { return }
 
         // On attach, tmux can flood output before hydration names any active
         // window. The latch opens only once a window is known, except for the
@@ -1942,6 +2543,7 @@ public final class TmuxController {
         // paints mid-stream bytes (and drops the launch overlay) during
         // the ~0.5 s retry window on attach.
         let latchGateOpen = controlPath == .inline
+            && !establishedRenderIsFailClosed
             && ((activeWindowId != nil && renderRetryTask == nil) || allowUngatedLatchFallback)
         if latchGateOpen,
            renderedPaneId == nil,
@@ -1958,7 +2560,6 @@ public final class TmuxController {
             renderedWindowId = activeWindowId
             preloadTerminalDefaultColorReportIfNeeded(for: paneId)
         }
-        guard controlPath == .inline else { return }
         if paneId == renderedPaneId {
             feedTerminal?(ArraySlice(data))
             markInitialRenderReady()
@@ -2048,6 +2649,7 @@ public final class TmuxController {
             // send; the option died with the window).
             moshPaneBorderWindows.remove(windowId)
             paneWindowTable = paneWindowTable.filter { $0.value != windowId }
+            prunePaneCurrentPathsToKnownPanes()
             if activeWindowId == windowId {
                 let generation = advanceStateGeneration(reason: "active-window-closed")
                 activeWindowId = windows.first?.id
@@ -2069,6 +2671,14 @@ public final class TmuxController {
                             generation: generation,
                             reason: "active-window-closed"
                         )
+                    }
+                } else {
+                    // The last active window disappeared. There is no shared
+                    // surface left to repaint, so retire both ordinary
+                    // established-swap recovery and foreground ownership.
+                    abandonSharedRenderRecovery()
+                    if isForegroundOutputCoalescing {
+                        endForegroundOutputCoalescing()
                     }
                 }
             }
@@ -2201,16 +2811,19 @@ public final class TmuxController {
         case .continue(let paneId):
             pausedPanes.remove(paneId)
 
-        case .begin:
+        case .begin(_, let commandNumber, let flags):
             // Fresh command response — drop any leftover body from a
             // previous response (shouldn't happen in normal flow, but
             // keeps us robust to parser state mishaps).
             inflightLines.removeAll(keepingCapacity: true)
+            Self.logDiagnostic(
+                "command-frame-begin controller=\(diagnosticID) number=\(commandNumber) flags=\(flags) wirePending=\(pendingCommands.count) headSequence=\(pendingCommands.first?.sequence ?? -1) headCategory=\(pendingCommands.first.map { Self.commandCategory($0.command) } ?? "none")"
+            )
 
         case .commandOutputLine(let line):
             inflightLines.append(line)
 
-        case .end(_, _, let flags):
+        case .end(_, let commandNumber, let flags):
             let lines = inflightLines
             inflightLines.removeAll(keepingCapacity: true)
             guard flags & 1 == 1 else {
@@ -2230,12 +2843,12 @@ public final class TmuxController {
             if !pendingCommands.isEmpty {
                 let entry = pendingCommands.removeFirst()
                 Self.logDiagnostic(
-                    "command-response status=end commandCategory=\(Self.commandCategory(entry.command)) lines=\(lines.count)"
+                    "command-response controller=\(diagnosticID) status=end number=\(commandNumber) sequence=\(entry.sequence) commandCategory=\(Self.commandCategory(entry.command)) lines=\(lines.count)"
                 )
                 entry.completion(.success(lines))
             }
 
-        case .error(_, _, let flags):
+        case .error(_, let commandNumber, let flags):
             let lines = inflightLines
             inflightLines.removeAll(keepingCapacity: true)
             guard flags & 1 == 1 else {
@@ -2247,7 +2860,7 @@ public final class TmuxController {
             if !pendingCommands.isEmpty {
                 let entry = pendingCommands.removeFirst()
                 Self.logDiagnostic(
-                    "command-response status=error commandCategory=\(Self.commandCategory(entry.command)) lines=\(lines.count)"
+                    "command-response controller=\(diagnosticID) status=error number=\(commandNumber) sequence=\(entry.sequence) commandCategory=\(Self.commandCategory(entry.command)) lines=\(lines.count)"
                 )
                 entry.completion(.failure(.tmuxError(lines: lines)))
             }
@@ -2281,8 +2894,20 @@ public final class TmuxController {
             // simulator latching $0 here, then a peer's
             // %client-session-changed $5 flipping it to $5 and re-opening
             // the very leak this filter closes.
+            let priorSessionId = ownSessionId
             ownSessionId = sessionId
             Self.logDiagnostic("session-changed own session set to \(sessionId)")
+
+            // A later %session-changed can move this same -CC client to a
+            // different session without disconnecting. Window ids are global
+            // to the tmux server, so stale tabs from the prior session must not
+            // remain valid kill targets. Keep them visible but disabled until
+            // a new authoritative list-windows response replaces the model.
+            if let priorSessionId, priorSessionId != sessionId {
+                controlConnectionGeneration &+= 1
+                isWindowListHydrated = false
+                hydrateTmuxState(reason: "session-changed")
+            }
 
         case let .layoutChange(windowId, layout, visibleLayout, rawFlags):
             handleLayoutChange(
@@ -2327,6 +2952,7 @@ public final class TmuxController {
             return
         }
 
+        let previouslyRenderedAsGrid = windows[idx].rendersAsPaneGrid
         let parsedLayout = WindowLayout.parse(layout)
         let parsedVisible = visibleLayout.flatMap { WindowLayout.parse($0) }
         let zoomed = rawFlags?.contains("Z") ?? false
@@ -2342,6 +2968,21 @@ public final class TmuxController {
             )
         }
         rebuildPaneWindowTable()
+
+        if controlPath == .inline,
+           windowId == activeWindowId,
+           !previouslyRenderedAsGrid,
+           windows[idx].rendersAsPaneGrid {
+            // SwiftUI will replace the shared terminal with fresh per-pane
+            // surfaces after this model update. Invalidate any hidden shared
+            // capture/retry, but keep an existing lifecycle output barrier
+            // armed across the mount gap. The app's normal first per-pane
+            // refresh inherits that ownership and releases it only after every
+            // mounted surface has captured authoritative state. If the app is
+            // still inactive, foreground activation starts those pane repairs.
+            _ = advanceStateGeneration(reason: "shared-to-grid")
+            abandonSharedRenderRecovery()
+        }
 
         Self.logDiagnostic(
             "layout-change window=\(windowId) paneCount=\(parsedLayout?.paneCount ?? -1) zoomed=\(zoomed) grid=\(windows[idx].rendersAsPaneGrid) panes=\(parsedLayout?.paneIds.map(\.description) ?? [])"
@@ -2413,6 +3054,12 @@ public final class TmuxController {
               // swap-in resume continues it if the user returns.
               windowId == activeWindowId
         else { return }
+
+        // Foreground recovery already owns the authoritative viewport capture.
+        // Leave the pane paused until that repaint lands; starting the normal
+        // deep pause-resync here would replay history and supersede the exact
+        // output barrier that protects app activation.
+        if isForegroundOutputCoalescing { return }
 
         resumePausedPane(paneId)
         let generation = advanceStateGeneration(reason: "pause-resync")
@@ -2500,6 +3147,10 @@ public final class TmuxController {
     private func hydrateTmuxState(reason: String) {
         let generation = advanceStateGeneration(reason: reason)
         resetRenderHardeningState()
+        if appIsInactive, controlPath == .inline {
+            awaitingAppForegroundRefresh = true
+            beginForegroundOutputCoalescing()
+        }
         if controlPath == .inline {
             startInitialRenderWatchdog()
         }
@@ -2513,13 +3164,11 @@ public final class TmuxController {
             // covers post-attach windows while first-session panes keep the
             // server default and deep capture simply clamps to what's there.
             sendControlCommand("set-option -g history-limit 10000")
-
-            // SIGWINCH to the PTY is silently ignored in -CC mode, so this is
-            // the only path that syncs tmux's pane grid to SwiftTerm's size.
-            if let size = lastKnownSize {
-                sendControlCommand("refresh-client -C \(size.cols),\(size.rows)")
-            }
         }
+        // PTY resize is silently ignored in -CC mode, including mosh's
+        // side-channel client. Replay the visible terminal size before any
+        // queries or user-triggered tmux commands depend on this client.
+        replayClientSize(reason: "attach-init")
 
         sendControlCommand("refresh-client -f pause-after=5")
         sendControlCommand(
@@ -2616,6 +3265,7 @@ public final class TmuxController {
         }
 
         windows = discoveredWindows
+        isWindowListHydrated = true
         // Hydration is the authoritative active-pane snapshot (list-panes sets
         // each window's active pane below). Any pane focus stashed for a
         // not-yet-known window is now superseded — applied windows get their
@@ -2758,7 +3408,7 @@ public final class TmuxController {
         let windowName: String?
     }
 
-    private struct PaneSubscriptionMetadata {
+    struct PaneSubscriptionMetadata {
         let windowId: WindowId
         let paneId: PaneId
         let isActive: Bool
@@ -2767,11 +3417,13 @@ public final class TmuxController {
         let paneTitle: String?
         let paneTitleIsDefault: Bool
         let windowName: String?
+        let currentPath: String?
+        let agentStateJSON: String?
     }
 
     private func sendPaneMetadataSubscription() {
         sendControlCommand(
-            "refresh-client -B '\(Self.paneMetadataSubscriptionName):%*:#{window_id}\t#{pane_id}\t#{pane_active}\t#{pane_left}\t#{pane_top}\t#{pane_width}\t#{pane_height}\t#{pane_current_command}\t#{pane_title}\t#{window_name}\t#{host}'"
+            "refresh-client -B '\(Self.paneMetadataSubscriptionName):%*:\(Self.paneMetadataSubscriptionFormat)'"
         )
     }
 
@@ -2897,7 +3549,7 @@ public final class TmuxController {
         )
     }
 
-    private static func parsePaneSubscriptionMetadata(
+    static func parsePaneSubscriptionMetadata(
         _ value: String,
         fallbackWindowId: WindowId,
         fallbackPaneId: PaneId
@@ -2934,6 +3586,10 @@ public final class TmuxController {
         let windowName = parts.count > windowNameIndex ? nonEmpty(String(parts[windowNameIndex])) : nil
         let hostIndex = currentCommandIndex + 3
         let host = parts.count > hostIndex ? nonEmpty(String(parts[hostIndex])) : nil
+        let currentPathIndex = currentCommandIndex + 4
+        let currentPath = parts.count > currentPathIndex ? nonEmpty(String(parts[currentPathIndex])) : nil
+        let agentStateIndex = currentCommandIndex + 5
+        let agentStateJSON = parts.count > agentStateIndex ? nonEmpty(String(parts[agentStateIndex])) : nil
 
         return PaneSubscriptionMetadata(
             windowId: windowId,
@@ -2943,7 +3599,9 @@ public final class TmuxController {
             currentCommand: currentCommand,
             paneTitle: title,
             paneTitleIsDefault: isDefaultPaneTitle(title, host: host),
-            windowName: windowName
+            windowName: windowName,
+            currentPath: currentPath,
+            agentStateJSON: agentStateJSON
         )
     }
 
@@ -3010,6 +3668,9 @@ public final class TmuxController {
     }
 
     private func handlePaneMetadataSubscription(_ metadata: PaneSubscriptionMetadata) {
+        if let agentStateJSON = metadata.agentStateJSON {
+            paneAgentStateObserver?(metadata.paneId, agentStateJSON)
+        }
         guard indexOfWindow(metadata.windowId) != nil else { return }
 
         if let windowName = Self.nonEmpty(metadata.windowName) {
@@ -3030,6 +3691,7 @@ public final class TmuxController {
             contentRect: metadata.contentRect
         )
         paneWindowTable[metadata.paneId] = metadata.windowId
+        updatePaneCurrentPath(metadata.currentPath, for: metadata.paneId)
 
         let trackedActivePane = window(metadata.windowId)?.activePaneId
         guard metadata.isActive
@@ -3192,16 +3854,46 @@ public final class TmuxController {
         stage: RenderStage = .viewport
     ) {
         guard controlPath == .inline else { return }
+        if awaitingAppForegroundRefresh {
+            clearPendingRenderRefresh(windowId: windowId, generation: generation)
+            Self.logDiagnostic(
+                "render-refresh deferred-inactive window=\(windowId) generation=\(generation) stage=\(stage) reason=\(reason)"
+            )
+            return
+        }
+        if isForegroundOutputCoalescing {
+            // A state change can supersede the original foreground request.
+            // Transfer ownership only when this call will actually perform the
+            // replacement shared-surface capture; grid/no-window paths release
+            // the barrier explicitly instead.
+            relinquishForegroundPaneRefreshOwnership()
+            foregroundOutputRefreshGeneration = generation
+        }
         // Grid windows are painted per-pane by the app (refreshPane), not the
         // shared terminal — skip the shared repaint so the two paths don't
         // fight over renderedPaneId / displayWillSwap. Mark ready so the launch
         // overlay can still drop when switching to a grid window.
         if window(windowId)?.rendersAsPaneGrid == true {
-            clearPendingRenderRefresh(windowId: windowId, generation: generation)
+            abandonSharedRenderRecovery()
+            if isForegroundOutputCoalescing {
+                endForegroundOutputCoalescing()
+            }
             markInitialRenderReady()
             return
         }
-        pendingRenderRefresh = (windowId: windowId, generation: generation)
+        pendingRenderRefresh = (windowId: windowId, generation: generation, stage: stage)
+        let requiresExclusiveCommandQueue = isInitialRenderReady && stage != .deep
+        guard !requiresExclusiveCommandQueue || pendingCommands.isEmpty else {
+            waitForCommandQueueBeforeRender(
+                windowId: windowId,
+                generation: generation,
+                reason: reason,
+                stage: stage
+            )
+            return
+        }
+        renderCommandQueueWaitTask?.cancel()
+        renderCommandQueueWaitTask = nil
         Self.logDiagnostic(
             "render-refresh send-metadata window=\(windowId) generation=\(generation) stage=\(stage) reason=\(reason)"
         )
@@ -3216,6 +3908,13 @@ public final class TmuxController {
                 self.clearPendingRenderRefresh(windowId: windowId, generation: generation)
                 Self.logDiagnostic(
                     "render-refresh metadata stale window=\(windowId) generation=\(generation) result='\(Self.describe(result))'"
+                )
+                return
+            }
+            if self.awaitingAppForegroundRefresh {
+                self.clearPendingRenderRefresh(windowId: windowId, generation: generation)
+                Self.logDiagnostic(
+                    "render-refresh metadata-deferred-inactive window=\(windowId) generation=\(generation) stage=\(stage) reason=\(reason)"
                 )
                 return
             }
@@ -3235,14 +3934,48 @@ public final class TmuxController {
                 return
             }
 
+            let resolvedStage = self.resolvedRenderStage(
+                requestedStage: stage,
+                windowId: windowId,
+                state: parsed,
+                generation: generation
+            )
+            if resolvedStage != stage {
+                self.pendingRenderRefresh = (
+                    windowId: windowId,
+                    generation: generation,
+                    stage: resolvedStage
+                )
+                Self.logDiagnostic(
+                    "render-refresh promoted window=\(windowId) generation=\(generation) from=\(stage) to=\(resolvedStage) pane=\(parsed.paneId) paneAlt=\(parsed.paneInAltScreen)"
+                )
+            }
+
             self.captureRenderedWindow(
                 windowId: windowId,
                 state: parsed,
                 generation: generation,
                 reason: reason,
-                stage: stage
+                stage: resolvedStage
             )
         }
+    }
+
+    private func resolvedRenderStage(
+        requestedStage: RenderStage,
+        windowId: WindowId,
+        state: RenderedPaneState,
+        generation: Int
+    ) -> RenderStage {
+        guard requestedStage == .viewportOnly else { return requestedStage }
+        let previousRenderedWindowId = renderedWindowId ?? abortedRenderedWindowId
+        let terminalAltScreen = terminalIsInAltScreen?() == true
+        let retainedOutputCanAdvanceTerminalState = foregroundOutputRefreshGeneration == generation
+            && coalescedForegroundOutput[state.paneId]?.isEmpty == false
+        let canRefreshInPlace = previousRenderedWindowId == windowId
+            && renderedPaneId == state.paneId
+            && (terminalAltScreen == state.paneInAltScreen || retainedOutputCanAdvanceTerminalState)
+        return canRefreshInPlace ? .viewportOnly : .viewport
     }
 
     private func captureRenderedWindow(
@@ -3253,7 +3986,7 @@ public final class TmuxController {
         stage: RenderStage
     ) {
         switch stage {
-        case .viewport:
+        case .viewport, .viewportOnly:
             captureViewport(windowId: windowId, state: state, generation: generation, reason: reason, stage: stage)
         case .deep where state.paneInAltScreen:
             captureDeepAltScreen(windowId: windowId, state: state, generation: generation, reason: reason)
@@ -3304,17 +4037,45 @@ public final class TmuxController {
             stage: .deep,
             failureReason: "deep-capture"
         ) { [weak self] captureLines in
-            self?.finishRenderedWindowRefresh(
+            guard let self else { return }
+            let finish: ([String]?) -> Void = { [weak self] scrubLines in
+                self?.finishRenderedWindowRefresh(
+                    windowId: windowId,
+                    state: state,
+                    generation: generation,
+                    stage: .deep,
+                    reason: reason,
+                    captureLines: captureLines,
+                    historyLines: [],
+                    savedPrimaryLines: [],
+                    altScreenLines: nil,
+                    scrubLines: scrubLines
+                )
+            }
+            // The ghost scrub (finishRenderedWindowRefresh) re-paints the
+            // visible screen after the deep feed. It must NOT reuse a suffix
+            // slice of this deep capture: capture-pane -e emits SGR
+            // cumulatively, so a slice can start mid-run with its bg/fg
+            // openers stranded above the boundary — legitimate colors repaint
+            // as default (the full-width black band). tmux re-serializes all
+            // open SGR state at row 0 of a viewport-only capture, so chain a
+            // fresh one whenever the scrub will run (history scrolled).
+            guard let visibleRows = self.lastKnownSize?.rows,
+                  visibleRows > 0,
+                  captureLines.count > visibleRows
+            else {
+                finish(nil)
+                return
+            }
+            self.sendCaptureCommand(
+                "capture-pane -p -e -N -t \(windowId.description)",
                 windowId: windowId,
-                state: state,
                 generation: generation,
                 stage: .deep,
-                reason: reason,
-                captureLines: captureLines,
-                historyLines: [],
-                savedPrimaryLines: [],
-                altScreenLines: nil
-            )
+                failureReason: "deep-scrub"
+            ) { scrubLines in
+                finish(scrubLines)
+            }
         }
     }
 
@@ -3435,7 +4196,8 @@ public final class TmuxController {
         captureLines: [String],
         historyLines: [String],
         savedPrimaryLines: [String],
-        altScreenLines: [String]?
+        altScreenLines: [String]?,
+        scrubLines: [String]? = nil
     ) {
         guard let feed = feedTerminal,
               isCurrentGeneration(generation),
@@ -3449,11 +4211,39 @@ public final class TmuxController {
             )
             return
         }
+        if awaitingAppForegroundRefresh {
+            clearPendingRenderRefresh(windowId: windowId, generation: generation)
+            Self.logDiagnostic(
+                "render-refresh finish-deferred-inactive window=\(windowId) generation=\(generation) stage=\(stage) reason=\(reason)"
+            )
+            return
+        }
+
+        // Replay retained same-pane output in one synchronous call before the
+        // captured viewport. This keeps every byte in SwiftTerm's local history
+        // and applies any buffered alternate-screen transition before the
+        // assembler inspects the terminal, while presenting no intermediate
+        // frame between the batch and the authoritative repaint.
+        let completesForegroundOutputCoalescing = foregroundOutputRefreshGeneration == generation
+        if completesForegroundOutputCoalescing,
+           stage == .viewportOnly,
+           renderedPaneId == state.paneId {
+            let retainedOutput = takeCoalescedForegroundOutput(for: state.paneId)
+            if !retainedOutput.bytes.isEmpty {
+                feed(ArraySlice(retainedOutput.bytes))
+            }
+        }
 
         let previousRenderedWindowId = renderedWindowId ?? abortedRenderedWindowId
-        abortedRenderedWindowId = nil
         let terminalWasInAltScreen = terminalIsInAltScreen?() == true
-        displayWillSwap?(previousRenderedWindowId, windowId, state.paneInAltScreen)
+        let refreshesRenderedPaneInPlace = stage == .viewportOnly
+            && previousRenderedWindowId == windowId
+            && renderedPaneId == state.paneId
+            && terminalWasInAltScreen == state.paneInAltScreen
+        abortedRenderedWindowId = nil
+        if !refreshesRenderedPaneInPlace {
+            displayWillSwap?(previousRenderedWindowId, windowId, state.paneInAltScreen)
+        }
         let bytes = RepaintAssembly.assemble(
             state: state,
             captureLines: captureLines,
@@ -3461,7 +4251,8 @@ public final class TmuxController {
             savedPrimaryLines: savedPrimaryLines,
             altScreenLines: altScreenLines,
             terminalIsInAltScreen: terminalWasInAltScreen,
-            clientRows: lastKnownSize?.rows
+            clientRows: lastKnownSize?.rows,
+            preservePrimaryDuringAltRefresh: refreshesRenderedPaneInPlace && state.paneInAltScreen
         )
 
         // Cross-window gray-block bleed repro signal: flag when this window's
@@ -3494,13 +4285,23 @@ public final class TmuxController {
         // scrolling ~all of it up into the buffer. That scroll exercises
         // SwiftTerm's iOS scroll path, which can leave a scrolled row's RIGHT
         // half holding the previous frame's background in the cell model — the
-        // "half-width gray box" at the screen midpoint (cols >= width/2). The
-        // capture bytes are clean (every row paints full-width and resets its
-        // SGR — verified), and the viewport repaint, which homes and paints
-        // exactly the visible rows with NO scroll, renders clean. So after the
-        // deep scroll lands the history, re-paint just the visible screen on
-        // top of it to scrub any ghost. ESC[2J inside the repaint clears only
-        // the visible screen, so the scrolled-in scrollback is preserved.
+        // "half-width gray box" at the screen midpoint (cols >= width/2). So
+        // after the deep scroll lands the history, re-paint just the visible
+        // screen on top of it to scrub any ghost. ESC[2J inside the repaint
+        // clears only the visible screen, so the scrolled-in scrollback is
+        // preserved.
+        //
+        // The scrub paints from `scrubLines` — a fresh viewport capture that
+        // captureDeepPrimary chains after the deep one — NEVER from a suffix
+        // slice of `captureLines`. capture-pane -e emits SGR cumulatively:
+        // an opener appears once and is inherited by every later row, so a
+        // mid-stream slice strands bg/fg/attr openers above its boundary and
+        // RepaintAssembly's fresh pen paints those rows in default colors
+        // (full-width black band over a colored panel — the artifact this
+        // used to cause when it sliced the deep capture). A viewport-only
+        // capture is self-contained: tmux re-serializes all open SGR state
+        // at row 0. When no chained capture landed (scrubLines == nil),
+        // skip the scrub outright rather than fall back to a slice.
         // Scoped to the non-alt deep stage where the ghost was observed and
         // only when real history scrolled (more captured rows than fit on
         // screen); tests pass tiny captures / no size, so this stays inert
@@ -3508,13 +4309,13 @@ public final class TmuxController {
         if stage == .deep,
            !state.paneInAltScreen,
            !terminalWasInAltScreen,
+           let scrubLines,
            let visibleRows = lastKnownSize?.rows,
            visibleRows > 0,
            captureLines.count > visibleRows {
-            let viewportLines = Array(captureLines.suffix(visibleRows))
             let scrubBytes = RepaintAssembly.assemble(
                 state: state,
-                captureLines: viewportLines,
+                captureLines: scrubLines,
                 historyLines: [],
                 savedPrimaryLines: [],
                 altScreenLines: nil,
@@ -3523,11 +4324,12 @@ public final class TmuxController {
             )
             feed(ArraySlice(scrubBytes))
             Self.logDiagnostic(
-                "repaint-scrub window=\(windowId) visibleRows=\(visibleRows) deepRows=\(captureLines.count) reason=\(reason)"
+                "repaint-scrub window=\(windowId) visibleRows=\(visibleRows) deepRows=\(captureLines.count) scrubRows=\(scrubLines.count) source=fresh-viewport reason=\(reason)"
             )
         }
 
         markInitialRenderReady()
+        establishedRenderIsFailClosed = false
         renderedWindowId = windowId
         renderedPaneId = state.paneId
         if pausedPanes.contains(state.paneId) {
@@ -3543,9 +4345,16 @@ public final class TmuxController {
             clearTitleWhenMissing: true
         )
         renderRetryAttemptsByGeneration[generation] = nil
-        displayDidSwap?(windowId)
+        if !refreshesRenderedPaneInPlace {
+            displayDidSwap?(windowId)
+        } else {
+            displayDidRefresh?(windowId)
+        }
         clearPendingRenderRefresh(windowId: windowId, generation: generation)
-        if stage == .viewport,
+        if completesForegroundOutputCoalescing {
+            endForegroundOutputCoalescing()
+        }
+        if (stage == .viewport || (stage == .viewportOnly && !refreshesRenderedPaneInPlace)),
            isCurrentGeneration(generation),
            activeWindowId == windowId {
             refreshRenderedWindow(

@@ -199,6 +199,55 @@ final class CommandPaletteTests: XCTestCase {
         XCTAssertEqual(palette.sessions.count, 0)
     }
 
+    func test_sessionsPrecedeAgentsRankedByUrgency() {
+        let palette = CommandPalette()
+        let session = makeLive(name: "session")
+        let idle = makeAgent(name: "idle", status: .idle)
+        let waiting = makeAgent(name: "waiting", status: .waitingForInput)
+        let working = makeAgent(name: "working", status: .working)
+
+        palette.open(sessions: [session], agents: [idle, working, waiting])
+
+        XCTAssertEqual(palette.entries.map(\.id), [
+            .session(session.id),
+            .agent(waiting.id),
+            .agent(working.id),
+            .agent(idle.id),
+        ])
+    }
+
+    func test_atPrefixScopesResultsToAgents() {
+        let palette = CommandPalette()
+        let session = makeLive(name: "prod-session")
+        let agent = makeAgent(name: "Codex", status: .working, hostName: "prod-agent")
+        palette.open(sessions: [session], agents: [agent])
+
+        palette.query = "@ prod"
+
+        XCTAssertEqual(palette.agentResults.map(\.id), [agent.id])
+        XCTAssertTrue(palette.results.isEmpty)
+        XCTAssertEqual(palette.entries.map(\.id), [.agent(agent.id)])
+    }
+
+    func test_agentQueryMatchesFullLocation() {
+        let palette = CommandPalette()
+        let agent = makeAgent(name: "Claude Code", status: .idle, hostName: "buildbox")
+        palette.open(sessions: [], agents: [agent])
+
+        palette.query = "window 4"
+
+        XCTAssertEqual(palette.agentResults.map(\.id), [agent.id])
+    }
+
+    func test_commitResultReturnsAgentTarget() {
+        let palette = CommandPalette()
+        let agent = makeAgent(name: "Codex", status: .waitingForInput)
+        palette.open(sessions: [], agents: [agent])
+
+        XCTAssertEqual(palette.commitResult(), .agent(agent.id))
+        XCTAssertNil(palette.commit())
+    }
+
     // MARK: helpers
 
     private func makeLive(name: String, hostKeyOverride: String? = nil) -> LiveSession {
@@ -209,6 +258,44 @@ final class CommandPaletteTests: XCTestCase {
             hostName: name,
             hostKey: key,
             launchMode: .autoTmux
+        )
+    }
+
+    private func makeAgent(
+        name: String,
+        status: AgentStatus,
+        hostName: String = "host"
+    ) -> AgentInstance {
+        let sessionID = UUID()
+        let now = Date(timeIntervalSinceReferenceDate: 100)
+        return AgentInstance(
+            id: AgentInstanceID(sessionID: sessionID, paneID: 8),
+            profileID: UUID(),
+            name: name,
+            providerSessionID: nil,
+            location: AgentLocation(
+                sessionID: sessionID,
+                hostName: hostName,
+                transportLabel: "ssh+tmux",
+                tmuxSessionName: "work",
+                windowID: 4,
+                windowName: "editor",
+                paneID: 8
+            ),
+            status: status,
+            taskSummary: nil,
+            outputTail: nil,
+            prompt: nil,
+            detectedAt: now,
+            statusChangedAt: now,
+            finishedAt: status == .justFinished ? now : nil,
+            lastLifecycleEventAt: now,
+            lastOutputAt: now,
+            outputSequence: 0,
+            bracketedPasteEnabled: false,
+            sendInFlight: false,
+            actionMessage: nil,
+            actionIsError: false
         )
     }
 }

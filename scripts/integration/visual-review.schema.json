@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "overall_verdict": {
+      "type": "string",
+      "enum": ["pass", "fail", "inconclusive"]
+    },
+    "summary": { "type": "string" },
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "verdict": {
+            "type": "string",
+            "enum": ["pass", "fail", "inconclusive"]
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "observed": { "type": "string" },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "artifact": { "type": "string" },
+                "frame_or_time": { "type": "string" },
+                "region": { "type": "string" },
+                "detail": { "type": "string" }
+              },
+              "required": ["artifact", "frame_or_time", "region", "detail"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["id", "verdict", "confidence", "observed", "evidence"],
+        "additionalProperties": false
+      }
+    },
+    "cross_case_findings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "limitations": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "required": [
+    "overall_verdict",
+    "summary",
+    "cases",
+    "cross_case_findings",
+    "limitations"
+  ],
+  "additionalProperties": false
+}

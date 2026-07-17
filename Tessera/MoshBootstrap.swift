@@ -11,16 +11,37 @@ struct MoshBootstrapResult: Equatable, Sendable {
     /// or the parser can't classify the output. Mosh sessions consume
     /// this and republish via `@Published var detectedOSHint`.
     let detectedOSHint: String?
+    /// Live destination address and topology actually used by the bootstrap
+    /// SSH chain. Mosh's UDP driver and its SSH-fallback policy must use this
+    /// snapshot, not the session's potentially stale construction-time Host.
+    let targetAddress: String?
+    let jumpChainHopCount: Int
+
+    init(
+        udpPort: Int,
+        base64Key: String,
+        serverPID: Int?,
+        detectedOSHint: String?,
+        targetAddress: String? = nil,
+        jumpChainHopCount: Int = 0
+    ) {
+        self.udpPort = udpPort
+        self.base64Key = base64Key
+        self.serverPID = serverPID
+        self.detectedOSHint = detectedOSHint
+        self.targetAddress = targetAddress
+        self.jumpChainHopCount = jumpChainHopCount
+    }
 }
 
 enum MoshBootstrapError: Error, Equatable, LocalizedError, Sendable {
     case authenticationFailed(String)
     case connectionFailed(String)
     case hostKeyRejected
-    case missingServer(stderr: String)
-    case missingConnect(stdout: String)
-    case malformedConnect(stdout: String)
-    case remoteCommandFailed(exitCode: Int, stderr: String)
+    case missingServer
+    case missingConnect
+    case malformedConnect
+    case remoteCommandFailed(exitCode: Int)
 
     var errorDescription: String? {
         switch self {
@@ -36,9 +57,75 @@ enum MoshBootstrapError: Error, Equatable, LocalizedError, Sendable {
             return "Could not start mosh: `mosh-server` never printed a MOSH CONNECT line."
         case .malformedConnect:
             return "Could not start mosh: `mosh-server` printed a malformed MOSH CONNECT line."
-        case .remoteCommandFailed(let exitCode, _):
+        case .remoteCommandFailed(let exitCode):
             return "Could not start mosh: the remote bootstrap command failed with exit status \(exitCode)."
         }
+    }
+}
+
+/// The single boundary for removing live mosh session credentials from text
+/// before it reaches either unified logging or Tessera's diagnostic file.
+///
+/// Bootstrap parser errors intentionally retain no transcript at all. This
+/// remains defense in depth for errors produced below Citadel and for future
+/// diagnostic call sites that receive remote command output.
+enum SensitiveDataRedactor {
+    private static let moshConnectLinePattern = try! NSRegularExpression(
+        pattern: #"(?im)\bMOSH[ \t]+CONNECT(?:[ \t]+[^\r\n]*)?"#
+    )
+    private static let moshKeyPattern = try! NSRegularExpression(
+        pattern: #"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{22}(?:==)?(?![A-Za-z0-9+/=])"#
+    )
+
+    static func redact(_ text: String) -> String {
+        let mutable = NSMutableString(string: text)
+        let fullRange = NSRange(location: 0, length: mutable.length)
+        let matches = moshConnectLinePattern.matches(in: text, range: fullRange)
+
+        // Work backwards so replacing one line cannot invalidate the ranges of
+        // earlier matches. A port is retained only after strict decimal/range
+        // validation; every malformed tail is treated as credential material.
+        for match in matches.reversed() {
+            let connectText = mutable.substring(with: match.range)
+            let fields = connectText.split(whereSeparator: \Character.isWhitespace)
+            let replacement: String
+            if fields.count >= 4, isValidMoshPortToken(fields[2]) {
+                replacement = "MOSH CONNECT \(fields[2]) <redacted>"
+            } else {
+                replacement = "MOSH CONNECT <redacted>"
+            }
+            mutable.replaceCharacters(in: match.range, with: replacement)
+        }
+
+        // Defense in depth for exception bridges that contain only the key,
+        // and for malformed output that splits CONNECT and its key over lines.
+        let connectRedacted = mutable as String
+        let redactedRange = NSRange(
+            connectRedacted.startIndex..<connectRedacted.endIndex,
+            in: connectRedacted
+        )
+        return moshKeyPattern.stringByReplacingMatches(
+            in: connectRedacted,
+            range: redactedRange,
+            withTemplate: "<redacted-key>"
+        )
+    }
+
+    static func bootstrapTranscriptSummary(stdout: String, stderr: String) -> String {
+        "stdoutBytes=\(stdout.utf8.count) stderrBytes=\(stderr.utf8.count) connectMarker=\(containsConnectMarker(stdout) || containsConnectMarker(stderr))"
+    }
+
+    private static func containsConnectMarker(_ text: String) -> Bool {
+        text.range(of: "MOSH CONNECT", options: [.caseInsensitive]) != nil
+    }
+
+    private static func isValidMoshPortToken(_ token: Substring) -> Bool {
+        guard !token.isEmpty,
+              token.utf8.allSatisfy({ (0x30...0x39).contains($0) }),
+              let port = Int(token),
+              (1...65_535).contains(port)
+        else { return false }
+        return true
     }
 }
 
@@ -52,35 +139,23 @@ enum MoshBootstrap {
         hostKeyPrompt: HostKeyVerificationPrompt? = nil,
         sessionNameResolver: SessionNameResolver = HostRuntimeStateStore.sessionName(for:)
     ) async throws -> MoshBootstrapResult {
-        let authMethod: SSHAuthenticationMethod
+        // The bootstrap SSH ride (and only this ride) carries the mosh key
+        // exchange; it goes through the shared jump-chain establisher so a
+        // bastioned host can still launch mosh-server. The subsequent UDP
+        // flow is direct device→host and cannot traverse the chain — the
+        // session layer detects unreachable servers and falls back.
+        let chain: EstablishedSSHChain
         do {
-            authMethod = try await resolveSSHAuthMethod(
+            chain = try await establishSSHChain(
                 for: host,
                 requireBiometric: requireBiometric,
-                isSecureEnclave: isSecureEnclave
+                isSecureEnclave: isSecureEnclave,
+                hostKeyPrompt: hostKeyPrompt
             )
         } catch {
             throw classifyConnectionError(error)
         }
-
-        let endpoint = "\(host.address):\(host.port)"
-        let validator = TesseraHostKeyValidator(
-            endpoint: endpoint,
-            prompt: hostKeyPrompt
-        )
-
-        let client: SSHClient
-        do {
-            client = try await SSHClient.connect(
-                host: host.address,
-                port: host.port,
-                authenticationMethod: authMethod,
-                hostKeyValidator: .custom(validator),
-                reconnect: .never
-            )
-        } catch {
-            throw classifyConnectionError(error)
-        }
+        let client = chain.client
 
         do {
             let transcript = try await executeBootstrapCommand(
@@ -95,9 +170,9 @@ enum MoshBootstrap {
             // only window we have. Any error returns nil and the result
             // simply lacks a detected hint.
             let detectedOSHint = await OSDetectionProbe.run(on: client)
-            try? await client.close()
+            await chain.closeAll()
             if transcriptSuggestsMissingServer(transcript) {
-                throw MoshBootstrapError.missingServer(stderr: transcript.stderr)
+                throw MoshBootstrapError.missingServer
             }
             let parsed = try parseConnectResponse(
                 stdout: transcript.stdout,
@@ -107,35 +182,53 @@ enum MoshBootstrap {
                 udpPort: parsed.udpPort,
                 base64Key: parsed.base64Key,
                 serverPID: parsed.serverPID,
-                detectedOSHint: detectedOSHint
+                detectedOSHint: detectedOSHint,
+                targetAddress: chain.resolvedHost.address,
+                jumpChainHopCount: chain.resolvedHost.jumpChain.count
             )
         } catch let error as RemoteCommandFailure {
-            try? await client.close()
-            if transcriptSuggestsMissingServer(error.transcript) {
-                throw MoshBootstrapError.missingServer(stderr: error.transcript.stderr)
-            }
-            throw MoshBootstrapError.remoteCommandFailed(
-                exitCode: error.exitCode,
+            await chain.closeAll()
+            let transcriptSummary = SensitiveDataRedactor.bootstrapTranscriptSummary(
+                stdout: error.transcript.stdout,
                 stderr: error.transcript.stderr
             )
-        } catch let error as BootstrapCommandFailure {
-            try? await client.close()
+            MoshDiagnostics.log(
+                "bootstrap remote-command failed exit=\(error.exitCode) transcript=\(transcriptSummary)"
+            )
             if transcriptSuggestsMissingServer(error.transcript) {
-                throw MoshBootstrapError.missingServer(stderr: error.transcript.stderr)
+                throw MoshBootstrapError.missingServer
+            }
+            throw MoshBootstrapError.remoteCommandFailed(
+                exitCode: error.exitCode
+            )
+        } catch let error as BootstrapCommandFailure {
+            await chain.closeAll()
+            let transcriptSummary = SensitiveDataRedactor.bootstrapTranscriptSummary(
+                stdout: error.transcript.stdout,
+                stderr: error.transcript.stderr
+            )
+            MoshDiagnostics.log(
+                "bootstrap command failed type=\(String(describing: type(of: error.underlying))) detail=\(SensitiveDataRedactor.redact(String(describing: error.underlying))) transcript=\(transcriptSummary)"
+            )
+            if transcriptSuggestsMissingServer(error.transcript) {
+                throw MoshBootstrapError.missingServer
             }
             throw MoshBootstrapError.connectionFailed(
                 MoshSession.userFacingStartupFailureMessage(
-                    from: describeSSHError(error.underlying)
+                    from: SensitiveDataRedactor.redact(describeSSHError(error.underlying))
                 )
             )
         } catch let error as MoshBootstrapError {
-            try? await client.close()
+            await chain.closeAll()
             throw error
         } catch {
-            try? await client.close()
+            await chain.closeAll()
+            MoshDiagnostics.log(
+                "bootstrap exec-phase failed type=\(String(describing: type(of: error))) detail=\(SensitiveDataRedactor.redact(String(describing: error)))"
+            )
             throw MoshBootstrapError.connectionFailed(
                 MoshSession.userFacingStartupFailureMessage(
-                    from: describeSSHError(error)
+                    from: SensitiveDataRedactor.redact(describeSSHError(error))
                 )
             )
         }
@@ -261,22 +354,37 @@ enum MoshBootstrap {
         }
 
         if sawMalformedLine {
-            throw MoshBootstrapError.malformedConnect(
-                stdout: combinedOutput
-            )
+            throw MoshBootstrapError.malformedConnect
         }
-        throw MoshBootstrapError.missingConnect(
-            stdout: combinedOutput
-        )
+        throw MoshBootstrapError.missingConnect
     }
 
     private static func classifyConnectionError(_ error: Error) -> MoshBootstrapError {
+        MoshDiagnostics.log(
+            "bootstrap connect-phase failed type=\(String(describing: type(of: error))) detail=\(SensitiveDataRedactor.redact(String(describing: error)))"
+        )
+        // Unwrap hop-attributed failures so per-kind handling (host key,
+        // auth, retry classification) still applies; keep the hop label on
+        // message cases.
+        if let hopError = error as? SSHChainHopError {
+            let classified = classifyConnectionError(hopError.underlying)
+            switch classified {
+            case .authenticationFailed(let message):
+                return .authenticationFailed("Jump host \(hopError.hopLabel): \(message)")
+            case .connectionFailed(let message):
+                return .connectionFailed("Jump host \(hopError.hopLabel): \(message)")
+            default:
+                return classified
+            }
+        }
         switch error {
         case is HostKeyRejectedError:
             return .hostKeyRejected
 
         case let error as AuthResolutionError:
-            return .authenticationFailed(error.errorDescription ?? describeSSHError(error))
+            return .authenticationFailed(
+                SensitiveDataRedactor.redact(error.errorDescription ?? describeSSHError(error))
+            )
 
         case is AuthenticationFailed:
             return .authenticationFailed("Authentication failed.")
@@ -300,11 +408,11 @@ enum MoshBootstrap {
             case .unauthorized:
                 return .authenticationFailed("Authentication failed.")
             default:
-                return .connectionFailed(describeSSHError(error))
+                return .connectionFailed(SensitiveDataRedactor.redact(describeSSHError(error)))
             }
 
         default:
-            return .connectionFailed(describeSSHError(error))
+            return .connectionFailed(SensitiveDataRedactor.redact(describeSSHError(error)))
         }
     }
 

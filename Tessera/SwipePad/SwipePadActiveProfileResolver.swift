@@ -14,7 +14,10 @@ import Foundation
 import TmuxControl
 
 public typealias SwipePadProcessNameProvider = @MainActor () async -> [String]
-public typealias SwipePadPaneProcessNameProvider = @MainActor (_ panePID: Int) async -> [String]
+public typealias SwipePadPaneProcessNameProvider = @MainActor (
+    _ paneID: PaneId?,
+    _ panePID: Int
+) async -> [String]
 
 enum SwipePadDiagnostics {
     static func log(_ message: @autoclosure () -> String) {
@@ -158,8 +161,13 @@ public final class SwipePadActiveProfileResolver {
             return
         }
 
-        let command = Self.tmuxProcessQuery(activePaneId: tmux.activePaneId)
-        if tmux.activePaneId == nil {
+        // Capture the pane identity together with the query. Focus can change
+        // before the async response arrives; consulting `tmux.activePaneId`
+        // later could apply a lifecycle hint from the new pane to the old
+        // pane's PID.
+        let queriedPaneID = tmux.activePaneId
+        let command = Self.tmuxProcessQuery(activePaneId: queriedPaneID)
+        if queriedPaneID == nil {
             SwipePadDiagnostics.log(
                 "tmux-query warning=missing-active-pane using-client-scoped-command activeWindow=\(String(describing: tmux.activeWindowId))"
             )
@@ -168,7 +176,7 @@ public final class SwipePadActiveProfileResolver {
             "tmux-query activePanePresent=\(tmux.activePaneId != nil) commandCategory=process-query"
         )
 
-        tmux.sendControlCommand(command) { [weak self] result in
+        tmux.sendBackgroundControlQuery(command) { [weak self] result in
             Task { @MainActor in
                 let parsed = Self.parseTmuxResult(result)
                 var processNames = parsed.processNames
@@ -183,7 +191,7 @@ public final class SwipePadActiveProfileResolver {
                     SwipePadDiagnostics.log(
                         "tmux-pane-ps begin panePID=\(panePID) existingCandidateCount=\(processNames.count)"
                     )
-                    let paneNames = await paneProcessNameProvider(panePID)
+                    let paneNames = await paneProcessNameProvider(queriedPaneID, panePID)
                     SwipePadDiagnostics.log(
                         "tmux-pane-ps result panePID=\(panePID) candidateCount=\(paneNames.count)"
                     )
@@ -193,6 +201,20 @@ public final class SwipePadActiveProfileResolver {
                         fallback: fallback,
                         processNames: processNames
                     )
+                }
+                guard tmux.mode == .tmuxControl,
+                      tmux.activePaneId == queriedPaneID else {
+                    SwipePadDiagnostics.log(
+                        "resolve discard source=tmux reason=focus-changed queriedPane=\(queriedPaneID?.rawValue.description ?? "missing") activePane=\(tmux.activePaneId?.rawValue.description ?? "missing")"
+                    )
+                    self?.resolveActiveProfile(
+                        tmux: tmux,
+                        store: store,
+                        processNameProvider: processNameProvider,
+                        paneProcessNameProvider: paneProcessNameProvider,
+                        completion: completion
+                    )
+                    return
                 }
                 SwipePadDiagnostics.log(
                     "resolve complete source=tmux candidateCount=\(processNames.count) matched=\(resolved.id != fallback.id) panePIDPresent=\(parsed.panePID != nil)"
@@ -308,6 +330,10 @@ public final class SwipePadActiveProfileResolver {
 }
 
 enum SwipePadPlainSSHProcessProbe {
+    struct Snapshot: Equatable, Sendable {
+        let processNames: [String]
+        let processIDs: Set<Int>
+    }
     /// Side-channel process snapshot used when the terminal is plain SSH
     /// passthrough rather than tmux control mode. `exit 0` is load-bearing:
     /// unsupported `ps` options should produce an empty snapshot, not a
@@ -361,6 +387,10 @@ enum SwipePadPlainSSHProcessProbe {
     }
 
     static func processNames(from psOutput: String) -> [String] {
+        snapshot(from: psOutput).processNames
+    }
+
+    static func snapshot(from psOutput: String) -> Snapshot {
         let lines = psOutput.split(whereSeparator: \.isNewline)
         let records = lines
             .compactMap(parseRecord)
@@ -382,7 +412,10 @@ enum SwipePadPlainSSHProcessProbe {
         SwipePadDiagnostics.log(
             "ps-parse lines=\(lines.count) attachedRecords=\(records.count) foregroundRecords=\(foregroundRecords.count) activeRecords=\(activeRecords.count) candidateCount=\(result.count)"
         )
-        return result
+        return Snapshot(
+            processNames: result,
+            processIDs: Set(activeRecords.map(\.pid))
+        )
     }
 
     private static func parseRecord(_ line: Substring) -> ProcessRecord? {

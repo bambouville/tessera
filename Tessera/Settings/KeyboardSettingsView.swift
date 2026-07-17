@@ -1,5 +1,5 @@
 // Tessera/Settings/KeyboardSettingsView.swift
-// §14.8 — accessory bar editor + modifier behavior + caps-lock-as-ctrl.
+// §14.8 — accessory bar editor + modifier behavior + input preferences.
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -11,7 +11,14 @@ struct KeyboardSettingsView: View {
         @Bindable var appearance = appearance
 
         VStack(alignment: .leading, spacing: 0) {
-            SettingsH("keyboard")
+            SettingsH("keyboard & input")
+
+            ToggleRow(
+                title: "natural text editing",
+                subtitle: "mac-style word, line, and delete shortcuts in shells and terminal apps",
+                isOn: $appearance.naturalTextEditingEnabled
+            )
+            .padding(.bottom, 22)
 
             ToggleRow(
                 title: "show accessory bar",
@@ -73,6 +80,7 @@ private struct ShortcutLegend: View {
         ]),
         Group(title: "sessions", rows: [
             ("⌘⇧K / ⌘⇧J", "previous / next session"),
+            ("⌘⇧E",       "toggle files panel"),
             ("⌘↩",        "connect (host editor)"),
         ]),
         Group(title: "find in scrollback", rows: [
@@ -80,6 +88,12 @@ private struct ShortcutLegend: View {
             ("⌘G / ⇧⌘G",  "next / previous match"),
             ("↩ / ⇧↩",    "next / previous match (while searching)"),
             ("esc",       "close find bar"),
+        ]),
+        Group(title: "text editing", rows: [
+            ("⌥← / ⌥→",   "previous / next word"),
+            ("⌘← / ⌘→",   "start / end of line"),
+            ("⌥⌫",        "delete word left"),
+            ("⌘⌫",        "delete to start of line"),
         ]),
         Group(title: "tmux", rows: [
             ("⌘T",        "new window"),

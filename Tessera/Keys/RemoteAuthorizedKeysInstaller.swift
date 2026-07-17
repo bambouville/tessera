@@ -8,6 +8,7 @@ enum RemoteAuthorizedKeysInstaller {
         case network(String)
         case hostKeyRejected
         case selfInstall
+        case invalidPublicKey
         case remoteCommandFailed(stderr: String)
         case verificationFailed(stderr: String)
 
@@ -23,6 +24,8 @@ enum RemoteAuthorizedKeysInstaller {
                 return "Host key was not trusted. Connect once first to review it, then retry."
             case .selfInstall:
                 return "This host uses this key for authentication. Choose a host identity that uses a different key or password."
+            case .invalidPublicKey:
+                return "The stored public key is malformed and cannot be revoked safely."
             case .remoteCommandFailed(let stderr):
                 let trimmed = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else {
@@ -40,6 +43,7 @@ enum RemoteAuthorizedKeysInstaller {
     }
 
     private static let verificationMarker = "TESSERA_KEY_INSTALLED"
+    private static let revocationMarker = "TESSERA_KEY_REMOVED"
 
     static func install(key: StoredKey, on host: Host) async throws {
         try await install(line: key.authorizedKeysLine, keyID: key.id, on: host)
@@ -64,61 +68,127 @@ enum RemoteAuthorizedKeysInstaller {
         try await install(
             line: authorizedKeysLine,
             on: host,
+            targetKeyID: keyID,
             requireBiometric: requireBiometric,
             isSecureEnclave: isSecureEnclave
         )
     }
 
-    static func install(
+    /// Removes the target public key using the host's currently configured
+    /// alternate credential. The target private key is never needed or sent.
+    static func revoke(
         line authorizedKeysLine: String,
+        keyID: UUID,
         on host: Host,
         requireBiometric: Bool = false,
         isSecureEnclave: Bool = false
     ) async throws {
+        try validateCanInstall(keyID: keyID, on: host)
+
+        let chain: EstablishedSSHChain
+        do {
+            await SSHAuthenticationPolicyStore.shared.registerPersistedHost(host.id)
+            chain = try await withPendingSSHConnectionAttempt {
+                let chain = try await establishSSHChain(
+                    for: host,
+                    requireBiometric: requireBiometric,
+                    isSecureEnclave: isSecureEnclave,
+                    hostKeyPrompt: nil
+                )
+                // The initial UI Host is only a snapshot. The credential that
+                // authenticated this socket must still be an alternate after
+                // live policy resolution; nothing has been written yet.
+                do {
+                    try validateCanInstall(keyID: keyID, on: chain.resolvedHost)
+                } catch {
+                    await chain.closeAll()
+                    throw error
+                }
+                return chain
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw classifyConnectionError(error)
+        }
+        let client = chain.client
+
+        do {
+            try Task.checkCancellation()
+            let output = try await execute(
+                try makeRevokeCommand(line: authorizedKeysLine),
+                on: client
+            )
+            await chain.closeAll()
+            guard output.contains(revocationMarker) else {
+                throw InstallError.verificationFailed(stderr: output)
+            }
+        } catch is CancellationError {
+            await chain.closeAll()
+            throw CancellationError()
+        } catch let error as InstallError {
+            await chain.closeAll()
+            throw error
+        } catch {
+            await chain.closeAll()
+            throw InstallError.remoteCommandFailed(
+                stderr: commandFailureMessage(error)
+            )
+        }
+    }
+
+    static func install(
+        line authorizedKeysLine: String,
+        on host: Host,
+        targetKeyID: UUID,
+        requireBiometric: Bool = false,
+        isSecureEnclave: Bool = false
+    ) async throws {
         let startedAt = Date()
-        let authMethod: SSHAuthenticationMethod
+        let chain: EstablishedSSHChain
         do {
             DiagnosticLogStore.appendKeys("install step=auth-resolve host=\(shortID(host.id))")
-            authMethod = try await resolveSSHAuthMethod(
-                for: host,
-                requireBiometric: requireBiometric,
-                isSecureEnclave: isSecureEnclave
-            )
+            await SSHAuthenticationPolicyStore.shared.registerPersistedHost(host.id)
+            chain = try await withPendingSSHConnectionAttempt {
+                DiagnosticLogStore.appendKeys(
+                    "install step=connect host=\(shortID(host.id)) hops=\(host.jumpChain.count + 1)"
+                )
+                let chain = try await establishSSHChain(
+                    for: host,
+                    requireBiometric: requireBiometric,
+                    isSecureEnclave: isSecureEnclave,
+                    hostKeyPrompt: nil
+                )
+                do {
+                    try validateCanInstall(keyID: targetKeyID, on: chain.resolvedHost)
+                } catch {
+                    await chain.closeAll()
+                    throw error
+                }
+                return chain
+            }
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             DiagnosticLogStore.appendKeys(
                 "install failed step=auth-resolve host=\(shortID(host.id)) durationMs=\(durationMs(since: startedAt)) error='\(error)'"
             )
             throw classifyConnectionError(error)
         }
-
-        let endpoint = "\(host.address):\(host.port)"
-        let validator = TesseraHostKeyValidator(endpoint: endpoint, prompt: nil)
-
-        let client: SSHClient
-        do {
-            DiagnosticLogStore.appendKeys("install step=connect host=\(shortID(host.id)) port=\(host.port)")
-            client = try await SSHClient.connect(
-                host: host.address,
-                port: host.port,
-                authenticationMethod: authMethod,
-                hostKeyValidator: .custom(validator),
-                reconnect: .never
-            )
-        } catch {
-            DiagnosticLogStore.appendKeys(
-                "install failed step=connect host=\(shortID(host.id)) durationMs=\(durationMs(since: startedAt)) error='\(error)'"
-            )
-            throw classifyConnectionError(error)
-        }
+        let client = chain.client
 
         do {
+            try Task.checkCancellation()
             DiagnosticLogStore.appendKeys("install step=append-key host=\(shortID(host.id))")
             _ = try await execute(
                 makeInstallCommand(line: authorizedKeysLine),
                 on: client
             )
+        } catch is CancellationError {
+            await chain.closeAll()
+            throw CancellationError()
         } catch {
-            try? await client.close()
+            await chain.closeAll()
             DiagnosticLogStore.appendKeys(
                 "install failed step=append-key host=\(shortID(host.id)) durationMs=\(durationMs(since: startedAt)) error='\(error)'"
             )
@@ -129,13 +199,17 @@ enum RemoteAuthorizedKeysInstaller {
 
         let verificationOutput: String
         do {
+            try Task.checkCancellation()
             DiagnosticLogStore.appendKeys("install step=verify host=\(shortID(host.id))")
             verificationOutput = try await execute(
                 makeVerifyCommand(line: authorizedKeysLine),
                 on: client
             )
+        } catch is CancellationError {
+            await chain.closeAll()
+            throw CancellationError()
         } catch {
-            try? await client.close()
+            await chain.closeAll()
             DiagnosticLogStore.appendKeys(
                 "install failed step=verify host=\(shortID(host.id)) durationMs=\(durationMs(since: startedAt)) error='\(error)'"
             )
@@ -144,7 +218,7 @@ enum RemoteAuthorizedKeysInstaller {
             )
         }
 
-        try? await client.close()
+        await chain.closeAll()
 
         guard verificationOutput.contains(verificationMarker) else {
             DiagnosticLogStore.appendKeys(
@@ -178,9 +252,209 @@ enum RemoteAuthorizedKeysInstaller {
         return "if grep -qxF \(quotedLine) ~/.ssh/authorized_keys; then echo \(verificationMarker); else echo TESSERA_KEY_MISSING; fi"
     }
 
+    /// Rewrites authorized_keys by semantic public-key identity rather than the
+    /// mutable full line. Options and comments may change without changing the
+    /// algorithm + SSH wire blob that authorizes access. The awk tokenizer
+    /// treats whitespace inside double-quoted options as data and refuses to
+    /// match an unterminated quote, so malformed remote lines are preserved.
+    static func makeRevokeCommand(line: String) throws -> String {
+        guard let identity = authorizedKeyIdentity(from: line) else {
+            throw InstallError.invalidPublicKey
+        }
+
+        let type = singleQuotedShellString(identity.type)
+        let blob = singleQuotedShellString(identity.blob)
+        let removeScript = semanticKeyAWKPrelude
+            + " { tessera_result=tessera_matches($0, tessera_fields); if (tessera_result!=1) print $0 }"
+        let verifyScript = semanticKeyAWKPrelude
+            + " { tessera_result=tessera_matches($0, tessera_fields); if (tessera_result!=0) tessera_found=1 }"
+            + " END { print tessera_found ? \"TESSERA_KEY_STILL_PRESENT\" : \"\(revocationMarker)\" }"
+
+        return "umask 077; mkdir -m 700 -p ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && tmp=\"$HOME/.ssh/.authorized_keys.tessera.$$\" && awk -v tessera_type=\(type) -v tessera_blob=\(blob) '\(removeScript)' ~/.ssh/authorized_keys > \"$tmp\" && chmod 600 \"$tmp\" && mv \"$tmp\" ~/.ssh/authorized_keys && awk -v tessera_type=\(type) -v tessera_blob=\(blob) '\(verifyScript)' ~/.ssh/authorized_keys"
+    }
+
+    /// Testable mirror of the remote semantic matcher. The target is required
+    /// to be a structurally valid SSH public-key line; malformed candidate
+    /// lines simply do not match and are retained remotely.
+    static func line(
+        _ candidate: String,
+        referencesSameKeyAs target: String
+    ) throws -> Bool {
+        guard let targetIdentity = authorizedKeyIdentity(from: target) else {
+            throw InstallError.invalidPublicKey
+        }
+        return authorizedKeyIdentity(from: candidate) == targetIdentity
+    }
+
     static func singleQuotedShellString(_ string: String) -> String {
         let escaped = string.replacingOccurrences(of: "'", with: "'\\''")
         return "'\(escaped)'"
+    }
+
+    private struct AuthorizedKeyIdentity: Equatable {
+        let type: String
+        let blob: String
+    }
+
+    /// POSIX-awk compatible tokenizer. Quotes are retained in option tokens so
+    /// a key-looking string inside `command="..."` cannot become a match.
+    private static let semanticKeyAWKPrelude = #"""
+    function tessera_is_key_type(value) {
+        return value ~ /^(ssh-|ecdsa-|sk-)[-A-Za-z0-9@._+]+$/
+    }
+    function tessera_token_status(fields, count) {
+        if (count==1 && substr(fields[1], 1, 1)=="#") return 2
+        if (count==2 && tessera_is_key_type(fields[1])) {
+            return fields[1]==tessera_type && fields[2]==tessera_blob ? 1 : 2
+        }
+        if (count==2 && !tessera_is_key_type(fields[2])) return 2
+        if (count==3 && tessera_is_key_type(fields[2])) {
+            return fields[2]==tessera_type && fields[3]==tessera_blob ? 1 : 2
+        }
+        if (count>=3) return 2
+        return 0
+    }
+    function tessera_matches(line, fields,    count, i, c, token, quoted, escaped, key, status) {
+        for (key in fields) delete fields[key]
+        count=0; token=""; quoted=0; escaped=0
+        for (i=1; i<=length(line); i++) {
+            c=substr(line, i, 1)
+            if (escaped) { token=token c; escaped=0; continue }
+            if (quoted && c=="\\") { token=token c; escaped=1; continue }
+            if (c=="\"") { token=token c; quoted=!quoted; continue }
+            if (!quoted && (c==" " || c=="\t" || c=="\r")) {
+                if (token!="") {
+                    fields[++count]=token; token=""
+                    status=tessera_token_status(fields, count)
+                    if (status==1) return 1
+                    if (status==2) return 0
+                }
+            } else { token=token c }
+        }
+        if (quoted || escaped) {
+            if (index(line, tessera_type) && index(line, tessera_blob)) return -1
+            return 0
+        }
+        if (token!="") {
+            fields[++count]=token
+            status=tessera_token_status(fields, count)
+            if (status==1) return 1
+        }
+        return 0
+    }
+    """#
+
+    private static func authorizedKeyIdentity(from line: String) -> AuthorizedKeyIdentity? {
+        var tokens: [String] = []
+        var token = ""
+        var quoted = false
+        var escaped = false
+
+        func completedIdentity() -> (complete: Bool, identity: AuthorizedKeyIdentity?) {
+            if tokens.count == 1, tokens[0].hasPrefix("#") {
+                return (true, nil)
+            }
+            if tokens.count == 2, isAuthorizedKeyType(tokens[0]) {
+                let type = tokens[0]
+                guard publicKeyBlob(tokens[1], declaresType: type) else {
+                    return (true, nil)
+                }
+                return (true, AuthorizedKeyIdentity(type: type, blob: tokens[1]))
+            }
+            if tokens.count == 2, !isAuthorizedKeyType(tokens[1]) {
+                return (true, nil)
+            }
+            if tokens.count == 3, isAuthorizedKeyType(tokens[1]) {
+                let type = tokens[1]
+                guard publicKeyBlob(tokens[2], declaresType: type) else {
+                    return (true, nil)
+                }
+                return (true, AuthorizedKeyIdentity(type: type, blob: tokens[2]))
+            }
+            return (tokens.count >= 3, nil)
+        }
+
+        for character in line {
+            if escaped {
+                token.append(character)
+                escaped = false
+                continue
+            }
+            if quoted, character == "\\" {
+                token.append(character)
+                escaped = true
+                continue
+            }
+            if character == "\"" {
+                token.append(character)
+                quoted.toggle()
+                continue
+            }
+            if !quoted, character.isWhitespace {
+                if !token.isEmpty {
+                    tokens.append(token)
+                    token.removeAll(keepingCapacity: true)
+                    let result = completedIdentity()
+                    if result.complete { return result.identity }
+                }
+            } else {
+                token.append(character)
+            }
+        }
+
+        guard !quoted, !escaped else { return nil }
+        if !token.isEmpty {
+            tokens.append(token)
+            let result = completedIdentity()
+            if result.complete { return result.identity }
+        }
+        return nil
+    }
+
+    private static func isAuthorizedKeyType(_ value: String) -> Bool {
+        let prefix: String
+        if value.hasPrefix("ssh-") {
+            prefix = "ssh-"
+        } else if value.hasPrefix("ecdsa-") {
+            prefix = "ecdsa-"
+        } else if value.hasPrefix("sk-") {
+            prefix = "sk-"
+        } else {
+            return false
+        }
+        guard value.utf8.count > prefix.utf8.count else { return false }
+        return value.utf8.allSatisfy { byte in
+            (byte >= 48 && byte <= 57)
+                || (byte >= 65 && byte <= 90)
+                || (byte >= 97 && byte <= 122)
+                || byte == 45
+                || byte == 64
+                || byte == 46
+                || byte == 95
+                || byte == 43
+        }
+    }
+
+    /// Confirms the base64 is an SSH public-key wire blob whose first string is
+    /// the declared algorithm. This rejects placeholders and arbitrary base64
+    /// before any target-controlled value reaches the remote shell command.
+    private static func publicKeyBlob(_ blob: String, declaresType type: String) -> Bool {
+        guard blob.unicodeScalars.allSatisfy({
+            CharacterSet.alphanumerics.contains($0)
+                || "+/=".unicodeScalars.contains($0)
+        }), let data = Data(base64Encoded: blob), data.count >= 4 else {
+            return false
+        }
+
+        let length = data.prefix(4).reduce(0) { partial, byte in
+            (partial << 8) | Int(byte)
+        }
+        guard length > 0, length <= data.count - 4,
+              let declared = String(
+                data: data.subdata(in: 4..<(4 + length)),
+                encoding: .utf8
+              ) else { return false }
+        return declared == type
     }
 
     static func validateCanInstall(keyID: UUID, on host: Host) throws {
@@ -201,7 +475,23 @@ enum RemoteAuthorizedKeysInstaller {
     }
 
     private static func classifyConnectionError(_ error: Error) -> InstallError {
+        // Unwrap hop-attributed failures so per-kind handling (host key,
+        // auth) still applies; keep the hop label on message cases.
+        if let hopError = error as? SSHChainHopError {
+            let classified = classifyConnectionError(hopError.underlying)
+            switch classified {
+            case .authentication(let message):
+                return .authentication("Jump host \(hopError.hopLabel): \(message)")
+            case .network(let message):
+                return .network("Jump host \(hopError.hopLabel): \(message)")
+            default:
+                return classified
+            }
+        }
         switch error {
+        case let error as InstallError:
+            return error
+
         case is HostKeyRejectedError:
             return .hostKeyRejected
 

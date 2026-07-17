@@ -13,7 +13,7 @@ class MoshClient {
 public:
     using OutputCallback = std::function<void(const uint8_t *, size_t)>;
 
-    MoshClient(std::string host, int port, std::string base64_key);
+    MoshClient(std::string host, int port, const std::string &base64_key);
     ~MoshClient();
 
     void start();
@@ -28,6 +28,7 @@ public:
     bool transport_reachable() const;
     bool shutdown_complete() const;
     bool application_mode_cursor_keys() const;
+    bool retains_bootstrap_key_material() const;
 
 private:
     class Impl;

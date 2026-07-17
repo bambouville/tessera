@@ -53,7 +53,33 @@ struct TerminalSettingsView: View {
                 )
                 .tint(T.accent)
             }
-            .padding(.bottom, 24)
+            .padding(.bottom, 18)
+
+            ToggleRow(
+                title: "smooth scrolling",
+                subtitle: "glide with momentum after trackpad flicks · scrollback only, apps like vim stay untouched",
+                isOn: $appearance.smoothScrollingEnabled
+            )
+            .padding(.bottom, appearance.smoothScrollingEnabled ? 12 : 24)
+
+            if appearance.smoothScrollingEnabled {
+                Field(label: "glide speed") {
+                    HStack(spacing: 12) {
+                        Text("slow")
+                            .font(Typography.tesseraMono(size: 11))
+                            .foregroundStyle(T.fgMuted)
+                        Slider(
+                            value: $appearance.smoothScrollingSpeed,
+                            in: AppearancePreferences.smoothScrollingSpeedRange
+                        )
+                        .tint(T.accent)
+                        Text("fast")
+                            .font(Typography.tesseraMono(size: 11))
+                            .foregroundStyle(T.fgMuted)
+                    }
+                }
+                .padding(.bottom, 24)
+            }
 
             SettingsH("startup")
                 .padding(.top, 6)
@@ -72,15 +98,14 @@ struct TerminalSettingsView: View {
             }
             .padding(.bottom, 24)
 
-            // §bell — quiet-by-default agent-turn-complete signaling.
-            // Sound is OFF, visual + notification ON, matching the
-            // "ping me when I'm not looking" design intent.
+            // §bell — terminal BEL signaling. Precise provider lifecycle
+            // notifications live with Agent Center in Experimental settings.
             SettingsH("bell")
                 .padding(.top, 6)
 
             ToggleRow(
                 title: "sound",
-                subtitle: "soft tink when an agent finishes its turn · mixes with music",
+                subtitle: "soft tink when the terminal emits BEL · mixes with music",
                 isOn: $appearance.bellSoundEnabled
             )
 
@@ -92,7 +117,7 @@ struct TerminalSettingsView: View {
 
             ToggleRow(
                 title: "notify when backgrounded",
-                subtitle: "banner ping when tessera isn't focused",
+                subtitle: "banner when any program emits terminal BEL while tessera isn't focused",
                 isOn: $appearance.bellNotificationEnabled
             )
             .onChange(of: appearance.bellNotificationEnabled) { _, newValue in
@@ -121,7 +146,9 @@ struct TerminalSettingsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .sheet(isPresented: $showDenialSheet) {
-            BellPermissionDenialSheet()
+            NotificationPermissionDenialSheet(
+                detail: "Tessera can't send terminal-bell banners while iOS notifications are off. Turn notifications on in Settings, then come back."
+            )
         }
         .task {
             // First-visit nudge: if the user hasn't been asked yet
@@ -286,7 +313,9 @@ private struct BlinkingCursor: View {
 /// permission prompt or because notifications are off in Settings.app.
 /// Sends them straight to Settings.app for tessera so they can flip
 /// it back on without hunting through the menu tree.
-private struct BellPermissionDenialSheet: View {
+struct NotificationPermissionDenialSheet: View {
+    let detail: String
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.designTokens) private var T
 
@@ -296,7 +325,7 @@ private struct BellPermissionDenialSheet: View {
                 .font(Typography.tesseraMono(size: 16, weight: .semibold))
                 .foregroundStyle(T.fg)
 
-            Text("tessera can't send you a banner when an agent finishes if iOS notifications are off. flip them on in settings → tessera → notifications, then come back.")
+            Text(detail)
                 .font(Typography.tesseraMono(size: 13))
                 .foregroundStyle(T.fgMuted)
                 .fixedSize(horizontal: false, vertical: true)

@@ -1,4 +1,5 @@
 import XCTest
+import Crypto
 @testable import Tessera
 
 final class RemoteAuthorizedKeysInstallerTests: XCTestCase {
@@ -58,6 +59,171 @@ final class RemoteAuthorizedKeysInstallerTests: XCTestCase {
         )
     }
 
+    func test_makeRevokeCommand_removesSemanticIdentityAndVerifiesAbsence() throws {
+        let line = KeyStore.ed25519AuthorizedKeysLine(
+            publicKey: Curve25519.Signing.PrivateKey().publicKey,
+            comment: "alice's-key"
+        )
+        let fields = line.split(separator: " ", maxSplits: 2)
+        let blob = String(fields[1])
+        let command = try RemoteAuthorizedKeysInstaller.makeRevokeCommand(line: line)
+
+        XCTAssertTrue(command.contains("awk -v tessera_type='ssh-ed25519'"))
+        XCTAssertTrue(command.contains("-v tessera_blob='\(blob)'"))
+        XCTAssertTrue(command.contains("mv \"$tmp\" ~/.ssh/authorized_keys"))
+        XCTAssertTrue(command.contains("TESSERA_KEY_REMOVED"))
+        XCTAssertTrue(command.contains("TESSERA_KEY_STILL_PRESENT"))
+        XCTAssertFalse(command.contains("alice"))
+        XCTAssertFalse(command.contains("grep -vxF"))
+    }
+
+    func test_semanticRevoke_matchesChangedComment() throws {
+        let key = Curve25519.Signing.PrivateKey()
+        let target = KeyStore.ed25519AuthorizedKeysLine(
+            publicKey: key.publicKey,
+            comment: "original-comment"
+        )
+        let candidate = KeyStore.ed25519AuthorizedKeysLine(
+            publicKey: key.publicKey,
+            comment: "renamed elsewhere"
+        )
+
+        XCTAssertTrue(
+            try RemoteAuthorizedKeysInstaller.line(
+                candidate,
+                referencesSameKeyAs: target
+            )
+        )
+    }
+
+    func test_semanticRevoke_matchesLeadingOptionsIncludingQuotedWhitespace() throws {
+        let target = KeyStore.ed25519AuthorizedKeysLine(
+            publicKey: Curve25519.Signing.PrivateKey().publicKey,
+            comment: "original"
+        )
+        let candidate = #"from="10.0.0.0/8",command="echo hello world",no-pty \#(target)"#
+
+        XCTAssertTrue(
+            try RemoteAuthorizedKeysInstaller.line(
+                candidate,
+                referencesSameKeyAs: target
+            )
+        )
+    }
+
+    func test_semanticRevoke_doesNotMatchUnrelatedKey() throws {
+        let target = KeyStore.ed25519AuthorizedKeysLine(
+            publicKey: Curve25519.Signing.PrivateKey().publicKey,
+            comment: "target"
+        )
+        let unrelated = KeyStore.ed25519AuthorizedKeysLine(
+            publicKey: Curve25519.Signing.PrivateKey().publicKey,
+            comment: "unrelated"
+        )
+
+        XCTAssertFalse(
+            try RemoteAuthorizedKeysInstaller.line(
+                unrelated,
+                referencesSameKeyAs: target
+            )
+        )
+    }
+
+    func test_semanticRevoke_ignoresTargetLookingTextInUnrelatedComment() throws {
+        let target = KeyStore.ed25519AuthorizedKeysLine(
+            publicKey: Curve25519.Signing.PrivateKey().publicKey,
+            comment: "target"
+        )
+        let unrelated = KeyStore.ed25519AuthorizedKeysLine(
+            publicKey: Curve25519.Signing.PrivateKey().publicKey,
+            comment: "comment contains \(target)"
+        )
+
+        XCTAssertFalse(
+            try RemoteAuthorizedKeysInstaller.line(
+                unrelated,
+                referencesSameKeyAs: target
+            )
+        )
+    }
+
+    func test_semanticRevoke_ignoresCommentedOutTarget() throws {
+        let target = KeyStore.ed25519AuthorizedKeysLine(
+            publicKey: Curve25519.Signing.PrivateKey().publicKey,
+            comment: "target"
+        )
+
+        XCTAssertFalse(
+            try RemoteAuthorizedKeysInstaller.line(
+                "# disabled \(target)",
+                referencesSameKeyAs: target
+            )
+        )
+    }
+
+    func test_semanticRevoke_ignoresMalformedQuoteAfterParsedKey() throws {
+        let key = Curve25519.Signing.PrivateKey()
+        let target = KeyStore.ed25519AuthorizedKeysLine(
+            publicKey: key.publicKey,
+            comment: "target"
+        )
+        let candidate = KeyStore.ed25519AuthorizedKeysLine(
+            publicKey: key.publicKey,
+            comment: "comment with unmatched \" quote"
+        )
+
+        XCTAssertTrue(
+            try RemoteAuthorizedKeysInstaller.line(
+                candidate,
+                referencesSameKeyAs: target
+            )
+        )
+    }
+
+    func test_semanticRevoke_rejectsMalformedTarget() {
+        let candidate = KeyStore.ed25519AuthorizedKeysLine(
+            publicKey: Curve25519.Signing.PrivateKey().publicKey,
+            comment: "valid"
+        )
+
+        XCTAssertThrowsError(
+            try RemoteAuthorizedKeysInstaller.line(
+                candidate,
+                referencesSameKeyAs: "ssh-ed25519 AAAA malformed"
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? RemoteAuthorizedKeysInstaller.InstallError,
+                .invalidPublicKey
+            )
+        }
+        XCTAssertThrowsError(
+            try RemoteAuthorizedKeysInstaller.makeRevokeCommand(
+                line: "ssh-ed25519 AAAA malformed"
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? RemoteAuthorizedKeysInstaller.InstallError,
+                .invalidPublicKey
+            )
+        }
+    }
+
+    func test_semanticRevoke_preservesMalformedQuotedCandidate() throws {
+        let target = KeyStore.ed25519AuthorizedKeysLine(
+            publicKey: Curve25519.Signing.PrivateKey().publicKey,
+            comment: "target"
+        )
+        let candidate = "command=\"unterminated \(target)"
+
+        XCTAssertFalse(
+            try RemoteAuthorizedKeysInstaller.line(
+                candidate,
+                referencesSameKeyAs: target
+            )
+        )
+    }
+
     func test_validateCanInstall_throwsForSelfInstall() {
         let keyID = UUID()
         let host = Host(address: "example.com", user: "alice", storedKeyID: keyID)
@@ -90,5 +256,37 @@ final class RemoteAuthorizedKeysInstallerTests: XCTestCase {
         XCTAssertNoThrow(
             try RemoteAuthorizedKeysInstaller.validateCanInstall(keyID: UUID(), on: host)
         )
+    }
+
+    func test_validateCanInstall_rechecksLiveCredentialAfterInitialAlternate() throws {
+        let targetKeyID = UUID()
+        let alternateKeyID = UUID()
+        let hostID = UUID()
+        let initialSnapshot = Host(
+            id: hostID,
+            address: "example.test",
+            user: "alice",
+            storedKeyID: alternateKeyID
+        )
+        var resolvedLiveHost = initialSnapshot
+        resolvedLiveHost.storedKeyID = targetKeyID
+
+        XCTAssertNoThrow(
+            try RemoteAuthorizedKeysInstaller.validateCanInstall(
+                keyID: targetKeyID,
+                on: initialSnapshot
+            )
+        )
+        XCTAssertThrowsError(
+            try RemoteAuthorizedKeysInstaller.validateCanInstall(
+                keyID: targetKeyID,
+                on: resolvedLiveHost
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? RemoteAuthorizedKeysInstaller.InstallError,
+                .selfInstall
+            )
+        }
     }
 }

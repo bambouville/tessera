@@ -134,14 +134,17 @@ final class OnboardingControllerTests: XCTestCase {
 
     // MARK: - Step list shape
 
-    func test_firstRun_hasFiveStepsInOrder() {
+    func test_firstRun_hasEightStepsInOrder() {
         let steps = OnboardingStep.firstRun
-        XCTAssertEqual(steps.count, 5)
+        XCTAssertEqual(steps.count, 8)
         XCTAssertEqual(steps[0].kind, .spotlight(.addHost, .below))
         XCTAssertEqual(steps[1].kind, .spotlight(.keysNav, .right))
         XCTAssertEqual(steps[2].kind, .illustration(.mockTerminal))
         XCTAssertEqual(steps[3].kind, .illustration(.claudeCodePromptWithPuck))
-        XCTAssertEqual(steps[4].kind, .illustration(.shortcuts))
+        XCTAssertEqual(steps[4].kind, .illustration(.filesPanel))
+        XCTAssertEqual(steps[5].kind, .illustration(.shareInOut))
+        XCTAssertEqual(steps[6].kind, .illustration(.agentImagePaste))
+        XCTAssertEqual(steps[7].kind, .illustration(.shortcuts))
     }
 
     func test_controllerStepsMatchFirstRun() {

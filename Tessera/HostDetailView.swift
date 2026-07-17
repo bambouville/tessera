@@ -15,8 +15,10 @@ struct HostDetailView: View {
     @Bindable var host: PersistedHost
     @Environment(\.modelContext) private var modelContext
     @Environment(\.designTokens) private var T
+    @Environment(AppearancePreferences.self) private var appearance
+    @Environment(HostTerminalBackgroundStore.self) private var hostBackgrounds
     @Query(sort: \StoredKey.createdAt, order: .reverse) private var storedKeys: [StoredKey]
-    var onConnect: (PersistedHost, String) -> Void
+    var onConnect: (PersistedHost, String, [UUID: String]) -> Void
     var onCancel: () -> Void
     var onDelete: () -> Void
 
@@ -30,6 +32,13 @@ struct HostDetailView: View {
     /// `@State` so toggling between auto/manual triggers a SwiftUI
     /// re-render that hides or shows the OS picker.
     @State private var isOSManual: Bool = false
+    /// Mirrors this host's `HostJumpLink.jumpHostID`, kept in `@State`
+    /// so picking a bastion re-renders the path caption immediately.
+    @State private var jumpHostID: UUID?
+    /// Per-hop passwords are session-scoped like the destination password.
+    /// They are never persisted; the resulting Host DTO retains them for
+    /// reconnecting Mosh/tmux/File side channels during this live session.
+    @State private var jumpPasswords: [UUID: String] = [:]
 
     private let osHintOptions = ["macos", "ubuntu", "debian", "alpine", "linux", "raspbian"]
 
@@ -68,6 +77,7 @@ struct HostDetailView: View {
         }
         .task(id: host.id) {
             isOSManual = HostOSDetectionState.isManuallySet(hostID: host.id)
+            jumpHostID = HostJumpChainResolver.link(for: host.id, in: modelContext)?.jumpHostID
         }
     }
 
@@ -86,7 +96,9 @@ struct HostDetailView: View {
     }
 
     private var connectBar: some View {
-        Btn(style: .primary, full: true, action: { onConnect(host, password) }) {
+        Btn(style: .primary, full: true, action: {
+            onConnect(host, password, jumpPasswords)
+        }) {
             HStack {
                 Text("connect")
                     .font(Typography.tesseraMono(size: 13, weight: .semibold))
@@ -110,6 +122,7 @@ struct HostDetailView: View {
 
     private var connectEnabled: Bool {
         !host.address.trimmingCharacters(in: .whitespaces).isEmpty
+            && passwordJumpHosts.allSatisfy { !jumpPasswordRequired(for: $0) }
     }
 
     // MARK: - Tabs
@@ -143,6 +156,8 @@ struct HostDetailView: View {
             }
 
             transportSection
+
+            jumpHostSection
 
             launchSection
         }
@@ -196,6 +211,8 @@ struct HostDetailView: View {
                 }
             }
 
+            terminalBackgroundField
+
             Field(label: "tags") {
                 VStack(alignment: .leading, spacing: 10) {
                     if !host.tags.isEmpty {
@@ -233,6 +250,103 @@ struct HostDetailView: View {
 
     private var forwardingTab: some View {
         ForwardingTabView(host: host)
+    }
+
+    // MARK: - Terminal background override
+
+    private var backgroundOverride: HostTerminalBackgroundOverride {
+        hostBackgrounds.override(for: host.id)
+    }
+
+    private var selectedTheme: TerminalTheme {
+        TerminalTheme.find(id: appearance.terminalThemeID)
+    }
+
+    private var globalBackgroundCaption: String {
+        if let bg = appearance.globalTerminalBackground {
+            return "follows settings → themes (currently: custom image · dim \(Int((bg.dim * 100).rounded()))%)."
+        }
+        return "follows settings → themes (currently: theme color)."
+    }
+
+    private var terminalBackgroundField: some View {
+        Field(label: "terminal background") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    backgroundModeButton(.inherit, label: "global")
+                    backgroundModeButton(.color, label: "theme color")
+                    backgroundModeButton(.image, label: "image")
+                }
+                .animation(.easeInOut(duration: 0.15), value: backgroundOverride.mode)
+
+                switch backgroundOverride.mode {
+                case .inherit:
+                    Text(globalBackgroundCaption)
+                        .font(Typography.tesseraMono(size: 11))
+                        .foregroundStyle(T.fgDim)
+                        .fixedSize(horizontal: false, vertical: true)
+                case .color:
+                    Text("always the theme's solid color on this host, even when a global picture is set.")
+                        .font(Typography.tesseraMono(size: 11))
+                        .foregroundStyle(T.fgDim)
+                        .fixedSize(horizontal: false, vertical: true)
+                case .image:
+                    TerminalBackgroundImageControls(
+                        imageID: backgroundOverride.imageID,
+                        dim: backgroundOverride.dim,
+                        blur: backgroundOverride.blur,
+                        fillMode: backgroundOverride.fillMode,
+                        theme: selectedTheme,
+                        onImport: { data in
+                            guard let imported = TerminalBackgroundImageStore.importImage(data: data) else {
+                                NSLog("[TerminalBackground] host import failed host=%@", host.id.uuidString)
+                                return
+                            }
+                            // set(_:for:) deletes the previously stored file
+                            // when the id changes.
+                            var override = backgroundOverride
+                            override.imageID = imported.id
+                            hostBackgrounds.set(override, for: host.id)
+                        },
+                        onRemove: {
+                            var override = backgroundOverride
+                            override.imageID = nil
+                            hostBackgrounds.set(override, for: host.id)
+                        },
+                        onDimChanged: { dim in
+                            var override = backgroundOverride
+                            override.dim = dim
+                            hostBackgrounds.set(override, for: host.id)
+                        },
+                        onBlurChanged: { blur in
+                            var override = backgroundOverride
+                            override.blur = blur
+                            hostBackgrounds.set(override, for: host.id)
+                        },
+                        onFillModeChanged: { mode in
+                            var override = backgroundOverride
+                            override.fillMode = mode
+                            hostBackgrounds.set(override, for: host.id)
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    private func backgroundModeButton(
+        _ mode: HostTerminalBackgroundMode,
+        label: String
+    ) -> some View {
+        let isSelected = backgroundOverride.mode == mode
+        return Btn(style: isSelected ? .primary : .default, full: true, action: {
+            var override = backgroundOverride
+            override.mode = mode
+            hostBackgrounds.set(override, for: host.id)
+        }) {
+            Text(label)
+                .font(Typography.tesseraMono(size: 13, weight: isSelected ? .semibold : .regular))
+        }
     }
 
     private var snippetsTab: some View {
@@ -420,6 +534,152 @@ struct HostDetailView: View {
             Text(host.transport.editorDescription)
                 .font(Typography.tesseraMono(size: 11))
                 .foregroundStyle(T.fgDim)
+        }
+        .padding(.vertical, 4)
+    }
+
+    // MARK: - Jump host
+
+    private var eligibleJumpHosts: [PersistedHost] {
+        HostJumpChainResolver.eligibleJumpHosts(for: host.id, in: modelContext)
+            .sorted {
+                jumpHostDisplayName($0).localizedCaseInsensitiveCompare(
+                    jumpHostDisplayName($1)
+                ) == .orderedAscending
+            }
+    }
+
+    private func jumpHostDisplayName(_ host: PersistedHost) -> String {
+        host.name.isEmpty ? host.address : host.name
+    }
+
+    private var selectedJumpHostLabel: String {
+        guard let jumpHostID else { return "none" }
+        let descriptor = FetchDescriptor<PersistedHost>(
+            predicate: #Predicate { $0.id == jumpHostID }
+        )
+        guard let bastion = (try? modelContext.fetch(descriptor))?.first else {
+            return "missing host"
+        }
+        return jumpHostDisplayName(bastion)
+    }
+
+    /// Resolved multi-hop path (or the broken-chain warning) for the
+    /// caption under the picker.
+    private var jumpChainCaption: String? {
+        guard jumpHostID != nil else { return nil }
+        let resolution = HostJumpChainResolver.resolve(for: host, in: modelContext)
+        if resolution.isBroken {
+            return "⚠ \(resolution.brokenReason ?? "the jump chain could not be resolved.") connections fail until this is fixed."
+        }
+        let path = (resolution.hops.map(jumpHostDisplayName)
+                    + [jumpHostDisplayName(host)]).joined(separator: " → ")
+        var caption = "path: \(path)"
+        if resolution.hops.count > 1 {
+            caption += " (the jump host's own jump host extends the chain)"
+        }
+        if host.transport == .mosh {
+            caption += "\nmosh UDP cannot traverse bastions — if the mosh server is unreachable the session falls back to SSH."
+        }
+        return caption
+    }
+
+    private func setJumpHost(_ id: UUID?) {
+        HostJumpChainResolver.setJumpHost(id, for: host.id, in: modelContext)
+        try? modelContext.save()
+        jumpHostID = id
+    }
+
+    private var passwordJumpHosts: [PersistedHost] {
+        let resolution = HostJumpChainResolver.resolve(for: host, in: modelContext)
+        guard !resolution.isBroken else { return [] }
+        return resolution.hops.filter {
+            if case .password = $0.identity?.credentialMode { return true }
+            return false
+        }
+    }
+
+    private func jumpPasswordRequired(for jumpHost: PersistedHost) -> Bool {
+        if hasStoredJumpPassword(for: jumpHost) { return false }
+        return (jumpPasswords[jumpHost.id] ?? "").isEmpty
+    }
+
+    private func hasStoredJumpPassword(for jumpHost: PersistedHost) -> Bool {
+        guard let identity = jumpHost.identity,
+              let stored = try? KeychainHelper.password(forIdentityID: identity.id) else {
+            return false
+        }
+        return !stored.isEmpty
+    }
+
+    private var jumpHostsNeedingPasswordInput: [PersistedHost] {
+        passwordJumpHosts.filter { !hasStoredJumpPassword(for: $0) }
+    }
+
+    private func jumpPasswordBinding(for hostID: UUID) -> Binding<String> {
+        Binding(
+            get: { jumpPasswords[hostID] ?? "" },
+            set: { jumpPasswords[hostID] = $0 }
+        )
+    }
+
+    private var jumpHostSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("jump host")
+                .font(Typography.tesseraMono(size: 11))
+                .foregroundStyle(T.fgMuted)
+
+            Menu {
+                Button("none") { setJumpHost(nil) }
+                ForEach(eligibleJumpHosts, id: \.id) { candidate in
+                    Button(jumpHostDisplayName(candidate)) {
+                        setJumpHost(candidate.id)
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(selectedJumpHostLabel)
+                        .font(Typography.tesseraMono(size: 13))
+                        .foregroundStyle(T.fg)
+                    Spacer()
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(Typography.tesseraMono(size: 11))
+                        .foregroundStyle(T.fgDim)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(T.inputBg)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(T.border, lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+
+            ForEach(jumpHostsNeedingPasswordInput, id: \.id) { jumpHost in
+                Field(label: "password · \(jumpHostDisplayName(jumpHost))") {
+                    Input(
+                        text: jumpPasswordBinding(for: jumpHost.id),
+                        placeholder: "••••••••",
+                        secure: true
+                    )
+                    .textContentType(.password)
+                }
+            }
+
+            if !jumpHostsNeedingPasswordInput.isEmpty {
+                Text("jump-host passwords are kept only for this live session.")
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.fgDim)
+            }
+
+            Text(jumpChainCaption
+                 ?? "connect through another saved host (SSH bastion / ProxyJump).")
+                .font(Typography.tesseraMono(size: 11))
+                .foregroundStyle(T.fgDim)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 4)
     }

@@ -18,7 +18,16 @@ public final class TunnelsRegistry {
     }
 
     /// SessionView calls this on `.onDisappear`.
-    public func unregister(host: UUID) {
+    ///
+    /// Owner-checked: when one session replaces another for the same host
+    /// in a single SwiftUI transaction (the mosh→SSH jump fallback swap),
+    /// the outgoing view's `.onDisappear` can fire AFTER the incoming
+    /// view's `.onAppear` — an unconditional remove would silently drop
+    /// the replacement's live manager from the tunnels badge.
+    public func unregister(host: UUID, manager: PortForwarderManager? = nil) {
+        if let manager, managers[host] !== manager {
+            return
+        }
         managers.removeValue(forKey: host)
     }
 

@@ -67,24 +67,38 @@ struct InstallKeyToHostFlow: View {
 
     @ViewBuilder
     private var content: some View {
-        switch step {
-        case .pickHost:
-            hostPicker
+        if key.algorithm == .rsa {
+            resultHeader(
+                symbol: "xmark.shield.fill",
+                color: T.red,
+                title: "Legacy RSA installation is disabled. Generate an Ed25519 replacement and use a different working credential to install it before retiring this key."
+            )
+        } else {
+            switch step {
+            case .pickHost:
+                hostPicker
 
-        case .confirm(let host):
-            confirmView(host: host)
+            case .confirm(let host):
+                confirmView(host: host)
 
-        case .installing(let host):
-            installingView(host: host)
+            case .installing(let host):
+                installingView(host: host)
 
-        case .result(let host, let outcome):
-            resultView(host: host, outcome: outcome)
+            case .result(let host, let outcome):
+                resultView(host: host, outcome: outcome)
+            }
         }
     }
 
     @ViewBuilder
     private var actions: some View {
-        switch step {
+        if key.algorithm == .rsa {
+            HStack {
+                Spacer()
+                Btn("done", compact: true, action: close)
+            }
+        } else {
+            switch step {
         case .pickHost:
             HStack {
                 Spacer()
@@ -126,6 +140,7 @@ struct InstallKeyToHostFlow: View {
                     Btn("done", compact: true, action: close)
                 }
             }
+        }
         }
     }
 
@@ -298,6 +313,7 @@ struct InstallKeyToHostFlow: View {
 
     @MainActor
     private func beginInstall(on persistedHost: PersistedHost) {
+        guard key.algorithm != .rsa else { return }
         installTask?.cancel()
         step = .installing(host: persistedHost)
 
@@ -321,6 +337,12 @@ struct InstallKeyToHostFlow: View {
                     requireBiometric: requireBiometric,
                     isSecureEnclave: isSecureEnclave
                 )
+                KeySecurityMetadataStore().recordRemoteInstallation(
+                    keyID: keyID,
+                    hostID: persistedHost.id,
+                    hostLabel: displayName(for: persistedHost),
+                    endpoint: "\(persistedHost.address):\(persistedHost.port)"
+                )
                 outcome = .success
             } catch {
                 outcome = .failure(message: userFacingMessage(for: error))
@@ -339,8 +361,10 @@ struct InstallKeyToHostFlow: View {
             return false
         }
         let key = storedKey ?? storedKeys.first { $0.id == keyID }
-        return appearance.requireBiometricForKeyUse
-            || (key?.requiresBiometric ?? false)
+        return KeyOwnerPresencePolicy.isRequired(
+            globalPreference: appearance.requireBiometricForKeyUse,
+            key: key
+        )
     }
 
     private func configuredStoredKey(for host: PersistedHost) -> StoredKey? {

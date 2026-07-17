@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=/opt/tessera-fixture
+SERVICE=tessera-fixture-sshd.service
+
+# shellcheck disable=SC1091
+source "$ROOT/role.env"
+
+usage() {
+  printf 'usage: tessera-fixture-admin <status|endpoint-start|endpoint-stop|rotate-host-key|drop-udp|restore-udp|drop-app-ssh|restore-app-ssh|cleanup-run> [run-id]\n' >&2
+  exit 2
+}
+
+delete_rule() {
+  local chain="$1"
+  shift
+  while iptables -C "$chain" "$@" >/dev/null 2>&1; do
+    iptables -D "$chain" "$@"
+  done
+}
+
+command="${1:-}"
+case "$command" in
+  status)
+    printf 'role=%s\n' "$role"
+    printf 'endpoint='; systemctl is-active "$SERVICE" || true
+    if [[ "$role" == chaos ]]; then
+      printf 'tmux='; "$ROOT/tmux-3.6a/bin/tmux" -V
+    else
+      printf 'tmux='; /usr/bin/tmux -V
+    fi
+    printf 'mosh='; mosh-server --help 2>&1 | sed -n '1p'
+    pgrep -af '[m]osh-server' || true
+    ;;
+  endpoint-start)
+    systemctl start "$SERVICE"
+    ;;
+  endpoint-stop)
+    systemctl stop "$SERVICE"
+    ;;
+  rotate-host-key)
+    systemctl stop "$SERVICE"
+    rm -f "$ROOT/ssh/ssh_host_ed25519_key" "$ROOT/ssh/ssh_host_ed25519_key.pub"
+    ssh-keygen -q -t ed25519 -N '' -f "$ROOT/ssh/ssh_host_ed25519_key"
+    systemctl start "$SERVICE"
+    ;;
+  drop-udp)
+    iptables -C INPUT -p udp --dport 60000:61000 -m comment --comment tessera-fixture-udp -j DROP >/dev/null 2>&1 \
+      || iptables -I INPUT 1 -p udp --dport 60000:61000 -m comment --comment tessera-fixture-udp -j DROP
+    ;;
+  restore-udp)
+    delete_rule INPUT -p udp --dport 60000:61000 -m comment --comment tessera-fixture-udp -j DROP
+    ;;
+  drop-app-ssh)
+    iptables -C INPUT -p tcp --dport "$app_port" -m comment --comment tessera-fixture-ssh -j DROP >/dev/null 2>&1 \
+      || iptables -I INPUT 1 -p tcp --dport "$app_port" -m comment --comment tessera-fixture-ssh -j DROP
+    ;;
+  restore-app-ssh)
+    delete_rule INPUT -p tcp --dport "$app_port" -m comment --comment tessera-fixture-ssh -j DROP
+    ;;
+  cleanup-run)
+    run_id="${2:-}"
+    [[ "$run_id" =~ ^[A-Za-z0-9._-]+$ ]] || usage
+    rm -rf "/var/lib/tessera-fixture/runs/$run_id"
+    if [[ "$role" == chaos ]]; then
+      sudo -u "$fixture_user" -- "$ROOT/tmux-3.6a/bin/tmux" kill-server >/dev/null 2>&1 || true
+    else
+      sudo -u "$fixture_user" -- /usr/bin/tmux kill-server >/dev/null 2>&1 || true
+    fi
+    pkill -u "$fixture_user" -f '[m]osh-server' || true
+    ;;
+  *)
+    usage
+    ;;
+esac

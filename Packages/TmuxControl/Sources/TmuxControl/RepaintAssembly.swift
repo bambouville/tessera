@@ -8,11 +8,12 @@ enum RepaintAssembly {
         savedPrimaryLines: [String],
         altScreenLines: [String]?,
         terminalIsInAltScreen: Bool,
-        clientRows: Int?
+        clientRows: Int?,
+        preservePrimaryDuringAltRefresh: Bool = false
     ) -> [UInt8] {
         var bytes: [UInt8] = []
         appendEscape("\u{1B}[?2026l", to: &bytes)
-        if terminalIsInAltScreen {
+        if terminalIsInAltScreen && !preservePrimaryDuringAltRefresh {
             appendEscape("\u{1B}[?1049l", to: &bytes)
         }
         appendEscape("\u{1B}[?1003l\u{1B}[?1002l\u{1B}[?1000l\u{1B}[?1006l", to: &bytes)
@@ -23,26 +24,37 @@ enum RepaintAssembly {
         // cells used by TUIs for full-row backgrounds; CRLF-joining the raw
         // `-e -N` rows preserves those blank rows without needing CSI 3 J.
         if state.paneInAltScreen {
-            appendLines(historyLines, to: &bytes)
-            if !historyLines.isEmpty && !savedPrimaryLines.isEmpty {
-                appendCRLF(to: &bytes)
+            if preservePrimaryDuringAltRefresh {
+                // The terminal and tmux are already showing this pane's
+                // alternate buffer. Repaint that buffer directly; toggling
+                // 1049 here would clear the saved primary screen because a
+                // viewport-only capture intentionally has no primary payload.
+                appendLines(altScreenLines ?? captureLines, to: &bytes)
+            } else {
+                appendLines(historyLines, to: &bytes)
+                // Each capture-pane response tracks SGR state independently
+                // and only closes attributes where trailing blanks exist, so
+                // a fully-colored final cell leaves its SGR open — reset at
+                // every segment seam or the tail attributes of one capture
+                // bleed into the head of the next. The reset must come BEFORE
+                // the seam CRLF: a linefeed on the bottom row scrolls, and the
+                // scrolled-in line is filled with the current background (BCE),
+                // planting a stale colored row if the pen were still open.
+                appendEscape("\u{1B}[0m", to: &bytes)
+                if !historyLines.isEmpty && !savedPrimaryLines.isEmpty {
+                    appendCRLF(to: &bytes)
+                }
+                appendLines(savedPrimaryLines, to: &bytes)
+                // This CUP before ?1049h seeds the saved-primary cursor that a
+                // later live ?1049l restores — semantically required, not a
+                // workaround (the fork's old savedY-zeroing bug is fixed as of
+                // d34c15f).
+                let savedRow = max(1, (state.altSavedY ?? 0) + 1)
+                let savedCol = max(1, (state.altSavedX ?? 0) + 1)
+                appendEscape("\u{1B}[\(savedRow);\(savedCol)H", to: &bytes)
+                appendEscape("\u{1B}[0m\u{1B}[?1049h\u{1B}[H", to: &bytes)
+                appendLines(altScreenLines ?? captureLines, to: &bytes)
             }
-            // Each capture-pane response tracks SGR state independently
-            // and only closes attributes where trailing blanks exist, so
-            // a fully-colored final cell leaves its SGR open — reset at
-            // every segment seam or the tail attributes of one capture
-            // bleed into the head of the next.
-            appendEscape("\u{1B}[0m", to: &bytes)
-            appendLines(savedPrimaryLines, to: &bytes)
-            // This CUP before ?1049h seeds the saved-primary cursor that a
-            // later live ?1049l restores — semantically required, not a
-            // workaround (the fork's old savedY-zeroing bug is fixed as of
-            // d34c15f).
-            let savedRow = max(1, (state.altSavedY ?? 0) + 1)
-            let savedCol = max(1, (state.altSavedX ?? 0) + 1)
-            appendEscape("\u{1B}[\(savedRow);\(savedCol)H", to: &bytes)
-            appendEscape("\u{1B}[0m\u{1B}[?1049h\u{1B}[H", to: &bytes)
-            appendLines(altScreenLines ?? captureLines, to: &bytes)
         } else {
             appendLines(captureLines, to: &bytes)
         }
@@ -128,8 +140,21 @@ enum RepaintAssembly {
     /// `48;2;r;g;b` / `48:5:n` / `48:2::r:g:b` (extended). Foreground (`38…`)
     /// params are skipped without disturbing background state.
     static func backgroundLeftOpen(in lines: [String]) -> Bool {
-        var backgroundActive = false
+        var pen = BackgroundPen()
         for line in lines {
+            pen.consume(line)
+        }
+        return pen.activePayload != nil
+    }
+
+    /// Cumulative SGR background state across capture rows. `activePayload` is
+    /// the raw SGR parameter string that re-establishes the current background
+    /// (e.g. `"100"`, `"48;5;236"`, `"48:2::64:64:64"`), or nil when the
+    /// background is default.
+    struct BackgroundPen {
+        private(set) var activePayload: String? = nil
+
+        mutating func consume(_ line: String) {
             let bytes = Array(line.utf8)
             var i = 0
             while i < bytes.count {
@@ -150,12 +175,61 @@ enum RepaintAssembly {
                     i += 1
                     continue
                 }
-                let paramBytes = bytes[(i + 2)..<j]
-                applySGR(String(decoding: paramBytes, as: UTF8.self), backgroundActive: &backgroundActive)
+                apply(String(decoding: bytes[(i + 2)..<j], as: UTF8.self))
                 i = j + 1
             }
         }
-        return backgroundActive
+
+        /// Fold one SGR payload's effect on the background pen. Parameters are
+        /// `;`-separated; a parameter may carry `:` sub-parameters (ITU form),
+        /// which make it self-contained. Legacy `38`/`48`/`58` extended colors
+        /// consume their `;`-separated operands so color components aren't
+        /// misread as background selects (`38;2;100;107;42`).
+        private mutating func apply(_ payload: String) {
+            let groups = payload.components(separatedBy: ";")
+            var k = 0
+            while k < groups.count {
+                let group = groups[k]
+                if group.isEmpty {
+                    // Empty parameter == `0` == full reset.
+                    activePayload = nil
+                    k += 1
+                    continue
+                }
+                if group.contains(":") {
+                    // ITU sub-parameter form, self-contained in one group.
+                    let head = Int(group.prefix(while: { $0.isNumber })) ?? -1
+                    if head == 48 {
+                        activePayload = group
+                    }
+                    k += 1
+                    continue
+                }
+                guard let code = Int(group) else {
+                    k += 1
+                    continue
+                }
+                switch code {
+                case 0, 49:
+                    activePayload = nil
+                case 40...47, 100...107:
+                    activePayload = group
+                case 38, 48, 58:
+                    var span = 1
+                    if k + 1 < groups.count, let mode = Int(groups[k + 1]) {
+                        span += (mode == 2) ? 4 : (mode == 5) ? 2 : 0
+                    }
+                    let end = min(k + span, groups.count)
+                    if code == 48 {
+                        activePayload = groups[k..<end].joined(separator: ";")
+                    }
+                    k = end - 1
+                default:
+                    break
+                }
+                k += 1
+            }
+        }
     }
 
     /// Diagnostic: visible column count of a captured line — the number of
@@ -201,51 +275,34 @@ enum RepaintAssembly {
         return cols
     }
 
-    /// Fold one SGR payload's effect on background state. Tokens may be `;`- or
-    /// `:`-separated; extended `48` colors consume their trailing tokens.
-    private static func applySGR(_ payload: String, backgroundActive: inout Bool) {
-        // Treat ':' (sub-parameter) and ';' alike for scanning purposes.
-        let tokens = payload.split(whereSeparator: { $0 == ";" || $0 == ":" }).map(String.init)
-        if tokens.isEmpty {
-            // Empty payload == `0` == full reset.
-            backgroundActive = false
-            return
-        }
-        var k = 0
-        while k < tokens.count {
-            guard let code = Int(tokens[k]) else { k += 1; continue }
-            switch code {
-            case 0:
-                backgroundActive = false
-            case 49:
-                backgroundActive = false
-            case 40...47, 100...107:
-                backgroundActive = true
-            case 48:
-                // Extended background: `48;5;n` or `48;2;r;g;b` (sub-param
-                // variants collapse to the same token stream here). Any
-                // extended background select turns the background on; consume
-                // the mode + its operands so they aren't misread as resets.
-                backgroundActive = true
-                if k + 1 < tokens.count, let mode = Int(tokens[k + 1]) {
-                    k += (mode == 2) ? 4 : 2
-                }
-            default:
-                break
-            }
-            k += 1
-        }
-    }
-
     private static func appendEscape(_ sequence: String, to bytes: inout [UInt8]) {
         bytes.append(contentsOf: sequence.utf8)
     }
 
+    /// Joins capture rows with CRLF, neutralizing the background pen at every
+    /// seam. `capture-pane -e` carries cumulative SGR state across rows and
+    /// only closes attributes where a row has trailing blank cells, so a
+    /// full-width colored row leaves its background open across the CRLF. A
+    /// linefeed executed on the bottom row scrolls, and the scrolled-in line
+    /// is filled with the *current* background (BCE) — planting a stale
+    /// colored tail on the next row wherever its content is shorter than the
+    /// full width. Those rows land in scrollback, out of reach of the
+    /// visible-screen scrub. Closing the background before the CRLF and
+    /// re-establishing it right after keeps the scroll fill default while
+    /// preserving the inherited pen for the next row's cells.
     private static func appendLines(_ lines: [String], to bytes: inout [UInt8]) {
+        var pen = BackgroundPen()
         for (index, line) in lines.enumerated() {
             bytes.append(contentsOf: line.utf8)
             if index < lines.count - 1 {
-                appendCRLF(to: &bytes)
+                pen.consume(line)
+                if let background = pen.activePayload {
+                    appendEscape("\u{1B}[49m", to: &bytes)
+                    appendCRLF(to: &bytes)
+                    appendEscape("\u{1B}[\(background)m", to: &bytes)
+                } else {
+                    appendCRLF(to: &bytes)
+                }
             }
         }
     }

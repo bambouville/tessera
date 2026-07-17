@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 enum SessionRestorePolicy: String, CaseIterable, Codable {
     case ask
@@ -111,11 +112,36 @@ struct SessionRestoreStore {
     }
 }
 
+enum PasswordMaterialAvailability: Equatable, Sendable {
+    case available
+    case missing
+    case unavailable
+    case invalid
+
+    var permitsSessionRestoreAttempt: Bool {
+        self == .available || self == .unavailable
+    }
+}
+
 enum SessionRestoreEligibility {
     static func isRestorable(
         host: PersistedHost,
         storedKey: (UUID) -> StoredKey?,
-        passwordExists: (UUID) -> Bool = { KeychainHelper.password(forIdentityID: $0) != nil },
+        privateMaterialExists: ((UUID) -> Bool)? = nil,
+        privateMaterialIntegrity: ((StoredKey) -> KeyMaterialIntegrity)? = nil,
+        passwordAvailability: (UUID) -> PasswordMaterialAvailability = {
+            do {
+                return try KeychainHelper.password(forIdentityID: $0) == nil
+                    ? .missing : .available
+            } catch let error as KeychainOperationError where error.status == errSecDecode {
+                return .invalid
+            } catch {
+                // Protected-data, entitlement, and transient copy failures are
+                // re-evaluated by the authoritative authentication path. Keep
+                // the snapshot while that boundary remains temporarily unreadable.
+                return .unavailable
+            }
+        },
         legacyDevKeyExists: (String) -> Bool = Self.defaultLegacyDevKeyExists
     ) -> Bool {
         guard let identity = host.identity else { return false }
@@ -124,15 +150,36 @@ enum SessionRestoreEligibility {
         case .none:
             return false
         case .password:
-            return passwordExists(identity.id)
+            return passwordAvailability(identity.id).permitsSessionRestoreAttempt
         case .key(let id):
-            return storedKey(id) != nil
+            guard let key = storedKey(id), key.algorithm != .rsa else {
+                return false
+            }
+            if let privateMaterialExists {
+                // Test/legacy injection remains available, but production uses
+                // the cryptographic non-interactive assessment below.
+                return privateMaterialExists(id)
+            }
+            let integrity = privateMaterialIntegrity?(key)
+                ?? KeyStore.privateMaterialIntegrity(
+                    forKeyID: key.id,
+                    algorithm: key.algorithm,
+                    isSecureEnclave: key.isSecureEnclave,
+                    expectedAuthorizedKeysLine: key.authorizedKeysLine
+                )
+            return integrity.permitsSessionRestoreAttempt
         case .legacyDevKey(let filename):
+            #if DEBUG
             return legacyDevKeyExists(filename)
+            #else
+            _ = filename
+            return false
+            #endif
         }
     }
 
     private static func defaultLegacyDevKeyExists(_ filename: String) -> Bool {
+        #if DEBUG
         guard let docsURL = FileManager.default.urls(
             for: .documentDirectory,
             in: .userDomainMask
@@ -149,6 +196,10 @@ enum SessionRestoreEligibility {
             atPath: url.path,
             isDirectory: &isDirectory
         ) && !isDirectory.boolValue
+        #else
+        _ = filename
+        return false
+        #endif
     }
 }
 
@@ -182,6 +233,7 @@ enum SessionRestoreResolver {
         var skippedCount = 0
         var resolved: [SessionRestoreResolvedSession] = []
         var singletonIndexes: [String: Int] = [:]
+        var lineageIndexes: [String: Int] = [:]
 
         for snapshot in document.sessions {
             guard let host = hostsByID[snapshot.persistedHostID],
@@ -197,9 +249,22 @@ enum SessionRestoreResolver {
                 continue
             }
 
+            // A foreground replacement restore re-parents a snapshot
+            // but inherits its createdAt verbatim, so snapshots
+            // sharing (host, createdAt) are one session's lineage —
+            // restore it once. Distinct user-opened sessions to the
+            // same host can never share an exact sub-microsecond
+            // Date, so intentional duplicates still restore apart.
+            let lineageKey = lineageRestoreKey(for: snapshot)
+            if let existingIndex = lineageIndexes[lineageKey] {
+                resolved[existingIndex].sourceSnapshotIDs.append(snapshot.liveSessionID)
+                continue
+            }
+
             if let singletonKey = singletonRestoreKey(for: host) {
                 singletonIndexes[singletonKey] = resolved.count
             }
+            lineageIndexes[lineageKey] = resolved.count
 
             resolved.append(
                 SessionRestoreResolvedSession(
@@ -228,6 +293,10 @@ enum SessionRestoreResolver {
         let name = host.name.trimmingCharacters(in: .whitespacesAndNewlines)
         if !name.isEmpty { return name }
         return host.address
+    }
+
+    private static func lineageRestoreKey(for snapshot: SessionRestoreSnapshot) -> String {
+        "\(snapshot.persistedHostID.uuidString)#\(snapshot.createdAt.timeIntervalSinceReferenceDate)"
     }
 
     private static func singletonRestoreKey(for host: PersistedHost) -> String? {

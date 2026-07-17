@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0852B22FF60AF0B5F713D29B /* ScrollProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = F258CE6A611C425C97F1A49C /* ScrollProbe.swift */; };
+		0852B22FF60AF0B5F713D29B /* TerminalScrollHarnessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F258CE6A611C425C97F1A49C /* TerminalScrollHarnessTests.swift */; };
 		1A0004000000000000000001 /* TesseraApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000001 /* TesseraApp.swift */; };
 		1A0004000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000002 /* ContentView.swift */; };
 		1A0004000000000000000003 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000003 /* Assets.xcassets */; };
@@ -39,6 +39,10 @@
 		1A0004000000000000000022 /* MoshBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000300000000000000001C /* MoshBootstrap.swift */; };
 		1A0004000000000000000023 /* MoshBootstrapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000300000000000000001E /* MoshBootstrapTests.swift */; };
 		1A0004000000000000000024 /* KnownHostsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000300000000000000001F /* KnownHostsStoreTests.swift */; };
+		1A00A0000000000000000002 /* RealHostTransportIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00A0000000000000000001 /* RealHostTransportIntegrationTests.swift */; };
+		1A00A0000000000000000004 /* VisualCaptureProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00A0000000000000000003 /* VisualCaptureProbe.swift */; };
+		1A00A0000000000000000006 /* TerminalScrollbackOracleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00A0000000000000000005 /* TerminalScrollbackOracleTests.swift */; };
+		1A0004000000000000000033 /* HostKeyVerificationRequestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000033 /* HostKeyVerificationRequestTests.swift */; };
 		1A0004000000000000000025 /* OSDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000025 /* OSDetector.swift */; };
 		1A0004000000000000000026 /* HostOSDetectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000026 /* HostOSDetectionState.swift */; };
 		1A0004000000000000000027 /* OSDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000027 /* OSDetectorTests.swift */; };
@@ -75,6 +79,11 @@
 		1A0014000000000000000019 /* SecuritySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000019 /* SecuritySettingsView.swift */; };
 		1A001400000000000000001B /* AboutSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000001B /* AboutSettingsView.swift */; };
 		1A001400000000000000001C /* TerminalTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000001C /* TerminalTheme.swift */; };
+		1A0071000000000000000001 /* TerminalBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0070000000000000000001 /* TerminalBackground.swift */; };
+		1A0071000000000000000002 /* TerminalBackdropView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0070000000000000000002 /* TerminalBackdropView.swift */; };
+		1A0071000000000000000003 /* TerminalBackgroundControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0070000000000000000003 /* TerminalBackgroundControls.swift */; };
+		1A0081000000000000000001 /* TerminalBackdropTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0080000000000000000001 /* TerminalBackdropTests.swift */; };
+		1A0081000000000000000002 /* TerminalBackgroundTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0080000000000000000002 /* TerminalBackgroundTests.swift */; };
 		1A001400000000000000001D /* TesseraLogo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000001D /* TesseraLogo.swift */; };
 		1A001400000000000000001E /* DistroLogos.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000001E /* DistroLogos.swift */; };
 		1A001400000000000000001F /* InstallKeyToHostFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000001F /* InstallKeyToHostFlow.swift */; };
@@ -108,7 +117,11 @@
 		1A002400000000000000000A /* CommandPaletteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002300000000000000000A /* CommandPaletteTests.swift */; };
 		1A002400000000000000000B /* SessionSwitcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002300000000000000000B /* SessionSwitcherTests.swift */; };
 		1A0024000000000000000010 /* TesseraMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0025000000000000000010 /* TesseraMigration.swift */; };
+		7E4A0001AA00000000000001 /* HostJumpLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E4A0002AA00000000000001 /* HostJumpLink.swift */; };
+		7E4A0001AA00000000000002 /* SSHConnectionChain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E4A0002AA00000000000002 /* SSHConnectionChain.swift */; };
 		1A0024000000000000000011 /* TesseraMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0025000000000000000011 /* TesseraMigrationTests.swift */; };
+		7E4A0001AA00000000000003 /* HostJumpChainResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E4A0002AA00000000000003 /* HostJumpChainResolverTests.swift */; };
+		7E4A0001AA00000000000004 /* JumpHostTransportIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E4A0002AA00000000000004 /* JumpHostTransportIntegrationTests.swift */; };
 		1A0025000000000000000001 /* EnclaveAuthDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0025000000000000000002 /* EnclaveAuthDelegate.swift */; };
 		1A0028000000000000000001 /* DirectTCPIPChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0027000000000000000001 /* DirectTCPIPChannel.swift */; };
 		1A0028000000000000000002 /* PortListener.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0027000000000000000002 /* PortListener.swift */; };
@@ -129,9 +142,33 @@
 		1A002C000000000000000008 /* MacroEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B000000000000000008 /* MacroEncoderTests.swift */; };
 		1A002C000000000000000009 /* SwipePadProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B000000000000000009 /* SwipePadProfileTests.swift */; };
 		1A002C00000000000000000A /* ExperimentalSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B00000000000000000A /* ExperimentalSettingsView.swift */; };
+		1A00B1000000000000000001 /* AgentCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00B0000000000000000001 /* AgentCenter.swift */; };
+		1A00B1000000000000000002 /* AgentSessionSourceFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00B0000000000000000002 /* AgentSessionSourceFactory.swift */; };
+		1A00B1000000000000000003 /* AgentCenterPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00B0000000000000000003 /* AgentCenterPage.swift */; };
+		1A00B1000000000000000004 /* RemoteAgentLifecycleIntegrationInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00B0000000000000000004 /* RemoteAgentLifecycleIntegrationInstaller.swift */; };
 		1A0034000000000000000001 /* SessionRestoreStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0033000000000000000001 /* SessionRestoreStore.swift */; };
 		1A0034000000000000000002 /* SessionRestoreSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0033000000000000000002 /* SessionRestoreSheet.swift */; };
 		1A0034000000000000000003 /* SessionRestoreStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0033000000000000000003 /* SessionRestoreStoreTests.swift */; };
+		1A0061000000000000000001 /* FilesContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000001 /* FilesContracts.swift */; };
+		1A0061000000000000000002 /* FileBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000002 /* FileBridge.swift */; };
+		1A0061000000000000000003 /* FileBridgeRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000003 /* FileBridgeRegistry.swift */; };
+		1A0061000000000000000004 /* TransferQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000004 /* TransferQueue.swift */; };
+		1A0061000000000000000005 /* TransferTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000005 /* TransferTask.swift */; };
+		1A0061000000000000000006 /* RemoteShellIntegrationInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000006 /* RemoteShellIntegrationInstaller.swift */; };
+		1A0061000000000000000007 /* QuickLookPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000007 /* QuickLookPresenter.swift */; };
+		1A0061000000000000000099 /* RemotePathResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000099 /* RemotePathResolver.swift */; };
+		1A0061000000000000000008 /* RemoteFileItemProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000008 /* RemoteFileItemProvider.swift */; };
+		1A0061000000000000000009 /* FilesPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000009 /* FilesPanelController.swift */; };
+		1A006100000000000000000A /* FilesPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A006000000000000000000A /* FilesPanelView.swift */; };
+		1A006100000000000000000B /* UploadRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A006000000000000000000B /* UploadRequest.swift */; };
+		1A006100000000000000000C /* UploadSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A006000000000000000000C /* UploadSheetView.swift */; };
+		1A006100000000000000000D /* FilesSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A006000000000000000000D /* FilesSettingsView.swift */; };
+		1A006100000000000000000E /* FileBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A006000000000000000000E /* FileBridgeTests.swift */; };
+		1A00610000000000000000A0 /* RemotePathResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00600000000000000000A0 /* RemotePathResolverTests.swift */; };
+		1A006100000000000000000F /* TransferQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A006000000000000000000F /* TransferQueueTests.swift */; };
+		1A0061000000000000000010 /* RemoteShellIntegrationInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000010 /* RemoteShellIntegrationInstallerTests.swift */; };
+		1A0061000000000000000012 /* RemoteCwdPoller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000012 /* RemoteCwdPoller.swift */; };
+		1A0061000000000000000013 /* RemoteCwdPollerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000013 /* RemoteCwdPollerTests.swift */; };
 		1A0034000000000000000004 /* SessionRestoreResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0033000000000000000004 /* SessionRestoreResolverTests.swift */; };
 		1A0041000000000000000002 /* OnboardingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0040000000000000000002 /* OnboardingController.swift */; };
 		1A0041000000000000000003 /* OnboardingStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0040000000000000000003 /* OnboardingStep.swift */; };
@@ -140,6 +177,11 @@
 		1A0041000000000000000006 /* OnboardingControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0040000000000000000006 /* OnboardingControllerTests.swift */; };
 		1A0050000000000000000002 /* KittyWindowModeStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0050000000000000000001 /* KittyWindowModeStoreTests.swift */; };
 		1A0050000000000000000004 /* PaneLayoutMathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0050000000000000000003 /* PaneLayoutMathTests.swift */; };
+		1A0091000000000000000001 /* KeyStoreSecurityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0090000000000000000001 /* KeyStoreSecurityTests.swift */; };
+		1A0091000000000000000002 /* BiometricRevocationRaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0090000000000000000002 /* BiometricRevocationRaceTests.swift */; };
+		1A0091000000000000000003 /* SSHAuthenticationPolicyRaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0090000000000000000003 /* SSHAuthenticationPolicyRaceTests.swift */; };
+		D7A500000000000000000006 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A500000000000000000002 /* ShareViewController.swift */; };
+		D7A500000000000000000007 /* TesseraShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = D7A500000000000000000005 /* TesseraShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		4E85A5F67DAFF1329C6E2D52 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5930AA51D944F5C5F0C84F3C /* Foundation.framework */; };
 /* End PBXBuildFile section */
 
@@ -158,7 +200,28 @@
 			remoteGlobalIDString = 1A0005000000000000000001;
 			remoteInfo = Tessera;
 		};
+		D7A500000000000000000011 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1A0001000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D7A500000000000000000001;
+			remoteInfo = TesseraShareExtension;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		D7A50000000000000000000B /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				D7A500000000000000000007 /* TesseraShareExtension.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		1A0003000000000000000001 /* TesseraApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TesseraApp.swift; sourceTree = "<group>"; };
@@ -189,6 +252,10 @@
 		1A000300000000000000001D /* TesseraTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TesseraTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A000300000000000000001E /* MoshBootstrapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoshBootstrapTests.swift; sourceTree = "<group>"; };
 		1A000300000000000000001F /* KnownHostsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnownHostsStoreTests.swift; sourceTree = "<group>"; };
+		1A00A0000000000000000001 /* RealHostTransportIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealHostTransportIntegrationTests.swift; sourceTree = "<group>"; };
+		1A00A0000000000000000003 /* VisualCaptureProbe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VisualCaptureProbe.swift; sourceTree = "<group>"; };
+		1A00A0000000000000000005 /* TerminalScrollbackOracleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalScrollbackOracleTests.swift; sourceTree = "<group>"; };
+		1A0003000000000000000033 /* HostKeyVerificationRequestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostKeyVerificationRequestTests.swift; sourceTree = "<group>"; };
 		1A0003000000000000000025 /* OSDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSDetector.swift; sourceTree = "<group>"; };
 		1A0003000000000000000026 /* HostOSDetectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostOSDetectionState.swift; sourceTree = "<group>"; };
 		1A0003000000000000000027 /* OSDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSDetectorTests.swift; sourceTree = "<group>"; };
@@ -224,6 +291,11 @@
 		1A0013000000000000000019 /* SecuritySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecuritySettingsView.swift; sourceTree = "<group>"; };
 		1A001300000000000000001B /* AboutSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutSettingsView.swift; sourceTree = "<group>"; };
 		1A001300000000000000001C /* TerminalTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalTheme.swift; sourceTree = "<group>"; };
+		1A0070000000000000000001 /* TerminalBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalBackground.swift; sourceTree = "<group>"; };
+		1A0070000000000000000002 /* TerminalBackdropView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalBackdropView.swift; sourceTree = "<group>"; };
+		1A0070000000000000000003 /* TerminalBackgroundControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalBackgroundControls.swift; sourceTree = "<group>"; };
+		1A0080000000000000000001 /* TerminalBackdropTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalBackdropTests.swift; sourceTree = "<group>"; };
+		1A0080000000000000000002 /* TerminalBackgroundTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalBackgroundTests.swift; sourceTree = "<group>"; };
 		1A001300000000000000001D /* TesseraLogo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TesseraLogo.swift; sourceTree = "<group>"; };
 		1A001300000000000000001E /* DistroLogos.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DistroLogos.swift; sourceTree = "<group>"; };
 		1A001300000000000000001F /* InstallKeyToHostFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstallKeyToHostFlow.swift; sourceTree = "<group>"; };
@@ -235,6 +307,27 @@
 		1A0013000000000000000025 /* HostLaunchPrologue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostLaunchPrologue.swift; sourceTree = "<group>"; };
 		1A0013000000000000000026 /* FindController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FindController.swift; sourceTree = "<group>"; };
 		1A0013000000000000000027 /* FindBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FindBar.swift; sourceTree = "<group>"; };
+		1A0060000000000000000001 /* FilesContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesContracts.swift; sourceTree = "<group>"; };
+		1A0060000000000000000002 /* FileBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileBridge.swift; sourceTree = "<group>"; };
+		1A0060000000000000000003 /* FileBridgeRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileBridgeRegistry.swift; sourceTree = "<group>"; };
+		1A0060000000000000000004 /* TransferQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferQueue.swift; sourceTree = "<group>"; };
+		1A0060000000000000000005 /* TransferTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferTask.swift; sourceTree = "<group>"; };
+		1A0060000000000000000006 /* RemoteShellIntegrationInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteShellIntegrationInstaller.swift; sourceTree = "<group>"; };
+		1A0060000000000000000007 /* QuickLookPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickLookPresenter.swift; sourceTree = "<group>"; };
+		1A0060000000000000000099 /* RemotePathResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePathResolver.swift; sourceTree = "<group>"; };
+		1A0060000000000000000008 /* RemoteFileItemProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteFileItemProvider.swift; sourceTree = "<group>"; };
+		1A0060000000000000000009 /* FilesPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesPanelController.swift; sourceTree = "<group>"; };
+		1A006000000000000000000A /* FilesPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesPanelView.swift; sourceTree = "<group>"; };
+		1A006000000000000000000B /* UploadRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UploadRequest.swift; sourceTree = "<group>"; };
+		1A006000000000000000000C /* UploadSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UploadSheetView.swift; sourceTree = "<group>"; };
+		1A006000000000000000000D /* FilesSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesSettingsView.swift; sourceTree = "<group>"; };
+		1A006000000000000000000E /* FileBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileBridgeTests.swift; sourceTree = "<group>"; };
+		1A00600000000000000000A0 /* RemotePathResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePathResolverTests.swift; sourceTree = "<group>"; };
+		1A006000000000000000000F /* TransferQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferQueueTests.swift; sourceTree = "<group>"; };
+		1A0060000000000000000010 /* RemoteShellIntegrationInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteShellIntegrationInstallerTests.swift; sourceTree = "<group>"; };
+		1A0060000000000000000011 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		1A0060000000000000000012 /* RemoteCwdPoller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteCwdPoller.swift; sourceTree = "<group>"; };
+		1A0060000000000000000013 /* RemoteCwdPollerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteCwdPollerTests.swift; sourceTree = "<group>"; };
 		1A0013000000000000000028 /* TerminalSearchAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSearchAdapter.swift; sourceTree = "<group>"; };
 		1A0013000000000000000029 /* AppPhase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPhase.swift; sourceTree = "<group>"; };
 		1A001300000000000000002A /* BellRateLimiter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BellRateLimiter.swift; sourceTree = "<group>"; };
@@ -258,7 +351,11 @@
 		1A002300000000000000000B /* SessionSwitcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSwitcherTests.swift; sourceTree = "<group>"; };
 		1A0025000000000000000002 /* EnclaveAuthDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnclaveAuthDelegate.swift; sourceTree = "<group>"; };
 		1A0025000000000000000010 /* TesseraMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TesseraMigration.swift; sourceTree = "<group>"; };
+		7E4A0002AA00000000000001 /* HostJumpLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostJumpLink.swift; sourceTree = "<group>"; };
+		7E4A0002AA00000000000002 /* SSHConnectionChain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHConnectionChain.swift; sourceTree = "<group>"; };
 		1A0025000000000000000011 /* TesseraMigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TesseraMigrationTests.swift; sourceTree = "<group>"; };
+		7E4A0002AA00000000000003 /* HostJumpChainResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostJumpChainResolverTests.swift; sourceTree = "<group>"; };
+		7E4A0002AA00000000000004 /* JumpHostTransportIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JumpHostTransportIntegrationTests.swift; sourceTree = "<group>"; };
 		1A0027000000000000000001 /* DirectTCPIPChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectTCPIPChannel.swift; sourceTree = "<group>"; };
 		1A0027000000000000000002 /* PortListener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortListener.swift; sourceTree = "<group>"; };
 		1A0027000000000000000003 /* PortForwarder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortForwarder.swift; sourceTree = "<group>"; };
@@ -289,9 +386,21 @@
 		1A0040000000000000000006 /* OnboardingControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingControllerTests.swift; sourceTree = "<group>"; };
 		1A0050000000000000000001 /* KittyWindowModeStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KittyWindowModeStoreTests.swift; sourceTree = "<group>"; };
 		1A0050000000000000000003 /* PaneLayoutMathTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneLayoutMathTests.swift; sourceTree = "<group>"; };
+		1A0090000000000000000001 /* KeyStoreSecurityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyStoreSecurityTests.swift; sourceTree = "<group>"; };
+		1A0090000000000000000002 /* BiometricRevocationRaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BiometricRevocationRaceTests.swift; sourceTree = "<group>"; };
+		1A0090000000000000000003 /* SSHAuthenticationPolicyRaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHAuthenticationPolicyRaceTests.swift; sourceTree = "<group>"; };
+		1A00B0000000000000000001 /* AgentCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCenter.swift; sourceTree = "<group>"; };
+		1A00B0000000000000000002 /* AgentSessionSourceFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionSourceFactory.swift; sourceTree = "<group>"; };
+		1A00B0000000000000000003 /* AgentCenterPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCenterPage.swift; sourceTree = "<group>"; };
+		1A00B0000000000000000004 /* RemoteAgentLifecycleIntegrationInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAgentLifecycleIntegrationInstaller.swift; sourceTree = "<group>"; };
 		5930AA51D944F5C5F0C84F3C /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		D6F0936D127F28EC4A75489D /* TesseraUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TesseraUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		F258CE6A611C425C97F1A49C /* ScrollProbe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScrollProbe.swift; sourceTree = "<group>"; };
+		D7A500000000000000000002 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		D7A500000000000000000003 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		D7A500000000000000000004 /* TesseraShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TesseraShareExtension.entitlements; sourceTree = "<group>"; };
+		D7A500000000000000000005 /* TesseraShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TesseraShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		D7A500000000000000000012 /* Tessera.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Tessera.entitlements; sourceTree = "<group>"; };
+		F258CE6A611C425C97F1A49C /* TerminalScrollHarnessTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalScrollHarnessTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -323,6 +432,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D7A500000000000000000009 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -330,6 +446,7 @@
 			isa = PBXGroup;
 			children = (
 				1A0002000000000000000002 /* Tessera */,
+				D7A50000000000000000000F /* TesseraShareExtension */,
 				1A0002000000000000000004 /* TesseraTests */,
 				1A0002000000000000000003 /* Products */,
 				1BFF7918809885BF33DA260B /* Frameworks */,
@@ -358,6 +475,8 @@
 				1A000300000000000000000C /* PersistedHost.swift */,
 				1A000300000000000000000D /* Identity.swift */,
 				1A0025000000000000000010 /* TesseraMigration.swift */,
+				7E4A0002AA00000000000001 /* HostJumpLink.swift */,
+				7E4A0002AA00000000000002 /* SSHConnectionChain.swift */,
 				1A000300000000000000000E /* LiveSession.swift */,
 				1A0033000000000000000001 /* SessionRestoreStore.swift */,
 				1A0033000000000000000002 /* SessionRestoreSheet.swift */,
@@ -378,18 +497,22 @@
 				1A001200000000000000000B /* Find */,
 				1A001200000000000000000C /* Notifications */,
 				1A001200000000000000000D /* Navigation */,
+				1A00B0000000000000000100 /* AgentCenter */,
 				1A0026000000000000000001 /* Forwarding */,
 				1A0022000000000000000001 /* Keyboard */,
 				1A002A000000000000000001 /* SwipePad */,
 				1A0012000000000000000001 /* Design */,
 				1A0012000000000000000004 /* Hosts */,
 				1A0012000000000000000005 /* Keys */,
+				1A0060000000000000000100 /* Files */,
 				1A0012000000000000000006 /* KnownHosts */,
 				1A0012000000000000000007 /* Settings */,
 				1A0012000000000000000008 /* Terminal */,
 				1A0012000000000000000003 /* Resources */,
 				1A0003000000000000000003 /* Assets.xcassets */,
 				1A00030000000000000000F0 /* PrivacyInfo.xcprivacy */,
+				1A0060000000000000000011 /* Info.plist */,
+				D7A500000000000000000012 /* Tessera.entitlements */,
 				1A00030000000000000000F1 /* LICENSE */,
 				1A00030000000000000000F2 /* COPYING.iOS */,
 			);
@@ -400,6 +523,7 @@
 			isa = PBXGroup;
 			children = (
 				1A0003000000000000000004 /* Tessera.app */,
+				D7A500000000000000000005 /* TesseraShareExtension.appex */,
 				1A000300000000000000001D /* TesseraTests.xctest */,
 				D6F0936D127F28EC4A75489D /* TesseraUITests.xctest */,
 			);
@@ -409,9 +533,14 @@
 		1A0002000000000000000004 /* TesseraTests */ = {
 			isa = PBXGroup;
 			children = (
+				1A00A0000000000000000001 /* RealHostTransportIntegrationTests.swift */,
+				1A00A0000000000000000005 /* TerminalScrollbackOracleTests.swift */,
 				1A000300000000000000001E /* MoshBootstrapTests.swift */,
 				1A000300000000000000001F /* KnownHostsStoreTests.swift */,
+				1A0003000000000000000033 /* HostKeyVerificationRequestTests.swift */,
 				1A0025000000000000000011 /* TesseraMigrationTests.swift */,
+				7E4A0002AA00000000000003 /* HostJumpChainResolverTests.swift */,
+				7E4A0002AA00000000000004 /* JumpHostTransportIntegrationTests.swift */,
 				1A0003000000000000000027 /* OSDetectorTests.swift */,
 				1A0003000000000000000029 /* RemoteAuthorizedKeysInstallerTests.swift */,
 				1A0023000000000000000004 /* AccessoryChipEncoderTests.swift */,
@@ -426,8 +555,49 @@
 				1A0040000000000000000006 /* OnboardingControllerTests.swift */,
 				1A0050000000000000000001 /* KittyWindowModeStoreTests.swift */,
 				1A0050000000000000000003 /* PaneLayoutMathTests.swift */,
+				1A006000000000000000000E /* FileBridgeTests.swift */,
+				1A00600000000000000000A0 /* RemotePathResolverTests.swift */,
+				1A006000000000000000000F /* TransferQueueTests.swift */,
+				1A0060000000000000000010 /* RemoteShellIntegrationInstallerTests.swift */,
+				1A0060000000000000000013 /* RemoteCwdPollerTests.swift */,
+				1A0080000000000000000001 /* TerminalBackdropTests.swift */,
+				1A0080000000000000000002 /* TerminalBackgroundTests.swift */,
+				1A0090000000000000000001 /* KeyStoreSecurityTests.swift */,
+				1A0090000000000000000002 /* BiometricRevocationRaceTests.swift */,
+				1A0090000000000000000003 /* SSHAuthenticationPolicyRaceTests.swift */,
 			);
 			path = TesseraTests;
+			sourceTree = "<group>";
+		};
+		D7A50000000000000000000F /* TesseraShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				D7A500000000000000000002 /* ShareViewController.swift */,
+				D7A500000000000000000003 /* Info.plist */,
+				D7A500000000000000000004 /* TesseraShareExtension.entitlements */,
+			);
+			path = TesseraShareExtension;
+			sourceTree = "<group>";
+		};
+		1A0060000000000000000100 /* Files */ = {
+			isa = PBXGroup;
+			children = (
+				1A0060000000000000000001 /* FilesContracts.swift */,
+				1A0060000000000000000002 /* FileBridge.swift */,
+				1A0060000000000000000003 /* FileBridgeRegistry.swift */,
+				1A0060000000000000000004 /* TransferQueue.swift */,
+				1A0060000000000000000005 /* TransferTask.swift */,
+				1A0060000000000000000006 /* RemoteShellIntegrationInstaller.swift */,
+				1A0060000000000000000007 /* QuickLookPresenter.swift */,
+				1A0060000000000000000099 /* RemotePathResolver.swift */,
+				1A0060000000000000000008 /* RemoteFileItemProvider.swift */,
+				1A0060000000000000000009 /* FilesPanelController.swift */,
+				1A006000000000000000000A /* FilesPanelView.swift */,
+				1A006000000000000000000B /* UploadRequest.swift */,
+				1A006000000000000000000C /* UploadSheetView.swift */,
+				1A0060000000000000000012 /* RemoteCwdPoller.swift */,
+			);
+			path = Files;
 			sourceTree = "<group>";
 		};
 		1A0012000000000000000001 /* Design */ = {
@@ -502,10 +672,12 @@
 				1A0013000000000000000015 /* AppearanceSettingsView.swift */,
 				1A0013000000000000000016 /* TerminalSettingsView.swift */,
 				1A0013000000000000000017 /* ThemeSettingsView.swift */,
+				1A0070000000000000000003 /* TerminalBackgroundControls.swift */,
 				1A0013000000000000000018 /* KeyboardSettingsView.swift */,
 				1A0013000000000000000019 /* SecuritySettingsView.swift */,
 				1A002B00000000000000000A /* ExperimentalSettingsView.swift */,
 				1A001300000000000000001B /* AboutSettingsView.swift */,
+				1A006000000000000000000D /* FilesSettingsView.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -514,6 +686,8 @@
 			isa = PBXGroup;
 			children = (
 				1A001300000000000000001C /* TerminalTheme.swift */,
+				1A0070000000000000000001 /* TerminalBackground.swift */,
+				1A0070000000000000000002 /* TerminalBackdropView.swift */,
 			);
 			path = Terminal;
 			sourceTree = "<group>";
@@ -568,6 +742,17 @@
 				1A001300000000000000002F /* SessionSwitcher.swift */,
 			);
 			path = Navigation;
+			sourceTree = "<group>";
+		};
+		1A00B0000000000000000100 /* AgentCenter */ = {
+			isa = PBXGroup;
+			children = (
+				1A00B0000000000000000001 /* AgentCenter.swift */,
+				1A00B0000000000000000002 /* AgentSessionSourceFactory.swift */,
+				1A00B0000000000000000003 /* AgentCenterPage.swift */,
+				1A00B0000000000000000004 /* RemoteAgentLifecycleIntegrationInstaller.swift */,
+			);
+			path = AgentCenter;
 			sourceTree = "<group>";
 		};
 		1A0022000000000000000001 /* Keyboard */ = {
@@ -642,7 +827,8 @@
 		A8DFFAA025EC04DAA914F477 /* TesseraUITests */ = {
 			isa = PBXGroup;
 			children = (
-				F258CE6A611C425C97F1A49C /* ScrollProbe.swift */,
+				1A00A0000000000000000003 /* VisualCaptureProbe.swift */,
+				F258CE6A611C425C97F1A49C /* TerminalScrollHarnessTests.swift */,
 			);
 			name = TesseraUITests;
 			path = TesseraUITests;
@@ -658,10 +844,12 @@
 				1A0006000000000000000001 /* Sources */,
 				1A0006000000000000000002 /* Frameworks */,
 				1A0006000000000000000003 /* Resources */,
+				D7A50000000000000000000B /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				D7A500000000000000000010 /* PBXTargetDependency */,
 			);
 			name = Tessera;
 			packageProductDependencies = (
@@ -675,6 +863,25 @@
 			productName = Tessera;
 			productReference = 1A0003000000000000000004 /* Tessera.app */;
 			productType = "com.apple.product-type.application";
+		};
+		D7A500000000000000000001 /* TesseraShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D7A50000000000000000000C /* Build configuration list for PBXNativeTarget "TesseraShareExtension" */;
+			buildPhases = (
+				D7A500000000000000000008 /* Sources */,
+				D7A500000000000000000009 /* Frameworks */,
+				D7A50000000000000000000A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TesseraShareExtension;
+			packageProductDependencies = (
+			);
+			productName = TesseraShareExtension;
+			productReference = D7A500000000000000000005 /* TesseraShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 		1A0005000000000000000002 /* TesseraTests */ = {
 			isa = PBXNativeTarget;
@@ -724,6 +931,9 @@
 					1A0005000000000000000001 = {
 						CreatedOnToolsVersion = 26.0;
 					};
+					D7A500000000000000000001 = {
+						CreatedOnToolsVersion = 26.0;
+					};
 					1A0005000000000000000002 = {
 						CreatedOnToolsVersion = 26.0;
 						TestTargetID = 1A0005000000000000000001;
@@ -753,6 +963,7 @@
 			projectRoot = "";
 			targets = (
 				1A0005000000000000000001 /* Tessera */,
+				D7A500000000000000000001 /* TesseraShareExtension */,
 				1A0005000000000000000002 /* TesseraTests */,
 				D99FA07CA841FF260AE6856E /* TesseraUITests */,
 			);
@@ -780,6 +991,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D7A50000000000000000000A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -789,6 +1007,10 @@
 			files = (
 				1A0004000000000000000001 /* TesseraApp.swift in Sources */,
 				1A0004000000000000000002 /* ContentView.swift in Sources */,
+				1A00B1000000000000000001 /* AgentCenter.swift in Sources */,
+				1A00B1000000000000000002 /* AgentSessionSourceFactory.swift in Sources */,
+				1A00B1000000000000000003 /* AgentCenterPage.swift in Sources */,
+				1A00B1000000000000000004 /* RemoteAgentLifecycleIntegrationInstaller.swift in Sources */,
 				1A0004000000000000000009 /* Host.swift in Sources */,
 				1A000400000000000000000A /* SSHSession.swift in Sources */,
 				1A000400000000000000000B /* HostEntryView.swift in Sources */,
@@ -815,6 +1037,8 @@
 				1A0004000000000000000015 /* KeychainHelper.swift in Sources */,
 				1A0004000000000000000016 /* StoredKey.swift in Sources */,
 				1A0024000000000000000010 /* TesseraMigration.swift in Sources */,
+				7E4A0001AA00000000000001 /* HostJumpLink.swift in Sources */,
+				7E4A0001AA00000000000002 /* SSHConnectionChain.swift in Sources */,
 				1A0004000000000000000017 /* KeyStore.swift in Sources */,
 				1A0004000000000000000019 /* KnownHostsStore.swift in Sources */,
 				1A000400000000000000001A /* HostKeyVerificationView.swift in Sources */,
@@ -855,6 +1079,9 @@
 				1A0014000000000000000019 /* SecuritySettingsView.swift in Sources */,
 				1A001400000000000000001B /* AboutSettingsView.swift in Sources */,
 				1A001400000000000000001C /* TerminalTheme.swift in Sources */,
+				1A0071000000000000000001 /* TerminalBackground.swift in Sources */,
+				1A0071000000000000000002 /* TerminalBackdropView.swift in Sources */,
+				1A0071000000000000000003 /* TerminalBackgroundControls.swift in Sources */,
 				1A001400000000000000001D /* TesseraLogo.swift in Sources */,
 				1A001400000000000000001E /* DistroLogos.swift in Sources */,
 				1A0014000000000000000021 /* BiometricGate.swift in Sources */,
@@ -890,6 +1117,21 @@
 				1A001400000000000000002D /* CommandPalette.swift in Sources */,
 				1A001400000000000000002E /* CommandPaletteView.swift in Sources */,
 				1A001400000000000000002F /* SessionSwitcher.swift in Sources */,
+				1A0061000000000000000001 /* FilesContracts.swift in Sources */,
+				1A0061000000000000000002 /* FileBridge.swift in Sources */,
+				1A0061000000000000000003 /* FileBridgeRegistry.swift in Sources */,
+				1A0061000000000000000004 /* TransferQueue.swift in Sources */,
+				1A0061000000000000000005 /* TransferTask.swift in Sources */,
+				1A0061000000000000000006 /* RemoteShellIntegrationInstaller.swift in Sources */,
+				1A0061000000000000000007 /* QuickLookPresenter.swift in Sources */,
+				1A0061000000000000000099 /* RemotePathResolver.swift in Sources */,
+				1A0061000000000000000008 /* RemoteFileItemProvider.swift in Sources */,
+				1A0061000000000000000009 /* FilesPanelController.swift in Sources */,
+				1A006100000000000000000A /* FilesPanelView.swift in Sources */,
+				1A006100000000000000000B /* UploadRequest.swift in Sources */,
+				1A006100000000000000000C /* UploadSheetView.swift in Sources */,
+				1A006100000000000000000D /* FilesSettingsView.swift in Sources */,
+				1A0061000000000000000012 /* RemoteCwdPoller.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -897,9 +1139,14 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A00A0000000000000000002 /* RealHostTransportIntegrationTests.swift in Sources */,
+				1A00A0000000000000000006 /* TerminalScrollbackOracleTests.swift in Sources */,
 				1A0004000000000000000023 /* MoshBootstrapTests.swift in Sources */,
 				1A0004000000000000000024 /* KnownHostsStoreTests.swift in Sources */,
+				1A0004000000000000000033 /* HostKeyVerificationRequestTests.swift in Sources */,
 				1A0024000000000000000011 /* TesseraMigrationTests.swift in Sources */,
+				7E4A0001AA00000000000003 /* HostJumpChainResolverTests.swift in Sources */,
+				7E4A0001AA00000000000004 /* JumpHostTransportIntegrationTests.swift in Sources */,
 				1A0004000000000000000027 /* OSDetectorTests.swift in Sources */,
 				1A0004000000000000000029 /* RemoteAuthorizedKeysInstallerTests.swift in Sources */,
 				1A0024000000000000000004 /* AccessoryChipEncoderTests.swift in Sources */,
@@ -914,6 +1161,16 @@
 				1A0041000000000000000006 /* OnboardingControllerTests.swift in Sources */,
 				1A0050000000000000000002 /* KittyWindowModeStoreTests.swift in Sources */,
 				1A0050000000000000000004 /* PaneLayoutMathTests.swift in Sources */,
+				1A006100000000000000000E /* FileBridgeTests.swift in Sources */,
+				1A00610000000000000000A0 /* RemotePathResolverTests.swift in Sources */,
+				1A006100000000000000000F /* TransferQueueTests.swift in Sources */,
+				1A0061000000000000000010 /* RemoteShellIntegrationInstallerTests.swift in Sources */,
+				1A0061000000000000000013 /* RemoteCwdPollerTests.swift in Sources */,
+				1A0081000000000000000001 /* TerminalBackdropTests.swift in Sources */,
+				1A0081000000000000000002 /* TerminalBackgroundTests.swift in Sources */,
+				1A0091000000000000000001 /* KeyStoreSecurityTests.swift in Sources */,
+				1A0091000000000000000002 /* BiometricRevocationRaceTests.swift in Sources */,
+				1A0091000000000000000003 /* SSHAuthenticationPolicyRaceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -921,7 +1178,16 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				0852B22FF60AF0B5F713D29B /* ScrollProbe.swift in Sources */,
+				1A00A0000000000000000004 /* VisualCaptureProbe.swift in Sources */,
+				0852B22FF60AF0B5F713D29B /* TerminalScrollHarnessTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D7A500000000000000000008 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D7A500000000000000000006 /* ShareViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -938,6 +1204,11 @@
 			isa = PBXTargetDependency;
 			target = 1A0005000000000000000001 /* Tessera */;
 			targetProxy = 1A000C000000000000000001 /* PBXContainerItemProxy */;
+		};
+		D7A500000000000000000010 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D7A500000000000000000001 /* TesseraShareExtension */;
+			targetProxy = D7A500000000000000000011 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -1066,17 +1337,18 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Tessera/Tessera.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Tessera/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Tessera;
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Tessera unlocks SSH keys protected by biometric authentication.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Tessera connects to SSH and Mosh servers on your local network and forwards local ports to them.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Tessera uses the microphone for on-device dictation into terminal sessions.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Tessera uses on-device speech recognition to dictate text into terminal sessions.";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
@@ -1085,7 +1357,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -1099,17 +1371,18 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Tessera/Tessera.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Tessera/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Tessera;
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Tessera unlocks SSH keys protected by biometric authentication.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Tessera connects to SSH and Mosh servers on your local network and forwards local ports to them.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Tessera uses the microphone for on-device dictation into terminal sessions.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Tessera uses on-device speech recognition to dictate text into terminal sessions.";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
@@ -1118,7 +1391,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -1132,7 +1405,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1140,7 +1413,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -1156,7 +1429,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1164,7 +1437,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -1210,6 +1483,62 @@
 			};
 			name = Debug;
 		};
+		D7A50000000000000000000D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = TesseraShareExtension/TesseraShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TesseraShareExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Tessera;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraApp.ShareExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Debug;
+		};
+		D7A50000000000000000000E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = TesseraShareExtension/TesseraShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TesseraShareExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Tessera;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraApp.ShareExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1249,6 +1578,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		D7A50000000000000000000C /* Build configuration list for PBXNativeTarget "TesseraShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D7A50000000000000000000D /* Debug */,
+				D7A50000000000000000000E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -1276,7 +1614,7 @@
 			repositoryURL = "https://github.com/bambouville/SwiftTerm";
 			requirement = {
 				kind = revision;
-				revision = d34c15f76342ce66f717ac0830e0c0484b86a9dd;
+				revision = d135aeb10108a3c11fb897aad656ea345545184c;
 			};
 		};
 		1A0009000000000000000002 /* XCRemoteSwiftPackageReference "Citadel" */ = {

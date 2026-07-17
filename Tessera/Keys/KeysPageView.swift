@@ -1,13 +1,15 @@
 import SwiftUI
 import SwiftData
-import CryptoKit
 import UIKit
+import UniformTypeIdentifiers
 
 /// Keys page (M3). Two-pane: 340pt list + detail.
 struct KeysPageView: View {
     @Environment(\.designTokens) private var T
     @Environment(\.modelContext) private var modelContext
+    @Environment(AppearancePreferences.self) private var appearance
     @Query(sort: \StoredKey.createdAt, order: .reverse) private var keys: [StoredKey]
+    @Query(sort: \PersistedHost.name) private var hosts: [PersistedHost]
 
     @State private var filterText = ""
     @State private var selectedID: UUID?
@@ -16,6 +18,24 @@ struct KeysPageView: View {
     @State private var showImportModal = false
     @State private var showCopyToHostSheet = false
     @State private var toastText: String?
+    @State private var recoveryPassphraseAction: RecoveryPassphraseAction?
+    @State private var recoveryFilePurpose: RecoveryFilePurpose?
+    @State private var showRecoveryFileImporter = false
+    @State private var pendingExportDocument: EncryptedRecoveryDocument?
+    @State private var pendingExportKeyID: UUID?
+    @State private var pendingExportFilename = "tessera-recovery-key"
+    @State private var showRecoveryFileExporter = false
+    @State private var riskAcknowledgementKeyID: UUID?
+    @State private var deleteCandidateID: UUID?
+    @State private var deletionInProgress = false
+    @State private var deletionTask: Task<Void, Never>?
+    @State private var keyMaterialRevision = 0
+    @State private var materialIntegrity: [UUID: KeyMaterialIntegrity] = [:]
+    @State private var orphanedKeyIDs: Set<UUID> = []
+    @State private var showOrphanCleanupConfirmation = false
+    @State private var protectionUpdateKeyID: UUID?
+
+    private let securityMetadata = KeySecurityMetadataStore()
 
     private var filteredKeys: [StoredKey] {
         let needle = filterText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -45,10 +65,14 @@ struct KeysPageView: View {
 
             if showGenerateModal {
                 GenerateKeyModal(
+                    initialProtection: KeyOwnerPresencePolicy.initialKeyPreference(
+                        globalPreference: appearance.requireBiometricForKeyUse
+                    ),
                     onClose: { showGenerateModal = false },
                     onCreated: { key in
                         selectedID = key.id
                         didDefaultSelection = true
+                        beginInitialRecovery(for: key)
                     }
                 )
                 .zIndex(10)
@@ -56,16 +80,89 @@ struct KeysPageView: View {
 
             if showImportModal {
                 ImportKeyModal(
+                    initialProtection: KeyOwnerPresencePolicy.initialKeyPreference(
+                        globalPreference: appearance.requireBiometricForKeyUse
+                    ),
                     onClose: { showImportModal = false },
                     onImported: { key in
                         selectedID = key.id
                         didDefaultSelection = true
+                        beginInitialRecovery(for: key)
                     }
                 )
                 .zIndex(10)
             }
+
+            if let action = recoveryPassphraseAction,
+               let key = keys.first(where: { $0.id == action.keyID }) {
+                RecoveryPassphraseModal(
+                    keyName: displayName(for: key),
+                    purpose: action.purpose,
+                    onCancel: { clearRecoveryPassphraseAction() },
+                    onSubmit: { passphrase in
+                        Task { @MainActor in
+                            await performRecoveryAction(
+                                action,
+                                passphrase: passphrase
+                            )
+                        }
+                    }
+                )
+                .zIndex(30)
+            }
+
+            if let keyID = riskAcknowledgementKeyID,
+               let key = keys.first(where: { $0.id == keyID }) {
+                KeyRiskAcknowledgementModal(
+                    key: key,
+                    fingerprint: fingerprint(for: key),
+                    onCancel: { riskAcknowledgementKeyID = nil },
+                    onExport: (key.isSecureEnclave || key.algorithm != .ed25519) ? nil : {
+                        riskAcknowledgementKeyID = nil
+                        recoveryPassphraseAction = .export(keyID: key.id)
+                    },
+                    onAcknowledge: {
+                        securityMetadata.acknowledgeDeviceBoundRisk(for: key.id)
+                        riskAcknowledgementKeyID = nil
+                        showCopyToHostSheet = true
+                    }
+                )
+                .zIndex(30)
+                .transaction { $0.animation = nil }
+            }
+
+            if let keyID = deleteCandidateID,
+               let key = keys.first(where: { $0.id == keyID }) {
+                KeyDeletionConfirmationModal(
+                    key: key,
+                    fingerprint: fingerprint(for: key),
+                    hostNames: usedHostNames(for: key),
+                    identityCount: usedIdentityCount(for: key),
+                    securityRecord: securityMetadata.record(for: key.id),
+                    eligibleRemoteRevocationCount: eligibleRemoteRevocationHosts(for: key).count,
+                    isWorking: deletionInProgress,
+                    onCancel: { deleteCandidateID = nil },
+                    onConfirm: { deleteConfirmed(key) },
+                    onRevokeAndConfirm: { revokeRemotelyThenDelete(key) }
+                )
+                .zIndex(30)
+                .transaction { $0.animation = nil }
+            }
+
+            if showOrphanCleanupConfirmation {
+                OrphanedKeyCleanupModal(
+                    count: orphanedKeyIDs.count,
+                    onCancel: { showOrphanCleanupConfirmation = false },
+                    onConfirm: cleanupOrphanedPrivateMaterial
+                )
+                .zIndex(30)
+                .transaction { $0.animation = nil }
+            }
         }
-        .onAppear(perform: applyInitialSelectionIfNeeded)
+        .onAppear {
+            applyInitialSelectionIfNeeded()
+            refreshIntegrityReport()
+        }
         .onChange(of: keys.map(\.id)) { _, _ in
             reconcileSelectionAfterDataChange()
         }
@@ -76,6 +173,22 @@ struct KeysPageView: View {
                     onClose: { showCopyToHostSheet = false }
                 )
             }
+        }
+        .fileImporter(
+            isPresented: $showRecoveryFileImporter,
+            allowedContentTypes: [.data, .plainText],
+            allowsMultipleSelection: false,
+            onCompletion: handleRecoveryFileSelection
+        )
+        .fileExporter(
+            isPresented: $showRecoveryFileExporter,
+            document: pendingExportDocument,
+            contentType: .data,
+            defaultFilename: pendingExportFilename,
+            onCompletion: handleRecoveryExportCompletion
+        )
+        .onDisappear {
+            deletionTask?.cancel()
         }
     }
 
@@ -111,6 +224,21 @@ struct KeysPageView: View {
             }
 
             ScrollView {
+                if !orphanedKeyIDs.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("\(orphanedKeyIDs.count) orphaned Keychain item\(orphanedKeyIDs.count == 1 ? "" : "s")")
+                            .font(Typography.tesseraMono(size: 11, weight: .medium))
+                            .foregroundStyle(T.red)
+                        Text("Private material exists without matching key metadata.")
+                            .font(Typography.tesseraMono(size: 10))
+                            .foregroundStyle(T.fgDim)
+                        Btn("review cleanup…", compact: true) {
+                            showOrphanCleanupConfirmation = true
+                        }
+                    }
+                    .padding(12)
+                }
+
                 LazyVStack(spacing: 2) {
                     ForEach(filteredKeys) { key in
                         keyListRow(key)
@@ -173,8 +301,21 @@ struct KeysPageView: View {
 
                     Spacer(minLength: 8)
 
-                    if key.requiresBiometric {
-                        Tag(text: "face id")
+                    if ownerPresenceIsEffectivelyRequired(for: key) {
+                        Tag(text: "user presence")
+                    }
+
+                    switch recoveryState(for: key) {
+                    case .missingPrivateMaterial:
+                        Tag(text: "missing")
+                    case .mismatchedPrivateMaterial, .invalidPrivateMaterial:
+                        Tag(text: "rejected")
+                    case .privateMaterialUnavailable:
+                        Tag(text: "unavailable")
+                    case .legacyAlgorithmDisabled:
+                        Tag(text: "disabled")
+                    case .notBackedUp, .backupExported, .deviceBoundUnrecoverable:
+                        EmptyView()
                     }
                 }
             }
@@ -226,21 +367,29 @@ struct KeysPageView: View {
                     .padding(.top, 10)
                 }
 
-                HStack(spacing: 8) {
-                    Btn("copy public key", compact: true) {
-                        UIPasteboard.general.string = key.authorizedKeysLine
-                        showToast("public key copied")
-                    }
+                if key.algorithm == .rsa {
+                    Text("Legacy RSA is disabled: Tessera cannot authenticate with or install this key. Generate an Ed25519 replacement, install it with a different working credential, then retire this RSA key.")
+                        .font(Typography.tesseraMono(size: 11))
+                        .foregroundStyle(T.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 10)
+                } else {
+                    HStack(spacing: 8) {
+                        Btn("copy public key", compact: true) {
+                            UIPasteboard.general.string = key.authorizedKeysLine
+                            showToast("public key copied")
+                        }
 
-                    Btn("share", compact: true) {
-                        showToast("share ships later")
-                    }
+                        Btn("share", compact: true) {
+                            showToast("share ships later")
+                        }
 
-                    Btn("copy to host…", compact: true) {
-                        showCopyToHostSheet = true
+                        Btn("copy to host…", compact: true) {
+                            requestCopyToHost(for: key)
+                        }
                     }
+                    .padding(.top, 10)
                 }
-                .padding(.top, 10)
 
                 if let toastText {
                     Text(toastText)
@@ -250,6 +399,9 @@ struct KeysPageView: View {
                 }
             }
 
+            recoverySection(for: key)
+                .padding(.bottom, 22)
+
             Rectangle()
                 .fill(T.border)
                 .frame(height: 1)
@@ -257,41 +409,67 @@ struct KeysPageView: View {
                 .padding(.bottom, 20)
 
             VStack(spacing: 14) {
-                ToggleRow(
-                    title: "require face id per use",
-                    subtitle: "prompt biometric each time this key signs",
-                    isOn: Binding(
-                        get: { key.requiresBiometric },
-                        set: { newValue in
-                            key.requiresBiometric = newValue
-                            saveModelContext("saving key biometric toggle")
+                if key.isSecureEnclave {
+                    let boundaryProtection = KeyOwnerPresencePolicy
+                        .currentBoundaryProtection(
+                            for: key,
+                            metadata: securityMetadata
+                        )
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("biometrics or passcode")
+                                .font(Typography.tesseraMono(size: 13))
+                                .foregroundStyle(T.fg)
+                            Text(boundaryProtection == .userPresence
+                                ? "Face ID/Touch ID or passcode is enforced by the Secure Enclave"
+                                : "changing Secure Enclave protection requires key rotation")
+                                .font(Typography.tesseraMono(size: 11))
+                                .foregroundStyle(T.fgDim)
                         }
+                        Spacer()
+                        Tag(text: boundaryProtection == .userPresence ? "enforced" : "rotation required")
+                    }
+                    .padding(.vertical, 8)
+                } else {
+                    ToggleRow(
+                        title: "require biometrics or passcode",
+                        subtitle: "Face ID/Touch ID or passcode whenever Tessera accesses this key",
+                        isOn: Binding(
+                            get: { key.requiresBiometric },
+                            set: { newValue in
+                                updateProtection(for: key, enabled: newValue)
+                            }
+                        )
                     )
-                )
+                    .disabled(protectionUpdateKeyID != nil)
 
-                ToggleRow(
-                    title: "agent forwarding",
-                    subtitle: "forward this key to remote hosts on demand",
-                    isOn: Binding(
-                        get: { key.agentForwarding },
-                        set: { newValue in
-                            key.agentForwarding = newValue
-                            saveModelContext("saving key forwarding toggle")
+                    if hasStaleUserPresenceBoundary(for: key) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("This key is still protected by iOS. Confirm once to finish turning protection off, then Tessera can use it without authentication.")
+                                .font(Typography.tesseraMono(size: 10))
+                                .foregroundStyle(T.fgDim)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            Btn("finish turning protection off…", compact: true) {
+                                updateProtection(for: key, enabled: false)
+                            }
+                            .disabled(protectionUpdateKeyID != nil)
                         }
-                    )
-                )
+                    }
+                }
             }
 
             usedBySection(for: key)
                 .padding(.top, 34)
 
             HStack(spacing: 10) {
-                Btn("delete key", style: .danger, compact: true) {
-                    delete(key)
+                Btn("delete local private key…", style: .danger, compact: true) {
+                    deleteCandidateID = key.id
                 }
 
-                if !key.isSecureEnclave {
+                if !key.isSecureEnclave && key.algorithm == .ed25519 {
                     Btn("export private key…", compact: true) {
+                        recoveryPassphraseAction = .export(keyID: key.id)
                     }
                 }
             }
@@ -334,13 +512,74 @@ struct KeysPageView: View {
                 )
             }
 
-            if key.requiresBiometric {
+            if ownerPresenceIsEffectivelyRequired(for: key) {
                 keyBadge(
-                    text: "face id",
+                    text: "user presence",
                     background: T.panelBg,
                     border: T.border,
                     foreground: T.fgDim
                 )
+            }
+
+            switch recoveryState(for: key) {
+            case .missingPrivateMaterial:
+                keyBadge(
+                    text: "private material missing",
+                    background: T.panelBg,
+                    border: T.red,
+                    foreground: T.red
+                )
+            case .mismatchedPrivateMaterial:
+                keyBadge(
+                    text: "private material mismatch",
+                    background: T.panelBg,
+                    border: T.red,
+                    foreground: T.red
+                )
+            case .invalidPrivateMaterial:
+                keyBadge(
+                    text: "private material invalid",
+                    background: T.panelBg,
+                    border: T.red,
+                    foreground: T.red
+                )
+            case .privateMaterialUnavailable:
+                keyBadge(
+                    text: "integrity unavailable",
+                    background: T.panelBg,
+                    border: T.border,
+                    foreground: T.fgDim
+                )
+            case .legacyAlgorithmDisabled:
+                keyBadge(
+                    text: "legacy rsa disabled",
+                    background: T.panelBg,
+                    border: T.red,
+                    foreground: T.red
+                )
+            case .notBackedUp:
+                keyBadge(
+                    text: "recovery not exported",
+                    background: T.panelBg,
+                    border: T.border,
+                    foreground: T.fgDim
+                )
+            case .backupExported:
+                keyBadge(
+                    text: "recovery exported",
+                    background: T.panelBg,
+                    border: T.green,
+                    foreground: T.green
+                )
+            case .deviceBoundUnrecoverable(let acknowledged):
+                if acknowledged {
+                    keyBadge(
+                        text: "device-loss risk acknowledged",
+                        background: T.panelBg,
+                        border: T.border,
+                        foreground: T.fgDim
+                    )
+                }
             }
         }
     }
@@ -407,6 +646,115 @@ struct KeysPageView: View {
         }
     }
 
+    @ViewBuilder
+    private func recoverySection(for key: StoredKey) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("recovery")
+                .font(Typography.tesseraMono(size: 13, weight: .medium))
+                .foregroundStyle(T.fg)
+
+            switch recoveryState(for: key) {
+            case .missingPrivateMaterial:
+                Text("The metadata for this key exists, but its private material is missing from Keychain. Tessera will not restore sessions or authenticate with it.")
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.red)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if !key.isSecureEnclave {
+                    Btn("restore from recovery file…", compact: true) {
+                        recoveryFilePurpose = .restore(keyID: key.id)
+                        showRecoveryFileImporter = true
+                    }
+                }
+
+            case .mismatchedPrivateMaterial:
+                Text("The private material stored under this key ID derives a different public key. Tessera will not restore sessions, authenticate, copy, or install it.")
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.red)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if !key.isSecureEnclave && key.algorithm == .ed25519 {
+                    Btn("repair from matching recovery file…", compact: true) {
+                        recoveryFilePurpose = .restore(keyID: key.id)
+                        showRecoveryFileImporter = true
+                    }
+                }
+
+            case .invalidPrivateMaterial:
+                Text("The private material is malformed for this key type. Tessera will not use it. Restore the matching Ed25519 recovery file or rotate the key.")
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.red)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if !key.isSecureEnclave && key.algorithm == .ed25519 {
+                    Btn("repair from matching recovery file…", compact: true) {
+                        recoveryFilePurpose = .restore(keyID: key.id)
+                        showRecoveryFileImporter = true
+                    }
+                }
+
+            case .privateMaterialUnavailable:
+                Text("iOS could not complete a non-interactive integrity check. Tessera is failing closed for session restore and remote installation until the key becomes available.")
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.red)
+                    .fixedSize(horizontal: false, vertical: true)
+
+            case .legacyAlgorithmDisabled:
+                Text("Legacy RSA authentication and installation are disabled because this SSH stack cannot prove RSA-SHA2 use. Generate an Ed25519 replacement and install it with a different credential before deleting this key.")
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.red)
+                    .fixedSize(horizontal: false, vertical: true)
+
+            case .notBackedUp:
+                Text(key.algorithm == .ed25519
+                    ? "No verified recovery export is recorded. Device loss or local deletion may permanently remove this credential."
+                    : "This legacy software key type cannot be exported safely by this version. Generate a recoverable Ed25519 key, install it alongside this credential, then retire this key.")
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.fgDim)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if key.algorithm == .ed25519 {
+                    Btn("protect recovery key…", compact: true) {
+                        recoveryPassphraseAction = .export(keyID: key.id)
+                    }
+                } else {
+                    Btn("acknowledge risk before remote use…", compact: true) {
+                        riskAcknowledgementKeyID = key.id
+                    }
+                }
+
+            case .backupExported(let date, let exportedFingerprint):
+                Text("Encrypted OpenSSH recovery exported \(detailDate(date)). Fingerprint \(exportedFingerprint).")
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.fgDim)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 8) {
+                    Btn("verify recovery file…", compact: true) {
+                        recoveryFilePurpose = .verify(keyID: key.id)
+                        showRecoveryFileImporter = true
+                    }
+                    Btn("export a new copy…", compact: true) {
+                        recoveryPassphraseAction = .export(keyID: key.id)
+                    }
+                }
+
+            case .deviceBoundUnrecoverable(let acknowledged):
+                Text("Secure Enclave private material cannot leave this device. Keep a second, recoverable credential authorized on every host that uses it.")
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.fgDim)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if !acknowledged {
+                    Btn("acknowledge device-loss risk…", compact: true) {
+                        riskAcknowledgementKeyID = key.id
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private func placeholder(text: String) -> some View {
         VStack {
             Spacer()
@@ -436,23 +784,574 @@ struct KeysPageView: View {
         }
     }
 
-    private func fingerprint(for key: StoredKey) -> String {
-        let parts = key.authorizedKeysLine.split(separator: " ")
-        guard parts.count >= 2,
-              let publicKeyData = Data(base64Encoded: String(parts[1]))
-        else {
-            return "SHA256:—"
+    private func usedIdentityCount(for key: StoredKey) -> Int {
+        let identities = (try? modelContext.fetch(FetchDescriptor<Identity>())) ?? []
+        return identities.reduce(into: 0) { count, identity in
+            if case .key(let keyID) = identity.credentialMode, keyID == key.id {
+                count += 1
+            }
         }
-
-        let digest = SHA256.hash(data: publicKeyData)
-        return "SHA256:\(Data(digest).base64EncodedString())"
     }
 
-    private func delete(_ key: StoredKey) {
-        KeyStore.deleteKey(forKeyID: key.id)
-        modelContext.delete(key)
-        selectedID = nil
-        saveModelContext("deleting key")
+    private func fingerprint(for key: StoredKey) -> String {
+        let canonical = key.canonicalFingerprint
+        return canonical.isEmpty ? "SHA256:—" : canonical
+    }
+
+    private func beginInitialRecovery(for key: StoredKey) {
+        keyMaterialRevision += 1
+        if key.isSecureEnclave {
+            riskAcknowledgementKeyID = key.id
+        } else {
+            recoveryPassphraseAction = .export(keyID: key.id)
+        }
+    }
+
+    private func recoveryState(for key: StoredKey) -> KeyRecoveryState {
+        _ = keyMaterialRevision
+        let integrity = materialIntegrity[key.id]
+            ?? KeyStore.privateMaterialIntegrity(
+                forKeyID: key.id,
+                algorithm: key.algorithm,
+                isSecureEnclave: key.isSecureEnclave,
+                expectedAuthorizedKeysLine: key.authorizedKeysLine
+            )
+        return securityMetadata.recoveryState(
+            for: key,
+            integrity: integrity
+        )
+    }
+
+    private func requestCopyToHost(for key: StoredKey) {
+        guard key.algorithm != .rsa else {
+            showToast("Legacy RSA installation is disabled; rotate to Ed25519")
+            return
+        }
+        switch recoveryState(for: key) {
+        case .missingPrivateMaterial:
+            showToast("Restore the missing private key before installing it")
+        case .mismatchedPrivateMaterial, .invalidPrivateMaterial:
+            showToast("Repair the rejected private material before installing it")
+        case .privateMaterialUnavailable:
+            showToast("Key integrity is unavailable; installation is blocked")
+        case .legacyAlgorithmDisabled:
+            showToast("Legacy RSA installation is disabled; rotate to Ed25519")
+        case .backupExported:
+            showCopyToHostSheet = true
+        case .notBackedUp:
+            if securityMetadata.record(for: key.id).unrecoverableAcknowledgedAt != nil {
+                showCopyToHostSheet = true
+            } else {
+                riskAcknowledgementKeyID = key.id
+            }
+        case .deviceBoundUnrecoverable(let acknowledged):
+            if acknowledged {
+                showCopyToHostSheet = true
+            } else {
+                riskAcknowledgementKeyID = key.id
+            }
+        }
+    }
+
+    private func clearRecoveryPassphraseAction() {
+        recoveryPassphraseAction = nil
+    }
+
+    @MainActor
+    private func performRecoveryAction(
+        _ action: RecoveryPassphraseAction,
+        passphrase: String
+    ) async {
+        guard let key = keys.first(where: { $0.id == action.keyID }) else {
+            recoveryPassphraseAction = nil
+            return
+        }
+
+        do {
+            switch action {
+            case .export:
+                guard key.algorithm == .ed25519, !key.isSecureEnclave else {
+                    throw KeyStore.RecoveryError.unsupportedAlgorithm
+                }
+                if hasStaleUserPresenceBoundary(for: key) {
+                    throw AuthResolutionError
+                        .ownerAuthenticationDisabledForProtectedKey
+                }
+                var authorization: BiometricAuthorization?
+                if ownerPresenceIsEffectivelyRequired(for: key) {
+                    switch await BiometricGate.evaluateForKeyUse(
+                        reason: "export encrypted recovery for \(displayName(for: key))"
+                    ) {
+                    case .authenticated(let granted):
+                        authorization = granted
+                    case .userCancelled:
+                        throw AuthResolutionError.biometricCancelled
+                    case .unavailable:
+                        throw AuthResolutionError.biometricFailed(
+                            reason: "Device owner authentication is unavailable."
+                        )
+                    case .failed(let reason):
+                        throw AuthResolutionError.biometricFailed(reason: reason)
+                    }
+                }
+                let data = try KeyStore.exportEncryptedEd25519PrivateKey(
+                    forKeyID: key.id,
+                    passphrase: passphrase,
+                    comment: key.name,
+                    authorization: authorization
+                )
+                pendingExportDocument = EncryptedRecoveryDocument(data: data)
+                pendingExportKeyID = key.id
+                let safeName = key.name
+                    .replacingOccurrences(of: "/", with: "-")
+                    .replacingOccurrences(of: ":", with: "-")
+                pendingExportFilename = "\(safeName.isEmpty ? "tessera" : safeName)-recovery.key"
+                recoveryPassphraseAction = nil
+                showRecoveryFileExporter = true
+
+            case .verify(_, let data):
+                let expected = fingerprint(for: key)
+                let actual = try KeyStore.recoveryFingerprint(
+                    data: data,
+                    passphrase: passphrase
+                )
+                guard actual == expected else {
+                    throw KeyStore.RecoveryError.fingerprintMismatch(
+                        expected: expected,
+                        actual: actual
+                    )
+                }
+                recoveryPassphraseAction = nil
+                showToast("recovery file verified")
+
+            case .restore(_, let data):
+                let restoredProtection: KeyStore.KeyProtection =
+                    ownerPresenceIsEffectivelyRequired(for: key)
+                    ? .userPresence
+                    : .deviceUnlocked
+                let restoredFingerprint = try KeyStore.recoverEd25519Key(
+                    data: data,
+                    passphrase: passphrase,
+                    forKeyID: key.id,
+                    expectedFingerprint: fingerprint(for: key),
+                    protection: restoredProtection
+                )
+                let integrity: KeyMaterialIntegrity = restoredProtection == .userPresence
+                    ? .authenticationRequired
+                    : .valid
+                materialIntegrity[key.id] = integrity
+                securityMetadata.markBoundaryProtection(
+                    restoredProtection == .userPresence
+                        ? .userPresence
+                        : .deviceUnlocked,
+                    for: key.id
+                )
+                securityMetadata.markMaterialIntegrity(integrity, for: key.id)
+                securityMetadata.markBackupExported(
+                    for: key.id,
+                    fingerprint: restoredFingerprint
+                )
+                recoveryPassphraseAction = nil
+                keyMaterialRevision += 1
+                showToast("private key restored")
+            }
+        } catch {
+            showToast(error.localizedDescription)
+        }
+    }
+
+    private func handleRecoveryFileSelection(_ result: Result<[URL], Error>) {
+        guard let purpose = recoveryFilePurpose else { return }
+        recoveryFilePurpose = nil
+
+        do {
+            guard let url = try result.get().first else { return }
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer {
+                if accessed { url.stopAccessingSecurityScopedResource() }
+            }
+            let values = try url.resourceValues(forKeys: [.fileSizeKey])
+            if let size = values.fileSize, size > 1_048_576 {
+                throw KeyRecoverySurfaceError.fileTooLarge
+            }
+            let data = try Data(contentsOf: url, options: .mappedIfSafe)
+            guard !data.isEmpty, data.count <= 1_048_576 else {
+                throw KeyRecoverySurfaceError.fileTooLarge
+            }
+            switch purpose {
+            case .verify(let keyID):
+                recoveryPassphraseAction = .verify(keyID: keyID, data: data)
+            case .restore(let keyID):
+                recoveryPassphraseAction = .restore(keyID: keyID, data: data)
+            }
+        } catch {
+            showToast(error.localizedDescription)
+        }
+    }
+
+    private func handleRecoveryExportCompletion(_ result: Result<URL, Error>) {
+        defer {
+            pendingExportDocument = nil
+            pendingExportKeyID = nil
+        }
+
+        switch result {
+        case .success:
+            guard let keyID = pendingExportKeyID,
+                  let key = keys.first(where: { $0.id == keyID }) else { return }
+            securityMetadata.markBackupExported(
+                for: keyID,
+                fingerprint: fingerprint(for: key)
+            )
+            keyMaterialRevision += 1
+            showToast("encrypted recovery file exported")
+        case .failure(let error):
+            showToast("Recovery export was not completed: \(error.localizedDescription)")
+        }
+    }
+
+    private func deleteConfirmed(
+        _ key: StoredKey,
+        remotelyRevokedCount: Int = 0
+    ) {
+        deletionTask?.cancel()
+        deletionInProgress = true
+        deletionTask = Task { @MainActor in
+            await performConfirmedDeletion(
+                key,
+                remotelyRevokedCount: remotelyRevokedCount
+            )
+        }
+    }
+
+    @MainActor
+    private func performConfirmedDeletion(
+        _ key: StoredKey,
+        remotelyRevokedCount: Int
+    ) async {
+        guard !Task.isCancelled else {
+            deletionInProgress = false
+            return
+        }
+        let priorRemoteRevocation = securityMetadata.record(
+            for: key.id
+        ).lastRemoteRevocationAt != nil
+
+        do {
+            try StoredKeyLifecycle.delete(
+                key,
+                persistence: KeyLifecyclePersistence.live(modelContext),
+                metadata: securityMetadata,
+                deleteMaterial: { keyID in
+                    _ = try KeyStore.deleteKey(forKeyID: keyID)
+                }
+            )
+            deleteCandidateID = nil
+            deletionInProgress = false
+            selectedID = nil
+            keyMaterialRevision += 1
+            materialIntegrity.removeValue(forKey: key.id)
+            if remotelyRevokedCount > 0 {
+                showToast("local private key deleted after revoking \(remotelyRevokedCount) tracked remote authorization\(remotelyRevokedCount == 1 ? "" : "s")")
+            } else if priorRemoteRevocation {
+                showToast("local private key deleted; earlier tracked remote revocation was preserved")
+            } else {
+                showToast("local private key deleted; remote authorizations were not revoked")
+            }
+        } catch {
+            deleteCandidateID = nil
+            deletionInProgress = false
+            keyMaterialRevision += 1
+            if case .deletionPending = error as? KeyLifecycleError {
+                selectedID = nil
+                materialIntegrity.removeValue(forKey: key.id)
+                showToast(error.localizedDescription)
+            } else {
+                showToast("Local key deletion failed; private material was not touched: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func eligibleRemoteRevocationHosts(for key: StoredKey) -> [PersistedHost] {
+        let trackedIDs = Set(
+            securityMetadata.record(for: key.id).remoteInstallations.map(\.hostID)
+        )
+        return hosts.filter { host in
+            guard trackedIDs.contains(host.id), let identity = host.identity else {
+                return false
+            }
+            switch identity.credentialMode {
+            case .password:
+                return !Host(from: host).password.isEmpty
+            case .key(let authKeyID):
+                guard authKeyID != key.id,
+                      let authKey = keys.first(where: { $0.id == authKeyID })
+                else { return false }
+                return integrity(for: authKey).permitsAuthenticationAttempt
+            case .none, .legacyDevKey:
+                return false
+            }
+        }
+    }
+
+    private func refreshIntegrityReport() {
+        let pendingDeletionIDs = Set(
+            KeyDeletionIntentStore().intents().map(\.keyID)
+        )
+        let report: KeyStore.IntegrityReport?
+        do {
+            report = try KeyStore.integrityReport(
+                metadataKeyIDs: Set(keys.map(\.id))
+            )
+        } catch {
+            // Protected items can gate the bulk attributes inventory on real
+            // devices. Continue with exact per-key checks so one ACL never makes
+            // every key look unavailable; orphan cleanup stays hidden because
+            // it cannot be established safely from a partial inventory.
+            report = nil
+            orphanedKeyIDs = pendingDeletionIDs
+            DiagnosticLogStore.appendKeys(
+                "integrity-inventory-ui unavailable error='\(error.localizedDescription)'"
+            )
+        }
+
+        if let report {
+            orphanedKeyIDs = report.orphanedKeyIDs.union(pendingDeletionIDs)
+        }
+        var refreshed: [UUID: KeyMaterialIntegrity] = [:]
+        for key in keys {
+            let integrity: KeyMaterialIntegrity
+            if report?.metadataOnlyKeyIDs.contains(key.id) == true {
+                integrity = .missing
+            } else {
+                integrity = KeyStore.privateMaterialIntegrity(
+                    forKeyID: key.id,
+                    algorithm: key.algorithm,
+                    isSecureEnclave: key.isSecureEnclave,
+                    expectedAuthorizedKeysLine: key.authorizedKeysLine
+                )
+            }
+            refreshed[key.id] = integrity
+            securityMetadata.markMaterialIntegrity(integrity, for: key.id)
+        }
+        materialIntegrity = refreshed
+        keyMaterialRevision += 1
+    }
+
+    private func cleanupOrphanedPrivateMaterial() {
+        let keyIDs = orphanedKeyIDs
+        showOrphanCleanupConfirmation = false
+        Task { @MainActor in
+            var failures = 0
+            for keyID in keyIDs {
+                do {
+                    _ = try KeyStore.deleteKey(forKeyID: keyID)
+                    securityMetadata.removeRecord(for: keyID)
+                    try KeyDeletionIntentStore().clear(keyID: keyID)
+                } catch {
+                    failures += 1
+                }
+            }
+            refreshIntegrityReport()
+            if failures == 0 {
+                showToast("orphaned private material deleted")
+            } else {
+                showToast("Some orphaned Keychain items could not be deleted")
+            }
+        }
+    }
+
+    private func revokeRemotelyThenDelete(_ key: StoredKey) {
+        let eligibleHosts = eligibleRemoteRevocationHosts(for: key)
+        guard !eligibleHosts.isEmpty else {
+            showToast("No tracked remote host has a reachable alternate credential")
+            return
+        }
+
+        deletionTask?.cancel()
+        deletionInProgress = true
+        let line = key.authorizedKeysLine
+        let keyID = key.id
+        deletionTask = Task { @MainActor in
+            do {
+                var revokedCount = 0
+                for persistedHost in eligibleHosts {
+                    try Task.checkCancellation()
+                    let authKey: StoredKey?
+                    if case .key(let authKeyID) = persistedHost.identity?.credentialMode {
+                        authKey = keys.first { $0.id == authKeyID }
+                    } else {
+                        authKey = nil
+                    }
+                    try await RemoteAuthorizedKeysInstaller.revoke(
+                        line: line,
+                        keyID: keyID,
+                        on: Host(from: persistedHost),
+                        requireBiometric: KeyOwnerPresencePolicy.isRequired(
+                            globalPreference: appearance.requireBiometricForKeyUse,
+                            key: authKey,
+                            metadata: securityMetadata
+                        ),
+                        isSecureEnclave: authKey?.isSecureEnclave ?? false
+                    )
+                    securityMetadata.removeRemoteInstallation(
+                        keyID: keyID,
+                        hostID: persistedHost.id
+                    )
+                    revokedCount += 1
+                }
+                try Task.checkCancellation()
+                await performConfirmedDeletion(
+                    key,
+                    remotelyRevokedCount: revokedCount
+                )
+            } catch is CancellationError {
+                deletionInProgress = false
+            } catch {
+                deletionInProgress = false
+                showToast(
+                    "Remote revocation failed; the local key was not deleted: \(error.localizedDescription)"
+                )
+            }
+        }
+    }
+
+    private func updateProtection(for key: StoredKey, enabled: Bool) {
+        guard !key.isSecureEnclave else {
+            showToast("Secure Enclave protection changes require key rotation")
+            return
+        }
+        guard protectionUpdateKeyID == nil else { return }
+        protectionUpdateKeyID = key.id
+        Task { @MainActor in
+            defer { protectionUpdateKeyID = nil }
+            await performProtectionUpdate(for: key, enabled: enabled)
+        }
+    }
+
+    @MainActor
+    private func performProtectionUpdate(for key: StoredKey, enabled: Bool) async {
+        // Rewriting a presence-protected item requires reading its bytes, and
+        // on-device that read cannot reliably present the raw Keychain sheet.
+        // Evaluate owner presence through the app gate and bind the rewrite to
+        // that authorization. Turning protection off therefore has one final,
+        // explicit confirmation before the same key becomes prompt-free.
+        var authorization: BiometricAuthorization?
+        let currentProtection: KeyStore.KeyMaterialProtection
+        DiagnosticLogStore.appendKeys(
+            "protection-change begin requested=\(enabled ? "on" : "off")"
+        )
+        do {
+            currentProtection = try KeyStore.materialProtection(forKeyID: key.id)
+        } catch {
+            DiagnosticLogStore.appendKeys(
+                "protection-change inspect-failed requested=\(enabled ? "on" : "off") error='\(error.localizedDescription)'"
+            )
+            showToast("Could not inspect current key protection; no change was made")
+            return
+        }
+        if KeyOwnerPresencePolicy.requiresAuthorizationForProtectionChange(
+            currentBoundary: currentProtection,
+            enabling: enabled
+        ) {
+            // Enabling needs authorization too: if the SwiftData save fails,
+            // compensation must be able to read/delete the presence-protected
+            // item it just created without launching a second raw Keychain
+            // prompt or leaving preference and boundary split.
+            switch await BiometricGate.evaluateForKeyUse(
+                reason: "change key protection for \(displayName(for: key))"
+            ) {
+            case .authenticated(let granted):
+                authorization = granted
+                DiagnosticLogStore.appendKeys(
+                    "protection-change owner-auth=authenticated requested=\(enabled ? "on" : "off")"
+                )
+            case .userCancelled:
+                DiagnosticLogStore.appendKeys(
+                    "protection-change owner-auth=cancelled requested=\(enabled ? "on" : "off")"
+                )
+                showToast("Authentication cancelled - key protection unchanged")
+                return
+            case .unavailable(let reason):
+                DiagnosticLogStore.appendKeys(
+                    "protection-change owner-auth=unavailable requested=\(enabled ? "on" : "off") error='\(reason)'"
+                )
+                showToast("Could not change key protection: \(reason)")
+                return
+            case .failed(let reason):
+                DiagnosticLogStore.appendKeys(
+                    "protection-change owner-auth=failed requested=\(enabled ? "on" : "off") error='\(reason)'"
+                )
+                showToast("Could not change key protection: \(reason)")
+                return
+            }
+        }
+
+        do {
+            try StoredKeyLifecycle.updateProtection(
+                for: key,
+                enabled: enabled,
+                persistence: KeyLifecyclePersistence.live(modelContext),
+                metadata: securityMetadata,
+                applyBoundary: { protection in
+                    try KeyStore.updateProtection(
+                        forKeyID: key.id,
+                        to: protection,
+                        isSecureEnclave: false,
+                        authorization: authorization
+                    )
+                },
+                inspectBoundary: {
+                    try KeyStore.materialProtection(forKeyID: key.id)
+                }
+            )
+            let integrity: KeyMaterialIntegrity = enabled
+                ? .authenticationRequired
+                : KeyStore.privateMaterialIntegrity(
+                    forKeyID: key.id,
+                    algorithm: key.algorithm,
+                    isSecureEnclave: false,
+                    expectedAuthorizedKeysLine: key.authorizedKeysLine
+                )
+            materialIntegrity[key.id] = integrity
+            securityMetadata.markMaterialIntegrity(integrity, for: key.id)
+            keyMaterialRevision += 1
+            DiagnosticLogStore.appendKeys(
+                "protection-change complete protection=\(enabled ? "on" : "off")"
+            )
+            showToast(
+                enabled
+                    ? "key protection on"
+                    : "key protection off - future key use will not require authentication"
+            )
+        } catch {
+            DiagnosticLogStore.appendKeys(
+                "protection-change failed requested=\(enabled ? "on" : "off") error='\(error.localizedDescription)'"
+            )
+            showToast("Could not change key protection: \(error.localizedDescription)")
+        }
+    }
+
+    private func ownerPresenceIsEffectivelyRequired(for key: StoredKey) -> Bool {
+        KeyOwnerPresencePolicy.isRequired(
+            globalPreference: appearance.requireBiometricForKeyUse,
+            key: key,
+            metadata: securityMetadata
+        )
+    }
+
+    private func hasStaleUserPresenceBoundary(for key: StoredKey) -> Bool {
+        !ownerPresenceIsEffectivelyRequired(for: key)
+            && securityMetadata.record(for: key.id).boundaryProtection == .userPresence
+    }
+
+    private func integrity(for key: StoredKey) -> KeyMaterialIntegrity {
+        materialIntegrity[key.id] ?? KeyStore.privateMaterialIntegrity(
+            forKeyID: key.id,
+            algorithm: key.algorithm,
+            isSecureEnclave: key.isSecureEnclave,
+            expectedAuthorizedKeysLine: key.authorizedKeysLine
+        )
     }
 
     private func displayName(for key: StoredKey) -> String {
@@ -521,5 +1420,393 @@ private struct FlowTags: View {
         ForEach(names, id: \.self) { name in
             Tag(text: name)
         }
+    }
+}
+
+private enum RecoveryPassphraseAction {
+    case export(keyID: UUID)
+    case verify(keyID: UUID, data: Data)
+    case restore(keyID: UUID, data: Data)
+
+    var keyID: UUID {
+        switch self {
+        case .export(let keyID), .verify(let keyID, _), .restore(let keyID, _):
+            return keyID
+        }
+    }
+
+    var purpose: RecoveryPassphrasePurpose {
+        switch self {
+        case .export: return .export
+        case .verify: return .verify
+        case .restore: return .restore
+        }
+    }
+}
+
+private enum RecoveryPassphrasePurpose {
+    case export
+    case verify
+    case restore
+
+    var title: String {
+        switch self {
+        case .export: return "protect recovery key"
+        case .verify: return "verify recovery file"
+        case .restore: return "restore private key"
+        }
+    }
+
+    var explanation: String {
+        switch self {
+        case .export:
+            return "Tessera will create a standard passphrase-encrypted OpenSSH private-key file. Tessera cannot recover this passphrase. No plaintext key file is created."
+        case .verify:
+            return "The file will be decrypted in memory and its public fingerprint compared with this key. It will not replace the live key."
+        case .restore:
+            return "The file will be decrypted in memory, fingerprint-matched, and restored under the existing key identity so host references remain intact."
+        }
+    }
+}
+
+private enum RecoveryFilePurpose {
+    case verify(keyID: UUID)
+    case restore(keyID: UUID)
+}
+
+private struct EncryptedRecoveryDocument: FileDocument {
+    static let readableContentTypes: [UTType] = [.data]
+
+    var data: Data
+
+    init(data: Data) {
+        self.data = data
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        self.data = data
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
+    }
+}
+
+private struct RecoveryPassphraseModal: View {
+    let keyName: String
+    let purpose: RecoveryPassphrasePurpose
+    let onCancel: () -> Void
+    let onSubmit: (String) -> Void
+
+    @Environment(\.designTokens) private var T
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var passphrase = ""
+    @State private var confirmation = ""
+    @State private var privacyShielded = false
+    @State private var validationError: String?
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.65)
+                .ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: 16) {
+                Text(purpose.title)
+                    .font(Typography.tesseraMono(size: 18, weight: .medium))
+                    .foregroundStyle(T.fg)
+
+                Text(keyName)
+                    .font(Typography.tesseraMono(size: 12))
+                    .foregroundStyle(T.fgMuted)
+
+                Text(purpose.explanation)
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.fgDim)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Field(label: "recovery-file passphrase") {
+                    Input(text: $passphrase, placeholder: "", secure: true)
+                }
+
+                if purpose == .export {
+                    Field(label: "confirm passphrase") {
+                        Input(text: $confirmation, placeholder: "", secure: true)
+                    }
+                }
+
+                if let validationError {
+                    Text(validationError)
+                        .font(Typography.tesseraMono(size: 11))
+                        .foregroundStyle(T.red)
+                }
+
+                HStack(spacing: 10) {
+                    Spacer()
+                    Btn("cancel", compact: true, action: cancel)
+                    Btn(submitTitle, style: .primary, compact: true, action: submit)
+                }
+            }
+            .padding(28)
+            .frame(width: 500)
+            .background(T.panelBg)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(T.borderStrong, lineWidth: 1)
+            )
+
+            if privacyShielded {
+                Color.black
+                    .ignoresSafeArea()
+                    .overlay {
+                        Text("recovery operation hidden")
+                            .font(Typography.tesseraMono(size: 13))
+                            .foregroundStyle(.white.opacity(0.8))
+                    }
+                    .zIndex(100)
+                    .transaction { $0.animation = nil }
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                privacyShielded = UIScreen.main.isCaptured
+            } else {
+                privacyShielded = true
+                clearSecrets()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIScreen.capturedDidChangeNotification
+        )) { _ in
+            let captured = UIScreen.main.isCaptured
+            privacyShielded = captured
+            if captured { clearSecrets() }
+        }
+        .onDisappear(perform: clearSecrets)
+    }
+
+    private var submitTitle: String {
+        switch purpose {
+        case .export: return "export encrypted file…"
+        case .verify: return "verify"
+        case .restore: return "restore"
+        }
+    }
+
+    private func submit() {
+        guard !passphrase.isEmpty else {
+            validationError = "A passphrase is required."
+            return
+        }
+        if purpose == .export {
+            guard passphrase.count >= 8 else {
+                validationError = "Use at least 8 characters."
+                return
+            }
+            guard passphrase == confirmation else {
+                validationError = "Passphrases do not match."
+                return
+            }
+        }
+        let submitted = passphrase
+        clearSecrets()
+        onSubmit(submitted)
+    }
+
+    private func cancel() {
+        clearSecrets()
+        onCancel()
+    }
+
+    private func clearSecrets() {
+        passphrase = ""
+        confirmation = ""
+    }
+}
+
+private struct KeyRiskAcknowledgementModal: View {
+    let key: StoredKey
+    let fingerprint: String
+    let onCancel: () -> Void
+    let onExport: (() -> Void)?
+    let onAcknowledge: () -> Void
+
+    @Environment(\.designTokens) private var T
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.65).ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: 14) {
+                Text(key.isSecureEnclave ? "device-bound key" : "recovery not exported")
+                    .font(Typography.tesseraMono(size: 18, weight: .medium))
+                    .foregroundStyle(T.fg)
+
+                Text(fingerprint)
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.fgMuted)
+
+                Text(key.isSecureEnclave
+                    ? "This Secure Enclave key can never be recovered after device loss. Before installing it remotely, keep a second recoverable credential on that host."
+                    : "This software key has no recorded recovery export. Installing it as the only remote credential can permanently lock you out after device loss or accidental deletion.")
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.fgDim)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 10) {
+                    Btn("cancel", compact: true, action: onCancel)
+                    Spacer()
+                    if let onExport {
+                        Btn("export recovery first", style: .primary, compact: true, action: onExport)
+                    }
+                    Btn("I understand · continue", style: .danger, compact: true, action: onAcknowledge)
+                }
+            }
+            .padding(28)
+            .frame(width: 560)
+            .background(T.panelBg)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(T.borderStrong, lineWidth: 1)
+            )
+        }
+    }
+}
+
+private struct KeyDeletionConfirmationModal: View {
+    let key: StoredKey
+    let fingerprint: String
+    let hostNames: [String]
+    let identityCount: Int
+    let securityRecord: KeySecurityRecord
+    let eligibleRemoteRevocationCount: Int
+    let isWorking: Bool
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+    let onRevokeAndConfirm: () -> Void
+
+    @Environment(\.designTokens) private var T
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.65).ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: 14) {
+                Text("delete local private key")
+                    .font(Typography.tesseraMono(size: 18, weight: .medium))
+                    .foregroundStyle(T.red)
+
+                Text(fingerprint)
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.fgMuted)
+
+                Text(backupDescription)
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.fgDim)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("Local references: \(identityCount) identit\(identityCount == 1 ? "y" : "ies") and \(hostNames.count) host\(hostNames.count == 1 ? "" : "s"). They will be detached before deletion.")
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.fgDim)
+
+                Text("Known remote installations: \(securityRecord.remoteInstallations.count). Deleting locally does not revoke any authorized_keys entry; remove this public key from every remote host separately.")
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.fgDim)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if !hostNames.isEmpty {
+                    FlowTags(names: hostNames)
+                }
+
+                HStack(spacing: 10) {
+                    Btn("cancel", compact: true, action: onCancel)
+                        .disabled(isWorking)
+                    Spacer()
+                    if isWorking {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                    } else {
+                        if eligibleRemoteRevocationCount > 0 {
+                            Btn(
+                                "revoke on \(eligibleRemoteRevocationCount) tracked host\(eligibleRemoteRevocationCount == 1 ? "" : "s") & delete",
+                                style: .primary,
+                                compact: true,
+                                action: onRevokeAndConfirm
+                            )
+                        }
+                        Btn("local delete only", style: .danger, compact: true, action: onConfirm)
+                    }
+                }
+            }
+            .padding(28)
+            .frame(width: 620)
+            .background(T.panelBg)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(T.red, lineWidth: 1)
+            )
+        }
+    }
+
+    private var backupDescription: String {
+        if key.isSecureEnclave {
+            return "This Secure Enclave key is permanently unrecoverable after deletion."
+        }
+        if let date = securityRecord.backupExportedAt {
+            return "A recovery export was recorded \(date.formatted(.dateTime.year().month().day())). Confirm that you still possess its passphrase before deleting."
+        }
+        return "No recovery export is recorded. Deletion may be permanent."
+    }
+}
+
+private struct OrphanedKeyCleanupModal: View {
+    let count: Int
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+
+    @Environment(\.designTokens) private var T
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.65).ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: 14) {
+                Text("delete orphaned private material")
+                    .font(Typography.tesseraMono(size: 18, weight: .medium))
+                    .foregroundStyle(T.red)
+
+                Text("Tessera found \(count) Keychain item\(count == 1 ? "" : "s") with no matching key metadata. They cannot be selected, authenticated with, exported, or associated with a host. This removes only those inaccessible orphaned items.")
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.fgDim)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 10) {
+                    Btn("cancel", compact: true, action: onCancel)
+                    Spacer()
+                    Btn("delete \(count) orphaned item\(count == 1 ? "" : "s")", style: .danger, compact: true, action: onConfirm)
+                }
+            }
+            .padding(28)
+            .frame(width: 560)
+            .background(T.panelBg)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(T.red, lineWidth: 1)
+            )
+        }
+    }
+}
+
+private enum KeyRecoverySurfaceError: LocalizedError {
+    case fileTooLarge
+
+    var errorDescription: String? {
+        "The recovery file is empty or exceeds the 1 MB safety limit."
     }
 }

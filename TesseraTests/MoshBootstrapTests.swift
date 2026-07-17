@@ -188,7 +188,7 @@ final class MoshBootstrapTests: XCTestCase {
         ) { error in
             XCTAssertEqual(
                 error as? MoshBootstrapError,
-                .missingConnect(stdout: "mosh-server ready\n")
+                .missingConnect
             )
         }
     }
@@ -201,7 +201,7 @@ final class MoshBootstrapTests: XCTestCase {
         ) { error in
             XCTAssertEqual(
                 error as? MoshBootstrapError,
-                .malformedConnect(stdout: stdout)
+                .malformedConnect
             )
         }
     }
@@ -214,11 +214,196 @@ final class MoshBootstrapTests: XCTestCase {
         ) { error in
             XCTAssertEqual(
                 error as? MoshBootstrapError,
-                .malformedConnect(stdout: stdout)
+                .malformedConnect
             )
         }
     }
 }
+
+final class PrivateKeyAuditMoshCredentialRedactionTests: XCTestCase {
+    private let sessionKey = "qiXpjXIk6M8/nWtBn9s6rQ"
+
+    func test_PK009_redactorRemovesConnectKeyFromMultilineText() {
+        let text = "before\nMOSH CONNECT 60001 \(sessionKey)\nafter"
+
+        let redacted = SensitiveDataRedactor.redact(text)
+
+        XCTAssertFalse(redacted.contains(sessionKey))
+        XCTAssertTrue(redacted.contains("MOSH CONNECT 60001 <redacted>"))
+    }
+
+    func test_PK009_redactorDoesNotPreserveKeyInMalformedPortPosition() {
+        let keyFirst = SensitiveDataRedactor.redact(
+            "failure MOSH CONNECT \(sessionKey) malformed"
+        )
+        let keyOnly = SensitiveDataRedactor.redact(
+            "failure MOSH CONNECT \(sessionKey)"
+        )
+
+        XCTAssertFalse(keyFirst.contains(sessionKey))
+        XCTAssertFalse(keyOnly.contains(sessionKey))
+        XCTAssertEqual(keyFirst, "failure MOSH CONNECT <redacted>")
+        XCTAssertEqual(keyOnly, "failure MOSH CONNECT <redacted>")
+    }
+
+    func test_PK009_redactorPreservesOnlyValidatedPort() {
+        let valid = SensitiveDataRedactor.redact(
+            "MOSH CONNECT 65535 \(sessionKey) trailing-noise"
+        )
+        let zero = SensitiveDataRedactor.redact(
+            "MOSH CONNECT 0 \(sessionKey)"
+        )
+        let tooLarge = SensitiveDataRedactor.redact(
+            "MOSH CONNECT 65536 \(sessionKey)"
+        )
+
+        XCTAssertEqual(valid, "MOSH CONNECT 65535 <redacted>")
+        XCTAssertEqual(zero, "MOSH CONNECT <redacted>")
+        XCTAssertEqual(tooLarge, "MOSH CONNECT <redacted>")
+    }
+
+    func test_PK009_redactorRemovesSplitAndEncodedBareKeys() {
+        let split = SensitiveDataRedactor.redact(
+            "MOSH CONNECT 60001\n\(sessionKey)"
+        )
+        let padded = SensitiveDataRedactor.redact(
+            "native failure payload=\(sessionKey)=="
+        )
+        let escapedNewline = SensitiveDataRedactor.redact(
+            "wrapped=MOSH CONNECT 60001\\n\(sessionKey)"
+        )
+
+        XCTAssertFalse(split.contains(sessionKey))
+        XCTAssertFalse(padded.contains(sessionKey))
+        XCTAssertFalse(escapedNewline.contains(sessionKey))
+        XCTAssertEqual(split, "MOSH CONNECT <redacted>\n<redacted-key>")
+        XCTAssertEqual(padded, "native failure payload=<redacted-key>")
+        XCTAssertEqual(escapedNewline, "wrapped=MOSH CONNECT <redacted>")
+    }
+
+    func test_PK009_diagnosticBoundaryRemovesBareNativeKeyPayload() {
+        let sanitized = DiagnosticLogStore.sanitizedMessageForTesting(
+            "session failed message=Unexpected output from base64_encode: \(sessionKey)=="
+        )
+
+        XCTAssertFalse(sanitized.contains(sessionKey))
+        XCTAssertTrue(sanitized.contains("message=Unexpected output from base64_encode"))
+        XCTAssertTrue(sanitized.contains("<redacted-key>"))
+    }
+
+    func test_agentCenterDiagnosticBoundaryRedactsContentBearingFields() {
+        let sanitized = DiagnosticLogStore.sanitizedMessageForTesting(
+            "send sid=ABCDEF12 pane=7 provider=claude command='secret command' payload='secret prompt' path=/private/secret env=TOKEN-secret result=failed"
+        )
+
+        XCTAssertTrue(sanitized.contains("sid=ABCDEF12"))
+        XCTAssertTrue(sanitized.contains("pane=7"))
+        XCTAssertTrue(sanitized.contains("provider=claude"))
+        XCTAssertFalse(sanitized.contains("secret command"))
+        XCTAssertFalse(sanitized.contains("secret prompt"))
+        XCTAssertFalse(sanitized.contains("/private/secret"))
+        XCTAssertFalse(sanitized.contains("TOKEN-secret"))
+    }
+
+    func test_PK009_malformedParserErrorRetainsNoBootstrapTranscript() {
+        let transcript = "MOSH CONNECT nope \(sessionKey)\n"
+
+        XCTAssertThrowsError(try MoshBootstrap.parseConnectResponse(stdout: transcript)) { error in
+            XCTAssertEqual(error as? MoshBootstrapError, .malformedConnect)
+            XCTAssertFalse(String(describing: error).contains(sessionKey))
+            XCTAssertFalse(error.localizedDescription.contains(sessionKey))
+        }
+    }
+
+    func test_PK009_missingParserErrorRetainsNoStderrTranscript() {
+        let stderr = "diagnostic MOSH CONNECT\nsecret=\(sessionKey)"
+
+        XCTAssertThrowsError(
+            try MoshBootstrap.parseConnectResponse(stdout: "", stderr: stderr)
+        ) { error in
+            XCTAssertEqual(error as? MoshBootstrapError, .missingConnect)
+            XCTAssertFalse(String(describing: error).contains(sessionKey))
+            XCTAssertFalse(error.localizedDescription.contains(sessionKey))
+        }
+    }
+
+    func test_PK009_transcriptSummaryContainsOnlyBoundedMetadata() {
+        let summary = SensitiveDataRedactor.bootstrapTranscriptSummary(
+            stdout: "MOSH CONNECT 60001 \(sessionKey)",
+            stderr: sessionKey
+        )
+
+        XCTAssertFalse(summary.contains(sessionKey))
+        XCTAssertEqual(summary, "stdoutBytes=41 stderrBytes=22 connectMarker=true")
+    }
+}
+
+#if DEBUG
+final class PrivateKeyAuditMoshCredentialLifetimeTests: XCTestCase {
+    func test_PK011_driverReleasesSwiftAndNativeBootstrapKeyAtHandoff() {
+        let driver = MoshTransportDriver(
+            host: "127.0.0.1",
+            udpPort: 60_004,
+            base64Key: "qiXpjXIk6M8/nWtBn9s6rQ",
+            onOutput: { _ in },
+            onConnected: {},
+            onDisconnected: {},
+            onFailed: { _ in },
+            onTransportReachabilityChanged: { _ in }
+        )
+
+        let retainedBeforeConnect = driver.retainsBootstrapKeyMaterialForTesting()
+        XCTAssertTrue(retainedBeforeConnect)
+        driver.connect()
+        let retainedAfterHandoff = driver.retainsBootstrapKeyMaterialForTesting()
+        XCTAssertFalse(retainedAfterHandoff)
+        driver.disconnect()
+        let retainedAfterDisconnect = driver.retainsBootstrapKeyMaterialForTesting()
+        XCTAssertFalse(retainedAfterDisconnect)
+    }
+}
+#endif
+
+#if DEBUG
+final class PrivateKeyAuditDevRawKeyMigrationTests: XCTestCase {
+    func test_PK012_sourceRemovalRequiresVerifiedKeychainAndSavedModels() {
+        XCTAssertFalse(
+            DevRawKeyMigrationVerification.mayRemoveSource(
+                keychainVerified: false,
+                modelSaveSucceeded: true
+            )
+        )
+        XCTAssertFalse(
+            DevRawKeyMigrationVerification.mayRemoveSource(
+                keychainVerified: true,
+                modelSaveSucceeded: false
+            )
+        )
+        XCTAssertTrue(
+            DevRawKeyMigrationVerification.mayRemoveSource(
+                keychainVerified: true,
+                modelSaveSucceeded: true
+            )
+        )
+    }
+
+    func test_PK012_keychainReadbackComparisonRejectsAnySeedDifference() {
+        let seed = Data(repeating: 0xA5, count: 32)
+        var different = seed
+        different[31] ^= 0x01
+
+        XCTAssertTrue(
+            DevRawKeyMigrationVerification.storedSeedMatches(seed, expectedSeed: seed)
+        )
+        XCTAssertFalse(
+            DevRawKeyMigrationVerification.storedSeedMatches(different, expectedSeed: seed)
+        )
+        XCTAssertFalse(
+            DevRawKeyMigrationVerification.storedSeedMatches(nil, expectedSeed: seed)
+        )
+    }
+}
+#endif
 
 final class HostTransportModelTests: XCTestCase {
 
@@ -337,6 +522,49 @@ final class MoshSessionFailureMessageTests: XCTestCase {
         XCTAssertEqual(
             MoshSession.userFacingStartupFailureMessage(from: reason),
             reason
+        )
+    }
+}
+
+final class HostLaunchPrologueTests: XCTestCase {
+    func test_multilineSSHFormPreservesRemoteShellExpansionAndSnippetOrder() {
+        let result = HostLaunchPrologue.multilineStdin(
+            envVars: """
+            FOO="hello world"
+            export PATH=$HOME/bin:$PATH
+            # ignored
+            9INVALID=nope
+            """,
+            startupSnippet: "cd /tmp && printf ready"
+        )
+
+        XCTAssertEqual(
+            result,
+            "export FOO=\"hello world\"\n"
+                + "export PATH=$HOME/bin:$PATH\n"
+                + "cd /tmp && printf ready\n"
+        )
+    }
+
+    func test_inlineMoshFormIsSemicolonJoinedForShellArgv() {
+        XCTAssertEqual(
+            HostLaunchPrologue.inlineForArgv(
+                envVars: "FOO='space value'\nBAR=$(printf dynamic)",
+                startupSnippet: "umask 077"
+            ),
+            "export FOO='space value'; export BAR=$(printf dynamic); umask 077; "
+        )
+    }
+
+    func test_emptyOrInvalidConfigurationProducesNoPrologue() {
+        XCTAssertNil(
+            HostLaunchPrologue.multilineStdin(
+                envVars: "# comment\nnot-an-assignment",
+                startupSnippet: "  "
+            )
+        )
+        XCTAssertNil(
+            HostLaunchPrologue.inlineForArgv(envVars: "", startupSnippet: "")
         )
     }
 }

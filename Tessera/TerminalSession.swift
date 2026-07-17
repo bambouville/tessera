@@ -31,6 +31,18 @@ public protocol TerminalSession: AnyObject {
     var state: SessionState { get }
     var outputStream: AsyncStream<[UInt8]> { get }
 
+    /// Last cwd this session's terminal reported (tmux pane path, OSC 7,
+    /// or the bridge cwd poller) — the session view keeps it current so
+    /// transport-agnostic consumers (Upload sheet host rows) can read it
+    /// without reaching into per-view state. nil until a signal arrives.
+    var remoteWorkingDirectory: String? { get set }
+
+    /// Absolute remote path queued for typing into this session's
+    /// terminal (Upload sheet's "paste path"). Producers set it from
+    /// anywhere; the session view consumes it via its tmux controller
+    /// (which routes per transport) and resets it to nil.
+    var pendingPathInjection: String? { get set }
+
     func connect()
     func send(_ bytes: [UInt8])
     func resize(cols: Int, rows: Int)
