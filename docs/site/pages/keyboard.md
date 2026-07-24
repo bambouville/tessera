@@ -7,15 +7,15 @@ description: Hardware-keyboard shortcuts, the on-screen accessory bar, and text 
 
 # keyboard & input
 
-Tessera is keyboard-first. With a hardware keyboard attached, hold **⌘** for
-the iPadOS shortcut overlay. The same list lives in
-**settings → keyboard & input → shortcuts**.
+Tessera is keyboard-first. The tables below are the full reference; a
+condensed legend lives in **settings → keyboard & input → shortcuts**.
 
 ## global
 
 | shortcut | action |
 | --- | --- |
 | **⌘N** | new host |
+| **⌘↩** | connect (in the host editor) |
 | **⌘K** | quick-switch palette (sessions and agents; prefix `@` for agents) |
 | **⌘,** | settings |
 

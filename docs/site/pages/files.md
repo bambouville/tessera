@@ -16,11 +16,18 @@ ssh and mosh sessions. The bridge closes itself when idle.
 
 ## following your shell
 
-The panel tracks the shell's current directory via OSC 7 escape sequences. If
-your shell doesn't emit them, the panel offers **Enable follow — install shell
-integration**, which installs `~/.config/tessera/osc7.sh` on the server and
-hooks it into `.zshrc` / `.bashrc` (marked with `# TESSERA-OSC7`). It takes
-effect on the next shell login — run `exec $SHELL` or reconnect.
+The panel follows the shell's current directory. The precise signal is OSC 7
+escape sequences; underneath sits a no-setup fallback that finds your newest
+shell on the host and reads its working directory.
+
+If your shell doesn't emit OSC 7, the panel can offer **Enable follow —
+install shell integration**, which installs `~/.config/tessera/osc7.sh` on the
+server and hooks it into `.zshrc` / `.bashrc` (marked with `# TESSERA-OSC7`).
+It takes effect on the next shell login — run `exec $SHELL` or reconnect.
+
+Over mosh, a stock `mosh-server` strips OSC 7 entirely, so following there
+always relies on the fallback — Tessera doesn't offer the shell-integration
+install where it wouldn't change anything.
 
 You can also turn following off per panel and browse freely.
 
@@ -53,8 +60,9 @@ Three ways in:
   sheet, other file types through "open in Tessera". The *Upload to host*
   sheet picks the host and a
   destination — **session cwd** or **temp folder** (`~/.cache/tessera`) — with
-  a **Paste path into active session** toggle. Hosts that aren't connected show
-  "connect & upload".
+  a **Paste path into active session** toggle. Hosts that aren't connected are
+  marked "connect on upload…" — the **Connect & upload** button connects
+  first, then uploads.
 
 The paste-path flow is built for agent workflows: paste or share a screenshot
 and Claude Code / Codex pick the file up from the typed path.

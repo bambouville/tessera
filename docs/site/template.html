@@ -43,9 +43,8 @@
     padding: 28px 0;
     display: flex; align-items: center; justify-content: space-between;
   }
-  header.site .brand { display: flex; align-items: center; gap: 12px; }
+  header.site .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
   header.site .brand .name { font-weight: 500; font-size: 14px; }
-  header.site .brand a { text-decoration: none; }
   header.site nav { display: flex; gap: 28px; color: var(--ink-mute); font-size: 13px; }
   header.site nav a { text-decoration: none; }
   header.site nav a:hover { color: var(--ink); }
@@ -189,6 +188,24 @@
   }
   footer.site a { text-decoration: none; }
   footer.site a:hover { color: var(--ink); }
+  footer.site .left { display: flex; align-items: center; gap: 10px; }
+
+  /* ─── Dark mode (system) ───────────────────────── */
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #F5F2EC;
+      --ink-mute: rgba(245,242,236,0.62);
+      --ink-dim:  rgba(245,242,236,0.4);
+      --ink-faint:rgba(245,242,236,0.18);
+      --paper: #0A0A0A;
+      --line: rgba(245,242,236,0.12);
+    }
+    code, kbd {
+      background: rgba(245,242,236,0.07);
+      border-color: rgba(245,242,236,0.09);
+    }
+    .docs-content pre { background: rgba(245,242,236,0.05); }
+  }
 
   @media (max-width: 900px) {
     .page { padding: 0 22px; }
@@ -204,13 +221,24 @@
 </style>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="bv-mark" viewBox="0 0 140 140">
+    <g stroke="currentColor" stroke-width="14" stroke-linecap="square" fill="none">
+      <line x1="70" y1="22" x2="70" y2="118"/>
+      <line x1="46" y1="46" x2="94" y2="46"/>
+      <line x1="46" y1="70" x2="94" y2="70"/>
+      <line x1="46" y1="94" x2="94" y2="94"/>
+    </g>
+  </symbol>
+</svg>
 <div class="page">
   <header class="site">
-    <div class="brand">
-      <a href="/" class="name">bambouville</a>
-    </div>
+    <a href="/" class="brand">
+      <svg width="22" height="22" viewBox="0 0 140 140" style="color: var(--ink);"><use href="#bv-mark"/></svg>
+      <span class="name">bambouville</span>
+    </a>
     <nav>
-      <a href="/Bambouville%20Tessera.html">tessera</a>
+      <a href="/Bambouville%20Tessera">tessera</a>
       <a href="/docs/" class="current">docs</a>
       <a href="https://github.com/bambouville/tessera">github&nbsp;↗</a>
     </nav>
@@ -219,10 +247,9 @@
   <div class="breadcrumb">
     <a href="/">bambouville</a>
     <span class="sep">/</span>
-    <a href="/Bambouville%20Tessera.html">tessera</a>
+    <a href="/Bambouville%20Tessera">tessera</a>
     <span class="sep">/</span>
-    <a href="/docs/">docs</a>
-    {{breadcrumb_current}}
+    {{breadcrumb_docs}}{{breadcrumb_current}}
   </div>
 
   <div class="docs-layout">
@@ -235,7 +262,10 @@
   </div>
 
   <footer class="site">
-    <div>Tessera is free software under <a href="https://www.gnu.org/licenses/gpl-3.0.html">GPL-3.0</a> · © 2026 Bambouville Inc.</div>
+    <div class="left">
+      <svg width="14" height="14" viewBox="0 0 140 140" style="color: var(--ink-dim);"><use href="#bv-mark"/></svg>
+      <span>Tessera is free software under <a href="https://www.gnu.org/licenses/gpl-3.0.html">GPL-3.0</a> · © 2026 bambouville inc.</span>
+    </div>
     <div><a href="https://github.com/bambouville/tessera/issues">support &amp; bug reports ↗</a></div>
   </footer>
 </div>

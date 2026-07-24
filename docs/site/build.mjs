@@ -173,9 +173,13 @@ for (const page of pages) {
   const breadcrumb = page.slug === "index"
     ? ""
     : `\n    <span class="sep">/</span>\n    <span class="current">${escapeHtml(page.title)}</span>`;
+  const breadcrumbDocs = page.slug === "index"
+    ? `<span class="current">docs</span>`
+    : `<a href="/docs/">docs</a>`;
   const html = template
     .replaceAll("{{title}}", escapeHtml(page.title))
     .replaceAll("{{description}}", escapeHtml(page.description))
+    .replaceAll("{{breadcrumb_docs}}", breadcrumbDocs)
     .replaceAll("{{breadcrumb_current}}", breadcrumb)
     .replace("{{nav}}", renderNav(page.slug))
     .replace("{{content}}", page.html.trimEnd());
