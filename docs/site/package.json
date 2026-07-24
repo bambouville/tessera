@@ -1,0 +1,16 @@
+{
+  "name": "tessera-docs",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Builds the Tessera user guide (docs/site/pages/*.md) into static HTML for bambouville.com/docs/.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "serve": "node build.mjs && python3 -m http.server 8042 --directory dist",
+    "deploy:local": "../../scripts/deploy-docs.sh"
+  },
+  "dependencies": {
+    "gray-matter": "4.0.3",
+    "marked": "15.0.12"
+  }
+}

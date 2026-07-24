@@ -24,11 +24,19 @@ there is no Tessera backend, no account, and no data collection.
 Requires iPadOS 17 or later (iPad only). Mosh and tmux features require
 `mosh-server` / `tmux` installed on the server.
 
+## Documentation
+
+User guide: [bambouville.com/docs](https://bambouville.com/docs/) — getting
+started, keys, tmux, port forwarding, files, the agent center, and more. The
+Markdown source lives in [`docs/site/pages/`](docs/site/pages/) and is
+published automatically to Cloudflare on every push to `main` (see
+[`.github/workflows/docs.yml`](.github/workflows/docs.yml)).
+
 ## Privacy
 
 Tessera collects no data — no analytics, no tracking, no telemetry. Everything
 you enter stays on your device, and connections go directly from your iPad to
-your machines. See the [privacy policy](docs/privacy-policy.md).
+your machines. See the [privacy policy](https://bambouville.com/docs/privacy/).
 
 ## Building from source
 

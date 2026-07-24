@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{{title}} — Tessera docs · bambouville</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="{{description}}">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.png" type="image/png" sizes="64x64">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Instrument+Serif&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0A0A0A;
+    --ink-mute: rgba(10,10,10,0.62);
+    --ink-dim:  rgba(10,10,10,0.4);
+    --ink-faint:rgba(10,10,10,0.18);
+    --paper: #F5F2EC;
+    --line: rgba(10,10,10,0.12);
+    --blue: #5B9FFF;
+    --green: #30D158;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+    --serif: "Instrument Serif", Georgia, serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 14px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  .page { max-width: 1100px; margin: 0 auto; padding: 0 48px; }
+
+  /* ─── Header ──────────────────────────────────── */
+  header.site {
+    padding: 28px 0;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  header.site .brand { display: flex; align-items: center; gap: 12px; }
+  header.site .brand .name { font-weight: 500; font-size: 14px; }
+  header.site .brand a { text-decoration: none; }
+  header.site nav { display: flex; gap: 28px; color: var(--ink-mute); font-size: 13px; }
+  header.site nav a { text-decoration: none; }
+  header.site nav a:hover { color: var(--ink); }
+  header.site nav a.current { color: var(--ink); }
+
+  /* ─── Breadcrumb ──────────────────────────────── */
+  .breadcrumb {
+    padding: 16px 0;
+    border-top: 1px solid var(--line);
+    font-size: 11px;
+    color: var(--ink-dim);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  }
+  .breadcrumb a { text-decoration: none; }
+  .breadcrumb a:hover { color: var(--ink); }
+  .breadcrumb .sep { color: var(--ink-faint); }
+  .breadcrumb .current { color: var(--ink); }
+
+  /* ─── Layout ──────────────────────────────────── */
+  .docs-layout {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr);
+    gap: 56px;
+    padding: 32px 0 96px;
+    border-top: 1px solid var(--line);
+  }
+  .docs-nav { position: sticky; top: 24px; align-self: start; }
+  .docs-nav ul { list-style: none; margin: 0; padding: 0; }
+  .docs-nav li { margin: 0; }
+  .docs-nav a {
+    display: block;
+    padding: 5px 0;
+    font-size: 12.5px;
+    color: var(--ink-mute);
+    text-decoration: none;
+  }
+  .docs-nav a:hover { color: var(--ink); }
+  .docs-nav a.current { color: var(--ink); font-weight: 500; }
+  .docs-nav a.current::before { content: "→ "; color: var(--ink-dim); }
+  .docs-nav .nav-group {
+    margin: 18px 0 6px;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+  .docs-nav .nav-group:first-child { margin-top: 0; }
+
+  .docs-content { max-width: 760px; min-width: 0; }
+
+  /* ─── Content typography ──────────────────────── */
+  .docs-content h1 {
+    font-family: var(--serif); font-weight: 400;
+    font-size: clamp(40px, 5vw, 56px);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin: 0 0 20px;
+  }
+  .docs-content h2 {
+    font-family: var(--serif); font-weight: 400;
+    font-size: 30px;
+    letter-spacing: -0.01em;
+    margin: 48px 0 14px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+  .docs-content h3 {
+    font-size: 13px; font-weight: 600;
+    letter-spacing: 0.04em;
+    margin: 32px 0 10px;
+  }
+  .docs-content p { margin: 12px 0; }
+  .docs-content ul, .docs-content ol { margin: 12px 0; padding-left: 22px; }
+  .docs-content li { margin: 5px 0; }
+  .docs-content li::marker { color: var(--ink-dim); }
+  .docs-content a { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--ink-faint); }
+  .docs-content a:hover { text-decoration-color: var(--ink); }
+  .docs-content strong { font-weight: 600; }
+  .docs-content hr { border: none; border-top: 1px solid var(--line); margin: 36px 0; }
+  .docs-content blockquote {
+    margin: 16px 0;
+    padding: 10px 18px;
+    border-left: 2px solid var(--ink-faint);
+    color: var(--ink-mute);
+  }
+  .docs-content blockquote p { margin: 4px 0; }
+
+  code, kbd {
+    font-family: var(--mono);
+    font-size: 0.92em;
+    background: rgba(10,10,10,0.055);
+    border: 1px solid rgba(10,10,10,0.07);
+    border-radius: 4px;
+    padding: 0.1em 0.35em;
+    white-space: nowrap;
+  }
+  .docs-content pre {
+    margin: 16px 0;
+    padding: 16px 18px;
+    background: rgba(10,10,10,0.045);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: 12.5px;
+    line-height: 1.6;
+  }
+  .docs-content pre code {
+    background: none; border: none; padding: 0; white-space: pre;
+  }
+
+  .docs-content table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 18px 0;
+    font-size: 12.5px;
+  }
+  .docs-content th, .docs-content td {
+    text-align: left;
+    padding: 8px 14px 8px 0;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  .docs-content th {
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    font-weight: 500;
+  }
+  .docs-content td kbd, .docs-content td code { white-space: nowrap; }
+
+  /* ─── Footer ──────────────────────────────────── */
+  footer.site {
+    border-top: 1px solid var(--line);
+    padding: 28px 0 48px;
+    display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap;
+    font-size: 11.5px;
+    color: var(--ink-dim);
+  }
+  footer.site a { text-decoration: none; }
+  footer.site a:hover { color: var(--ink); }
+
+  @media (max-width: 900px) {
+    .page { padding: 0 22px; }
+    .docs-layout { grid-template-columns: 1fr; gap: 24px; }
+    .docs-nav {
+      position: static;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 16px;
+    }
+    .docs-nav ul { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+    .docs-nav .nav-group { width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="site">
+    <div class="brand">
+      <a href="/" class="name">bambouville</a>
+    </div>
+    <nav>
+      <a href="/Bambouville%20Tessera.html">tessera</a>
+      <a href="/docs/" class="current">docs</a>
+      <a href="https://github.com/bambouville/tessera">github&nbsp;↗</a>
+    </nav>
+  </header>
+
+  <div class="breadcrumb">
+    <a href="/">bambouville</a>
+    <span class="sep">/</span>
+    <a href="/Bambouville%20Tessera.html">tessera</a>
+    <span class="sep">/</span>
+    <a href="/docs/">docs</a>
+    {{breadcrumb_current}}
+  </div>
+
+  <div class="docs-layout">
+    <aside class="docs-nav">
+{{nav}}
+    </aside>
+    <main class="docs-content">
+{{content}}
+    </main>
+  </div>
+
+  <footer class="site">
+    <div>Tessera is free software under <a href="https://www.gnu.org/licenses/gpl-3.0.html">GPL-3.0</a> · © 2026 Bambouville Inc.</div>
+    <div><a href="https://github.com/bambouville/tessera/issues">support &amp; bug reports ↗</a></div>
+  </footer>
+</div>
+</body>
+</html>

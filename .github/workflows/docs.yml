@@ -1,0 +1,76 @@
+name: Publish docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/site/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out tessera
+        uses: actions/checkout@v4
+        with:
+          path: tessera
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tessera/docs/site/package-lock.json
+
+      - name: Install doc build dependencies
+        working-directory: tessera/docs/site
+        run: npm ci
+
+      - name: Build docs
+        working-directory: tessera/docs/site
+        run: node build.mjs
+
+      - name: Check out bambousite
+        uses: actions/checkout@v4
+        with:
+          repository: bambouville/bambousite
+          token: ${{ secrets.BAMBOUSITE_TOKEN }}
+          path: bambousite
+
+      - name: Sync built docs into bambousite
+        run: |
+          mkdir -p bambousite/site/docs
+          rsync -a --delete tessera/docs/site/dist/ bambousite/site/docs/
+
+      - name: Commit and push bambousite
+        id: push
+        working-directory: bambousite
+        run: |
+          git config user.name "bambouville-docs-bot"
+          git config user.email "support@bambouville.com"
+          git add site/docs
+          if git diff --cached --quiet; then
+            echo "docs unchanged; nothing to commit"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "docs: publish tessera docs ($(git -C ../tessera rev-parse --short HEAD))"
+            git push
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy to Cloudflare
+        if: github.event_name == 'workflow_dispatch' || steps.push.outputs.changed == 'true'
+        working-directory: bambousite
+        run: npx --yes wrangler@4 deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
