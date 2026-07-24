@@ -105,10 +105,19 @@ actor KnownHostsStore {
             return .unknown(fingerprint: fingerprint, keyString: keyString)
         }
 
-        if record.fingerprint == fingerprint {
+        if Self.unpadded(record.fingerprint) == fingerprint {
+            var dirty = false
+            if record.fingerprint != fingerprint {
+                // Migrate a record stored with base64 padding.
+                record.fingerprint = fingerprint
+                dirty = true
+            }
             if record.pendingFingerprint != nil || record.pendingKeyString != nil {
                 record.pendingFingerprint = nil
                 record.pendingKeyString = nil
+                dirty = true
+            }
+            if dirty {
                 records[endpoint] = record
                 saveToDisk()
             }
@@ -121,7 +130,7 @@ actor KnownHostsStore {
         saveToDisk()
 
         return .changed(
-            oldFingerprint: record.fingerprint,
+            oldFingerprint: Self.unpadded(record.fingerprint),
             newFingerprint: fingerprint,
             keyString: keyString
         )
@@ -142,9 +151,9 @@ actor KnownHostsStore {
             // Trusting the same key again preserves whatever rotation
             // history the record already had. Trusting a different key
             // captures the just-replaced fingerprint as "previous".
-            return existing.fingerprint == fingerprint
+            return Self.unpadded(existing.fingerprint) == fingerprint
                 ? existing.previousFingerprint
-                : existing.fingerprint
+                : Self.unpadded(existing.fingerprint)
         }()
         records[endpoint] = HostRecord(
             fingerprint: fingerprint,
@@ -191,9 +200,9 @@ actor KnownHostsStore {
                 id: endpoint,
                 host: Self.endpointHost(endpoint: endpoint),
                 algorithm: Self.algorithmName(from: record.keyString),
-                fingerprint: record.fingerprint,
-                previousFingerprint: record.previousFingerprint,
-                pendingFingerprint: record.pendingFingerprint,
+                fingerprint: Self.unpadded(record.fingerprint),
+                previousFingerprint: record.previousFingerprint.map(Self.unpadded),
+                pendingFingerprint: record.pendingFingerprint.map(Self.unpadded),
                 pendingKeyString: record.pendingKeyString,
                 firstSeen: record.firstSeen,
                 lastSeen: record.lastSeen,
@@ -215,6 +224,14 @@ actor KnownHostsStore {
         }
         let hash = SHA256.hash(data: wireData)
         return "SHA256:" + Data(hash).base64EncodedString()
+            .trimmingCharacters(in: CharacterSet(charactersIn: "="))
+    }
+
+    /// Strips base64 padding from a stored fingerprint. Records written
+    /// before the padding fix carry a trailing "=" that OpenSSH never
+    /// prints; comparisons must treat both forms as the same key.
+    static func unpadded(_ fingerprint: String) -> String {
+        fingerprint.trimmingCharacters(in: CharacterSet(charactersIn: "="))
     }
 
     /// Short display form: "SHA256:abc...xyz"

@@ -68,6 +68,47 @@ final class KnownHostsStoreTests: XCTestCase {
         XCTAssertNil(rows.first?.pendingFingerprint)
     }
 
+    func test_check_migratesLegacyPaddedFingerprint() async throws {
+        let clock = TestClock(Date(timeIntervalSince1970: 1_700_000_000))
+        let tmpURL = FileManager.default
+            .temporaryDirectory
+            .appendingPathComponent("tessera-knownhosts-\(UUID().uuidString).json")
+        let key = try makeKey()
+        let fingerprint = KnownHostsStore.fingerprint(of: key)
+        XCTAssertFalse(fingerprint.hasSuffix("="))
+
+        let store = KnownHostsStore(fileURL: tmpURL, now: { clock.now })
+        await store.trust(key, for: "host.test:22")
+
+        // Rewrite the stored record the way pre-fix builds saved it:
+        // base64 "=" padding on every fingerprint value.
+        let data = try Data(contentsOf: tmpURL)
+        let padded = Self.padFingerprints(try JSONSerialization.jsonObject(with: data))
+        try JSONSerialization.data(withJSONObject: padded).write(to: tmpURL)
+
+        let reloaded = KnownHostsStore(fileURL: tmpURL, now: { clock.now })
+        guard case .trusted = await reloaded.check(key, for: "host.test:22") else {
+            return XCTFail("legacy padded fingerprint must still be trusted")
+        }
+
+        // The record migrates to the unpadded form on the trusted check.
+        let rows = await reloaded.list()
+        XCTAssertEqual(rows.first?.fingerprint, fingerprint)
+    }
+
+    private static func padFingerprints(_ object: Any) -> Any {
+        if let dict = object as? [String: Any] {
+            return dict.mapValues { padFingerprints($0) }
+        }
+        if let array = object as? [Any] {
+            return array.map { padFingerprints($0) }
+        }
+        if let string = object as? String, string.hasPrefix("SHA256:") {
+            return string + "="
+        }
+        return object
+    }
+
     func test_list_marksStaleAfterThreshold() async throws {
         let trustTime = Date(timeIntervalSince1970: 1_700_000_000)
         let clock = TestClock(trustTime)
