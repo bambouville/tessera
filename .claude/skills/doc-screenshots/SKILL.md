@@ -107,17 +107,24 @@ sips -Z 1500 <src>.png --out ~/bambousite/site/docs/img/<name>.png
 ```
 
 Insert at the end of the relevant `<h2 id="...">` section. The image is always
-wrapped in a link to itself so readers can open it full size — the inline
-column is only ~700 px wide, far too narrow to read terminal text:
+wrapped in a link to itself — the inline column is only ~700 px wide, far too
+narrow to read terminal text:
 
 ```html
 <figure>
-<a href="/docs/img/<name>.png" target="_blank" rel="noopener" aria-label="Open full-size screenshot">
+<a href="/docs/img/<name>.png" aria-label="Enlarge screenshot">
 <img src="/docs/img/<name>.png" alt="<what is visible, specifically>" loading="lazy" width="1500" height="1125">
 </a>
 <figcaption>What the reader should notice.</figcaption>
 </figure>
 ```
+
+`/docs/lightbox.js` (included by each page with figures) intercepts the click
+and enlarges in place: the image animates from its exact position to the centre
+of a dimmed backdrop, and any click, `Esc`, or the `esc` keycap closes it. The
+`href` stays put so the page still works with JS off, and modified clicks
+(cmd/ctrl/shift) fall through to the browser. A page's first figure needs
+`<script defer src="/docs/lightbox.js"></script>` before `</body>`.
 
 **Placement trap:** if you insert by scanning forward to the next
 `<h2 id="...">`, a figure destined for the page's *last* section has no next
@@ -149,6 +156,19 @@ needs this block added after `.docs-content blockquote p { margin: 4px 0; }`:
 
 `text-decoration: none` on the anchor is load-bearing — `.docs-content a`
 underlines links by default. The token colours adapt to dark mode already.
+
+If you touch `lightbox.js`, three things there are load-bearing and were each
+a bug first:
+
+- The close-on-click listener is attached in a `setTimeout(…, 0)`. The overlay
+  is inserted under the cursor, so a listener added synchronously catches the
+  *opening* click and closes immediately.
+- The opening state is flushed with a forced reflow (`void box.offsetWidth`),
+  not `requestAnimationFrame` — rAF does not fire in a background tab, which
+  leaves the overlay stuck at `opacity: 0`.
+- Caption width is synced from `img.offsetWidth`, never
+  `getBoundingClientRect().width`; the latter reports the visual rect, which
+  mid-FLIP is still the thumbnail size.
 
 Verify before committing: every `src` resolves, `<figure>` tags balance, every
 `<img>` has alt text and sits inside an anchor, and **every figure is before
