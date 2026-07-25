@@ -41,6 +41,7 @@
 		1A0004000000000000000024 /* KnownHostsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000300000000000000001F /* KnownHostsStoreTests.swift */; };
 		1A00A0000000000000000002 /* RealHostTransportIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00A0000000000000000001 /* RealHostTransportIntegrationTests.swift */; };
 		1A00A0000000000000000004 /* VisualCaptureProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00A0000000000000000003 /* VisualCaptureProbe.swift */; };
+		1A00A00000000000000000D4 /* DocShotsProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00A00000000000000000D3 /* DocShotsProbe.swift */; };
 		1A00A0000000000000000006 /* TerminalScrollbackOracleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00A0000000000000000005 /* TerminalScrollbackOracleTests.swift */; };
 		1A0004000000000000000033 /* HostKeyVerificationRequestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000033 /* HostKeyVerificationRequestTests.swift */; };
 		1A0004000000000000000025 /* OSDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000025 /* OSDetector.swift */; };
@@ -254,6 +255,7 @@
 		1A000300000000000000001F /* KnownHostsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnownHostsStoreTests.swift; sourceTree = "<group>"; };
 		1A00A0000000000000000001 /* RealHostTransportIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealHostTransportIntegrationTests.swift; sourceTree = "<group>"; };
 		1A00A0000000000000000003 /* VisualCaptureProbe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VisualCaptureProbe.swift; sourceTree = "<group>"; };
+		1A00A00000000000000000D3 /* DocShotsProbe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DocShotsProbe.swift; sourceTree = "<group>"; };
 		1A00A0000000000000000005 /* TerminalScrollbackOracleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalScrollbackOracleTests.swift; sourceTree = "<group>"; };
 		1A0003000000000000000033 /* HostKeyVerificationRequestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostKeyVerificationRequestTests.swift; sourceTree = "<group>"; };
 		1A0003000000000000000025 /* OSDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSDetector.swift; sourceTree = "<group>"; };
@@ -828,6 +830,7 @@
 			isa = PBXGroup;
 			children = (
 				1A00A0000000000000000003 /* VisualCaptureProbe.swift */,
+				1A00A00000000000000000D3 /* DocShotsProbe.swift */,
 				F258CE6A611C425C97F1A49C /* TerminalScrollHarnessTests.swift */,
 			);
 			name = TesseraUITests;
@@ -1179,6 +1182,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1A00A0000000000000000004 /* VisualCaptureProbe.swift in Sources */,
+				1A00A00000000000000000D4 /* DocShotsProbe.swift in Sources */,
 				0852B22FF60AF0B5F713D29B /* TerminalScrollHarnessTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

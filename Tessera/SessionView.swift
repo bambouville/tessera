@@ -6883,6 +6883,7 @@ private struct SessionTopBar: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("chrome-\(systemName)")
     }
 
     // MARK: - Passthrough layout
