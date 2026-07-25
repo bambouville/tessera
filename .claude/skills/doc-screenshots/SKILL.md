@@ -170,6 +170,24 @@ a bug first:
   `getBoundingClientRect().width`; the latter reports the visual rect, which
   mid-FLIP is still the thumbnail size.
 
+## Verify on iPad, not just a desktop browser
+
+Tessera is an iPad app, so that is where the docs are read. `xcrun simctl
+openurl <UDID> <url>` opens a page in the simulator's Safari and `xcrun simctl
+io <UDID> screenshot` captures it; check both orientations. A scratch XCUITest
+driving `com.apple.mobilesafari` can tap through an interaction when behaviour
+(not just layout) needs checking — measure the tap point from a screenshot
+first rather than guessing.
+
+WebKit specifics already handled in `lightbox.js`, worth preserving: `dvh`
+alongside `vh` (iOS `vh` is the toolbars-hidden height, so a `vh`-sized image
+can sit under the toolbar), a pinned body for scroll lock (`overflow:hidden`
+alone does not hold in iOS Safari), `touch-action:none` and
+`overscroll-behavior:contain` on the overlay, `-webkit-tap-highlight-color`
+cleared, `:hover` rules gated behind `@media (hover:hover)` so they do not
+stick after a tap, and focus placed on the dialog rather than the keycap so a
+touch does not draw a focus ring.
+
 Verify before committing: every `src` resolves, `<figure>` tags balance, every
 `<img>` has alt text and sits inside an anchor, and **every figure is before
 `</main>`**.
