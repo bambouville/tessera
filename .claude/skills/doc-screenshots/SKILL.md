@@ -106,32 +106,53 @@ Resize to 1500 px wide and place in `~/bambousite/site/docs/img/`:
 sips -Z 1500 <src>.png --out ~/bambousite/site/docs/img/<name>.png
 ```
 
-Insert at the end of the relevant `<h2 id="...">` section:
+Insert at the end of the relevant `<h2 id="...">` section. The image is always
+wrapped in a link to itself so readers can open it full size — the inline
+column is only ~700 px wide, far too narrow to read terminal text:
 
 ```html
 <figure>
+<a href="/docs/img/<name>.png" target="_blank" rel="noopener" aria-label="Open full-size screenshot">
 <img src="/docs/img/<name>.png" alt="<what is visible, specifically>" loading="lazy" width="1500" height="1125">
+</a>
 <figcaption>What the reader should notice.</figcaption>
 </figure>
 ```
+
+**Placement trap:** if you insert by scanning forward to the next
+`<h2 id="...">`, a figure destined for the page's *last* section has no next
+heading to stop at and gets appended after `</html>`, where it renders
+full-bleed under the footer. Anchor to `</main>` instead — that is the end of
+the content column regardless of which section is last.
 
 Pages that already carry figures have the CSS. A page getting its first figure
 needs this block added after `.docs-content blockquote p { margin: 4px 0; }`:
 
 ```css
   .docs-content figure { margin: 22px 0; }
+  .docs-content figure a {
+    display: block; cursor: zoom-in; text-decoration: none;
+  }
   .docs-content figure img {
     display: block; width: 100%; height: auto;
     border: 1px solid var(--line); border-radius: 10px;
+    transition: border-color 0.15s ease;
+  }
+  .docs-content figure a:hover img { border-color: var(--ink-dim); }
+  .docs-content figure a:focus-visible img {
+    outline: 2px solid var(--blue); outline-offset: 2px;
   }
   .docs-content figcaption {
     margin-top: 8px; font-size: 11.5px; color: var(--ink-dim);
   }
 ```
 
-`var(--line)` and `var(--ink-dim)` adapt to dark mode already. Verify before
-committing: every `src` resolves, `<figure>` tags balance, every `<img>` has
-alt text.
+`text-decoration: none` on the anchor is load-bearing — `.docs-content a`
+underlines links by default. The token colours adapt to dark mode already.
+
+Verify before committing: every `src` resolves, `<figure>` tags balance, every
+`<img>` has alt text and sits inside an anchor, and **every figure is before
+`</main>`**.
 
 ## Honesty rules
 
