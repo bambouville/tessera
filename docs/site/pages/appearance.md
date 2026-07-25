@@ -5,13 +5,13 @@ group: reference
 description: Themes, backgrounds, fonts, cursor, and scrollback.
 ---
 
-# appearance & themes
+# Appearance & themes
 
 Tessera's own chrome and the terminal are themed separately: the app's
 appearance settings style the interface around the terminal, and terminal
 themes style the terminal itself.
 
-## app appearance
+## App appearance
 
 Under **settings → appearance**:
 
@@ -23,12 +23,12 @@ Under **settings → appearance**:
 - **terminal font size** — 10–20 pt with a live preview.
 - **top bar height** — scales the tab strip and icons, with a live preview.
 
-## terminal themes
+## Terminal themes
 
 **settings → themes** shows a preview-card grid of terminal themes: Void,
 Graphite, Amber CRT, Paper, Dracula, and Nord.
 
-### background
+### Background
 
 Each theme's background can be the theme color or a **custom image** with dim,
 blur, and fill controls. The background applies to every session unless a host
@@ -36,7 +36,7 @@ overrides it (host editor →
 [advanced](connections.md#advanced-tab)). Full-screen apps that set their own
 colors (vim, htop) paint over the picture.
 
-## terminal behavior
+## Terminal behavior
 
 Under **settings → terminal**:
 

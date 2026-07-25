@@ -5,7 +5,7 @@ group: start
 description: Tessera is an SSH, Mosh, and tmux terminal for iPad — fast, keyboard-first, and private by design.
 ---
 
-# tessera docs
+# Tessera docs
 
 **Tessera is an SSH, Mosh, and tmux terminal for iPad** — fast, keyboard-first,
 and private by design. It connects directly to servers you own or control;
@@ -17,7 +17,7 @@ there is no Tessera backend, no account, and no data collection.
 
 Mosh and tmux features require `mosh-server` / `tmux` installed on the server.
 
-## what tessera does
+## What Tessera does
 
 - **SSH and Mosh.** Password and key authentication; Mosh keeps your session
   alive across Wi-Fi ↔ cellular roaming and sleep/wake.
@@ -35,7 +35,7 @@ Mosh and tmux features require `mosh-server` / `tmux` installed on the server.
   swipe pad for the touch screen, Stage Manager / Split View, session restore,
   find-in-terminal, themes, and optional on-device dictation.
 
-## the guide
+## The guide
 
 - [getting started](getting-started.md) — install, first host, first connection
 - [hosts & connections](connections.md) — transports, launch modes, jump hosts

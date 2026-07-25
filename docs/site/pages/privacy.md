@@ -5,7 +5,7 @@ group: legal
 description: Tessera collects no data — no analytics, no tracking, no telemetry.
 ---
 
-# tessera privacy policy
+# Tessera privacy policy
 
 _Last updated: May 29, 2026_
 
@@ -13,13 +13,13 @@ Tessera is an SSH, Mosh, and tmux terminal for iPad. This policy explains what
 data Tessera handles. The short version: **Tessera does not collect any
 personal data.**
 
-## no data collection
+## No data collection
 
 Tessera has no backend servers, no analytics, no tracking, no advertising, and
 no third-party data-collection SDKs. The developers do not receive any
 information about you or your use of the app.
 
-## data stored on your device
+## Data stored on your device
 
 Everything you enter or create stays on your device (and in your own device or
 iCloud backups, if you have those enabled):
@@ -33,13 +33,13 @@ This data is never transmitted to the developers. SSH and Mosh connections go
 **directly** from your device to the servers you specify — there is no Tessera
 infrastructure in between, because none exists.
 
-## network connections
+## Network connections
 
 Tessera connects only to the servers you configure, and connects to them
 directly. Your credentials, keystrokes, and session data are not routed through
 any Tessera-operated service.
 
-## permissions tessera may request
+## Permissions Tessera may request
 
 - **Local Network** — to reach SSH/Mosh servers on your local network and to
   forward local ports to them.
@@ -51,7 +51,7 @@ any Tessera-operated service.
 - **Notifications** (optional) — local notifications for the terminal bell /
   turn-complete signal, generated on-device.
 
-## diagnostic logs
+## Diagnostic logs
 
 Tessera can write a local diagnostic log (Settings → Diagnostics) to help with
 troubleshooting. This log is stored on your device. It leaves your device only
@@ -60,7 +60,7 @@ your own servers via the upload sheet — and choose a destination yourself.
 Tessera never uploads it automatically, and it is never sent to the
 developers.
 
-## data retention & deletion
+## Data retention & deletion
 
 All data Tessera handles lives only on your device, so retention and deletion
 are entirely under your control:
@@ -74,15 +74,15 @@ are entirely under your control:
 - No deletion request to the developers is possible or necessary: the
   developers hold no data about you.
 
-## children's privacy
+## Children's privacy
 
 Tessera does not collect data from anyone, including children.
 
-## changes to this policy
+## Changes to this policy
 
 If this policy changes, the updated version will be posted at this page.
 
-## contact
+## Contact
 
 Questions about this policy? Open an issue at
 <https://github.com/bambouville/tessera/issues>.

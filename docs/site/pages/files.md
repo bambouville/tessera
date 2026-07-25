@@ -4,7 +4,7 @@ nav: 10
 description: A remote file panel that tracks your shell's directory — over SSH and mosh alike.
 ---
 
-# files
+# Files
 
 The **files** panel slides out beside the terminal and shows the remote
 directory your shell is sitting in. Open it with **⌘⇧E** or the folder glyph
@@ -14,7 +14,7 @@ File operations always run over a dedicated, lazily-opened SSH+SFTP **bridge**
 per host — never the terminal transport — so the panel works identically for
 ssh and mosh sessions. The bridge closes itself when idle.
 
-## following your shell
+## Following your shell
 
 The panel follows the shell's current directory. The precise signal is OSC 7
 escape sequences; underneath sits a no-setup fallback that finds your newest
@@ -31,7 +31,15 @@ install where it wouldn't change anything.
 
 You can also turn following off per panel and browse freely.
 
-## browsing
+<figure>
+<a href="/docs/assets/img/files-panel.png" aria-label="Enlarge screenshot">
+<img src="/docs/assets/img/files-panel.png" alt="The files panel open beside a terminal, its breadcrumb reading ~/projects/nebula to match the shell, listing folders and files with sizes over SFTP." loading="lazy" width="1500" height="1125">
+</a>
+<figcaption>The panel tracking the shell's directory. The link icon in the breadcrumb shows follow is active.</figcaption>
+</figure>
+
+
+## Browsing
 
 The panel's breadcrumb bar shows the current path with a follow toggle.
 Actions:
@@ -49,7 +57,7 @@ Transfers show up in a progress strip, and errors are explicit — for example:
 review the key, then retry." (see
 [host key verification](host-keys.md#first-connection)).
 
-## uploading
+## Uploading
 
 Three ways in:
 
@@ -70,7 +78,7 @@ and Claude Code / Codex pick the file up from the typed path.
 Tessera also appears under "On My iPad" in the Files app, so downloads are
 easy to reach from other apps.
 
-## housekeeping
+## Housekeeping
 
 Under **settings → files**:
 

@@ -4,13 +4,13 @@ nav: 5
 description: Generate, import, protect, install, and recover SSH keys — all inside the iOS Keychain.
 ---
 
-# keys
+# Keys
 
 The **keys** page (sidebar) manages your SSH keys. Private key bytes live only
 in the iOS Keychain — Tessera stores just public metadata (names, fingerprints,
 usage) in its own database.
 
-## generating a key
+## Generating a key
 
 Tap **+ generate** and pick an algorithm:
 
@@ -23,7 +23,7 @@ Tap **+ generate** and pick an algorithm:
 RSA generation is not supported; see
 [troubleshooting](troubleshooting.md#rsa-keys-are-not-supported).
 
-## importing a key
+## Importing a key
 
 Tap **import** and pick an OpenSSH private-key file (up to 1 MB). If the file
 is passphrase-protected, the passphrase is used once to decrypt it and is not
@@ -35,13 +35,13 @@ retained.
 - The import sheet hides itself ("private-key import hidden") whenever the
   screen is captured or the app is backgrounded.
 
-## biometric protection
+## Biometric protection
 
 Each key has a **require biometrics or passcode** toggle: Face ID / Touch ID or
 the device passcode is then required whenever Tessera accesses that key,
 enforced by iOS at the Keychain/Secure Enclave boundary.
 
-### authorization bursts
+### Authorization bursts
 
 Under **settings → security → authorize key connection bursts**, a single
 biometric grant may cover repeated connections using the same key to the same
@@ -52,7 +52,7 @@ Backgrounding the app always invalidates these grants, even when
 P-256 Enclave keys have their protection fixed at creation; to change it,
 generate a new key and rotate.
 
-## the key detail panel
+## The key detail panel
 
 Tap a key to see its type, **fingerprint (sha256)** (OpenSSH-compatible), and
 public key. From here you can:
@@ -65,7 +65,7 @@ public key. From here you can:
 
 A **used by** section lists the hosts that reference the key.
 
-## installing a key on a host
+## Installing a key on a host
 
 **copy to host…** picks a host, shows the exact `authorized_keys` line, and
 appends it to `~/.ssh/authorized_keys` over SSH, with verification markers.
@@ -77,7 +77,7 @@ appends it to `~/.ssh/authorized_keys` over SSH, with verification markers.
 - Completed installations are tracked, and the deletion flow reports them
   ("Known remote installations: N").
 
-## export and recovery
+## Export and recovery
 
 The **recovery** section of a key tracks its backup state — whether a verified
 recovery export exists (with date and fingerprint), and for Enclave keys a
@@ -92,7 +92,7 @@ device.
 Back up software keys before installing them widely — an unrecoverable key
 means locking yourself out as passwords get disabled.
 
-## deleting a key
+## Deleting a key
 
 **delete local private key…** removes the key from the Keychain after
 confirmation. Deleting locally **does not revoke** any `authorized_keys` entry
@@ -103,7 +103,7 @@ the key should stop working.
 
 Legacy RSA keys left over from older versions are shown disabled.
 
-## where the bytes are
+## Where the bytes are
 
 - Software Ed25519 keys: iOS Keychain (non-synchronizing).
 - P-256 keys: Secure Enclave, non-exportable by design.

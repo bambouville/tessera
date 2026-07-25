@@ -5,9 +5,9 @@ group: connecting
 description: Host entries, ssh vs mosh, launch modes, jump hosts, sessions, and restore.
 ---
 
-# hosts & connections
+# Hosts & connections
 
-## the host editor
+## The host editor
 
 Press **⌘N** for a new host, or tap an existing host to edit it. The editor has
 four tabs — **connection**, **advanced**, **forwarding**, **snippets** — and a
@@ -18,7 +18,15 @@ The connection tab holds the basics: **name**, **address**, **port**
 **password**. Passwords are session-scoped: they're kept only for the live
 session and never persisted.
 
-## transport: ssh or mosh
+<figure>
+<a href="/docs/assets/img/host-editor.png" aria-label="Enlarge screenshot">
+<img src="/docs/assets/img/host-editor.png" alt="The host editor showing its four tabs — connection, advanced, forwarding, snippets — with the connection fields and the connect bar." loading="lazy" width="1500" height="1125">
+</a>
+<figcaption>Four tabs across the top, and a connect bar pinned to the bottom of every tab.</figcaption>
+</figure>
+
+
+## Transport: SSH or Mosh
 
 Each host picks one transport:
 
@@ -32,7 +40,7 @@ Mosh's UDP traffic cannot traverse bastions: if you use mosh through a
 [jump host](#jump-hosts) and the mosh server is unreachable, Tessera tells you
 ("mosh is unreachable through the jump chain…") and reconnects over SSH.
 
-## launch modes
+## Launch modes
 
 - **auto-tmux** — attach to (or create) a per-host tmux session with a
   deterministic `tessera-XXXXXXXX` name, remembered across app reinstalls.
@@ -46,14 +54,14 @@ See [tmux](tmux.md) for what the tmux modes give you, and
 [port forwarding](port-forwarding.md#mosh-and-forwarding) for how the launch
 mode interacts with tunnels.
 
-## jump hosts
+## Jump hosts
 
 Any saved host can be used as an SSH bastion (ProxyJump): pick it in the host
 editor. Chains nest — the jump host's own jump host extends the chain — and the
 editor shows the resulting path ("a → b → host") with warnings for broken
 chains. Jump-host passwords are kept only for the live session.
 
-## advanced tab
+## Advanced tab
 
 - **os logo** — auto-detected on connect, or set manually (macos, ubuntu,
   debian, alpine, linux, raspbian).
@@ -67,12 +75,12 @@ chains. Jump-host passwords are kept only for the live session.
 > starts. If you change them for a host whose tmux session already exists,
 > kill that session on the server to pick up the changes.
 
-## snippets
+## Snippets
 
 The snippets tab holds a **startup snippet**: commands sent immediately after
 connecting (the same tmux caveat above applies).
 
-## sessions
+## Sessions
 
 Tessera keeps multiple concurrent sessions open to any hosts. Auto-tmux hosts
 are singletons — one tmux control session per host (per host and session name
@@ -85,7 +93,7 @@ Switch between sessions by tapping them, walking neighbors with **⌘⇧K** /
 **⌘⇧J**, or opening the **⌘K** quick-switch palette: type to filter sessions
 (most-recent first) and agents — prefix the query with `@` to scope to agents.
 
-## session restore
+## Session restore
 
 **settings → terminal → startup → previous connections** controls what happens
 on a fresh launch:

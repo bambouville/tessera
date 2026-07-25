@@ -4,7 +4,7 @@ nav: 14
 description: Terminal bells — sound, flash, and background banners — plus agent attention alerts.
 ---
 
-# notifications
+# Notifications
 
 Tessera turns the terminal bell (BEL) into something useful, in three
 independent channels under **settings → terminal → bell**:
@@ -25,7 +25,7 @@ per source (session or tmux window) per 2 seconds.
 Over [tmux](tmux.md), control-mode wiring is what tells Tessera which window
 bell'd, so the flash and the banner point at the right tab.
 
-## agent attention
+## Agent attention
 
 If you use the [agent center](agent-center.md), its **attention
 notifications** are a separate, more precise channel: banners when a Claude

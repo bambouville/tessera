@@ -193,6 +193,64 @@ if (existsSync(join(root, "assets"))) {
   cpSync(join(root, "assets"), join(distDir, "assets"), { recursive: true });
 }
 
+// ─── Search index ───────────────────────────────────────────────────────────
+// One entry per heading section, so a hit lands the reader on the exact
+// anchor rather than the top of a long page. Consumed by assets/search.js,
+// which fetches it only when the reader actually opens search.
+const plainText = (md) =>
+  md
+    .replace(/```[\s\S]*?```/g, " ")            // fenced code
+    .replace(/<[^>]+>/g, " ")                    // raw HTML blocks (figures)
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")      // images
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")   // links → their text
+    .replace(/[`*_>#|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const buildSearchIndex = () => {
+  const entries = [];
+  for (const page of ordered) {
+    const url = slugToUrl(page.slug);
+    const seen = new Map();
+    let current = { heading: null, anchor: null, lines: [] };
+    const flush = () => {
+      const text = plainText(current.lines.join("\n"));
+      // Keep headingless page intros only when they carry real text.
+      if (!current.heading && !text) return;
+      entries.push({
+        u: url,
+        p: page.title,
+        h: current.heading,
+        a: current.anchor,
+        x: text.slice(0, 600),
+      });
+    };
+    for (const line of page.body.split("\n")) {
+      const m = line.match(/^(#{1,6})\s+(.*)$/);
+      if (!m) { current.lines.push(line); continue; }
+      flush();
+      const heading = m[2].replace(/[`*]/g, "").trim();
+      const base = slugify(m[2]);
+      const n = seen.get(base) || 0;
+      seen.set(base, n + 1);
+      // The h1 is the page itself; deeper headings anchor to their section.
+      current = {
+        heading: m[1].length === 1 ? null : heading,
+        anchor: m[1].length === 1 ? null : (n > 0 ? `${base}-${n}` : base),
+        lines: [],
+      };
+    }
+    flush();
+  }
+  return entries;
+};
+
+mkdirSync(join(distDir, "assets"), { recursive: true });
+writeFileSync(
+  join(distDir, "assets", "search-index.json"),
+  JSON.stringify(buildSearchIndex()),
+);
+
 if (errors.length) {
   console.error("build failed — dead links:");
   for (const e of errors) console.error(`  ${e}`);

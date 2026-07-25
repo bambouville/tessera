@@ -11,10 +11,29 @@ mockups, no simulated UI.
 
 Two repos are involved:
 
-- `~/tessera` — app, capture probe, driver script, fixtures.
-- `~/bambousite` — the published site. Docs pages are `site/docs/<page>/index.html`,
-  images live in `site/docs/img/`. `main` auto-deploys to bambouville.com via
-  Cloudflare, so a push is a publish.
+- `~/tessera` — app, capture probe, driver script, fixtures, **and the docs
+  themselves**: `docs/site/pages/*.md` plus `template.html`, `build.mjs`, and
+  `assets/`.
+- `~/bambousite` — the published site. `main` auto-deploys to bambouville.com
+  via Cloudflare, so a push is a publish.
+
+**`bambousite/site/docs/` is build output, never a source.** Both
+`scripts/deploy-docs.sh` and the `Publish docs` GitHub Action run
+`rsync -a --delete docs/site/dist/ bambousite/site/docs/`, so anything edited
+there directly — prose, figures, images, scripts — is deleted on the next docs
+build. Every change belongs in `docs/site/`:
+
+| Change | Where it goes |
+|---|---|
+| Prose, headings, figures | `docs/site/pages/*.md` |
+| Page shell, CSS, script tags | `docs/site/template.html` |
+| Screenshots, JS | `docs/site/assets/` → served at `/docs/assets/…` |
+| Generated data (search index) | emitted by `docs/site/build.mjs` |
+
+Build and preview with `cd docs/site && node build.mjs`, then
+`rsync -a --delete dist/ ~/bambousite/site/docs/` and serve `~/bambousite/site`
+locally. Pushing `docs/site/**` triggers the Action, which commits the rebuilt
+output to bambousite on its own.
 
 ## Prerequisites
 
@@ -100,65 +119,35 @@ never ship a frame with system chrome or error banners over the UI.
 
 ## Wire into the docs
 
-Resize to 1500 px wide and place in `~/bambousite/site/docs/img/`:
+Resize to 1500 px wide into the generator's assets:
 
 ```sh
-sips -Z 1500 <src>.png --out ~/bambousite/site/docs/img/<name>.png
+sips -Z 1500 <src>.png --out ~/tessera/docs/site/assets/img/<name>.png
 ```
 
-Insert at the end of the relevant `<h2 id="...">` section. The image is always
-wrapped in a link to itself — the inline column is only ~700 px wide, far too
-narrow to read terminal text:
+Then add the figure to the relevant `docs/site/pages/<page>.md`, at the end of
+the section it illustrates (raw HTML passes straight through Markdown). The
+image is wrapped in a link to itself — the inline column is only ~700 px wide,
+far too narrow to read terminal text:
 
 ```html
 <figure>
-<a href="/docs/img/<name>.png" aria-label="Enlarge screenshot">
-<img src="/docs/img/<name>.png" alt="<what is visible, specifically>" loading="lazy" width="1500" height="1125">
+<a href="/docs/assets/img/<name>.png" aria-label="Enlarge screenshot">
+<img src="/docs/assets/img/<name>.png" alt="<what is visible, specifically>" loading="lazy" width="1500" height="1125">
 </a>
 <figcaption>What the reader should notice.</figcaption>
 </figure>
 ```
 
-`/docs/lightbox.js` (included by each page with figures) intercepts the click
-and enlarges in place: the image animates from its exact position to the centre
-of a dimmed backdrop, and any click, `Esc`, or the `esc` keycap closes it. The
-`href` stays put so the page still works with JS off, and modified clicks
-(cmd/ctrl/shift) fall through to the browser. A page's first figure needs
-`<script defer src="/docs/lightbox.js"></script>` before `</body>`.
+`assets/lightbox.js` enlarges it in place: the image animates from its exact
+position to the centre of a dimmed backdrop, and any click, `Esc`, or the `esc`
+keycap closes it. The `href` stays put so the page still works with JS off, and
+modified clicks (cmd/ctrl/shift) fall through to the browser. The template
+already loads the script and carries the figure CSS, so a new figure needs
+nothing else.
 
-**Placement trap:** if you insert by scanning forward to the next
-`<h2 id="...">`, a figure destined for the page's *last* section has no next
-heading to stop at and gets appended after `</html>`, where it renders
-full-bleed under the footer. Anchor to `</main>` instead — that is the end of
-the content column regardless of which section is last.
-
-Pages that already carry figures have the CSS. A page getting its first figure
-needs this block added after `.docs-content blockquote p { margin: 4px 0; }`:
-
-```css
-  .docs-content figure { margin: 22px 0; }
-  .docs-content figure a {
-    display: block; cursor: zoom-in; text-decoration: none;
-  }
-  .docs-content figure img {
-    display: block; width: 100%; height: auto;
-    border: 1px solid var(--line); border-radius: 10px;
-    transition: border-color 0.15s ease;
-  }
-  .docs-content figure a:hover img { border-color: var(--ink-dim); }
-  .docs-content figure a:focus-visible img {
-    outline: 2px solid var(--blue); outline-offset: 2px;
-  }
-  .docs-content figcaption {
-    margin-top: 8px; font-size: 11.5px; color: var(--ink-dim);
-  }
-```
-
-`text-decoration: none` on the anchor is load-bearing — `.docs-content a`
-underlines links by default. The token colours adapt to dark mode already.
-
-If you touch `lightbox.js`, three things there are load-bearing and were each
-a bug first:
+If you touch `lightbox.js`, three things there are load-bearing and were each a
+bug first:
 
 - The close-on-click listener is attached in a `setTimeout(…, 0)`. The overlay
   is inserted under the cursor, so a listener added synchronously catches the
@@ -169,6 +158,23 @@ a bug first:
 - Caption width is synced from `img.offsetWidth`, never
   `getBoundingClientRect().width`; the latter reports the visual rect, which
   mid-FLIP is still the thumbnail size.
+
+## Search
+
+`build.mjs` emits `assets/search-index.json` — one entry per heading section,
+so a hit lands on the exact anchor rather than the top of a long page. It is
+regenerated on every build; adding or renaming a heading needs no other work.
+
+`assets/search.js` renders the palette: ⌘K / ctrl+K / `/` opens it, ↑↓ move, ↵
+opens, `esc` closes, and the sidebar carries a visible trigger for touch. The
+index is fetched on first open, never on page load. Two things to preserve:
+
+- Opening a result must **not** restore the saved scroll offset. For a
+  same-page anchor the browser has already jumped, and restoring would yank the
+  reader back — hence `close(false)` on navigate.
+- iPadOS does not shrink the visual viewport for the software keyboard, so the
+  palette sits higher under `@media (pointer:coarse)` to keep results visible
+  above it. The `visualViewport` listeners still earn their keep on iPhone.
 
 ## Verify on iPad, not just a desktop browser
 

@@ -4,14 +4,14 @@ nav: 9
 description: A floating thumb-zone puck with radial macros and on-device dictation (experimental).
 ---
 
-# swipe pad
+# Swipe pad
 
 The swipe pad is a floating thumb-zone puck for working without a hardware
 keyboard: flick it to fire per-app macros, double-tap to dictate. It's
 **experimental** and off by default — enable it in
 **settings → experimental → swipe pad**.
 
-## the puck
+## The puck
 
 - **default corner** — where the puck sits at cold launch, until you move it;
   the last position is remembered and re-clamped when the orientation or
@@ -20,7 +20,7 @@ keyboard: flick it to fire per-app macros, double-tap to dictate. It's
 - **long press** picks the puck up; it stays where you drop it (kept fully
   on-screen).
 
-## gestures
+## Gestures
 
 Three discrete gestures:
 
@@ -29,7 +29,7 @@ Three discrete gestures:
 - **double tap** — starts [dictation](#dictation).
 - **long press** — moves the puck.
 
-## profiles
+## Profiles
 
 Radial petals come from **profiles** matched against the foreground process of
 the active pane (via tmux's `pane_current_command`, or `ps` snapshots on plain
@@ -54,7 +54,7 @@ with invalid rules degrades to "status unavailable".
 Petal labels follow the agent-prompt roles — right = approve, left = deny,
 up = always, down = down; unbound petals are hidden.
 
-## the macro language
+## The macro language
 
 Macros are written in a small spec:
 
@@ -64,7 +64,7 @@ Macros are written in a small spec:
 - `\t` (or `tab`), `\r`, `\n`,
 - `\xNN` for an arbitrary byte in hex.
 
-## dictation
+## Dictation
 
 Double-tap the puck to dictate into the terminal. Recognition happens
 **on-device** (SFSpeechRecognizer) — no audio leaves the iPad. It uses your

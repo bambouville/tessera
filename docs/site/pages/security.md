@@ -4,9 +4,9 @@ nav: 13
 description: App lock, biometric key protection, host-key verification, and diagnostics.
 ---
 
-# security & app lock
+# Security & app lock
 
-## app lock
+## App lock
 
 Under **settings → security**, **require device owner authentication to
 unlock** gates the whole app behind Face ID (with device-passcode fallback).
@@ -24,25 +24,25 @@ cancels in-flight SSH handshakes. Even with app lock off, backgrounding the
 app always invalidates the 30-second
 [key authorization bursts](keys.md#authorization-bursts).
 
-## keys
+## Keys
 
 Private keys live in the iOS Keychain; P-256 Enclave keys never leave the
 Secure Enclave and can require biometrics per use. See [keys](keys.md), and
 for the full detail the public
 [private-key security audit](https://github.com/bambouville/tessera/blob/main/docs/private-key-security-audit.md).
 
-## host keys
+## Host keys
 
 Every server is pinned on first contact and re-verified on every connection;
 changed keys raise a loud warning. See [host key verification](host-keys.md).
 
-## privacy
+## Privacy
 
 Tessera has no backend, no account, no analytics — connections go directly
 from your iPad to your machines. The [privacy policy](privacy.md) has the
 details.
 
-## diagnostics
+## Diagnostics
 
 **settings → diagnostics** can write a local log (`tessera-diagnostics.log`,
 capped at 20 MB, redacted) to help with troubleshooting, with **verbose

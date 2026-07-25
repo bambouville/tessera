@@ -4,7 +4,7 @@ nav: 11
 description: Watch and answer every Claude Code and Codex session across your connections (experimental).
 ---
 
-# agent center
+# Agent center
 
 The agent center gathers your Claude Code and Codex sessions from across every
 connection — tmux windows, panes, and raw sessions — onto one page, and lets
@@ -16,7 +16,7 @@ uninstall host hooks.
 Open it from the sidebar's **agents** entry, with **⌘⇧A**, or from the
 top-bar attention button that appears when agents are waiting.
 
-## the agents page
+## The agents page
 
 Cards are grouped by status — **needs input**, **just finished**, **working**,
 **idle**, **status unavailable** — under a summary line
@@ -34,7 +34,15 @@ Each card shows the agent's current prompt. From a card you can:
 Answers re-check the live prompt before being sent, and sends verify
 submission — so you never answer a question the agent already moved past.
 
-## how detection works
+<figure>
+<a href="/docs/assets/img/agent-center.png" aria-label="Enlarge screenshot">
+<img src="/docs/assets/img/agent-center.png" alt="The agents page with cards grouped under needs input, just finished, working, and idle, each card showing provider, session, host, window and pane, plus inline answer buttons and a prompt field." loading="lazy" width="1500" height="1125">
+</a>
+<figcaption>Cards grouped by what needs you first. Blocked agents surface their choices as inline buttons.</figcaption>
+</figure>
+
+
+## How detection works
 
 Baseline detection is heuristic, read from terminal text, using the same
 grammars as [swipe pad profiles](swipe-pad.md#profiles) (built-in Claude Code
@@ -50,7 +58,7 @@ or functions — and adds a sourcing line to `.zshrc` / `.bashrc` (marked
 `# TESSERA-AGENT-LIFECYCLE`). The page shows the hook's state: not installed /
 needs an update / inactive.
 
-## attention notifications
+## Attention notifications
 
 With **agent attention notifications** enabled, Tessera posts an iOS banner —
 "\<host\> · \<window\>", "Claude Code needs input", "… just finished" — when an

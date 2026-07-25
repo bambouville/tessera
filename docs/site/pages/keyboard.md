@@ -5,12 +5,12 @@ group: using tessera
 description: Hardware-keyboard shortcuts, the on-screen accessory bar, and text editing.
 ---
 
-# keyboard & input
+# Keyboard & input
 
 Tessera is keyboard-first. The tables below are the full reference; a
 condensed legend lives in **settings → keyboard & input → shortcuts**.
 
-## global
+## Global
 
 | shortcut | action |
 | --- | --- |
@@ -19,7 +19,7 @@ condensed legend lives in **settings → keyboard & input → shortcuts**.
 | **⌘K** | quick-switch palette (sessions and agents; prefix `@` for agents) |
 | **⌘,** | settings |
 
-## sessions
+## Sessions
 
 | shortcut | action |
 | --- | --- |
@@ -41,7 +41,7 @@ condensed legend lives in **settings → keyboard & input → shortcuts**.
 
 See [tmux](tmux.md) for details.
 
-## find in terminal
+## Find in terminal
 
 **⌘F** (or the magnifier) opens the scrollback find bar: case-sensitive (Aa),
 whole-word ([w]), and regex (.\*) toggles, a match counter, and
@@ -54,7 +54,7 @@ whole-word ([w]), and regex (.\*) toggles, a match counter, and
 | **↩** / **⇧↩** | next / previous match |
 | **esc** | close find |
 
-## text editing
+## Text editing
 
 With **natural text editing** enabled (settings → keyboard & input), the
 mac-style editing chords work in shells:
@@ -66,7 +66,7 @@ mac-style editing chords work in shells:
 | **⌥⌫** | delete word |
 | **⌘⌫** | delete to line start |
 
-## the accessory bar
+## The accessory bar
 
 The on-screen **accessory bar** sits above the software keyboard and gives you
 the keys a glass keyboard lacks. Default chips:
@@ -80,7 +80,7 @@ Under **settings → keyboard & input**:
   `/ \ $ { } [ ] < >`), with **restore defaults** to undo,
 - **modifier behavior** — one-shot (applies to the next key) or sticky.
 
-## the swipe pad
+## The swipe pad
 
 If you work without a hardware keyboard, the experimental
 [swipe pad](swipe-pad.md) adds radial macros and dictation under your thumb.
