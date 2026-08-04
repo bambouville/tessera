@@ -51,6 +51,12 @@ Directory following needs OSC 7 from your shell. Use the panel's **Enable
 follow — install shell integration** button, then `exec $SHELL` or reconnect.
 Details in [files](files.md#following-your-shell).
 
+## Sessions to a WSL host freeze mid-output
+
+The connection is fine but large bursts of output never arrive — an MTU
+mismatch on WSL2's virtual adapter, swallowing every big packet. See
+[WSL MTU stalls](wsl-mtu.md).
+
 ## Local network connections fail
 
 iPadOS gates LAN access behind the **Local Network** permission. If you denied

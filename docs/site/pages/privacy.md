@@ -1,6 +1,6 @@
 ---
 title: privacy policy
-nav: 16
+nav: 17
 group: legal
 description: Tessera collects no data — no analytics, no tracking, no telemetry.
 ---
