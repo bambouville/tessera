@@ -10,6 +10,7 @@
 // Design reference: docs/mockups/remote-files/index.html.
 
 import SwiftUI
+import UIKit
 
 /// Drop-on-terminal (mockup §4): the terminal surface accepts file
 /// drops — upload to the host's temp dir, then type the quoted path
@@ -244,6 +245,10 @@ struct FilesPanelView: View {
     /// feeds the context-menu backstop stand-in so it matches the glass
     /// over the picture; defaults nil for the harness and previews.
     var terminalBackground: ResolvedTerminalBackground? = nil
+    #if DEBUG
+    /// Harness hook for capturing compact quick-open without simulator input.
+    var initiallyShowingQuickOpen = false
+    #endif
 
     /// Drives the floating-card surface material (liquid glass / frosted
     /// / solid), matching the sidebar and top bar. Injected app-wide via
@@ -251,6 +256,10 @@ struct FilesPanelView: View {
     @Environment(AppearancePreferences.self) private var appearance
 
     static let width: CGFloat = 340
+
+    private var isPhone: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+    }
 
     /// Backoff for auto-reconnect: an open panel reconnects a dropped/
     /// idle bridge by itself (opening the panel IS the intent to browse),
@@ -318,6 +327,13 @@ struct FilesPanelView: View {
     // the same wall — see moshTerminalSurface's extraction note).
     var body: some View {
         panelChrome
+            .onAppear {
+                #if DEBUG
+                if initiallyShowingQuickOpen {
+                    showingQuickOpen = true
+                }
+                #endif
+            }
             .onChange(of: showingNewFolder) { _, _ in syncTextEntryFlag() }
             .onChange(of: showingInstallConfirm) { _, _ in syncTextEntryFlag() }
             .onChange(of: renameTarget) { _, _ in syncTextEntryFlag() }
@@ -368,6 +384,11 @@ struct FilesPanelView: View {
                     .padding(.bottom, 6)
             }
             toolbar
+            if isPhone, showingQuickOpen {
+                compactQuickOpen
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 6)
+            }
             if controller.searchActive {
                 searchRow
                     .padding(.horizontal, 10)
@@ -379,7 +400,12 @@ struct FilesPanelView: View {
                 transferStrip(transfers)
             }
         }
-        .frame(width: Self.width)
+        // The 340pt inspector is deliberate on iPad, where it floats over a
+        // much wider terminal. On iPhone the panel already lives in a sheet;
+        // let it use that compact surface instead of nesting an iPad-width
+        // card inside the phone's limited width.
+        .frame(width: isPhone ? nil : Self.width)
+        .frame(maxWidth: isPhone ? .infinity : nil)
         .frame(maxHeight: .infinity)
         // Touch-down sensor for the backstop (see MARK above). Zero
         // minimum distance so it reports at first contact; simultaneous
@@ -470,26 +496,36 @@ struct FilesPanelView: View {
             Image(systemName: "folder")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(T.fgMuted)
-            Text("Files")
-                .font(Typography.tesseraSans(size: 12.5, weight: .semibold))
+            Text("files")
+                .font(Typography.tesseraMono(size: 13, weight: .medium))
                 .foregroundStyle(T.fg)
             Spacer(minLength: 4)
-            bridgeChip
-            Button {
-                controller.close()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(T.fgDim)
-                    .frame(width: 24, height: 22)
-                    .contentShape(Rectangle())
+            // Gap 0: the close button's hit frame supplies the old 8 pt
+            // chip gap and 12 pt trailing edge, so nothing moves.
+            HStack(spacing: 0) {
+                bridgeChip
+                Button {
+                    controller.close()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(T.fgDim)
+                        .frame(width: 24, height: 22)      // unchanged visual
+                        // 44 pt-wide hit frame: iPadOS 26 expands sub-44 pt
+                        // targets itself and mis-assigns taps. Height stops
+                        // at the header's bottom edge so the frame cannot
+                        // overlap the path bar's tap area below.
+                        .padding(.leading, 8)
+                        .padding(.trailing, 12)
+                        .frame(height: 38)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("close files panel")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("close files panel")
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
+        .padding(.leading, 12)
+        .padding(.top, 4)
     }
 
     @ViewBuilder
@@ -782,7 +818,9 @@ struct FilesPanelView: View {
     // MARK: - Toolbar
 
     private var toolbar: some View {
-        HStack(spacing: 2) {
+        // Gap 0 + 9 pt edges: the 30 pt hit frames supply the old 2 pt
+        // gaps and 6 pt bottom padding, keeping glyph centers put.
+        HStack(spacing: 0) {
             toolButton("arrow.up.doc", label: "upload here",
                        disabled: controller.onUploadRequested == nil) {
                 controller.onUploadRequested?()
@@ -816,8 +854,7 @@ struct FilesPanelView: View {
             }
             quickOpenButton
         }
-        .padding(.horizontal, 10)
-        .padding(.bottom, 6)
+        .padding(.horizontal, 9)
     }
 
     private func toggleSearch() {
@@ -829,15 +866,28 @@ struct FilesPanelView: View {
 
     /// §4 quick open: anchored popover with one mono path field —
     /// file → Quick Look, directory → the panel browses there.
+    @ViewBuilder
     private var quickOpenButton: some View {
+        if isPhone {
+            quickOpenToggle
+        } else {
+            quickOpenToggle
+                .popover(isPresented: $showingQuickOpen, arrowEdge: .top) {
+                    quickOpenPopover
+                        .presentationCompactAdaptation(.popover)
+                }
+        }
+    }
+
+    private var quickOpenToggle: some View {
         toolButton("doc.viewfinder", label: "open by path",
                    accented: showingQuickOpen,
                    disabled: controller.bridge == nil) {
-            showingQuickOpen = true
-        }
-        .popover(isPresented: $showingQuickOpen, arrowEdge: .top) {
-            quickOpenPopover
-                .presentationCompactAdaptation(.popover)
+            if isPhone {
+                showingQuickOpen.toggle()
+            } else {
+                showingQuickOpen = true
+            }
         }
     }
 
@@ -855,12 +905,19 @@ struct FilesPanelView: View {
                 .foregroundStyle(disabled ? T.fgFaint
                                  : accented ? T.accent
                                  : active ? T.fg : T.fgMuted)
-                .frame(width: 28, height: 24)
+                .frame(width: 28, height: 24)      // unchanged visual
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(accented ? T.accentSoft
                               : active ? T.inputBgSoft : Color.clear)
                 )
+                // Full-pitch hit frame: the bar's 30 pt pitch cannot absorb
+                // 44 pt without moving glyphs, so each frame fills the pitch
+                // (gap 0) and the bar's height instead — iPadOS 26 expands
+                // sub-44 pt targets itself and mis-assigns taps between
+                // adjacent small controls. Top-aligned: the extra 6 pt
+                // replaces the bar's old bottom padding, not the row above.
+                .frame(width: 30, height: 30, alignment: .top)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -906,7 +963,7 @@ struct FilesPanelView: View {
             .accessibilityLabel("close filter")
         }
         .padding(.horizontal, 8)
-        .frame(height: 28)
+        .frame(minHeight: 28)
         .background(T.inputBg)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
@@ -1009,7 +1066,7 @@ struct FilesPanelView: View {
                     .font(.system(size: 16))
                     .foregroundStyle(T.amber)
                 Text(message)
-                    .font(Typography.tesseraSans(size: 11.5))
+                    .font(Typography.tesseraMono(size: 11))
                     .foregroundStyle(T.fgMuted)
                     .multilineTextAlignment(.center)
                 retryButton
@@ -1018,7 +1075,7 @@ struct FilesPanelView: View {
                     .font(.system(size: 16))
                     .foregroundStyle(T.fgDim)
                 Text("Connection lost")
-                    .font(Typography.tesseraSans(size: 11.5))
+                    .font(Typography.tesseraMono(size: 11))
                     .foregroundStyle(T.fgMuted)
                 retryButton
             case .idle:
@@ -1029,7 +1086,7 @@ struct FilesPanelView: View {
                     .font(.system(size: 16))
                     .foregroundStyle(T.fgDim)
                 Text("Disconnected")
-                    .font(Typography.tesseraSans(size: 11.5))
+                    .font(Typography.tesseraMono(size: 11))
                     .foregroundStyle(T.fgMuted)
                 retryButton
             case .connected:
@@ -1430,13 +1487,35 @@ struct FilesPanelView: View {
     // MARK: - Quick open popover (§4)
 
     private var quickOpenPopover: some View {
+        quickOpenContent
+            .padding(12)
+            .frame(width: 300)
+            .presentationBackground(T.isLight ? Color(rgbInt: 0xF2F2F7) : Color(rgbInt: 0x1C1C1E))
+            .onAppear { quickOpenFocused = true }
+            .onDisappear { resetQuickOpen() }
+    }
+
+    private var compactQuickOpen: some View {
+        quickOpenContent
+            .padding(10)
+            .background(T.inputBg)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(T.border, lineWidth: 0.5)
+            )
+            .onAppear { quickOpenFocused = true }
+            .onDisappear { resetQuickOpen() }
+    }
+
+    private var quickOpenContent: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "doc.viewfinder")
                     .font(.system(size: 11))
                     .foregroundStyle(T.fgMuted)
-                Text("Open by path")
-                    .font(Typography.tesseraSans(size: 11.5, weight: .semibold))
+                Text("open by path")
+                    .font(Typography.tesseraMono(size: 11.5, weight: .medium))
                     .foregroundStyle(T.fg)
             }
             quickOpenField
@@ -1453,14 +1532,11 @@ struct FilesPanelView: View {
                 quickOpenRecents
             }
         }
-        .padding(12)
-        .frame(width: 300)
-        .presentationBackground(T.isLight ? Color(rgbInt: 0xF2F2F7) : Color(rgbInt: 0x1C1C1E))
-        .onAppear { quickOpenFocused = true }
-        .onDisappear {
-            quickOpenText = ""
-            quickOpenCompletion.clear()
-        }
+    }
+
+    private func resetQuickOpen() {
+        quickOpenText = ""
+        quickOpenCompletion.clear()
     }
 
     private var quickOpenField: some View {
@@ -1502,7 +1578,7 @@ struct FilesPanelView: View {
                 }
         }
         .padding(.horizontal, 8)
-        .frame(height: 28)
+        .frame(minHeight: 28)
         .background(T.inputBg)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(

@@ -2,6 +2,57 @@ import XCTest
 @testable import Tessera
 
 final class ModifierStateTests: XCTestCase {
+    func testSoftwareKeyboardDismissalPersistsUntilExplicitRequest() {
+        let state = ModifierState()
+        var resignCount = 0
+        state.noteSoftwareKeyboardRequested {
+            resignCount += 1
+            return true
+        }
+
+        state.dismissSoftwareKeyboard()
+        XCTAssertTrue(state.suppressesSoftwareKeyboardReclaim)
+        XCTAssertEqual(resignCount, 1)
+
+        state.noteSoftwareKeyboardRequested { false }
+        XCTAssertFalse(state.suppressesSoftwareKeyboardReclaim)
+    }
+
+    func testSoftwareKeyboardRequestRestoresResponderReclaim() {
+        let state = ModifierState()
+        var becomeCount = 0
+        state.noteSoftwareKeyboardRequested(
+            resign: { true },
+            become: {
+                becomeCount += 1
+                return true
+            }
+        )
+
+        state.dismissSoftwareKeyboard()
+        XCTAssertTrue(state.suppressesSoftwareKeyboardReclaim)
+        XCTAssertTrue(state.showSoftwareKeyboard())
+        XCTAssertFalse(state.suppressesSoftwareKeyboardReclaim)
+        XCTAssertEqual(becomeCount, 1)
+    }
+
+    func testSoftwareKeyboardPipelineConsumesOnlyAnEligibleNextKey() {
+        let state = ModifierState()
+        state.tap(.ctrl)
+
+        XCTAssertEqual(
+            state.encodeSoftwareKeyboardPayload(Array("paste".utf8)),
+            Array("paste".utf8)
+        )
+        XCTAssertTrue(state.armed.ctrl)
+
+        XCTAssertEqual(
+            state.encodeSoftwareKeyboardPayload(Array("c".utf8)),
+            [0x03]
+        )
+        XCTAssertEqual(state.armed, .none)
+    }
+
     func test_initialArmedIsNone() {
         let state = ModifierState()
 

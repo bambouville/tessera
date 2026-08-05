@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tessera — Continuity takeover: blur + take-back overlay</title>
+<style>
+  /* ── Real tokens: DesignTokens.swift (dark, blue accent) + terminal chrome ── */
+  :root {
+    color-scheme: dark;
+    --page: #181818;
+    --page-fg: #fff;
+    --page-muted: rgba(235,235,245,.60);
+    --page-dim: rgba(235,235,245,.35);
+    --page-border: rgba(255,255,255,.10);
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { background: var(--page); }
+  body {
+    font-family: var(--sans); color: var(--page-fg); background: var(--page);
+    padding: 44px 30px 120px; max-width: 1360px; margin: 0 auto;
+    -webkit-font-smoothing: antialiased; line-height: 1.5;
+  }
+  h1 { font: 500 26px/1.25 var(--mono); letter-spacing: -.02em; }
+  h2 { font-size: 19px; font-weight: 600; letter-spacing: -.01em; margin: 72px 0 6px;
+       padding-top: 24px; border-top: 1px solid var(--page-border); }
+  h3 { font-size: 15px; font-weight: 600; margin: 26px 0 8px; }
+  p.sub  { color: var(--page-muted); font-size: 14px; margin: 8px 0 0; max-width: 920px; }
+  p.note { color: var(--page-dim); font-size: 12.5px; margin: 10px 0 0; max-width: 920px; }
+  code { font-family: var(--mono); font-size: .86em; background: #141414;
+         border: 1px solid var(--page-border); border-radius: 4px; padding: 1px 5px; color: var(--page-muted); }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
+  .chip { font: 500 11.5px var(--mono); color: var(--page-muted);
+          border: 1px solid rgba(255,255,255,.14); border-radius: 100px; padding: 3px 10px;
+          display: inline-flex; align-items: center; gap: 6px; }
+  .chip .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .dot.ok  { background: #30D158; }
+  .dot.acc { background: #5B9FFF; }
+  .dot.mid { background: #FF9F0A; }
+
+  svg.g { stroke: currentColor; fill: none; stroke-width: 1.6;
+          stroke-linecap: round; stroke-linejoin: round; flex: none; display: block; }
+
+  /* ───────── demo controls ───────── */
+  .controls { display: flex; gap: 10px 14px; flex-wrap: wrap; align-items: center; margin: 22px 0 6px; }
+  .controls .lbl { font: 600 9px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase;
+                   color: var(--page-dim); margin-right: -2px; }
+  .btn { appearance: none; border: 1px solid rgba(255,255,255,.14); border-radius: 9px;
+         background: #101010; color: var(--page-muted); font: 500 12px var(--sans);
+         padding: 7px 14px; cursor: pointer; }
+  .btn:hover:not(:disabled) { color: #fff; border-color: rgba(255,255,255,.28); }
+  .btn:disabled { opacity: .35; cursor: default; }
+  .btn.primary { background: rgba(91,159,255,.14); border-color: rgba(91,159,255,.4); color: #5B9FFF; }
+  .ctl { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--page-muted); }
+  .ctl input { accent-color: #5B9FFF; }
+
+  /* ───────── stage: two devices ───────── */
+  .stage { display: grid; grid-template-columns: minmax(640px, 1fr) 320px; gap: 32px;
+           align-items: start; margin-top: 22px; }
+  .slot { min-width: 0; }
+  .caption { margin: 0 0 10px 2px; color: var(--page-dim); font: 10.5px/1.5 var(--mono); }
+  .caption b { color: var(--page-muted); font-weight: 500; }
+  .statebadge { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 100px;
+    border: 1px solid rgba(255,255,255,.14); font: 500 9.5px var(--mono); color: var(--page-muted); }
+  .statebadge.active   { border-color: rgba(48,209,88,.5);  color: #30D158; }
+  .statebadge.yielded  { border-color: rgba(255,159,10,.5); color: #FF9F0A; }
+  .statebadge.transient{ border-color: rgba(91,159,255,.5); color: #5B9FFF; }
+  .statebadge.ended    { border-color: rgba(255,69,58,.5);  color: #FF453A; }
+
+  .device {
+    --bg: #000; --fg: #D4D4D4;
+    --fg-muted: rgba(235,235,245,.60); --fg-dim: rgba(235,235,245,.35); --fg-faint: rgba(235,235,245,.18);
+    --accent: #5B9FFF; --accent-soft: rgba(91,159,255,.14);
+    --green: #30D158; --red: #FF453A; --amber: #FF9F0A;
+    --border: rgba(255,255,255,.08); --border-strong: rgba(255,255,255,.14);
+    --glass-tint: rgba(0,0,0,.35);
+    position: relative; overflow: hidden; background: var(--bg); color: var(--fg);
+    border: 1px solid var(--border-strong);
+    box-shadow: 0 28px 60px rgba(0,0,0,.4), inset 0 0 0 1px rgba(255,255,255,.03);
+  }
+  .ipad { width: 100%; aspect-ratio: 1194/834; border-radius: 24px; }
+  .iphone { width: 320px; aspect-ratio: 393/852; border-radius: 48px; }
+  .iphone::before { content: ""; position: absolute; z-index: 90; top: 11px; left: 50%;
+    translate: -50% 0; width: 98px; height: 27px; border-radius: 17px; background: #000;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.05); }
+  .iphone::after { content: ""; position: absolute; z-index: 90; bottom: 7px; left: 50%;
+    translate: -50% 0; width: 112px; height: 4px; border-radius: 3px; background: #fff; opacity: .8; }
+
+  /* ── SessionTopBar pill (spec: h32 r13 margins 8/10, tint bg@0.35, hairline .5) ── */
+  .pill { position: absolute; top: 8px; left: 10px; right: 10px; height: 32px; z-index: 60;
+    border-radius: 13px; display: flex; align-items: center; padding: 0 4px;
+    background: linear-gradient(rgba(210,210,214,.07), rgba(210,210,214,.04)), var(--glass-tint);
+    -webkit-backdrop-filter: blur(20px) saturate(160%); backdrop-filter: blur(20px) saturate(160%);
+    box-shadow: 0 0 0 .5px var(--border), 0 6px 22px rgba(0,0,0,.35); }
+  .iphone .pill { top: 48px; }
+  .device[data-cstate="list"] .pill { opacity: 0; pointer-events: none; }
+  .hostpill { display: flex; align-items: center; gap: 6px; padding: 0 8px; height: 32px; flex: none; }
+  .hostpill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex: none;
+    transition: background .3s; }
+  .hostpill .name { font: 500 12px var(--mono); color: var(--fg); white-space: nowrap; }
+  .hostpill .sep { font: 400 11px var(--mono); color: var(--fg-dim); }
+  .hostpill .tag { font: 600 10px var(--sans); letter-spacing: .05em; color: var(--fg-muted); }
+  .tabs { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 4px;
+          flex: 1 1 auto; min-width: 0; overflow: hidden; }
+  .tab { display: flex; align-items: center; height: 24px; border-radius: 12px; flex: none;
+         padding: 0 11px; }
+  .tab span { font: 400 12px var(--mono); color: var(--fg-muted); white-space: nowrap; }
+  .tab.active { background: var(--accent-soft); }
+  .tab.active span { font-weight: 500; color: var(--fg); }
+
+  /* continuity chip in the top bar (appears while yielded) */
+  .contchip { display: none; align-items: center; gap: 6px; height: 22px; padding: 0 9px;
+    margin-right: 4px; border-radius: 11px; flex: none;
+    box-shadow: 0 0 0 .5px var(--border-strong); color: var(--fg-muted);
+    font: 500 10.5px var(--mono); white-space: nowrap; }
+  .contchip svg.g { width: 10px; height: 13px; }
+  .device[data-cstate="yielded"] .contchip,
+  .device[data-cstate="offline"] .contchip { display: inline-flex; }
+
+  /* ── terminal canvas ── */
+  .term { position: absolute; inset: 0; padding: 52px 16px 14px;
+    font: 12.5px/1.5 var(--mono); color: var(--fg); overflow: hidden; user-select: none;
+    transition: filter .45s ease, opacity .45s ease, transform .45s ease; }
+  .iphone .term { padding: 92px 12px 14px; font-size: 10.5px; }
+  .term .p { color: var(--green); }
+  .term .d { color: var(--fg-dim); }
+  .term .b { color: var(--accent); }
+  .term .y { color: var(--amber); }
+  .term .r { color: var(--red); }
+  .term .m { color: var(--fg-muted); }
+  .term .cursor { display: inline-block; width: 7px; height: 14px; background: var(--fg);
+    vertical-align: text-bottom; animation: blink 1.1s step-end infinite; }
+  .iphone .term .cursor { width: 6px; height: 12px; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .term pre { font: inherit; white-space: pre; }
+
+  /* wide grid (device is authority) vs narrow reflow (peer forced its size) */
+  .term .wide, .term .narrow { position: absolute; inset: 52px 16px 14px; transition: opacity .3s; }
+  .iphone .term .wide, .iphone .term .narrow { inset: 92px 12px 14px; }
+  .term .narrow { width: 46ch; opacity: 0; }
+  .device[data-grid="narrow"] .term .wide { opacity: 0; }
+  .device[data-grid="narrow"] .term .narrow { opacity: 1; }
+  .device[data-grid="wide"] .term .narrow { opacity: 0; }
+
+  /* today's bug: the narrow grid scaled up to fill — jaggy, wrong aspect */
+  .device.artifact[data-cstate="yielded"] .term { filter: none !important; }
+  .device.artifact[data-cstate="yielded"] .term .narrow {
+    opacity: 1; transform: scale(1.62, 1.08); transform-origin: top left;
+    image-rendering: pixelated; filter: blur(.4px) contrast(1.15);
+    letter-spacing: .12em;
+  }
+  .device.artifact[data-cstate="yielded"] .term .wide { opacity: 0; }
+  .device.artifact[data-cstate="yielded"] .veil { opacity: 0 !important; pointer-events: none; }
+  .device.artifact[data-cstate="yielded"]::after {
+    content: ""; position: absolute; inset: 0; z-index: 30; pointer-events: none;
+    background: repeating-linear-gradient(0deg, transparent 0 3px, rgba(255,255,255,.022) 3px 4px);
+  }
+
+  /* blur applied to the terminal layer while yielded/reclaiming/offline */
+  .device[data-cstate="yielded"] .term,
+  .device[data-cstate="offline"] .term { filter: blur(14px) saturate(1.2) brightness(.8); transform: scale(1.015); }
+  .device[data-cstate="reclaiming"] .term { filter: blur(7px) brightness(.9); }
+  .device[data-cstate="ended"] .term { filter: blur(14px) brightness(.55) saturate(.6); }
+
+  /* ── continuity veil + card ── */
+  .veil { position: absolute; inset: 0; z-index: 40; display: flex; align-items: center;
+    justify-content: center; opacity: 0; pointer-events: none;
+    background: rgba(0,0,0,.30);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    transition: opacity .4s ease; cursor: pointer; }
+  .device[data-cstate="yielded"] .veil,
+  .device[data-cstate="reclaiming"] .veil,
+  .device[data-cstate="offline"] .veil,
+  .device[data-cstate="ended"] .veil { opacity: 1; pointer-events: auto; }
+  .device[data-cstate="reclaiming"] .veil,
+  .device[data-cstate="ended"] .veil { cursor: default; }
+
+  .ccard { display: flex; flex-direction: column; align-items: center; gap: 0; text-align: center;
+    padding: 26px 34px 22px; border-radius: 18px; max-width: 340px;
+    background: linear-gradient(rgba(210,210,214,.06), rgba(210,210,214,.03)), rgba(10,10,12,.55);
+    -webkit-backdrop-filter: blur(28px) saturate(150%); backdrop-filter: blur(28px) saturate(150%);
+    box-shadow: 0 0 0 .5px var(--border-strong), 0 18px 48px rgba(0,0,0,.45); }
+  .iphone .ccard { padding: 22px 24px 18px; max-width: 250px; border-radius: 16px; }
+  .ccard .glyph { color: var(--fg-muted); margin-bottom: 14px; position: relative;
+    animation: breathe 2.6s ease-in-out infinite; }
+  @keyframes breathe { 50% { opacity: .55; } }
+  .ccard .glyph svg.g { width: 44px; height: 44px; stroke-width: 1.3; }
+  .ccard .ttl { font: 500 15px var(--mono); color: var(--fg); letter-spacing: -.01em; }
+  .iphone .ccard .ttl { font-size: 13.5px; }
+  .ccard .msg { font: 400 12.5px/1.5 var(--sans); color: var(--fg-muted); margin-top: 7px; }
+  .iphone .ccard .msg { font-size: 11.5px; }
+  .ccard .takeback { margin-top: 18px; display: inline-flex; align-items: center; gap: 8px;
+    height: 34px; padding: 0 16px; border-radius: 17px; border: none; cursor: pointer;
+    background: rgba(210,210,214,.10); color: var(--fg);
+    box-shadow: 0 0 0 .5px var(--border-strong); font: 500 12.5px var(--sans); }
+  .ccard .takeback:hover { background: rgba(210,210,214,.16); }
+  .ccard .takeback svg.g { width: 13px; height: 13px; }
+  .ccard .hint { font: 400 10.5px var(--mono); color: var(--fg-faint); margin-top: 11px; }
+
+  /* card variants */
+  .ccard .spin { display: none; width: 26px; height: 26px; border-radius: 50%; margin-bottom: 14px;
+    border: 2px solid var(--fg-faint); border-top-color: var(--fg); animation: rot .8s linear infinite; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+  .device[data-cstate="reclaiming"] .ccard .glyph,
+  .device[data-cstate="reclaiming"] .ccard .takeback,
+  .device[data-cstate="reclaiming"] .ccard .hint,
+  .device[data-cstate="reclaiming"] .ccard .msg { display: none; }
+  .device[data-cstate="reclaiming"] .ccard .spin { display: block; }
+
+  .veil .offline-extra, .veil .ended-extra { display: none; }
+  .device[data-cstate="offline"] .ccard .glyph svg.hand { display: none; }
+  .device[data-cstate="offline"] .ccard .takeback { opacity: .35; pointer-events: none; }
+  .device[data-cstate="offline"] .ccard .hint { display: none; }
+
+  /* toast (auto-resume notice) */
+  .toast { position: absolute; left: 50%; bottom: 22px; translate: -50% 0; z-index: 70;
+    display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 14px;
+    border-radius: 15px; background: rgba(10,10,12,.72);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+    box-shadow: 0 0 0 .5px var(--border-strong); color: var(--fg-muted);
+    font: 500 11.5px var(--sans); white-space: nowrap;
+    opacity: 0; transition: opacity .3s, translate .3s; pointer-events: none; }
+  .toast.show { opacity: 1; translate: -50% -4px; }
+  .toast svg.g { width: 12px; height: 12px; color: var(--green); }
+
+  /* iPhone sessions-list screen (pre-attach) */
+  .phonehome { position: absolute; inset: 0; z-index: 50; background: var(--bg);
+    padding: 64px 16px 20px; display: flex; flex-direction: column; gap: 10px;
+    transition: opacity .35s, transform .35s; }
+  .phonehome.gone { opacity: 0; transform: scale(.98); pointer-events: none; }
+  .phonehome .ph-title { font: 500 22px var(--mono); color: #fff; margin: 4px 4px 10px; }
+  .sessrow { display: flex; align-items: center; gap: 11px; padding: 12px 13px; border-radius: 13px;
+    background: #0A0A0A; box-shadow: 0 0 0 .5px var(--border); cursor: pointer; }
+  .sessrow:hover { box-shadow: 0 0 0 .5px var(--border-strong); }
+  .sessrow .sdot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex: none; }
+  .sessrow .scol { flex: 1 1 auto; min-width: 0; }
+  .sessrow .sname { font: 500 12.5px var(--mono); color: var(--fg); }
+  .sessrow .ssub { font: 400 10.5px var(--mono); color: var(--fg-dim); margin-top: 2px;
+    display: flex; align-items: center; gap: 5px; }
+  .sessrow .ssub svg.g { width: 9px; height: 12px; }
+  .sessrow .continue { font: 500 11px var(--sans); color: var(--accent); background: var(--accent-soft);
+    border: none; border-radius: 100px; padding: 5px 12px; cursor: pointer; flex: none; }
+  .sessrow.dim { opacity: .5; }
+  .sessrow.dim .continue { display: none; }
+
+  /* ended card */
+  .device[data-cstate="ended"] .ccard .glyph,
+  .device[data-cstate="ended"] .ccard .takeback,
+  .device[data-cstate="ended"] .ccard .hint { display: none; }
+  .device[data-cstate="ended"] .ccard .ttl::after { content: ""; }
+
+  /* ───────── event log ───────── */
+  .eventlog { margin-top: 26px; border: 1px solid var(--page-border); border-radius: 14px;
+    background: #101010; padding: 14px 18px; max-height: 190px; overflow-y: auto; }
+  .eventlog h4 { font: 600 9px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase;
+    color: var(--page-dim); margin-bottom: 10px; }
+  .ev { display: flex; gap: 12px; font: 400 11.5px/1.7 var(--mono); color: var(--page-muted); }
+  .ev .t { color: var(--page-dim); flex: none; }
+  .ev b { color: #fff; font-weight: 500; }
+  .ev .arr { color: var(--page-dim); }
+  .ev .st-active { color: #30D158; } .ev .st-yielded { color: #FF9F0A; }
+  .ev .st-trans { color: #5B9FFF; } .ev .st-ended { color: #FF453A; }
+
+  /* ───────── state machine diagram ───────── */
+  .smwrap { margin-top: 20px; border: 1px solid var(--page-border); border-radius: 14px;
+    background: #101010; padding: 24px; overflow-x: auto; }
+  .smwrap svg { display: block; min-width: 860px; width: 100%; height: auto; font-family: var(--mono); }
+  .smwrap .box { fill: #0A0A0A; stroke: rgba(255,255,255,.14); rx: 12; }
+  .smwrap .box.hl { stroke: rgba(255,159,10,.55); }
+  .smwrap text { fill: rgba(235,235,245,.60); font-size: 11px; }
+  .smwrap text.title { fill: #fff; font-size: 13px; font-weight: 500; }
+  .smwrap text.lab { fill: rgba(235,235,245,.45); font-size: 10px; }
+  .smwrap text.labhl { fill: #FF9F0A; }
+  .smwrap path.edge { stroke: rgba(235,235,245,.35); fill: none; stroke-width: 1.3; marker-end: url(#arr); }
+  .smwrap path.edge.hl { stroke: rgba(255,159,10,.8); }
+  .smwrap path.edge.auto { stroke-dasharray: 4 4; }
+
+  table.spec { border-collapse: collapse; margin-top: 16px; font-size: 12.5px; width: 100%; }
+  table.spec th, table.spec td { text-align: left; padding: 7px 18px 7px 0; vertical-align: top; }
+  table.spec th { color: var(--page-dim); font-weight: 500; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .06em; border-bottom: 1px solid var(--page-border); }
+  table.spec td { color: var(--page-muted); border-bottom: 1px solid rgba(255,255,255,.04); }
+  table.spec td:first-child { color: #fff; font-family: var(--mono); font-size: 11.5px; white-space: nowrap; }
+  table.spec td code { white-space: nowrap; }
+
+  .speclist { margin-top: 12px; }
+  .speclist li { font-size: 12.5px; color: var(--page-muted); margin: 6px 0 6px 18px; }
+  .speclist li b { color: #fff; font-weight: 500; }
+
+  /* decision cards */
+  .decisions { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px; margin-top: 20px; }
+  .dcard { border: 1px solid var(--page-border); border-radius: 14px; background: #101010;
+    padding: 16px 18px; }
+  .dcard .dnum { font: 600 9px var(--mono); letter-spacing: .1em; color: #5B9FFF; }
+  .dcard h4 { font-size: 13.5px; font-weight: 600; margin: 6px 0 6px; }
+  .dcard p { font-size: 12px; color: var(--page-muted); }
+  .dcard .pick { margin-top: 10px; font-size: 12px; color: var(--page-muted); }
+  .dcard .pick b { color: #30D158; font-weight: 500; }
+</style>
+</head>
+<body>
+
+<h1>continuity — takeover overlay</h1>
+<p class="sub">When another device continues a live tmux-backed session, the device that lost
+the grid currently keeps rendering a size that no longer matches its screen — scaling
+artifacts. Proposal: the moment grid authority changes hands — an explicit
+<code>@tessera_authority</code> stamp the taking device writes on the tmux server — blur the
+terminal and show a frosted take-back card. Tapping it (or pressing any key) re-stamps
+authority, re-forces this device's size if it differs, and resyncs. The two devices below share
+one simulated tmux session — click through every transition live.</p>
+<div class="chips">
+  <span class="chip"><span class="dot acc"></span>blur hides the mis-sized grid — feed stays live beneath</span>
+  <span class="chip"><span class="dot acc"></span>detection: explicit stamp on the tmux server · %subscription-changed push · no P2P</span>
+  <span class="chip"><span class="dot ok"></span>tap · or any key — takes control back</span>
+  <span class="chip"><span class="dot ok"></span>symmetric: either device can yield / reclaim</span>
+  <span class="chip"><span class="dot mid"></span>arms only for tmux launch modes — customCommand reconnects a fresh shell, nothing to take back</span>
+</div>
+
+<h2 id="demo">1 · Interactive demo — both devices, one session</h2>
+<p class="sub">Start state: the iPad owns session <code>dev-1</code>. On the iPhone, tap
+<b>continue</b> — the iPad yields and blurs. Tap the iPad's veil (or its <b>take back
+control</b> pill) to reclaim; the iPhone then yields in mirror. The scenario buttons inject the
+edge events. The <b>same-grid iPad continues</b> button simulates a third device whose grid
+matches this iPad's exactly — stamp-only detection, zero artifacts, instant take-back.</p>
+<p class="note">Entry is the existing Handoff continuation flow (the sessions-list row stands
+in for it), but detection never depends on it: the taking device writes the
+<code>@tessera_authority</code> stamp on the tmux server, which reaches the yielded device as a
+<code>%subscription-changed</code> push — same-grid takeovers included. A laptop's bare
+<code>tmux attach</code> writes no stamp and is caught by the size-mismatch fallback; a bare
+attach with an identical grid stays invisible, which is harmless — nothing mis-renders.</p>
+
+<div class="controls">
+  <span class="lbl">scenario</span>
+  <button class="btn" id="bContinue">iPhone continues session</button>
+  <button class="btn" id="bIpad2">same-grid iPad continues</button>
+  <button class="btn" id="bDetach" disabled>iPhone leaves (detach)</button>
+  <button class="btn" id="bDrop" disabled>drop iPad connection</button>
+  <button class="btn" id="bKill">remote kills session</button>
+  <button class="btn primary" id="bReset">reset</button>
+  <label class="ctl"><input type="checkbox" id="cbArtifact"> show today's bug (no fix) on the yielded device</label>
+</div>
+
+<div class="stage">
+  <div class="slot">
+    <p class="caption"><b>iPad Pro 13″ · landscape</b> · session dev-1 · mosh+tmux
+      <span class="statebadge active" id="badgeIpad">active</span></p>
+    <div class="device ipad" id="devIpad" data-cstate="active" data-grid="wide">
+      <div class="pill">
+        <div class="hostpill"><span class="dot" id="ipadDot"></span><span class="name">mahler</span><span class="sep">·</span><span class="tag">tmux</span></div>
+        <div class="tabs">
+          <div class="tab active"><span>vim</span></div>
+          <div class="tab"><span>build</span></div>
+          <div class="tab"><span>logs</span></div>
+        </div>
+        <span class="contchip" id="ipadChip">
+          <svg class="g" viewBox="0 0 12 16"><rect x="1.5" y="1" width="9" height="14" rx="2.2"/><line x1="4.5" y1="12.7" x2="7.5" y2="12.7"/></svg>
+          <span id="ipadChipTxt">on iPhone</span>
+        </span>
+      </div>
+      <div class="term">
+        <div class="wide"><pre><span class="p">alice@mahler</span><span class="d">:</span><span class="b">~/src/tessera-srv</span><span class="d">$</span> make check
+<span class="m">cc -O2 -Wall -c proto/frame.c        -o build/frame.o</span>
+<span class="m">cc -O2 -Wall -c proto/handshake.c    -o build/handshake.o</span>
+<span class="m">cc -O2 -Wall -c transport/mux.c      -o build/mux.o</span>
+<span class="m">cc -O2 -Wall -c transport/backoff.c  -o build/backoff.o</span>
+<span class="p">  ✓</span> frame_roundtrip <span class="d">(112 cases, 3 ms)</span>
+<span class="p">  ✓</span> handshake_resume <span class="d">(48 cases, 9 ms)</span>
+<span class="p">  ✓</span> mux_interleave <span class="d">(201 cases, 14 ms)</span>
+<span class="y">  ⚠</span> backoff_jitter <span class="d">— 1 skipped (needs net)</span>
+<span class="m">All 361 tests passed, 1 skipped.</span>
+
+<span class="p">alice@mahler</span><span class="d">:</span><span class="b">~/src/tessera-srv</span><span class="d">$</span> git log --oneline -4
+<span class="y">9f31c2a</span> mux: coalesce keepalive frames under 40ms
+<span class="y">4b8e011</span> backoff: full-jitter, cap 32s
+<span class="y">d02c77f</span> frame: reject len &gt; 2^20 early
+<span class="y">88aa190</span> handshake: resume tickets v2
+<span class="p">alice@mahler</span><span class="d">:</span><span class="b">~/src/tessera-srv</span><span class="d">$</span> <span class="cursor"></span></pre></div>
+        <div class="narrow"><pre><span class="p">alice@mahler</span><span class="d">:</span><span class="b">~/src/te</span>
+<span class="b">ssera-srv</span><span class="d">$</span> make check
+<span class="m">cc -O2 -Wall -c proto/fra</span>
+<span class="m">me.c -o build/frame.o</span>
+<span class="p">  ✓</span> frame_roundtrip
+<span class="p">  ✓</span> handshake_resume
+<span class="p">  ✓</span> mux_interleave
+<span class="y">  ⚠</span> backoff_jitter
+<span class="m">All 361 passed, 1 skip.</span>
+
+<span class="p">alice@mahler</span><span class="d">:</span><span class="b">~/src/te</span>
+<span class="b">ssera-srv</span><span class="d">$</span> git log --on
+eline -4
+<span class="y">9f31c2a</span> mux: coalesce ke
+epalive frames under 40ms
+<span class="y">4b8e011</span> backoff: full-ji
+tter, cap 32s
+<span class="p">alice@mahler</span><span class="d">:</span><span class="b">~/src/te</span>
+<span class="b">ssera-srv</span><span class="d">$</span> <span class="cursor"></span></pre></div>
+      </div>
+      <div class="veil" id="veilIpad" title="tap to take back control">
+        <div class="ccard">
+          <div class="spin"></div>
+          <div class="glyph">
+            <svg class="g hand" viewBox="0 0 44 44">
+              <rect x="13" y="6" width="18" height="32" rx="4"/>
+              <line x1="19" y1="33.5" x2="25" y2="33.5"/>
+              <path d="M7 17 v10 M3.5 20.5 L7 17 l3.5 3.5" />
+              <path d="M37 27 v-10 M33.5 23.5 L37 27 l3.5-3.5" />
+            </svg>
+          </div>
+          <div class="ttl" id="ttlIpad">continued on iPhone</div>
+          <div class="msg" id="msgIpad">This session is being controlled from another device.</div>
+          <button class="takeback" id="tbIpad">
+            <svg class="g" viewBox="0 0 14 14"><path d="M2.2 7.6 L7 2.8 l4.8 4.8 M7 3.4 V11.6"/></svg>
+            take back control
+          </button>
+          <div class="hint">tap anywhere · or press any key</div>
+        </div>
+      </div>
+      <div class="toast" id="toastIpad">
+        <svg class="g" viewBox="0 0 12 12"><path d="M2 6.4 L4.8 9.2 L10 3.4"/></svg>
+        <span id="toastIpadTxt">iPhone left — control returned here</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="slot">
+    <p class="caption"><b>iPhone 15 Pro</b> · same host, same tmux session
+      <span class="statebadge" id="badgePhone">sessions list</span></p>
+    <div class="device iphone" id="devPhone" data-cstate="list" data-grid="narrow">
+      <div class="phonehome" id="phoneHome">
+        <div class="ph-title">sessions</div>
+        <div class="sessrow" id="rowContinue">
+          <span class="sdot"></span>
+          <div class="scol">
+            <div class="sname">mahler · dev-1</div>
+            <div class="ssub">
+              <svg class="g" viewBox="0 0 12 16"><rect x="1" y="2" width="10" height="12" rx="1.6"/><line x1="4" y1="11.6" x2="8" y2="11.6"/></svg>
+              live on iPad · mosh · tmux
+            </div>
+          </div>
+          <button class="continue">continue</button>
+        </div>
+        <div class="sessrow dim">
+          <span class="sdot" style="background: var(--fg-faint)"></span>
+          <div class="scol">
+            <div class="sname">bruckner · ops</div>
+            <div class="ssub">last used yesterday · ssh</div>
+          </div>
+        </div>
+      </div>
+      <div class="pill">
+        <div class="hostpill"><span class="dot" id="phoneDot"></span><span class="name">mahler</span><span class="sep">·</span><span class="tag">tmux</span></div>
+        <div class="tabs"><div class="tab active"><span>vim</span></div></div>
+        <span class="contchip">
+          <svg class="g" viewBox="0 0 16 13"><rect x="1" y="1" width="14" height="11" rx="1.8"/><line x1="5.5" y1="10.2" x2="10.5" y2="10.2"/></svg>
+          on iPad
+        </span>
+      </div>
+      <div class="term">
+        <div class="narrow"><pre><span class="p">alice@mahler</span><span class="d">:</span><span class="b">~/src/te</span>
+<span class="b">ssera-srv</span><span class="d">$</span> make check
+<span class="m">cc -O2 -Wall -c proto/fra</span>
+<span class="m">me.c -o build/frame.o</span>
+<span class="p">  ✓</span> frame_roundtrip
+<span class="p">  ✓</span> handshake_resume
+<span class="p">  ✓</span> mux_interleave
+<span class="y">  ⚠</span> backoff_jitter
+<span class="m">All 361 passed, 1 skip.</span>
+
+<span class="p">alice@mahler</span><span class="d">:</span><span class="b">~/src/te</span>
+<span class="b">ssera-srv</span><span class="d">$</span> <span class="cursor"></span></pre></div>
+        <div class="wide"><pre><span class="p">alice@mahler</span><span class="d">:</span><span class="b">~/src/tessera-srv</span><span class="d">$</span> make check
+<span class="m">…(iPad-width grid)…</span></pre></div>
+      </div>
+      <div class="veil" id="veilPhone" title="tap to take back control">
+        <div class="ccard">
+          <div class="spin"></div>
+          <div class="glyph">
+            <svg class="g" viewBox="0 0 44 44">
+              <rect x="10" y="12" width="24" height="19" rx="3"/>
+              <line x1="17" y1="28.4" x2="27" y2="28.4"/>
+              <path d="M5 17 v10 M2 20.5 L5 17 l3 3.5" transform="translate(0,-1)"/>
+              <path d="M39 27 v-10 M36 23.5 L39 27 l3-3.5" transform="translate(0,1)"/>
+            </svg>
+          </div>
+          <div class="ttl">continued on iPad</div>
+          <div class="msg">This session is being controlled from another device.</div>
+          <button class="takeback" id="tbPhone">
+            <svg class="g" viewBox="0 0 14 14"><path d="M2.2 7.6 L7 2.8 l4.8 4.8 M7 3.4 V11.6"/></svg>
+            take back control
+          </button>
+          <div class="hint">tap anywhere</div>
+        </div>
+      </div>
+      <div class="toast" id="toastPhone">
+        <svg class="g" viewBox="0 0 12 12"><path d="M2 6.4 L4.8 9.2 L10 3.4"/></svg>
+        <span>control returned here</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="eventlog" id="eventlog"><h4>event log — what each device observed</h4></div>
+
+<h2 id="sm">2 · State machine — per device, per session</h2>
+<p class="sub">Continuity presentation is a <b>device-local</b> state derived from one
+authoritative fact on the tmux server: the <code>@tessera_authority</code> stamp, written by
+whichever Tessera device last took the grid (in the same command batch as its resize) and
+pushed to every control client via a <code>refresh-client -B</code> subscription
+(<code>%subscription-changed</code>, tmux ≥ 3.2 — the same floor <code>-f ignore-size</code>
+already requires). There is no device-to-device channel: devices that may be countries apart
+coordinate through the one host both must be connected to anyway. tmux serializes the writes,
+so "current stamp ≠ mine" is the entire yielded test. A foreign <code>%layout-change</code>
+remains as fallback for stamp-less attachers (a laptop's bare <code>tmux attach</code>).</p>
+
+<div class="smwrap">
+<svg viewBox="0 0 980 470">
+  <defs>
+    <marker id="arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L8 4 L0 8 z" fill="rgba(235,235,245,.45)"/>
+    </marker>
+  </defs>
+
+  <!-- entry points -->
+  <text class="lab" x="60" y="52">attach stamps authority + our size</text>
+  <text class="lab" x="60" y="66">(normal launch)</text>
+  <path class="edge" d="M85 74 V108"/>
+
+  <text class="lab" x="612" y="46">cold attach / foreground hydration</text>
+  <text class="lab" x="612" y="60">finds a foreign stamp → enter blurred,</text>
+  <text class="lab" x="612" y="74">never flash the mis-sized grid</text>
+  <path class="edge" d="M700 82 V108"/>
+
+  <!-- ACTIVE -->
+  <rect class="box" x="30" y="110" width="220" height="74" rx="12"/>
+  <text class="title" x="52" y="141">ACTIVE</text>
+  <text x="52" y="161">our grid · input flows ·</text>
+  <text x="52" y="175">no overlay</text>
+
+  <!-- YIELDED -->
+  <rect class="box hl" x="580" y="110" width="270" height="74" rx="12"/>
+  <text class="title" x="602" y="136">CONTINUED ELSEWHERE</text>
+  <text x="602" y="156">blur + take-back card · input</text>
+  <text x="602" y="170">suppressed · feed live beneath</text>
+
+  <!-- RECLAIMING -->
+  <rect class="box" x="330" y="300" width="240" height="74" rx="12"/>
+  <text class="title" x="352" y="328">RECLAIMING</text>
+  <text x="352" y="348">restamp · resize + repaint</text>
+  <text x="352" y="362">only if size differs</text>
+
+  <!-- edges -->
+  <path class="edge hl" d="M250 132 H578"/>
+  <text class="lab labhl" x="286" y="122">@tessera_authority changed (%subscription-changed push)</text>
+
+  <path class="edge" d="M660 184 C640 250, 600 290, 572 318"/>
+  <text class="lab" x="612" y="242">tap / any key</text>
+
+  <path class="edge" d="M330 330 C240 310, 160 260, 140 186"/>
+  <text class="lab" x="170" y="268">stamp ack (+ layout confirm</text>
+  <text class="lab" x="170" y="282">+ repaint only on size delta)</text>
+
+  <path class="edge hl" d="M570 352 C680 350, 760 280, 776 186"/>
+  <text class="lab labhl" x="700" y="330">contested: stamp shows another</text>
+  <text class="lab labhl" x="700" y="344">writer / ack timeout</text>
+
+  <path class="edge auto" d="M580 158 C420 190, 260 180, 252 162"/>
+  <text class="lab" x="330" y="196">peer detached → auto-reclaim (D3)</text>
+
+  <!-- orthogonal exits -->
+  <rect class="box" x="30" y="410" width="410" height="44" rx="12"/>
+  <text x="52" y="437">connection lost (any state) → existing reconnect overlay wins;</text>
+  <text class="lab" x="52" y="450"></text>
+  <rect class="box" x="470" y="410" width="480" height="44" rx="12"/>
+  <text x="492" y="437">session exit / window killed (any state) → existing ended UI wins</text>
+  <path class="edge auto" d="M180 184 V408"/>
+  <path class="edge auto" d="M715 184 V408"/>
+  <text class="lab" x="190" y="398">on reconnect: re-read stamp — ours / none → ACTIVE, foreign → CONTINUED</text>
+</svg>
+</div>
+
+<h3>Transition table</h3>
+<table class="spec">
+  <tr><th>#</th><th>from → to</th><th>trigger</th><th>guard / notes</th></tr>
+  <tr><td>T1</td><td>active → continued-elsewhere</td>
+      <td><code>@tessera_authority</code> stamp changes to another device
+          (<code>%subscription-changed</code> push)</td>
+      <td>size-independent — a same-grid second iPad still arms it, and the stamp names the
+          taker for the card copy. Fallback for stamp-less attachers: a foreign
+          <code>%layout-change</code> outside our <code>clientSizeEpoch</code> window,
+          debounced so our own rotation / split-pane churn never triggers it</td></tr>
+  <tr><td>T2</td><td>continued-elsewhere → reclaiming</td>
+      <td>tap veil / take-back pill / any HW key</td>
+      <td>keystroke that triggers reclaim is consumed, not forwarded; requires live connection</td></tr>
+  <tr><td>T3</td><td>reclaiming → active</td>
+      <td><b>geometry confirms</b>: the active window's observed layout equals our viewport
+          (checked at the claim fence ack and on every <code>%layout-change</code>)</td>
+      <td>revised per TECHNICAL_REVIEW.md — a stamp ack can NOT prove geometry, since the
+          stamp and tmux's <code>window-size latest</code> client state can disagree. The
+          claim: <code>refresh-client -C</code>, then on inline SSH a no-op
+          <code>select-window</code> on the current window (fixture-verified latest-client
+          transfer; never <code>resize-window</code> inline); side channel keeps its direct
+          window force. Veil lifts on settled geometry + one authoritative repaint. Same-grid
+          reclaim settles at the fence ack — nothing waits on a <code>%layout-change</code>
+          that will never come</td></tr>
+  <tr><td>T4</td><td>reclaiming → continued-elsewhere</td>
+      <td>stamp shows another writer again, or ack timeout (~3 s)</td>
+      <td>the race: both devices reclaim at once — last writer wins, loser folds back to the
+          overlay; no error dialog, the card simply returns</td></tr>
+  <tr><td>T5</td><td>continued-elsewhere → active (auto)</td>
+      <td>peer client detaches (<code>%client-detached</code> + <code>list-clients</code>
+          corroboration — both parsed today)</td>
+      <td><b>decision D3, tightened per review</b> — auto-reclaim only when <b>truly
+          alone</b>: <code>list-clients</code> on our session shows only this device's own
+          clients (1 inline, 2 mosh topology), so a live bare laptop client is never seized
+          from. Otherwise stay veiled until tapped. The same check clears a stale stamp left
+          by a crashed peer at reconnect</td></tr>
+  <tr><td>T6</td><td>any → reconnect overlay</td>
+      <td>transport drops</td>
+      <td>connection overlays outrank the continuity overlay; take-back pill disabled while
+          offline. On reconnect, re-read the stamp (and size) — do <b>not</b> assume the
+          pre-drop state</td></tr>
+  <tr><td>T7</td><td>any → ended</td>
+      <td>session exit / tmux window killed (from either device or host)</td>
+      <td>existing ended UI wins; continuity overlay never masks an exit</td></tr>
+  <tr><td>T8</td><td>(cold) → continued-elsewhere</td>
+      <td>attach / foreground hydration reads a foreign stamp (or foreign size)</td>
+      <td>enter blurred immediately — the mis-sized grid must never flash before the veil</td></tr>
+</table>
+
+<h3>Overlay priority stack (top wins)</h3>
+<ul class="speclist">
+  <li><b>1 · ended</b> — session is gone; nothing to take back.</li>
+  <li><b>2 · connection overlays</b> — reconnecting / auth; you can't reclaim a session you're
+      not connected to. The continuity card stays visible beneath in its disabled variant
+      (dimmed pill, amber host dot) so context isn't lost.</li>
+  <li><b>3 · continuity veil</b> — this proposal.</li>
+  <li><b>4 · live terminal</b>.</li>
+</ul>
+
+<h3>Transport matrix</h3>
+<table class="spec">
+  <tr><th>transport · launch mode</th><th>continuation action today</th><th>takeover state?</th></tr>
+  <tr><td>ssh / mosh · customCommand</td><td><code>.reconnect</code> — the other device opens a brand-new shell</td>
+      <td>no — nothing is shared, overlay never arms</td></tr>
+  <tr><td>ssh · autoTmux / pinnedTmux</td><td><code>.continueSession</code> — co-attach to the same tmux session</td>
+      <td>yes — -CC notifications inline; reclaim = <code>refresh-client -C</code> + no-op
+          <code>select-window</code> on the current window (tmux-native latest-client
+          transfer; <code>resize-window</code> stays side-channel-only — forcing it inline
+          can snap back and churn repaints, per TECHNICAL_REVIEW.md)</td></tr>
+  <tr><td>mosh · autoTmux / pinnedTmux</td><td><code>.continueSession</code> — co-attach via second mosh-server + SSH -CC side channel</td>
+      <td>yes — the motivating case; reclaim = existing side-channel <code>resize-window</code>
+          force + <code>forceFullRepaint()</code> (the phone-attach fix path)</td></tr>
+</table>
+<p class="note">Corrected per TECHNICAL_REVIEW.md: normal SSH+tmux visible clients do NOT
+attach <code>ignore-size</code> (that geometry-preserving behavior was deliberately removed —
+active device wins); <code>ignore-size</code> is the mosh topology's visible-client trick. The
+<code>@tessera_authority</code> stamp is written in the same batch as the size commands and
+pushed via <code>refresh-client -B</code> (tmux ≥ 3.2), but it is <b>advisory</b> — it arms
+the peer's veil and names the taker. Geometry ownership is proven only by the observed window
+layout matching the claimant's viewport. The session itself is never evicted, matching
+today's "attached · other device stays attached" copy.</p>
+
+<h2 id="decisions">3 · Decisions to approve</h2>
+<div class="decisions">
+  <div class="dcard"><span class="dnum">D1</span>
+    <h4>What arms the overlay</h4>
+    <p>An explicit authority stamp, not a size heuristic. A second iPad with an identical grid
+    still yields this device — zero artifacts, but two keyboards into one PTY is exactly the
+    ambiguity the overlay removes, and behavior shouldn't depend on accidental geometry. The
+    stamp names the taker, so the card says which device took over. Foreign-size fallback
+    covers stamp-less attachers (bare <code>tmux attach</code>).</p>
+    <p class="pick">proposed: <b>stamp-authority (explicit) + size fallback</b></p></div>
+  <div class="dcard"><span class="dnum">D2</span>
+    <h4>Reclaim gesture</h4>
+    <p>Tap anywhere on the veil, the explicit pill, or any hardware key. The triggering
+    keystroke is consumed. Accidental-tap cost is low: the other device just shows its own
+    card and can tap right back.</p>
+    <p class="pick">proposed: <b>tap anywhere · pill · any key</b></p></div>
+  <div class="dcard"><span class="dnum">D3</span>
+    <h4>Peer detaches while you're yielded</h4>
+    <p>Auto-reclaim with a toast ("iPhone left — control returned here") versus staying
+    blurred until tapped. Auto feels right: the session would otherwise sit blurred forever
+    after you pocket the phone.</p>
+    <p class="pick">proposed: <b>auto-reclaim + toast</b></p></div>
+  <div class="dcard"><span class="dnum">D4</span>
+    <h4>What shows beneath the blur</h4>
+    <p>Keep the live (mis-sized) feed rendering under the veil — blur hides the artifacts and
+    you still see activity ambient-style. Freezing the last good frame would look "right" but
+    lie about liveness.</p>
+    <p class="pick">proposed: <b>live feed, blurred</b></p></div>
+  <div class="dcard"><span class="dnum">D5</span>
+    <h4>Input while yielded</h4>
+    <p>Terminal input is suppressed (tmux would happily interleave two keyboards into one
+    PTY). Only the reclaim gesture is consumed. Scroll/find/tab-switch chrome stays disabled
+    under the veil.</p>
+    <p class="pick">proposed: <b>suppress all terminal input</b></p></div>
+  <div class="dcard"><span class="dnum">D6</span>
+    <h4>Scope of the veil</h4>
+    <p>Per session, covering the whole terminal area including split panes; top bar stays
+    (with an "on iPhone" chip). Other sessions on this device are untouched; the sidebar row
+    for a yielded session gets the same device glyph.</p>
+    <p class="pick">proposed: <b>session-scoped veil + top-bar chip</b></p></div>
+</div>
+
+<h2 id="impl">4 · Implementation notes (for after approval)</h2>
+<ul class="speclist">
+  <li><b>Authority is an explicit stamp on the server, not an inference</b> — taking the grid
+      writes <code>set -w @tessera_authority &lt;deviceName&gt;:&lt;gen&gt;</code> in the same
+      command batch as <code>refresh-client -C</code> / <code>resize-window</code>; every
+      control client subscribes via <code>refresh-client -B</code> and receives
+      <code>%subscription-changed</code> pushes (tmux ≥ 3.2, the floor
+      <code>-f ignore-size</code> already imposes). tmux serializes the writers, so "current
+      stamp ≠ mine" is the entire yielded test — no consensus protocol, no proximity
+      requirement, and it rides the connection the session needs to exist anyway. The
+      already-parsed <code>%client-detached</code> + <code>list-clients</code> poll (dormant
+      today behind <code>.preserveServerGeometry</code>) drive peer-departure T5; a foreign
+      <code>%layout-change</code> outside our <code>clientSizeEpoch</code> window is the
+      fallback for stamp-less attachers.</li>
+  <li><b>Handoff is a latency hint only</b> — when the devices are in BT/Wi-Fi range, the
+      continuation activity can carry a "taking over dev-1" flag so the yielded device
+      pre-blurs before the first foreign event lands. Never the source of truth: Handoff is
+      proximity-gated, and takeover can originate without it (synced host + same pinned tmux
+      session opened from anywhere, or a laptop attach).</li>
+  <li><b>New presentation flag, not a new SessionState case</b> — the five
+      <code>SessionState</code> cases map 1:1 onto the top-bar connectivity dot; continued-
+      elsewhere is a per-session presentation state on the live-session layer, orthogonal to
+      connectivity.</li>
+  <li><b>Overlay mounts like SessionLaunchOverlay</b> — a ZStack sibling inside the terminal
+      stack (both the SSH and mosh mounts), so it veils only the terminal; top bar and sidebar
+      stay interactive. The card uses the themed <code>floatingGlass</code> helper so it honors
+      the user's chrome-material choice and Reduce Transparency. Blur composites fine over the
+      SwiftTerm <code>CAMetalLayer</code> (XCUITest still sees black — verify via
+      <code>simctl</code> screenshots as usual).</li>
+  <li><b>Reclaim is the "claim the active viewport" op (revised per TECHNICAL_REVIEW.md)</b> —
+      inline SSH: <code>refresh-client -C</code> + no-op <code>select-window</code> on the
+      current window (the fixture-verified <code>window-size latest</code> transfer;
+      <code>resize-window</code> must never leak inline — it can snap back under two visible
+      clients and broadens one reclaim into server-wide resize churn). Side channel keeps the
+      existing direct window force + <code>forceFullRepaint()</code>. The veil lifts only when
+      the observed active-window layout equals our viewport (fence ack + every
+      <code>%layout-change</code> re-check), then one authoritative repaint; the stamp ack is
+      never the success condition. Same-grid reclaim settles at the fence ack. The manual
+      refresh button invokes the same claim as its recovery role.</li>
+  <li><b>One invariant to make reversible</b> — the existing (dormant) cede machinery documents
+      <code>hasCededGridOwnership</code> as one-way for the session's lifetime; take-back
+      control is exactly the transition it forbids, so that state becomes re-entrant.</li>
+  <li><b>iPhone parity</b> — full parity; same states, compact card. The phone is expected to
+      be the <i>taker</i> most often, but every state is symmetric.</li>
+</ul>
+
+<script>
+(function () {
+  const devIpad  = document.getElementById('devIpad');
+  const devPhone = document.getElementById('devPhone');
+  const badgeIpad  = document.getElementById('badgeIpad');
+  const badgePhone = document.getElementById('badgePhone');
+  const phoneHome  = document.getElementById('phoneHome');
+  const log = document.getElementById('eventlog');
+  const bContinue = document.getElementById('bContinue');
+  const bIpad2    = document.getElementById('bIpad2');
+  const bDetach   = document.getElementById('bDetach');
+  const bDrop     = document.getElementById('bDrop');
+  const bKill     = document.getElementById('bKill');
+  const bReset    = document.getElementById('bReset');
+  const cbArtifact = document.getElementById('cbArtifact');
+  const ipadDot  = document.getElementById('ipadDot');
+  const ipadChipTxt = document.getElementById('ipadChipTxt');
+  const ttlIpad = document.getElementById('ttlIpad');
+  const msgIpad = document.getElementById('msgIpad');
+  const toastIpad = document.getElementById('toastIpad');
+  const toastIpadTxt = document.getElementById('toastIpadTxt');
+  const toastPhone = document.getElementById('toastPhone');
+
+  // clock for the fake event log
+  let clock = 14 * 3600 + 2 * 60 + 5;
+  function ts() {
+    clock += 1 + Math.floor(Math.random() * 3);
+    const h = String(Math.floor(clock / 3600)).padStart(2, '0');
+    const m = String(Math.floor(clock % 3600 / 60)).padStart(2, '0');
+    const s = String(clock % 60).padStart(2, '0');
+    return h + ':' + m + ':' + s;
+  }
+  function ev(html) {
+    const row = document.createElement('div');
+    row.className = 'ev';
+    row.innerHTML = '<span class="t">' + ts() + '</span><span>' + html + '</span>';
+    log.appendChild(row);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  let ipad = 'active';      // active | yielded | reclaiming | offline | ended
+  let phone = 'list';       // list | active | yielded | reclaiming | ended
+  let peer = null;          // who holds the iPad's grid: null | 'iphone' | 'ipad2' (same-grid third device)
+  let killed = false;
+  let timer = null;
+
+  function setBadge(el, state) {
+    const map = {
+      active: ['active', 'active'], yielded: ['continued elsewhere', 'yielded'],
+      reclaiming: ['reclaiming…', 'transient'], offline: ['connection lost', 'transient'],
+      ended: ['ended', 'ended'], list: ['sessions list', ''] };
+    el.textContent = map[state][0];
+    el.className = 'statebadge ' + map[state][1];
+  }
+  function render() {
+    devIpad.dataset.cstate = ipad;
+    // same-grid peer (ipad2) never changes the window size — grid stays wide under the veil
+    devIpad.dataset.grid = (peer === 'iphone' && (phone === 'active' || phone === 'reclaiming')) ? 'narrow' : 'wide';
+    devPhone.dataset.cstate = phone === 'list' ? 'list' : phone;
+    devPhone.dataset.grid = (ipad === 'active' || ipad === 'reclaiming') ? 'wide' : 'narrow';
+    phoneHome.classList.toggle('gone', phone !== 'list');
+    setBadge(badgeIpad, ipad);
+    setBadge(badgePhone, phone);
+    ipadDot.style.background = ipad === 'offline' ? 'var(--amber)' : ipad === 'ended' ? 'var(--red)' : 'var(--green)';
+    bContinue.disabled = killed || phone !== 'list' || peer === 'ipad2';
+    bIpad2.disabled   = killed || ipad !== 'active' || phone !== 'list';
+    bDetach.disabled  = killed || phone === 'list';
+    bDrop.disabled    = killed || ipad !== 'yielded';
+    bKill.disabled    = killed;
+    // today's-bug preview only applies where the underlying grid is actually foreign-sized
+    devIpad.classList.toggle('artifact', cbArtifact.checked && peer === 'iphone');
+    devPhone.classList.toggle('artifact', cbArtifact.checked);
+    const peerName = peer === 'ipad2' ? 'another iPad' : 'iPhone';
+    ipadChipTxt.textContent = 'on ' + peerName;
+    // offline / ended card copy
+    if (ipad === 'offline') {
+      ttlIpad.textContent = 'connection lost';
+      msgIpad.textContent = 'Reconnecting to mahler — take-back is available once the link is restored.';
+    } else if (ipad === 'ended') {
+      ttlIpad.textContent = 'session ended';
+      msgIpad.textContent = 'dev-1 exited on the host while this device was continued elsewhere.';
+    } else {
+      ttlIpad.textContent = 'continued on ' + peerName;
+      msgIpad.textContent = 'This session is being controlled from another device.';
+    }
+  }
+
+  function toast(el, ms) {
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), ms || 2600);
+  }
+
+  function phoneContinue() {
+    if (killed || phone !== 'list' || peer === 'ipad2') return;
+    phone = 'active'; ipad = 'yielded'; peer = 'iphone'; render();
+    ev('<b>iPhone</b> attached · wrote @tessera_authority=iPhone:g4 · forced window size 46×64');
+    ev('<b>iPad</b> %subscription-changed: authority ≠ mine · <span class="st-active">active</span> <span class="arr">→</span> <span class="st-yielded">continued-elsewhere</span> · veil up, input suppressed');
+  }
+
+  function ipad2Continue() {
+    if (killed || ipad !== 'active' || phone !== 'list') return;
+    peer = 'ipad2'; ipad = 'yielded'; render();
+    ev('<b>another iPad</b> (third device, same 92×38 grid) attached · wrote @tessera_authority=iPad-2:g5 · no resize, no %layout-change');
+    ev('<b>iPad</b> %subscription-changed: authority ≠ mine <span class="arr">→</span> <span class="st-yielded">continued-elsewhere</span> · zero artifacts — the veil is for input clarity (D1)');
+  }
+
+  function reclaim(who) {
+    if (killed) return;
+    clearTimeout(timer);
+    if (who === 'ipad' && ipad === 'yielded') {
+      if (peer === 'ipad2') {
+        // T3 fast path: same grid — stamp ack is the whole confirmation, no repaint wait
+        ipad = 'active'; peer = null; render();
+        ev('<b>iPad</b> reclaim: re-wrote @tessera_authority=iPad:g6 · no size delta <span class="arr">→</span> no %layout-change to wait for · veil lifts on stamp ack (T3 fast path) <span class="arr">→</span> <span class="st-active">active</span>');
+        return;
+      }
+      ipad = 'reclaiming'; phone = 'active'; render();
+      ev('<b>iPad</b> reclaim: wrote @tessera_authority=iPad:g6 + resize-window 92×38 + refresh-client -C · <span class="st-yielded">continued-elsewhere</span> <span class="arr">→</span> <span class="st-trans">reclaiming</span>');
+      timer = setTimeout(() => {
+        ipad = 'active'; phone = 'yielded'; render();
+        ev('<b>iPad</b> stamp ack + %layout-change 92×38 + repaint done <span class="arr">→</span> <span class="st-active">active</span>');
+        ev('<b>iPhone</b> %subscription-changed: authority ≠ mine <span class="arr">→</span> <span class="st-yielded">continued-elsewhere</span>');
+      }, 900);
+    } else if (who === 'phone' && phone === 'yielded') {
+      phone = 'reclaiming'; render();
+      ev('<b>iPhone</b> reclaim: wrote @tessera_authority=iPhone:g7 + forced window size 46×64 · <span class="arr">→</span> <span class="st-trans">reclaiming</span>');
+      timer = setTimeout(() => {
+        phone = 'active'; ipad = 'yielded'; peer = 'iphone'; render();
+        ev('<b>iPhone</b> stamp ack + layout confirmed, repaint done <span class="arr">→</span> <span class="st-active">active</span>');
+        ev('<b>iPad</b> %subscription-changed: authority ≠ mine <span class="arr">→</span> <span class="st-yielded">continued-elsewhere</span>');
+      }, 900);
+    }
+  }
+
+  function phoneDetach() {
+    if (killed || phone === 'list') return;
+    const hadControl = (phone === 'active' || phone === 'reclaiming');
+    phone = 'list';
+    if (hadControl && (ipad === 'yielded' || ipad === 'offline')) {
+      if (ipad === 'offline') { peer = null; render(); ev('<b>iPhone</b> detached · iPad still offline — stamp now stale, will re-read on reconnect'); return; }
+      clearTimeout(timer);
+      peer = null;
+      ipad = 'reclaiming'; render();
+      ev('<b>iPhone</b> control client detached (%client-detached + list-clients corroboration)');
+      ev('<b>iPad</b> auto-reclaim (D3): re-stamp authority + force 92×38 + resync <span class="arr">→</span> <span class="st-trans">reclaiming</span>');
+      timer = setTimeout(() => {
+        ipad = 'active'; render();
+        toastIpadTxt.textContent = 'iPhone left — control returned here';
+        toast(toastIpad);
+        ev('<b>iPad</b> <span class="arr">→</span> <span class="st-active">active</span> · toast shown, no tap needed');
+      }, 900);
+    } else { render(); ev('<b>iPhone</b> detached'); }
+  }
+
+  function dropIpad() {
+    if (killed || ipad !== 'yielded') return;
+    ipad = 'offline'; render();
+    ev('<b>iPad</b> transport dropped while yielded <span class="arr">→</span> reconnect overlay outranks veil · take-back disabled');
+    timer = setTimeout(() => {
+      if (killed) return;
+      const peerStillHere = peer === 'ipad2' || (peer === 'iphone' && (phone === 'active' || phone === 'reclaiming'));
+      ipad = peerStillHere ? 'yielded' : 'reclaiming';
+      render();
+      ev('<b>iPad</b> reconnected · re-reading @tessera_authority (T6)…');
+      if (ipad === 'yielded') {
+        ev('<b>iPad</b> stamp still foreign <span class="arr">→</span> <span class="st-yielded">continued-elsewhere</span> (not assumed — re-derived)');
+      } else {
+        timer = setTimeout(() => { ipad = 'active'; render();
+          toastIpadTxt.textContent = 'reconnected — control returned here'; toast(toastIpad);
+          ev('<b>iPad</b> stamp stale, no other client <span class="arr">→</span> re-stamp <span class="arr">→</span> <span class="st-active">active</span>'); }, 900);
+      }
+    }, 2600);
+  }
+
+  function killSession() {
+    if (killed) return;
+    clearTimeout(timer); killed = true;
+    const bothAttached = phone !== 'list';
+    ipad = 'ended'; if (bothAttached) phone = 'ended';
+    render();
+    ev('host: tmux window killed · ' + (bothAttached ? '<b>both devices</b>' : '<b>iPad</b>') + ' <span class="arr">→</span> <span class="st-ended">ended</span> — ended UI outranks the veil (T7)');
+  }
+
+  function reset() {
+    clearTimeout(timer); killed = false;
+    ipad = 'active'; phone = 'list'; peer = null; render();
+    ev('— reset · <b>iPad</b> <span class="st-active">active</span>, <b>iPhone</b> back on sessions list —');
+  }
+
+  bContinue.addEventListener('click', phoneContinue);
+  bIpad2.addEventListener('click', ipad2Continue);
+  bDetach.addEventListener('click', phoneDetach);
+  bDrop.addEventListener('click', dropIpad);
+  bKill.addEventListener('click', killSession);
+  bReset.addEventListener('click', reset);
+  cbArtifact.addEventListener('change', () => {
+    render();
+    if (cbArtifact.checked) ev('<i>preview:</i> showing today\'s unfixed rendering where the underlying grid is foreign-sized — a same-grid takeover has no artifacts to show');
+  });
+
+  document.getElementById('rowContinue').addEventListener('click', phoneContinue);
+  document.getElementById('veilIpad').addEventListener('click', () => reclaim('ipad'));
+  document.getElementById('veilPhone').addEventListener('click', () => reclaim('phone'));
+  document.getElementById('tbIpad').addEventListener('click', (e) => { e.stopPropagation(); reclaim('ipad'); });
+  document.getElementById('tbPhone').addEventListener('click', (e) => { e.stopPropagation(); reclaim('phone'); });
+  // any hardware key reclaims the yielded iPad (D2) — page-level demo
+  document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
+    if (ipad === 'yielded') { reclaim('ipad'); ev('<b>iPad</b> HW keystroke consumed as reclaim gesture (D2)'); }
+  });
+
+  ev('— demo ready · <b>iPad</b> <span class="st-active">active</span> on dev-1, <b>iPhone</b> on sessions list —');
+  render();
+})();
+</script>
+</body>
+</html>

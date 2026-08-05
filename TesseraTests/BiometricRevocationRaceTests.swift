@@ -6,6 +6,40 @@ import Testing
 
 @Suite("Biometric revocation races", .serialized)
 struct BiometricRevocationRaceTests {
+    @Test("background lock is off when its required app-lock policy is off")
+    func backgroundLockReportsEffectiveState() {
+        #expect(!AppLockSettingsPolicy.isBackgroundLockEnabled(
+            requiresOwnerAuthentication: false,
+            locksWhenBackgrounded: true
+        ))
+        #expect(AppLockSettingsPolicy.isBackgroundLockEnabled(
+            requiresOwnerAuthentication: true,
+            locksWhenBackgrounded: true
+        ))
+    }
+
+    @Test("enabling background lock also enables its required app-lock policy")
+    func enablingBackgroundLockEnablesAppLock() {
+        let selection = AppLockSettingsPolicy.applyingBackgroundLockSelection(
+            true,
+            requiresOwnerAuthentication: false
+        )
+
+        #expect(selection.requiresOwnerAuthentication)
+        #expect(selection.locksWhenBackgrounded)
+    }
+
+    @Test("disabling background lock preserves the master app-lock preference")
+    func disablingBackgroundLockPreservesAppLock() {
+        let selection = AppLockSettingsPolicy.applyingBackgroundLockSelection(
+            false,
+            requiresOwnerAuthentication: true
+        )
+
+        #expect(selection.requiresOwnerAuthentication)
+        #expect(!selection.locksWhenBackgrounded)
+    }
+
     @Test("app-lock off never locks when backgrounded")
     @MainActor
     func appLockOffRespectsPreferenceOnBackground() {

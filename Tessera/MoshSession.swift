@@ -5,6 +5,7 @@ import MoshBridge
 import NIOCore
 import NIOSSH
 import PortForwarding
+import TmuxControl
 
 enum MoshDiagnostics {
     static func log(_ message: @autoclosure () -> String) {
@@ -138,6 +139,10 @@ public final class MoshSession: ObservableObject, TerminalSession {
     public let host: Host
     let requireBiometric: Bool
     let isSecureEnclave: Bool
+    /// Optional observer mode for clients that must render the existing remote
+    /// grid without participating in tmux sizing. Visible app sessions leave
+    /// this false and advertise their physical viewport.
+    let preserveTmuxGeometry: Bool
 
     /// Owns the live `PortForwarder` instances for this mosh session.
     /// Forwarders ride on the long-lived SSH back-channel that
@@ -151,6 +156,7 @@ public final class MoshSession: ObservableObject, TerminalSession {
     @Published private(set) var transportState: MoshTransportState = .idle
     @Published var pendingHostKeyVerification: HostKeyVerificationRequest?
     @Published public private(set) var detectedOSHint: String?
+    @Published private(set) var wslTailscaleMTUWarning: WSLTailscaleMTUWarning?
 
     // TerminalSession cwd/injection surface — see the protocol docs.
     // Published: the Upload sheet's host rows refresh live when a cwd
@@ -196,16 +202,43 @@ public final class MoshSession: ObservableObject, TerminalSession {
     private(set) var remoteServerPID: Int?
     private var outputDeliveryCount = 0
     private var resizeRequestCount = 0
+    /// Non-nil only when a compact continuation attached to an existing tmux
+    /// session. The local view may be smaller, but mosh must keep advertising
+    /// this authoritative remote grid or its PTY will resize the tmux client.
+    private var preservedRemoteTmuxGeometry: (cols: Int, rows: Int)?
+
+    var preservedRemoteTmuxSize: (cols: Int, rows: Int)? {
+        preservedRemoteTmuxGeometry
+    }
+
+    /// Promote a successfully ceded phone-born grid into the same remote-size
+    /// hold used by existing-session continuations. This outlives the current
+    /// `TmuxController`/SSH side channel, so backgrounding or reconnecting can
+    /// never replay the compact physical viewport into the visible mosh PTY.
+    func preserveRemoteTmuxSizeAfterCede(cols: Int, rows: Int) {
+        guard preserveTmuxGeometry, cols > 0, rows > 0 else { return }
+        objectWillChange.send()
+        preservedRemoteTmuxGeometry = (cols, rows)
+        driver?.resize(cols: cols, rows: rows)
+        MoshDiagnostics.log(
+            "session remote tmux geometry held after cede size=\(cols)x\(rows)"
+        )
+    }
 
     public init(
         host: Host,
         requireBiometric: Bool = false,
-        isSecureEnclave: Bool = false
+        isSecureEnclave: Bool = false,
+        preserveTmuxGeometry: Bool = false
     ) {
         self.host = host
         self.requireBiometric = requireBiometric
         self.isSecureEnclave = isSecureEnclave
+        self.preserveTmuxGeometry = preserveTmuxGeometry
         self.portForwarderManager = PortForwarderManager()
+        self.wslTailscaleMTUWarning = HostRuntimeStateStore.wslTailscaleMTUWarning(
+            for: host
+        )
 
         let outputPair = AsyncStream.makeStream(of: [UInt8].self)
         outputStream = outputPair.stream
@@ -243,7 +276,33 @@ public final class MoshSession: ObservableObject, TerminalSession {
                 "session resize request #\(resizeRequestCount) size=\(cols)x\(rows) state=\(MoshDiagnostics.stateDescription(state))"
             )
         }
-        driver?.resize(cols: cols, rows: rows)
+        if let preservedRemoteTmuxGeometry {
+            driver?.resize(
+                cols: preservedRemoteTmuxGeometry.cols,
+                rows: preservedRemoteTmuxGeometry.rows
+            )
+        } else {
+            driver?.resize(cols: cols, rows: rows)
+        }
+    }
+
+    /// Re-emit the whole screen from the mosh client's framebuffer model.
+    /// The SSP diff stream never repaints cells it believes the terminal
+    /// already shows, so anything painted outside it (a buffered attach
+    /// replay across a tmux window resize, a restored continuity snapshot)
+    /// survives until the model is force-resynchronized.
+    public func forceFullRepaint(
+        completion: (@MainActor (Int?) -> Void)? = nil
+    ) {
+        guard case .connected = state, let driver else {
+            completion?(nil)
+            return
+        }
+        driver.forceFullRepaint { outputDeliveryTarget in
+            Task { @MainActor in
+                completion?(outputDeliveryTarget)
+            }
+        }
     }
 
     public func disconnect() {
@@ -294,7 +353,16 @@ public final class MoshSession: ObservableObject, TerminalSession {
                     isSecureEnclave: policy.isSecureEnclave,
                     hostKeyPrompt: { [weak self] challenge in
                         await self?.promptForHostKeyVerification(challenge) ?? false
-                    }
+                    },
+                    preserveTmuxGeometry: self.preserveTmuxGeometry,
+                    // The SSH -CC side channel is the single tmux sizing
+                    // authority. The visible mosh PTY still follows the local
+                    // viewport, but must not win tmux's latest-client policy
+                    // merely because the user typed after another device
+                    // resized the shared session.
+                    visibleTmuxClientIgnoresSize: policy.host.launchMode == .autoTmux
+                        || policy.host.launchMode == .pinnedTmux,
+                    gridAuthorityDeviceID: GridAuthorityDeviceIdentity.current().id
                 )
                 try Task.checkCancellation()
                 try await SSHAuthenticationPolicyStore.shared.revalidate(policy)
@@ -306,6 +374,24 @@ public final class MoshSession: ObservableObject, TerminalSession {
             if let detected = result.detectedOSHint {
                 detectedOSHint = detected
             }
+            HostRuntimeStateStore.recordNetworkPathAssessment(
+                result.networkPathAssessment,
+                for: host
+            )
+            switch result.networkPathAssessment {
+            case .unavailable:
+                MoshDiagnostics.log(
+                    "network-path probe=unavailable cachedWarning=\(wslTailscaleMTUWarning != nil)"
+                )
+            case .notAtRisk:
+                wslTailscaleMTUWarning = nil
+                MoshDiagnostics.log("network-path probe=clear")
+            case .warning(let warning):
+                wslTailscaleMTUWarning = warning
+                MoshDiagnostics.log(
+                    "network-path probe=wsl-tailscale-mtu-risk outerMTU=\(warning.defaultInterfaceMTU) tailscaleMTU=\(warning.tailscaleInterfaceMTU)"
+                )
+            }
             let driver = makeDriver(
                 targetAddress: result.targetAddress ?? host.address,
                 udpPort: result.udpPort,
@@ -313,12 +399,17 @@ public final class MoshSession: ObservableObject, TerminalSession {
             )
             remoteServerPID = result.serverPID
             bootstrapJumpChainHopCount = result.jumpChainHopCount
+            preservedRemoteTmuxGeometry = result.preservedTmuxGeometry.map {
+                (cols: $0.cols, rows: $0.rows)
+            }
             MoshDiagnostics.log(
                 "bootstrap success udpPort=\(result.udpPort) keyLength=\(result.base64Key.count) serverPID=\(result.serverPID.map(String.init) ?? "nil") lastSize=\(MoshDiagnostics.sizeDescription(lastReportedSize))"
             )
             bootstrapTask = nil
             self.driver = driver
-            if let size = lastReportedSize {
+            if let size = result.preservedTmuxGeometry {
+                driver.resize(cols: size.cols, rows: size.rows)
+            } else if let size = lastReportedSize {
                 driver.resize(cols: size.cols, rows: size.rows)
             }
             driver.connect()
@@ -546,7 +637,7 @@ public final class MoshSession: ObservableObject, TerminalSession {
             host: targetAddress,
             udpPort: udpPort,
             base64Key: base64Key,
-            onOutput: { [weak self] bytes in
+            onOutput: { [weak self] bytes, delivered in
                 Task { @MainActor in
                     guard let self else { return }
                     self.outputDeliveryCount += 1
@@ -557,6 +648,7 @@ public final class MoshSession: ObservableObject, TerminalSession {
                         )
                     }
                     self.outputContinuation.yield(bytes)
+                    delivered?(self.outputDeliveryCount)
                 }
             },
             onConnected: { [weak self] in
@@ -874,16 +966,29 @@ public final class MoshSession: ObservableObject, TerminalSession {
         _ challenge: HostKeyVerificationChallenge
     ) async -> Bool {
         let status = challenge.isChanged ? "changed" : "unknown"
+        let requestID = UUID()
         DiagnosticLogStore.appendSSH(
             "hostkey prompt transport=mosh status=\(status) keyType=\(challenge.keyType)"
         )
-        let result = await withCheckedContinuation { continuation in
-            pendingHostKeyVerification = HostKeyVerificationRequest(
-                challenge: challenge,
-                continuation: continuation
-            )
+        let result = await withTaskCancellationHandler {
+            guard !Task.isCancelled else { return false }
+            return await withCheckedContinuation { continuation in
+                pendingHostKeyVerification = HostKeyVerificationRequest(
+                    id: requestID,
+                    challenge: challenge,
+                    continuation: continuation
+                )
+            }
+        } onCancel: { [weak self] in
+            Task { @MainActor in
+                guard self?.pendingHostKeyVerification?.id == requestID else { return }
+                self?.pendingHostKeyVerification?.reject()
+                self?.pendingHostKeyVerification = nil
+            }
         }
-        pendingHostKeyVerification = nil
+        if pendingHostKeyVerification?.id == requestID {
+            pendingHostKeyVerification = nil
+        }
         DiagnosticLogStore.appendSSH(
             "hostkey prompt transport=mosh result=\(result ? "accepted" : "rejected") status=\(status) keyType=\(challenge.keyType)"
         )
@@ -927,10 +1032,14 @@ final class MoshTransportDriver {
     private var tickCount = 0
     private var outputChunkCount = 0
     private var outputByteCount = 0
+    /// Non-nil only during a forced framebuffer replay. Buffer its chunks so
+    /// the delivery callback can identify the exact AsyncStream element whose
+    /// consumption is allowed to lift the continuity veil.
+    private var forceFullRepaintOutput: [UInt8]?
     private var resizeCount = 0
     private var sendCount = 0
 
-    private let onOutput: ([UInt8]) -> Void
+    private let onOutput: ([UInt8], ((Int) -> Void)?) -> Void
     private let onConnected: () -> Void
     private let onDisconnected: () -> Void
     private let onFailed: (String) -> Void
@@ -940,7 +1049,7 @@ final class MoshTransportDriver {
         host: String,
         udpPort: Int,
         base64Key: String,
-        onOutput: @escaping ([UInt8]) -> Void,
+        onOutput: @escaping ([UInt8], ((Int) -> Void)?) -> Void,
         onConnected: @escaping () -> Void,
         onDisconnected: @escaping () -> Void,
         onFailed: @escaping (String) -> Void,
@@ -986,15 +1095,11 @@ final class MoshTransportDriver {
                     guard let self else { return }
                     let bytes = [UInt8](data)
                     if !bytes.isEmpty {
-                        self.outputChunkCount += 1
-                        self.outputByteCount += bytes.count
-                        let chunkIndex = self.outputChunkCount
-                        if chunkIndex <= 12 || chunkIndex == 25 || chunkIndex == 50 {
-                            MoshDiagnostics.log(
-                                "driver output chunk#\(chunkIndex) bytes=\(bytes.count) totalBytes=\(self.outputByteCount)"
-                            )
+                        if self.forceFullRepaintOutput != nil {
+                            self.forceFullRepaintOutput?.append(contentsOf: bytes)
+                        } else {
+                            self.emitOutput(bytes)
                         }
-                        self.onOutput(bytes)
                     }
                 }
 
@@ -1061,6 +1166,33 @@ final class MoshTransportDriver {
         }
     }
 
+    func forceFullRepaint(completion: @escaping (Int?) -> Void) {
+        queue.async {
+            guard !self.finished, let bridge = self.bridge else {
+                completion(nil)
+                return
+            }
+            MoshDiagnostics.log("driver force-full-repaint")
+            self.forceFullRepaintOutput = []
+            do {
+                try bridge.forceFullRepaint()
+                self.tickLocked()
+                let bytes = self.forceFullRepaintOutput ?? []
+                self.forceFullRepaintOutput = nil
+                guard !bytes.isEmpty else {
+                    MoshDiagnostics.log("driver force-full-repaint emitted no output")
+                    completion(nil)
+                    return
+                }
+                self.emitOutput(bytes, delivered: completion)
+            } catch {
+                self.forceFullRepaintOutput = nil
+                completion(nil)
+                self.failLocked(error)
+            }
+        }
+    }
+
     func disconnect() {
         queue.async {
             guard !self.finished else { return }
@@ -1086,6 +1218,22 @@ final class MoshTransportDriver {
         }
     }
     #endif
+
+    private func emitOutput(
+        _ bytes: [UInt8],
+        delivered: ((Int) -> Void)? = nil
+    ) {
+        guard !bytes.isEmpty else { return }
+        outputChunkCount += 1
+        outputByteCount += bytes.count
+        let chunkIndex = outputChunkCount
+        if chunkIndex <= 12 || chunkIndex == 25 || chunkIndex == 50 {
+            MoshDiagnostics.log(
+                "driver output chunk#\(chunkIndex) bytes=\(bytes.count) totalBytes=\(outputByteCount)"
+            )
+        }
+        onOutput(bytes, delivered)
+    }
 
     private func tickLocked() {
         guard !finished, let bridge else { return }
@@ -1279,6 +1427,11 @@ final class TmuxControlChannel {
     private let requireBiometric: Bool
     private let isSecureEnclave: Bool
     private let sessionName: String
+    private let preserveTmuxGeometry: Bool
+    /// Existing authoritative grid captured before the visible mosh client
+    /// attached. Keep the SSH control client's PTY at the same virtual size;
+    /// otherwise two ignored compact clients make tmux fall back to 50x20.
+    private let preservedServerSize: (cols: Int, rows: Int)?
     private var lastKnownSize: (cols: Int, rows: Int)?
     private let inputStream: AsyncStream<[UInt8]>
     private let inputContinuation: AsyncStream<[UInt8]>.Continuation
@@ -1304,6 +1457,8 @@ final class TmuxControlChannel {
         isSecureEnclave: Bool = false,
         sessionName: String,
         initialSize: (cols: Int, rows: Int)?,
+        preserveTmuxGeometry: Bool = false,
+        preservedServerSize: (cols: Int, rows: Int)? = nil,
         portForwarderManager: PortForwarderManager? = nil,
         portForwardRules: [PortForwardRule] = []
     ) {
@@ -1311,7 +1466,9 @@ final class TmuxControlChannel {
         self.requireBiometric = requireBiometric
         self.isSecureEnclave = isSecureEnclave
         self.sessionName = sessionName
-        self.lastKnownSize = initialSize
+        self.preserveTmuxGeometry = preserveTmuxGeometry
+        self.preservedServerSize = preservedServerSize
+        self.lastKnownSize = preservedServerSize ?? initialSize
         self.portForwarderManager = portForwarderManager
         self.portForwardRules = portForwardRules
         (outputStream, outputContinuation) = AsyncStream.makeStream(of: [UInt8].self)
@@ -1340,8 +1497,9 @@ final class TmuxControlChannel {
 
     func resize(cols: Int, rows: Int) {
         guard cols > 0, rows > 0 else { return }
-        lastKnownSize = (cols, rows)
-        controlContinuation.yield(.resize(cols: cols, rows: rows))
+        let remoteSize = preservedServerSize ?? (cols, rows)
+        lastKnownSize = remoteSize
+        controlContinuation.yield(.resize(cols: remoteSize.cols, rows: remoteSize.rows))
     }
 
     func disconnect() {
@@ -1417,12 +1575,24 @@ final class TmuxControlChannel {
         return String(decoding: bytes, as: UTF8.self)
     }
 
-    static func attachCommand(sessionName: String) -> String {
-        "tmux -CC attach -t \(sessionName)"
+    static func attachCommand(
+        sessionName: String,
+        preserveTmuxGeometry: Bool = false
+    ) -> String {
+        guard preserveTmuxGeometry else {
+            return "tmux -CC attach -t \(sessionName)"
+        }
+        return AutoTmuxScript.geometryPreservingClientCommand(
+            tmuxCommand: "tmux -CC attach",
+            arguments: "-t \(sessionName)"
+        )
     }
 
     private func run() async {
-        let command = Self.attachCommand(sessionName: sessionName)
+        let command = Self.attachCommand(
+            sessionName: sessionName,
+            preserveTmuxGeometry: preserveTmuxGeometry
+        )
         MoshDiagnostics.log(
             "tmux sidechannel run start sessionNameLength=\(sessionName.count) transport=\(host.transport.rawValue) launchMode=\(host.launchMode.rawValue) port=\(host.port)"
         )

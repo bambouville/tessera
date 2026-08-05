@@ -11,6 +11,69 @@ final class VisualCaptureProbe: XCTestCase {
         usleep(500_000)
     }
 
+    func testSetLandscapeWithActiveApp() throws {
+        try requireVisualCaptureRun()
+        // iPhone SpringBoard does not adopt a landscape orientation on its own.
+        // Keep Tessera active while changing the device orientation so the
+        // orientation persists for the following external simctl captures.
+        let app = XCUIApplication()
+        app.launchEnvironment["TESSERA_FORCE_TOUR_STEP"] = "0"
+        app.launch()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        usleep(500_000)
+    }
+
+    func testCaptureOnboardingLayoutMatrix() throws {
+        try requireVisualCaptureRun()
+        let app = XCUIApplication()
+        continueAfterFailure = false
+        let orientations: [(String, UIDeviceOrientation)] = [
+            ("portrait", .portrait),
+            ("landscape", .landscapeLeft),
+        ]
+
+        for (orientationName, orientation) in orientations {
+            app.terminate()
+            app.launchEnvironment.removeValue(forKey: "TESSERA_FORCE_TOUR_STEP")
+            app.launchEnvironment["TESSERA_FORCE_TOUR_WELCOME"] = "1"
+            app.launch()
+            XCUIDevice.shared.orientation = orientation
+
+            let welcome = app.staticTexts["welcome to Tessera"]
+            XCTAssertTrue(
+                welcome.waitForExistence(timeout: 5),
+                "missing onboarding welcome in \(orientationName)"
+            )
+            usleep(600_000)
+            mark("onboarding-\(orientationName)-welcome")
+            usleep(1_500_000)
+
+            app.terminate()
+            app.launchEnvironment.removeValue(forKey: "TESSERA_FORCE_TOUR_WELCOME")
+            app.launchEnvironment["TESSERA_FORCE_TOUR_STEP"] = "0"
+            app.launch()
+            XCUIDevice.shared.orientation = orientation
+
+            for step in 0..<9 {
+                let counter = app.staticTexts["STEP \(step + 1) OF 9"]
+                XCTAssertTrue(
+                    counter.waitForExistence(timeout: 5),
+                    "missing onboarding step \(step + 1) in \(orientationName)"
+                )
+                usleep(600_000)
+
+                mark("onboarding-\(orientationName)-step-\(step + 1)")
+                usleep(1_500_000)
+
+                if step < 8 {
+                    let next = app.buttons["onboarding-next"]
+                    XCTAssertTrue(next.waitForExistence(timeout: 2), "next button is missing")
+                    next.tap()
+                }
+            }
+        }
+    }
+
     func testFilesContextMenuLifecycle() throws {
         try requireVisualCaptureRun()
         XCUIDevice.shared.orientation = .landscapeLeft
@@ -337,6 +400,44 @@ final class VisualCaptureProbe: XCTestCase {
         XCTAssertTrue(confirmation.buttons["Install"].exists)
     }
 
+    func testCompactAgentIntegrationWarningAppearsInHostSwitcher() throws {
+        try requireVisualCaptureRun()
+        // Preserve the current device-class orientation. The focused iPhone
+        // lane runs in portrait, while the aggregate iPad visual suite is
+        // intentionally kept in landscape; the harness forces compact width
+        // independently, so rotating mid-suite only destabilizes SpringBoard.
+        let app = XCUIApplication()
+        app.launchEnvironment["TESSERA_AGENT_INTEGRATION_WARNING_HARNESS"] = "1"
+        app.launchEnvironment["TESSERA_AGENT_INTEGRATION_WARNING_AUTO_OPEN"] = "0"
+        app.launchEnvironment["TESSERA_AGENT_INTEGRATION_WARNING_COMPACT"] = "1"
+        app.launchEnvironment["TESSERA_AGENT_INTEGRATION_WARNING_STATE"] = "missing-agent"
+        app.launch()
+
+        let switcher = app.buttons["compact-session-switcher"]
+        XCTAssertTrue(switcher.waitForExistence(timeout: 8), "Compact host switcher is missing")
+        XCTAssertTrue(
+            switcher.label.contains("Agent integration not installed"),
+            "Compact host name does not announce the hook warning"
+        )
+        switcher.tap()
+
+        let warningRow = app.descendants(matching: .any)[
+            "agent-integration-warning-switcher-row"
+        ]
+        XCTAssertTrue(
+            warningRow.waitForExistence(timeout: 5),
+            "Hook warning is not the first switcher section"
+        )
+        let install = app.buttons["agent-integration-warning-switcher-action"]
+        XCTAssertTrue(install.exists)
+        XCTAssertEqual(install.label, "Install integration")
+        install.tap()
+        XCTAssertTrue(
+            app.alerts["Install agent integration?"].waitForExistence(timeout: 3),
+            "Compact switcher action bypassed the existing safety confirmation"
+        )
+    }
+
     func testWaitForLiveScrollReady() throws {
         try requireVisualCaptureRun()
         XCUIDevice.shared.orientation = .landscapeLeft
@@ -574,6 +675,19 @@ final class VisualCaptureProbe: XCTestCase {
             "single-pane X should close immediately without confirmation"
         )
         XCTAssertFalse(app.buttons["Close window"].exists)
+
+        // Regression: a freshly-created window (bare %window-add, layout not
+        // hydrated yet) is single-pane and must close without the spurious
+        // "pane information still loading" confirmation.
+        let freshClose = app.buttons["tmux-window-4-close"]
+        XCTAssertTrue(freshClose.exists, "fresh un-hydrated tab is missing its X")
+        freshClose.tap()
+        XCTAssertTrue(
+            freshClose.waitForNonExistence(timeout: 3),
+            "fresh single-pane X should close immediately without confirmation"
+        )
+        XCTAssertFalse(app.buttons["Close window"].exists)
+        XCTAssertFalse(app.buttons["Cancel"].exists)
 
         splitClose.tap()
         var destructive = app.buttons["Close all 2 panes"]

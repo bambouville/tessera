@@ -1,3 +1,5 @@
+import UIKit
+
 enum AccessoryChip: String, CaseIterable, Codable {
     // navigation
     case left, down, up, right, home, end, pgup, pgdn, tab
@@ -5,6 +7,7 @@ enum AccessoryChip: String, CaseIterable, Codable {
     case ctrl, alt, shift
     // simple key-bytes modifiers
     case esc
+    case ctrlJ
     // function keys
     case f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12
     // symbols
@@ -14,6 +17,8 @@ enum AccessoryChip: String, CaseIterable, Codable {
         switch self {
         case .esc:
             "esc"
+        case .ctrlJ:
+            "^J"
         case .ctrl:
             "^"
         case .alt:
@@ -96,8 +101,33 @@ enum AccessoryChip: String, CaseIterable, Codable {
         }
     }
 
+    var accessibilityLabel: String {
+        switch self {
+        case .ctrl: "Control"
+        case .alt: "Option"
+        case .shift: "Shift"
+        case .esc: "Escape"
+        case .ctrlJ: "Control-J"
+        case .tab: "Tab"
+        case .left: "Left arrow"
+        case .down: "Down arrow"
+        case .up: "Up arrow"
+        case .right: "Right arrow"
+        case .pgup: "Page up"
+        case .pgdn: "Page down"
+        default: rawValue
+        }
+    }
+
     static var defaultBarOrder: [AccessoryChip] {
-        [.esc, .ctrl, .alt, .tab, .left, .down, .up, .right, .pipe, .tilde]
+        defaultBarOrder(for: UIDevice.current.userInterfaceIdiom)
+    }
+
+    static func defaultBarOrder(for idiom: UIUserInterfaceIdiom) -> [AccessoryChip] {
+        if idiom == .phone {
+            return [.esc, .ctrl, .tab, .left, .right, .down, .up, .alt, .ctrlJ]
+        }
+        return [.esc, .ctrl, .alt, .tab, .left, .down, .up, .right, .pipe, .tilde]
     }
 
     static func from(rawIDs: [String]) -> [AccessoryChip] {

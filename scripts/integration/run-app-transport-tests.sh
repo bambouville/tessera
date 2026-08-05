@@ -16,7 +16,7 @@ require_command jq
 require_command xcodebuild
 require_command xcrun
 
-udid="$($HERE/ensure-test-simulator.sh | tail -n 1)"
+udid=''
 derived_data="$FIXTURE_STATE/DerivedData"
 result_bundle="$RUN_DIR/programmatic/real-host-transports.xcresult"
 mkdir -p "$derived_data" "$(dirname "$result_bundle")"
@@ -37,13 +37,17 @@ config_json="$(
 config_b64="$(printf '%s' "$config_json" | base64 | tr -d '\n')"
 
 cleanup() {
-  xcrun simctl spawn "$udid" launchctl unsetenv TESSERA_REAL_HOST_CONFIG_B64 \
-    >/dev/null 2>&1 || true
+  if [[ -n "$udid" ]]; then
+    xcrun simctl spawn "$udid" launchctl unsetenv TESSERA_REAL_HOST_CONFIG_B64 \
+      >/dev/null 2>&1 || true
+  fi
   if [[ "${TESSERA_KEEP_TEST_SIM_BOOTED:-0}" != 1 ]]; then
-    xcrun simctl shutdown "$udid" >/dev/null 2>&1 || true
+    delete_owned_test_simulator "$SIMULATOR_STATE/simulator_udid" || true
   fi
 }
 trap cleanup EXIT
+
+udid="$($HERE/ensure-test-simulator.sh | tail -n 1)"
 
 xcrun simctl spawn "$udid" launchctl setenv \
   TESSERA_REAL_HOST_CONFIG_B64 "$config_b64"

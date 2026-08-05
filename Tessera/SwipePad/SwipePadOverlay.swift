@@ -9,12 +9,25 @@ struct SwipePadOverlay: View {
     let outputActivityToken: Int
     let processNameProvider: SwipePadProcessNameProvider?
     let paneProcessNameProvider: SwipePadPaneProcessNameProvider?
+    /// Hook-proof projection for this session; nil (previews, harnesses)
+    /// keeps the pad permanently in resolver fallback mode.
+    let agentContext: SwipePadAgentContext?
+    /// Whether this session view is the selected, visible one. Hidden
+    /// sessions stay mounted at opacity 0; their pads must not poll.
+    let sessionIsActive: Bool
+    /// Opens the Agent Center surface — fired by the "more" petal when a
+    /// prompt has more options than the radial can hold.
+    let onShowMore: (() -> Void)?
     @Bindable var profileStore: SwipePadProfileStore
     @Bindable var dictationController: SpeechDictationController
 
     @Environment(AppearancePreferences.self) private var appearance
+    // \.scenePhase does not reliably reach nested session views (see the
+    // SessionView app-phase note); the root-injected AppPhase does.
+    @Environment(AppPhase.self) private var appPhase
     @State private var puckPosition: CGPoint = .zero
     @State private var hasInitializedPosition = false
+    @State private var softwareKeyboardVisible = false
     /// One resolver per overlay lifetime — kept as @State so its
     /// `currentProfile` publication survives view re-renders and drives
     /// the puck's at-rest "matched" indicator via the .task polling
@@ -27,6 +40,9 @@ struct SwipePadOverlay: View {
         outputActivityToken: Int = 0,
         processNameProvider: SwipePadProcessNameProvider? = nil,
         paneProcessNameProvider: SwipePadPaneProcessNameProvider? = nil,
+        agentContext: SwipePadAgentContext? = nil,
+        sessionIsActive: Bool = true,
+        onShowMore: (() -> Void)? = nil,
         profileStore: SwipePadProfileStore,
         dictationController: SpeechDictationController
     ) {
@@ -35,8 +51,41 @@ struct SwipePadOverlay: View {
         self.outputActivityToken = outputActivityToken
         self.processNameProvider = processNameProvider
         self.paneProcessNameProvider = paneProcessNameProvider
+        self.agentContext = agentContext
+        self.sessionIsActive = sessionIsActive
+        self.onShowMore = onShowMore
         self.profileStore = profileStore
         self.dictationController = dictationController
+    }
+
+    private var hookSnapshot: SwipePadAgentSnapshot? { agentContext?.snapshot }
+
+    /// Resolver polling runs only when every gate is open: no hook proof
+    /// (lifecycle events replace discovery entirely), the session visible,
+    /// and the app foregrounded. Task identity — any flip restarts or stops
+    /// the loop immediately.
+    private struct PollingKey: Equatable {
+        let hookActive: Bool
+        let sessionActive: Bool
+        let sceneActive: Bool
+
+        var allowsPolling: Bool { !hookActive && sessionActive && sceneActive }
+    }
+
+    private var pollingKey: PollingKey {
+        PollingKey(
+            hookActive: hookSnapshot != nil,
+            sessionActive: sessionIsActive,
+            sceneActive: appPhase.isActive
+        )
+    }
+
+    /// Burst identity folds the gate in: a gate flip mid-burst (hook proof
+    /// arriving, session hiding, backgrounding) cancels the remaining ticks
+    /// instead of letting them fire remote probes the gate exists to stop.
+    private struct BurstKey: Equatable {
+        let token: Int
+        let gate: PollingKey
     }
 
     var body: some View {
@@ -45,34 +94,49 @@ struct SwipePadOverlay: View {
         } else {
             GeometryReader { proxy in
                 let canvasSize = proxy.size
-                let diameter = Self.diameter(for: appearance.swipePadSize)
+                let configuredDiameter = Self.diameter(for: appearance.swipePadSize)
+                let diameter = UIDevice.current.userInterfaceIdiom == .phone
+                    ? min(configuredDiameter, 52)
+                    : configuredDiameter
 
-                ZStack {
-                    SwipePadView(
-                        diameter: diameter,
-                        position: puckPosition,
-                        canvasSize: canvasSize,
-                        resolver: resolver,
-                        tmux: tmux,
-                        processNameProvider: processNameProvider,
-                        paneProcessNameProvider: paneProcessNameProvider,
-                        profileStore: profileStore,
-                        dictationController: dictationController,
-                        onFireMacro: fireMacro(_:),
-                        onRelocate: { proposedPosition in
-                            relocate(
-                                proposedPosition,
-                                in: canvasSize,
-                                diameter: diameter
+                Group {
+                    if compactLandscapeKeyboardActive(in: canvasSize) {
+                        Color.clear
+                            .allowsHitTesting(false)
+                    } else {
+                        ZStack {
+                            SwipePadView(
+                                diameter: diameter,
+                                position: puckPosition,
+                                canvasSize: canvasSize,
+                                resolver: resolver,
+                                tmux: tmux,
+                                processNameProvider: processNameProvider,
+                                paneProcessNameProvider: paneProcessNameProvider,
+                                profileStore: profileStore,
+                                dictationController: dictationController,
+                                hookSnapshot: hookSnapshot,
+                                agentContext: agentContext,
+                                onShowMore: onShowMore,
+                                sessionIsActive: sessionIsActive,
+                                onFireMacro: fireMacro(_:),
+                                onRelocate: { proposedPosition in
+                                    relocate(
+                                        proposedPosition,
+                                        in: canvasSize,
+                                        diameter: diameter
+                                    )
+                                }
                             )
+                            .position(x: puckPosition.x, y: puckPosition.y)
+                            .transition(.scale(scale: 0.82).combined(with: .opacity))
                         }
-                    )
-                    .position(x: puckPosition.x, y: puckPosition.y)
-                    .transition(.scale(scale: 0.82).combined(with: .opacity))
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .onAppear {
                     configureDictationCommit()
+                    resolver.setSuspended(!pollingKey.allowsPolling)
                     syncPosition(
                         in: canvasSize,
                         diameter: diameter,
@@ -80,14 +144,43 @@ struct SwipePadOverlay: View {
                         force: !hasInitializedPosition
                     )
                 }
-                .task {
+                .onDisappear {
+                    // Hidden sessions keep this overlay mounted (opacity 0),
+                    // so this fires only on true teardown or the SwipePad
+                    // feature toggling off. Either way the surface is gone:
+                    // close the gate so any still-in-flight async work (the
+                    // VoiceOver fallback's resolution included) refuses
+                    // instead of firing into it. onAppear re-syncs the gate
+                    // if the overlay returns.
+                    resolver.setSuspended(true)
+                }
+                .onChange(of: pollingKey) { oldKey, newKey in
+                    // Suspension (not just task identity) closes the gate for
+                    // work already queued or in flight: a coalesced refresh
+                    // or a landing async query must neither reschedule nor
+                    // publish once polling is stopped.
+                    resolver.setSuspended(!newKey.allowsPolling)
+                    if oldKey.hookActive, !newKey.hookActive {
+                        // Hook proof vanished (agent exited, or focus moved
+                        // to an unhooked pane). The profile the resolver
+                        // retained from before hook mode describes the
+                        // *previous* foreground program — an immediate
+                        // gesture would fire its macro into the new one.
+                        // Show nothing until a fresh resolution lands.
+                        resolver.invalidate(reason: "hook-mode-ended")
+                    }
+                }
+                .task(id: pollingKey) {
                     // Light background polling so the puck's at-rest "matched"
                     // indicator updates without requiring a press. The
                     // output-activity task below handles bursty changes; this
                     // loop is the quiet fallback and the active-profile stale
-                    // state cleanup path.
+                    // state cleanup path. Hook mode and hidden/backgrounded
+                    // sessions run zero iterations — lifecycle events (or
+                    // nothing) drive them, not remote probes.
+                    guard pollingKey.allowsPolling else { return }
                     while !Task.isCancelled {
-                        SwipePadDiagnostics.log(
+                        SwipePadDiagnostics.verbose(
                             "refresh-trigger source=poll tmux.mode=\(tmux.mode) activeWindow=\(String(describing: tmux.activeWindowId)) activePane=\(String(describing: tmux.activePaneId)) currentProfile=\(Self.profileDiagnostic(resolver.currentProfile))"
                         )
                         resolver.refresh(
@@ -103,20 +196,20 @@ struct SwipePadOverlay: View {
                         } else {
                             intervalSeconds = 5
                         }
-                        SwipePadDiagnostics.log(
+                        SwipePadDiagnostics.verbose(
                             "refresh-sleep source=poll interval=\(intervalSeconds)s currentProfile=\(Self.profileDiagnostic(resolver.currentProfile))"
                         )
                         try? await Task.sleep(for: .seconds(intervalSeconds))
                     }
                 }
-                .task(id: outputActivityToken) {
-                    guard outputActivityToken != 0 else { return }
-                    SwipePadDiagnostics.log(
+                .task(id: BurstKey(token: outputActivityToken, gate: pollingKey)) {
+                    guard outputActivityToken != 0, pollingKey.allowsPolling else { return }
+                    SwipePadDiagnostics.verbose(
                         "refresh-window source=output token=\(outputActivityToken) ticks=3"
                     )
                     for tick in 0..<3 {
                         guard !Task.isCancelled else { return }
-                        SwipePadDiagnostics.log(
+                        SwipePadDiagnostics.verbose(
                             "refresh-trigger source=output token=\(outputActivityToken) tick=\(tick)"
                         )
                         resolver.refresh(
@@ -152,13 +245,33 @@ struct SwipePadOverlay: View {
                     )
                 }
                 .onChange(of: appearance.swipePadSize) { _, _ in
-                    let newDiameter = Self.diameter(for: appearance.swipePadSize)
+                    let configuredDiameter = Self.diameter(for: appearance.swipePadSize)
+                    let newDiameter = UIDevice.current.userInterfaceIdiom == .phone
+                        ? min(configuredDiameter, 52)
+                        : configuredDiameter
                     syncPosition(
                         in: canvasSize,
                         diameter: newDiameter,
                         animated: true,
                         force: true
                     )
+                }
+                .onReceive(
+                    NotificationCenter.default.publisher(
+                        for: UIResponder.keyboardWillChangeFrameNotification
+                    )
+                ) { notification in
+                    guard let frame = notification.userInfo?[
+                        UIResponder.keyboardFrameEndUserInfoKey
+                    ] as? CGRect else { return }
+                    softwareKeyboardVisible = frame.minY < UIScreen.main.bounds.maxY - 1
+                }
+                .onReceive(
+                    NotificationCenter.default.publisher(
+                        for: UIResponder.keyboardWillHideNotification
+                    )
+                ) { _ in
+                    softwareKeyboardVisible = false
                 }
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.72), value: appearance.swipePadEnabled)
@@ -170,6 +283,12 @@ struct SwipePadOverlay: View {
             let suffix: [UInt8] = appearance.voiceAppendReturn ? [0x0D] : []
             onSend(Array(text.utf8) + suffix)
         }
+    }
+
+    private func compactLandscapeKeyboardActive(in size: CGSize) -> Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+            && softwareKeyboardVisible
+            && size.width > size.height
     }
 
     private func fireMacro(_ spec: String) {
@@ -211,8 +330,12 @@ struct SwipePadOverlay: View {
                 diameter: diameter
             )
         }
-        return resolvedCornerPosition(
-            appearance.swipePadCorner,
+        return clampedPosition(
+            resolvedCornerPosition(
+                appearance.swipePadCorner,
+                in: size,
+                diameter: diameter
+            ),
             in: size,
             diameter: diameter
         )
@@ -234,14 +357,17 @@ struct SwipePadOverlay: View {
     }
 
     /// Clamp a candidate puck center so the full puck stays on-screen.
-    /// No additional inset — letting the user park flush against the edge
-    /// is part of the "drop where you want" UX.
+    /// Phone keeps the bottom edge above the one-swipe home-indicator zone;
+    /// the other edges and iPad remain flush-capable.
     private func clampedPosition(_ point: CGPoint, in size: CGSize, diameter: CGFloat) -> CGPoint {
         let radius = diameter / 2
+        let bottomClearance: CGFloat = UIDevice.current.userInterfaceIdiom == .phone
+            ? 34
+            : 0
         let minX = radius
         let maxX = max(radius, size.width - radius)
         let minY = radius
-        let maxY = max(radius, size.height - radius)
+        let maxY = max(radius, size.height - radius - bottomClearance)
         return CGPoint(
             x: min(max(point.x, minX), maxX),
             y: min(max(point.y, minY), maxY)
@@ -249,18 +375,37 @@ struct SwipePadOverlay: View {
     }
 
     private func resolvedCornerPosition(_ corner: String, in size: CGSize, diameter: CGFloat) -> CGPoint {
-        let edgeInset: CGFloat = 22
-        let radius = diameter / 2
+        // Phone: home at the actual corner — the fan presentation keeps the
+        // petals on-canvas there, so the puck no longer needs the cross's
+        // mid-screen insets. The bottom edge intentionally overshoots and
+        // lets clampedPosition apply its home-indicator clearance, keeping
+        // that constant in one place.
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            let inset = SwipePadPetalLayout.fanCornerInset(puckDiameter: diameter)
+            let x = corner.hasSuffix("Left") ? inset : size.width - inset
+            let y = corner.hasPrefix("top") ? inset : size.height
+            return CGPoint(x: x, y: y)
+        }
+
+        // iPad: unchanged — the cross radial fits at these insets, and the
+        // trained cardinal gestures stay primary at home.
+        let insets = SwipePadPetalLayout.radialCenterInsets(
+            directions: SwipePadPetalLayout.directionOrder,
+            diameter: diameter
+        )
 
         switch corner {
         case "topLeft":
-            return CGPoint(x: edgeInset + radius, y: edgeInset + radius)
+            return CGPoint(x: insets.leading, y: insets.top)
         case "topRight":
-            return CGPoint(x: size.width - edgeInset - radius, y: edgeInset + radius)
+            return CGPoint(x: size.width - insets.trailing, y: insets.top)
         case "bottomLeft":
-            return CGPoint(x: edgeInset + radius, y: size.height - edgeInset - radius)
+            return CGPoint(x: insets.leading, y: size.height - insets.bottom)
         default:
-            return CGPoint(x: size.width - edgeInset - radius, y: size.height - edgeInset - radius)
+            return CGPoint(
+                x: size.width - insets.trailing,
+                y: size.height - insets.bottom
+            )
         }
     }
 

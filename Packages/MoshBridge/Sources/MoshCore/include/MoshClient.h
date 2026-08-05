@@ -20,6 +20,7 @@ public:
     std::chrono::milliseconds tick();
     void inject_user_bytes(const uint8_t *bytes, size_t length);
     void resize(int cols, int rows);
+    void force_full_repaint();
     void shutdown();
     void set_output_callback(OutputCallback callback);
     int socket_fd() const;

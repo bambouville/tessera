@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tessera://schemas/nearby-bootstrap/v2/recipient-public-key.schema.json",
+  "title": "EnrollmentPublicKey v2 (recipientPublicKey payload)",
+  "description": "Payload of encrypted-envelope kind 'recipientPublicKey'. Public key material and display metadata only; no private bytes, Keychain handles, or credential references. Lenient decoder. Frozen for protocol version 2.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["id", "displayName", "algorithm", "blob", "fingerprint", "protection"],
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "displayName": { "type": "string", "description": "Display metadata; validated for safe rendering, never a trust input" },
+    "algorithm": { "type": "string", "enum": ["ssh-ed25519", "ecdsa-sha2-nistp256"] },
+    "blob": { "type": "string", "description": "Canonical base64 SSH wire blob, no algorithm prefix or comment" },
+    "fingerprint": { "type": "string", "description": "SHA256:... fingerprint; must match blob" },
+    "protection": { "type": "string", "enum": ["secureEnclave", "software"] }
+  }
+}

@@ -20,6 +20,11 @@ import PortForwarding
 /// silently delete the user's work.
 struct ForwardingTabView: View {
     @Bindable var host: PersistedHost
+    /// Compact host editing stages every field until the outer Save action.
+    /// Keeping an optional rule binding here lets that surface reuse the full
+    /// editor without SwiftData autosave turning Cancel into a partial save.
+    private let stagedRules: Binding<[PortForwardRule]>?
+    private let transportOverride: HostTransport?
     @Environment(\.designTokens) private var T
     @Environment(TunnelsRegistry.self) private var tunnelsRegistry
 
@@ -33,6 +38,16 @@ struct ForwardingTabView: View {
     @State private var remotePortText: String = ""
     @State private var ruleLabel: String = ""
     @State private var autoStart: Bool = true
+
+    init(
+        host: PersistedHost,
+        stagedRules: Binding<[PortForwardRule]>? = nil,
+        transportOverride: HostTransport? = nil
+    ) {
+        self.host = host
+        self.stagedRules = stagedRules
+        self.transportOverride = transportOverride
+    }
 
     private enum EditState: Equatable {
         case existing(id: UUID)
@@ -50,11 +65,12 @@ struct ForwardingTabView: View {
     }
 
     private var rules: [PortForwardRule] {
-        RuleCodec.decode(host.portForwardRulesData)
+        stagedRules?.wrappedValue ?? RuleCodec.decode(host.portForwardRulesData)
     }
 
     private var isForwardingDisabled: Bool {
-        host.transport == .mosh && host.launchMode == .customCommand
+        (transportOverride ?? host.transport) == .mosh
+            && host.launchMode == .customCommand
     }
 
     private var originalForEditing: PortForwardRule? {
@@ -213,7 +229,9 @@ struct ForwardingTabView: View {
 
     @ViewBuilder
     private func compactCard(_ rule: PortForwardRule) -> some View {
-        HStack(spacing: 10) {
+        // spacing 2 — the xmark's 44pt hit frame overhangs 8pt each side,
+        // so 2pt gaps restore the old 10pt visual pitch.
+        HStack(spacing: 2) {
             Button(action: { requestEdit(rule) }) {
                 VStack(alignment: .leading, spacing: 3) {
                     portsRow(rule)
@@ -222,6 +240,10 @@ struct ForwardingTabView: View {
                         .foregroundStyle(T.fgDim)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                // Full-row hit frame — must be >= 44pt tall (iPadOS 26
+                // expands sub-44pt targets itself and mis-assigns taps
+                // between adjacent small controls).
+                .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -230,7 +252,9 @@ struct ForwardingTabView: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(T.fgMuted)
+                    // 28pt visual box inside a 44pt hit frame (see above).
                     .frame(width: 28, height: 28)
+                    .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -241,7 +265,8 @@ struct ForwardingTabView: View {
                 .tint(T.accent)
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        // 4pt + the 44pt hit frames keeps the old ~52pt card height.
+        .padding(.vertical, 4)
         .background(T.inputBg)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
@@ -505,6 +530,10 @@ struct ForwardingTabView: View {
     }
 
     private func applyAndReconcile(_ next: [PortForwardRule]) {
+        if let stagedRules {
+            stagedRules.wrappedValue = next
+            return
+        }
         host.setPortForwardRules(next)
         let hostID = host.id
         Task {

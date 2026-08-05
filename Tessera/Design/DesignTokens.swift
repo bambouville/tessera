@@ -1,6 +1,19 @@
 import SwiftUI
+import UIKit
 
 enum AppearanceMode { case dark, light }
+
+/// Single authority for the phone-vs-iPad presentation split. iPhone idiom
+/// always presents the compact phone experience, even where the size class
+/// goes regular (Pro Max landscape) — otherwise the iPad sidebar shell wraps
+/// phone-styled pages whose idiom checks hide controls the iPad flows expect.
+/// iPad stays size-class-driven so Split View still adapts.
+enum CompactLayout {
+    static func isPhone(_ horizontalSizeClass: UserInterfaceSizeClass?) -> Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+            || horizontalSizeClass == .compact
+    }
+}
 
 enum AccentName: String, CaseIterable {
     case blue, green, amber, custom
@@ -55,9 +68,15 @@ struct DesignTokens {
     let amber: Color
     let border: Color
     let borderStrong: Color
-    let mono: String
-    let sans: String
     let isLight: Bool
+
+    /// Opaque canvas for full-screen presentations layered above existing
+    /// content. The normal light-mode `bg` is intentionally clear so the app's
+    /// root system background can show through, but using that token for a
+    /// modal overlay leaves the underlying page visible and unreadable.
+    var presentationBg: Color {
+        isLight ? .white : bg
+    }
 
     /// `customColor` is consulted only when `accent == .custom`. It overrides
     /// both `accent` and `accentSoft` — soft is derived as `customColor` with
@@ -104,8 +123,6 @@ struct DesignTokens {
                 amber:         Color(rgb: 0xFF9F0A),
                 border:        Color(r: 255, g: 255, b: 255, a: 0.08),
                 borderStrong:  Color(r: 255, g: 255, b: 255, a: 0.14),
-                mono:          "JetBrainsMono-Regular",
-                sans:          "SF Pro Text",
                 isLight:       false
             )
         case .light:
@@ -127,8 +144,6 @@ struct DesignTokens {
                 amber:         Color(rgb: 0xB26B00),
                 border:        Color(r: 0, g: 0, b: 0, a: 0.08),
                 borderStrong:  Color(r: 0, g: 0, b: 0, a: 0.14),
-                mono:          "JetBrainsMono-Regular",
-                sans:          "SF Pro Text",
                 isLight:       true
             )
         }
@@ -193,7 +208,7 @@ enum ChromeMaterial: String, CaseIterable, Identifiable {
 
     var caption: String {
         switch self {
-        case .liquidGlass: return "translucent, refractive — iPadOS 26+"
+        case .liquidGlass: return "translucent, refractive"
         case .frosted:     return "translucent blur"
         case .solid:       return "opaque, plainest"
         }

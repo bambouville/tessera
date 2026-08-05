@@ -2,6 +2,75 @@ import XCTest
 @testable import Tessera
 
 final class OSDetectorTests: XCTestCase {
+    func test_networkProbe_detectsDocumentedWSLTailscaleMTURisk() {
+        let output = """
+        Linux
+        ID=ubuntu
+        __TESSERA_NETWORK__ kernel=5.15.153.1-microsoft-standard-WSL2
+        __TESSERA_NETWORK__ tailscale_path=1
+        __TESSERA_NETWORK__ default_mtu=1280
+        __TESSERA_NETWORK__ tailscale_mtu=1280
+        """
+
+        let result = OSDetectionProbe.parse(probeOutput: output)
+
+        XCTAssertEqual(result.osHint, "ubuntu")
+        XCTAssertEqual(
+            result.networkPathAssessment,
+            .warning(
+                WSLTailscaleMTUWarning(
+                    defaultInterfaceMTU: 1_280,
+                    tailscaleInterfaceMTU: 1_280
+                )
+            )
+        )
+    }
+
+    func test_networkProbe_clearsRiskWhenOuterMTUIsRemediated() {
+        let output = """
+        Linux
+        __TESSERA_NETWORK__ kernel=5.15.153.1-microsoft-standard-WSL2
+        __TESSERA_NETWORK__ tailscale_path=1
+        __TESSERA_NETWORK__ default_mtu=1340
+        __TESSERA_NETWORK__ tailscale_mtu=1280
+        """
+
+        XCTAssertEqual(
+            OSDetectionProbe.parse(probeOutput: output).networkPathAssessment,
+            .notAtRisk
+        )
+    }
+
+    func test_networkProbe_doesNotWarnWhenSSHDidNotLandOnTailscale() {
+        let output = """
+        Linux
+        __TESSERA_NETWORK__ kernel=5.15.153.1-microsoft-standard-WSL2
+        __TESSERA_NETWORK__ tailscale_path=0
+        __TESSERA_NETWORK__ default_mtu=1280
+        __TESSERA_NETWORK__ tailscale_mtu=1280
+        """
+
+        XCTAssertEqual(
+            OSDetectionProbe.parse(probeOutput: output).networkPathAssessment,
+            .notAtRisk
+        )
+    }
+
+    func test_networkProbe_retainsCachedKnowledgeWhenWSLFieldsAreIncomplete() {
+        let output = """
+        Linux
+        __TESSERA_NETWORK__ kernel=5.15.153.1-microsoft-standard-WSL2
+        __TESSERA_NETWORK__ tailscale_path=unknown
+        __TESSERA_NETWORK__ default_mtu=
+        __TESSERA_NETWORK__ tailscale_mtu=
+        """
+
+        XCTAssertEqual(
+            OSDetectionProbe.parse(probeOutput: output).networkPathAssessment,
+            .unavailable
+        )
+    }
+
     func test_darwinUname_mapsToMacOS() {
         let output = """
         Darwin

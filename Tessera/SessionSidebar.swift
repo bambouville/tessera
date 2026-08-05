@@ -86,20 +86,27 @@ struct SessionSidebar: View {
 
             Spacer(minLength: 0)
 
-            SidebarIconButton(systemName: "plus", accessibilityLabel: "new host") {
-                onNewHost()
-            }
+            // Zero spacing: each button already carries a 44 pt hit frame
+            // around its 26 pt glyph box, so the frames themselves provide
+            // the gap. Sub-44 pt adjacent controls trip iPadOS 26's hit-target
+            // expansion into mis-assigning taps to the neighbor (tapping the
+            // visible `+` fired the chevron), so the frames must stay ≥ 44 pt.
+            HStack(spacing: 0) {
+                SidebarIconButton(systemName: "plus", accessibilityLabel: "new host") {
+                    onNewHost()
+                }
 
-            // In-panel hide (Apple's in-sidebar toggle). Over the terminal the
-            // sidebar floats, so this maximizes the canvas; on browse pages it
-            // collapses the nav column to full-width content.
-            SidebarIconButton(systemName: "chevron.left", accessibilityLabel: "hide sidebar") {
-                onCollapse()
+                // In-panel hide (Apple's in-sidebar toggle). Over the terminal the
+                // sidebar floats, so this maximizes the canvas; on browse pages it
+                // collapses the nav column to full-width content.
+                SidebarIconButton(systemName: "chevron.left", accessibilityLabel: "hide sidebar") {
+                    onCollapse()
+                }
             }
         }
         .padding(.leading, 20)
-        .padding(.trailing, 12)
-        .frame(height: 48)
+        .padding(.trailing, 0)
+        .frame(minHeight: 48)
     }
 
     private var activeSessionsSection: some View {
@@ -355,8 +362,10 @@ private struct ActiveSessionRowBody<S: ObservableObject & TerminalSession>: View
         let sessionHasUnreadFinished = agentCenter.hasUnreadJustFinished(
             sessionID: live.id
         )
+        let authorityPeerName = registry.gridAuthorityPeerName(for: live.id)
 
-        HStack(spacing: 6) {
+        // spacing 0: the disconnect button's 44 pt hit frame supplies the gap.
+        HStack(spacing: 0) {
             Button(action: action) {
                 HStack(alignment: .top, spacing: 8) {
                     StatusDot(color: dotColor(for: state), pulse: pulses(for: state), size: 6)
@@ -405,8 +414,29 @@ private struct ActiveSessionRowBody<S: ObservableObject & TerminalSession>: View
                             )
                     }
 
+                    if let authorityPeerName {
+                        let sameDeviceClass = authorityPeerName
+                            == GridAuthorityDeviceIdentity.selfDisplayName
+                        Image(systemName: authorityPeerName == "iPhone"
+                            ? "iphone"
+                            : (authorityPeerName == "iPad"
+                                ? "ipad.landscape"
+                                : "display"))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(T.fgMuted)
+                            .accessibilityLabel(
+                                "continued on "
+                                    + (sameDeviceClass
+                                        ? "another \(authorityPeerName)"
+                                        : authorityPeerName)
+                            )
+                    }
+
                     Spacer(minLength: 0)
                 }
+                // Row padding lives on the label so the 44 pt hit frame
+                // next door cannot stretch the row height.
+                .padding(.vertical, 8)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -426,8 +456,9 @@ private struct ActiveSessionRowBody<S: ObservableObject & TerminalSession>: View
                 confirmingDisconnect = true
             }
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 12)
+        .padding(.leading, 12)
+        // trailing 3: 12 minus the 9 pt the hit frame adds around the glyph.
+        .padding(.trailing, 3)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(isSelected ? T.inputBgSoft : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -463,7 +494,8 @@ private struct HostRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 6) {
+        // spacing 0: the delete button's 44 pt hit frame supplies the gap.
+        HStack(spacing: 0) {
             Button(action: action) {
                 HStack(alignment: .top, spacing: 0) {
                     OSBadge(osHint: host.osHint, size: 16)
@@ -484,9 +516,13 @@ private struct HostRow: View {
 
                     Spacer(minLength: 0)
                 }
+                // Row padding lives on the label so the 44 pt hit frame
+                // next door cannot stretch the row height.
+                .padding(.vertical, 8)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("sidebar-host-\(host.id.uuidString)")
 
             RowActionButton(
                 systemName: "trash",
@@ -496,8 +532,9 @@ private struct HostRow: View {
                 confirmingDelete = true
             }
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 12)
+        .padding(.leading, 12)
+        // trailing 3: 12 minus the 9 pt the hit frame adds around the glyph.
+        .padding(.trailing, 3)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(isSelected ? T.inputBgSoft : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -528,10 +565,15 @@ private struct RowActionButton: View {
             Image(systemName: systemName)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(tint)
+                // 26 pt visual circle inside a 44 pt hit frame. The hit
+                // frame must not shrink below 44 pt: iPadOS 26 expands
+                // sub-44 pt targets itself and mis-assigns taps between
+                // adjacent controls (the row's select button would fire).
                 .frame(width: 26, height: 26)
                 .background(Circle().fill(tint.opacity(0.14)))
                 .overlay(Circle().stroke(tint.opacity(0.35), lineWidth: 0.5))
-                .contentShape(Circle())
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
@@ -690,10 +732,15 @@ private struct SidebarIconButton: View {
                 .scaledToFit()
                 .frame(width: 14, height: 14)
                 .foregroundStyle(T.fgMuted)
+                // 26 pt visual box (press wash) inside a 44 pt hit frame. The
+                // hit frame must not shrink below 44 pt: iPadOS 26 expands
+                // sub-44 pt targets itself and mis-assigns taps between
+                // adjacent small controls (the `+` fired the chevron).
                 .frame(width: 26, height: 26)
-                .contentShape(RoundedRectangle(cornerRadius: 6))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
-        .buttonStyle(PressableIconButtonStyle(cornerRadius: 6))
+        .buttonStyle(PressableIconButtonStyle(cornerRadius: 6, washSize: 26))
         .accessibilityLabel(accessibilityLabel)
     }
 }
@@ -704,6 +751,9 @@ private struct SidebarIconButton: View {
 /// in scale while the finger is held, then springs back on release.
 private struct PressableIconButtonStyle: ButtonStyle {
     var cornerRadius: CGFloat = 6
+    /// When set, the press wash is a centered square of this size instead of
+    /// filling the label — lets a 26 pt visual sit inside a 44 pt hit frame.
+    var washSize: CGFloat?
     @Environment(\.designTokens) private var T
 
     func makeBody(configuration: Configuration) -> some View {
@@ -711,6 +761,7 @@ private struct PressableIconButtonStyle: ButtonStyle {
             .background(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(configuration.isPressed ? T.fgFaint : Color.clear)
+                    .frame(width: washSize, height: washSize)
             )
             .scaleEffect(configuration.isPressed ? 0.9 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)

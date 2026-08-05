@@ -73,34 +73,40 @@ struct UploadSheetView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Upload to host")
-                .font(Typography.tesseraMono(size: 18, weight: .semibold))
-                .foregroundStyle(T.fg)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("upload to host")
+                        .font(Typography.sheetTitle)
+                        .foregroundStyle(T.fg)
 
-            fileRow
+                    fileRow
 
-            sectionLabel("Host")
-            VStack(spacing: 6) {
-                ForEach(displayCandidates) { candidate in
-                    hostRow(candidate)
+                    sectionLabel("Host")
+                    VStack(spacing: 6) {
+                        ForEach(displayCandidates) { candidate in
+                            hostRow(candidate)
+                        }
+                    }
+
+                    sectionLabel("Destination")
+                    VStack(spacing: 6) {
+                        cwdRow
+                        tempRow
+                    }
+
+                    ToggleRow(
+                        title: "Paste path into active session",
+                        subtitle: pasteSubtitle,
+                        isOn: $pastePath
+                    )
+                    .disabled(!selectionCanReceivePastePath)
+                    .opacity(selectionCanReceivePastePath ? 1 : 0.4)
+                    .padding(.top, 2)
                 }
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-
-            sectionLabel("Destination")
-            VStack(spacing: 6) {
-                cwdRow
-                tempRow
-            }
-
-            ToggleRow(
-                title: "Paste path into active session",
-                subtitle: pasteSubtitle,
-                isOn: $pastePath
-            )
-            .disabled(!selectionCanReceivePastePath)
-            .opacity(selectionCanReceivePastePath ? 1 : 0.4)
-            .padding(.top, 2)
 
             HStack(spacing: 10) {
                 Spacer(minLength: 0)
@@ -110,13 +116,15 @@ struct UploadSheetView: View {
                         .font(Typography.tesseraMono(size: 13, weight: .semibold))
                 }
             }
-            .padding(.top, 4)
-
-            Spacer(minLength: 0)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 16)
+            .background(T.presentationBg)
+            .overlay(alignment: .top) {
+                Rectangle().fill(T.border).frame(height: 0.5)
+            }
         }
-        .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(T.bg)
+        .background(T.presentationBg)
         .onAppear {
             frozenOrder = sortedCandidates.map(\.id)
             adoptSelectionDefaults(for: selection)

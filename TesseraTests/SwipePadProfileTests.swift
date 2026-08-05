@@ -11,9 +11,13 @@ final class SwipePadProfileTests: XCTestCase {
     func test_claudeCodeBuiltInBindings() {
         let profile = SwipePadProfile.builtInClaudeCode
 
+        // Menu is 1=Yes / 2=Yes-always / 3=No: deny sends 3, always sends 2.
+        // (Corrected 2026-08 — the old left=2↵ made "deny" grant sticky
+        // consent after Claude reordered its menu. The drift test in
+        // SwipePadPetalLayoutTests pins these against the parser fixture.)
         XCTAssertEqual(profile.binding(for: .right).macro, "1↵")
-        XCTAssertEqual(profile.binding(for: .left).macro, "2↵")
-        XCTAssertEqual(profile.binding(for: .up).macro, "3↵")
+        XCTAssertEqual(profile.binding(for: .left).macro, "3↵")
+        XCTAssertEqual(profile.binding(for: .up).macro, "2↵")
         XCTAssertEqual(profile.binding(for: .down).isBound, false)
     }
 
@@ -592,6 +596,34 @@ final class SwipePadProfileTests: XCTestCase {
 
 @MainActor
 final class AgentCenterSafetyTests: XCTestCase {
+    func test_swipePadDraggedPositionPersistsAcrossPreferenceRecreation() {
+        let keys = [
+            "tessera.pref.swipePadLastX",
+            "tessera.pref.swipePadLastY",
+        ]
+        let defaults = UserDefaults.standard
+        let previous = Dictionary(uniqueKeysWithValues: keys.map {
+            ($0, defaults.object(forKey: $0))
+        })
+        defer {
+            for key in keys {
+                if let value = previous[key] ?? nil {
+                    defaults.set(value, forKey: key)
+                } else {
+                    defaults.removeObject(forKey: key)
+                }
+            }
+        }
+
+        let preferences = AppearancePreferences()
+        preferences.swipePadLastX = 321.25
+        preferences.swipePadLastY = 654.5
+
+        let restored = AppearancePreferences()
+        XCTAssertEqual(restored.swipePadLastX, 321.25)
+        XCTAssertEqual(restored.swipePadLastY, 654.5)
+    }
+
     func test_experimentalPreferenceDefaultsOffAndPersistsExplicitFalse() {
         let key = "tessera.pref.agentCenterEnabled"
         let defaults = UserDefaults.standard
@@ -2286,6 +2318,81 @@ final class AgentCenterSafetyTests: XCTestCase {
         XCTAssertEqual(center.agents.first?.status, .working)
     }
 
+    func test_scrollPreventionRequiresExactHookProvenWorkingPane() async throws {
+        let box = AgentTestSourceBox(visibleText: "Thinking…")
+        let center = AgentCenter(sendVerificationDelayNanoseconds: 1_000_000)
+        center.noteOutput(
+            sessionID: box.sessionID,
+            paneID: box.paneID,
+            data: Self.lifecycleOSC(state: "working", timestamp: 301)[...]
+        )
+        center.register(box.source())
+
+        await waitUntil {
+            center.agents.first?.status == .working
+                && center.lifecycleIntegrationState(
+                    agentID: AgentInstanceID(
+                        sessionID: box.sessionID,
+                        paneID: box.paneID
+                    )
+                ) == .active
+        }
+
+        let prevention = try XCTUnwrap(
+            center.scrollPrevention(sessionID: box.sessionID, paneID: box.paneID)
+        )
+        XCTAssertEqual(prevention.agentID.sessionID, box.sessionID)
+        XCTAssertEqual(prevention.agentID.paneID, box.paneID)
+        XCTAssertEqual(prevention.agentName, center.agents.first?.name)
+        XCTAssertNil(
+            center.scrollPrevention(sessionID: box.sessionID, paneID: box.paneID + 1),
+            "a working hook in one tmux pane must not block another pane"
+        )
+        XCTAssertNil(
+            center.scrollPrevention(sessionID: UUID(), paneID: box.paneID),
+            "a working hook in one session must not block another session"
+        )
+
+        center.noteOutput(
+            sessionID: box.sessionID,
+            paneID: box.paneID,
+            data: Self.lifecycleOSC(state: "idle", timestamp: 302)[...]
+        )
+        await waitUntil { center.agents.first?.status == .justFinished }
+        XCTAssertNil(
+            center.scrollPrevention(sessionID: box.sessionID, paneID: box.paneID)
+        )
+    }
+
+    func test_scrollPreventionRejectsUnprovenWorkingCard() {
+        let sessionID = UUID()
+        let agent = AgentCenterHarnessFixtures.make(
+            sessionID: sessionID,
+            paneID: 17,
+            profileID: SwipePadProfile.builtInCodexCLIID,
+            name: "Codex",
+            host: "test-host",
+            transport: "ssh+tmux",
+            tmuxSession: "work",
+            windowID: 1,
+            windowName: "agent",
+            status: .working,
+            tail: "Working",
+            prompt: nil,
+            detectedAt: .now,
+            statusChangedAt: .now,
+            lastOutputAt: .now
+        )
+        let center = AgentCenter()
+        center.installHarnessAgents([agent])
+
+        XCTAssertNotEqual(center.lifecycleIntegrationState(agentID: agent.id), .active)
+        XCTAssertNil(
+            center.scrollPrevention(sessionID: sessionID, paneID: 17),
+            "process or harness status without a trusted lifecycle event must never block scrolling"
+        )
+    }
+
     func test_visibleAgentCenterBoundsViewportCapturesDuringSustainedOutput() async {
         let box = AgentTestSourceBox(visibleText: "Thinking…")
         box.processNames = ["codex"]
@@ -2399,6 +2506,39 @@ final class AgentCenterSafetyTests: XCTestCase {
         XCTAssertEqual(event.state, .working)
     }
 
+    /// Regression: curly quotes are E2 80 9C / E2 80 9D — their trailing
+    /// bytes are also the C1 OSC/ST codes. Treating 0x9D as an OSC opener
+    /// parked the scanner in skip mode after ordinary prose, and the next
+    /// genuine agent-state OSC was consumed as skip filler.
+    func test_lifecycleOSCScannerIgnoresCurlyQuoteProse() throws {
+        var scanner = AgentLifecycleOSCScanner()
+        let prose = Array("agent said \u{201C}done\u{201D} just now".utf8)
+
+        XCTAssertTrue(scanner.feed(prose[...]).isEmpty)
+        let event = try XCTUnwrap(
+            scanner.feed(Self.lifecycleOSC(state: "working", timestamp: 42)[...]).first
+        )
+        XCTAssertEqual(event.state, .working)
+    }
+
+    /// Regression: skip mode is byte-capped. An unterminated foreign OSC
+    /// opener (e.g. cat-ing a binary) must not park the scanner in skip for
+    /// the rest of the session — after the cap it recovers and the next
+    /// agent-state OSC parses.
+    func test_lifecycleOSCScannerRecoversFromUnterminatedForeignOSC() throws {
+        var scanner = AgentLifecycleOSCScanner()
+        var opener = Array("\u{1B}]0;stuck".utf8)
+        opener.append(contentsOf: Array(repeating: UInt8(ascii: "a"), count: 17 * 1024))
+        let filler = Array(repeating: UInt8(ascii: "b"), count: 17 * 1024)
+
+        XCTAssertTrue(scanner.feed(opener[...]).isEmpty)
+        XCTAssertTrue(scanner.feed(filler[...]).isEmpty)
+        let event = try XCTUnwrap(
+            scanner.feed(Self.lifecycleOSC(state: "working", timestamp: 43)[...]).first
+        )
+        XCTAssertEqual(event.state, .working)
+    }
+
     func test_lifecycleEventsOverrideComposerAndIgnoreOlderDelivery() async {
         let box = AgentTestSourceBox(visibleText: "Done.\n\n❯ ")
         let center = AgentCenter(sendVerificationDelayNanoseconds: 1_000_000)
@@ -2424,6 +2564,112 @@ final class AgentCenterSafetyTests: XCTestCase {
             data: Self.lifecycleOSC(state: "idle", timestamp: 51)[...]
         )
         await waitUntil { center.agents.first?.status == .justFinished }
+    }
+
+    func test_escapeSuppressesSameTurnWorkingHooksForClaudeAndCodex() async {
+        for provider in ["claude", "codex"] {
+            let box = AgentTestSourceBox(visibleText: "Working")
+            box.processNames = [provider]
+            box.processIDs = [100]
+            let center = AgentCenter(sendVerificationDelayNanoseconds: 1_000_000)
+            center.register(box.source())
+            await waitUntil { center.agents.first != nil }
+
+            center.noteOutput(
+                sessionID: box.sessionID,
+                paneID: box.paneID,
+                data: Self.lifecycleOSC(
+                    state: "working",
+                    timestamp: 100,
+                    event: "UserPromptSubmit",
+                    provider: provider
+                )[...]
+            )
+            await waitUntil { center.agents.first?.status == .working }
+
+            center.noteInput(
+                sessionID: box.sessionID,
+                paneID: box.paneID,
+                bytes: [0x1B, 0x5B, 0x41]
+            )
+            XCTAssertEqual(
+                center.agents.first?.status,
+                .working,
+                "\(provider) arrow-key escape sequences must not interrupt"
+            )
+
+            center.noteInput(
+                sessionID: box.sessionID,
+                paneID: box.paneID,
+                bytes: [0x1B]
+            )
+            XCTAssertEqual(
+                center.agents.first?.status,
+                .idle,
+                "\(provider) should hide interrupt as soon as Escape is sent"
+            )
+
+            center.noteOutput(
+                sessionID: box.sessionID,
+                paneID: box.paneID,
+                data: Self.lifecycleOSC(
+                    state: "idle",
+                    timestamp: 101,
+                    event: "Stop",
+                    provider: provider
+                )[...]
+            )
+            await waitUntil { center.agents.first?.status == .justFinished }
+
+            center.noteOutput(
+                sessionID: box.sessionID,
+                paneID: box.paneID,
+                data: Self.lifecycleOSC(
+                    state: "working",
+                    timestamp: 100,
+                    event: "UserPromptSubmit",
+                    provider: provider
+                )[...]
+            )
+            center.noteLifecyclePayload(
+                sessionID: box.sessionID,
+                paneID: box.paneID,
+                json: Self.lifecycleJSON(
+                    state: "working",
+                    timestamp: 102,
+                    provider: provider,
+                    event: "PreToolUse"
+                )
+            )
+            center.noteOutput(
+                sessionID: box.sessionID,
+                paneID: box.paneID,
+                data: Self.lifecycleOSC(
+                    state: "working",
+                    timestamp: 103,
+                    event: "PostToolUse",
+                    provider: provider
+                )[...]
+            )
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            XCTAssertEqual(
+                center.agents.first?.status,
+                .justFinished,
+                "\(provider) same-turn tool cleanup must not restore interrupt"
+            )
+
+            center.noteOutput(
+                sessionID: box.sessionID,
+                paneID: box.paneID,
+                data: Self.lifecycleOSC(
+                    state: "working",
+                    timestamp: 104,
+                    event: "UserPromptSubmit",
+                    provider: provider
+                )[...]
+            )
+            await waitUntil { center.agents.first?.status == .working }
+        }
     }
 
     func test_lateSubagentStopDoesNotOverwriteRootJustFinishedState() async {

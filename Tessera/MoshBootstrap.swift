@@ -1,6 +1,19 @@
 import Foundation
 import Citadel
 import NIOCore
+import TmuxControl
+
+struct MoshBootstrapGeometry: Equatable, Sendable {
+    let sessionID: String
+    let sessionCreated: Int64
+    let windowID: String
+    let cols: Int
+    let rows: Int
+
+    fileprivate var verificationToken: String {
+        "\(sessionID),\(sessionCreated),\(windowID),\(cols),\(rows)"
+    }
+}
 
 struct MoshBootstrapResult: Equatable, Sendable {
     let udpPort: Int
@@ -11,33 +24,44 @@ struct MoshBootstrapResult: Equatable, Sendable {
     /// or the parser can't classify the output. Mosh sessions consume
     /// this and republish via `@Published var detectedOSHint`.
     let detectedOSHint: String?
+    /// Passive configuration assessment from the same bootstrap SSH client.
+    /// It never changes bootstrap success or failure semantics.
+    let networkPathAssessment: NetworkPathAssessment
     /// Live destination address and topology actually used by the bootstrap
     /// SSH chain. Mosh's UDP driver and its SSH-fallback policy must use this
     /// snapshot, not the session's potentially stale construction-time Host.
     let targetAddress: String?
     let jumpChainHopCount: Int
+    /// Existing tmux grid captured over the bootstrap SSH connection before
+    /// mosh starts. Compact continuation clients seed and hold this virtual
+    /// size so their physical viewport never mutates the shared tmux session.
+    let preservedTmuxGeometry: MoshBootstrapGeometry?
 
     init(
         udpPort: Int,
         base64Key: String,
         serverPID: Int?,
         detectedOSHint: String?,
+        networkPathAssessment: NetworkPathAssessment = .unavailable,
         targetAddress: String? = nil,
-        jumpChainHopCount: Int = 0
+        jumpChainHopCount: Int = 0,
+        preservedTmuxGeometry: MoshBootstrapGeometry? = nil
     ) {
         self.udpPort = udpPort
         self.base64Key = base64Key
         self.serverPID = serverPID
         self.detectedOSHint = detectedOSHint
+        self.networkPathAssessment = networkPathAssessment
         self.targetAddress = targetAddress
         self.jumpChainHopCount = jumpChainHopCount
+        self.preservedTmuxGeometry = preservedTmuxGeometry
     }
 }
 
 enum MoshBootstrapError: Error, Equatable, LocalizedError, Sendable {
     case authenticationFailed(String)
     case connectionFailed(String)
-    case hostKeyRejected
+    case hostKeyRejected(hopLabel: String?)
     case missingServer
     case missingConnect
     case malformedConnect
@@ -49,8 +73,11 @@ enum MoshBootstrapError: Error, Equatable, LocalizedError, Sendable {
             return reason
         case .connectionFailed(let reason):
             return reason
-        case .hostKeyRejected:
-            return "The server's SSH host key was rejected."
+        case .hostKeyRejected(let hopLabel):
+            if let hopLabel {
+                return "Jump host \(hopLabel): connection cancelled because its host key was not trusted."
+            }
+            return "Connection cancelled because the server's host key was not trusted."
         case .missingServer:
             return "Could not start mosh: the remote host does not have `mosh-server` installed or on PATH."
         case .missingConnect:
@@ -137,6 +164,9 @@ enum MoshBootstrap {
         requireBiometric: Bool = false,
         isSecureEnclave: Bool = false,
         hostKeyPrompt: HostKeyVerificationPrompt? = nil,
+        preserveTmuxGeometry: Bool = false,
+        visibleTmuxClientIgnoresSize: Bool = false,
+        gridAuthorityDeviceID: String? = nil,
         sessionNameResolver: SessionNameResolver = HostRuntimeStateStore.sessionName(for:)
     ) async throws -> MoshBootstrapResult {
         // The bootstrap SSH ride (and only this ride) carries the mosh key
@@ -158,9 +188,19 @@ enum MoshBootstrap {
         let client = chain.client
 
         do {
+            let preservedTmuxGeometry = try await preservedTmuxGeometry(
+                for: host,
+                enabled: preserveTmuxGeometry,
+                sessionNameResolver: sessionNameResolver,
+                on: client
+            )
             let transcript = try await executeBootstrapCommand(
                 bootstrapCommand(
                     for: host,
+                    preserveTmuxGeometry: preserveTmuxGeometry,
+                    preservedTmuxGeometry: preservedTmuxGeometry,
+                    visibleTmuxClientIgnoresSize: visibleTmuxClientIgnoresSize,
+                    gridAuthorityDeviceID: gridAuthorityDeviceID,
                     sessionNameResolver: sessionNameResolver
                 ),
                 on: client
@@ -169,7 +209,7 @@ enum MoshBootstrap {
             // Mosh has no SSH transport after this point, so this is the
             // only window we have. Any error returns nil and the result
             // simply lacks a detected hint.
-            let detectedOSHint = await OSDetectionProbe.run(on: client)
+            let detection = await OSDetectionProbe.run(on: client)
             await chain.closeAll()
             if transcriptSuggestsMissingServer(transcript) {
                 throw MoshBootstrapError.missingServer
@@ -182,9 +222,11 @@ enum MoshBootstrap {
                 udpPort: parsed.udpPort,
                 base64Key: parsed.base64Key,
                 serverPID: parsed.serverPID,
-                detectedOSHint: detectedOSHint,
+                detectedOSHint: detection?.osHint,
+                networkPathAssessment: detection?.networkPathAssessment ?? .unavailable,
                 targetAddress: chain.resolvedHost.address,
-                jumpChainHopCount: chain.resolvedHost.jumpChain.count
+                jumpChainHopCount: chain.resolvedHost.jumpChain.count,
+                preservedTmuxGeometry: preservedTmuxGeometry
             )
         } catch let error as RemoteCommandFailure {
             await chain.closeAll()
@@ -236,9 +278,20 @@ enum MoshBootstrap {
 
     static func bootstrapCommand(
         for host: Host,
+        preserveTmuxGeometry: Bool = false,
+        preservedTmuxGeometry: MoshBootstrapGeometry? = nil,
+        visibleTmuxClientIgnoresSize: Bool = false,
+        gridAuthorityDeviceID: String? = nil,
         sessionNameResolver: SessionNameResolver = HostRuntimeStateStore.sessionName(for:)
     ) -> String {
-        if let command = launchCommand(for: host, sessionNameResolver: sessionNameResolver) {
+        if let command = launchCommand(
+            for: host,
+            preserveTmuxGeometry: preserveTmuxGeometry,
+            preservedTmuxGeometry: preservedTmuxGeometry,
+            visibleTmuxClientIgnoresSize: visibleTmuxClientIgnoresSize,
+            gridAuthorityDeviceID: gridAuthorityDeviceID,
+            sessionNameResolver: sessionNameResolver
+        ) {
             return "mosh-server new -- \(command)"
         }
         return "mosh-server new"
@@ -246,6 +299,10 @@ enum MoshBootstrap {
 
     static func launchCommand(
         for host: Host,
+        preserveTmuxGeometry: Bool = false,
+        preservedTmuxGeometry: MoshBootstrapGeometry? = nil,
+        visibleTmuxClientIgnoresSize: Bool = false,
+        gridAuthorityDeviceID: String? = nil,
         sessionNameResolver: SessionNameResolver = HostRuntimeStateStore.sessionName(for:)
     ) -> String? {
         let prologue = HostLaunchPrologue.inlineForArgv(
@@ -255,7 +312,13 @@ enum MoshBootstrap {
 
         switch host.launchMode {
         case .autoTmux:
-            let inner = tmuxLaunchCommand(sessionName: sessionNameResolver(host))
+            let inner = tmuxLaunchCommand(
+                sessionName: sessionNameResolver(host),
+                preserveTmuxGeometry: preserveTmuxGeometry,
+                preservedTmuxGeometry: preservedTmuxGeometry,
+                visibleTmuxClientIgnoresSize: visibleTmuxClientIgnoresSize,
+                gridAuthorityDeviceID: gridAuthorityDeviceID
+            )
             return wrap(inner: inner, prologue: prologue)
 
         case .pinnedTmux:
@@ -263,7 +326,13 @@ enum MoshBootstrap {
                 for: host,
                 sessionNameResolver: sessionNameResolver
             ) ?? sessionNameResolver(host)
-            let inner = tmuxLaunchCommand(sessionName: sessionName)
+            let inner = tmuxLaunchCommand(
+                sessionName: sessionName,
+                preserveTmuxGeometry: preserveTmuxGeometry,
+                preservedTmuxGeometry: preservedTmuxGeometry,
+                visibleTmuxClientIgnoresSize: visibleTmuxClientIgnoresSize,
+                gridAuthorityDeviceID: gridAuthorityDeviceID
+            )
             return wrap(inner: inner, prologue: prologue)
 
         case .customCommand:
@@ -293,8 +362,156 @@ enum MoshBootstrap {
         return "sh -lc \(singleQuotedShellString(body))"
     }
 
-    private static func tmuxLaunchCommand(sessionName: String) -> String {
-        "tmux -u new-session -A -s \(sessionName) \\; set-option -t \(sessionName) status off"
+    private static func tmuxLaunchCommand(
+        sessionName: String,
+        preserveTmuxGeometry: Bool,
+        preservedTmuxGeometry: MoshBootstrapGeometry?,
+        visibleTmuxClientIgnoresSize: Bool,
+        gridAuthorityDeviceID: String?
+    ) -> String {
+        let visibleClientOption = gridAuthorityDeviceID.map {
+            TmuxController.gridAuthorityVisibleClientOption(identityID: $0)
+        }
+        let visibleClientCommand = visibleClientOption.map {
+            " \\; set-option -F -t \(sessionName) \($0) '#{client_name}|#{client_pid}|#{client_created}'"
+        } ?? ""
+        guard preserveTmuxGeometry else {
+            let arguments = "-s \(sessionName)"
+                + visibleClientCommand
+                + " \\; set-option -t \(sessionName) status off"
+            guard visibleTmuxClientIgnoresSize else {
+                return "tmux -u new-session -A \(arguments)"
+            }
+            let body = AutoTmuxScript.geometryPreservingClientCommand(
+                tmuxCommand: "tmux -u new-session -A",
+                arguments: arguments
+            )
+            return "sh -lc \(singleQuotedShellString(body))"
+        }
+
+        // `ignore-size` does not stop the only attached tmux client from
+        // defining its own view. For an existing session, wait until mosh has
+        // applied the compact client's first *preserved* Resize to both its
+        // terminal emulator and child PTY, then attach. Setting the child PTY
+        // early with `stty` would leave mosh's emulator at its 80x24 default
+        // while tmux emitted a wider first frame, permanently clipping it.
+        //
+        // The probe token includes stable tmux object ids and session creation
+        // time. Attach by session id, not the user-facing name, and verify the
+        // exact token immediately before exec. If the probed session/window
+        // disappeared or changed meanwhile, fail without touching a newly
+        // created or unrelated same-name session. A phone-created session has
+        // no token and is created only if the name is still absent.
+        let namedTarget = singleQuotedShellString(sessionName)
+        let body: String
+        if let geometry = preservedTmuxGeometry {
+            let identityTarget = singleQuotedShellString(geometry.sessionID)
+            let expected = singleQuotedShellString(geometry.verificationToken)
+            let format = singleQuotedShellString(
+                "#{session_id},#{session_created},#{window_id},#{window_width},#{window_height}"
+            )
+            let readCurrent = "tmux -u display-message -p -t \(identityTarget) \(format)"
+            let verify = "current=$(\(readCurrent)) && [ \"$current\" = \(expected) ]"
+            let waitForResize = "attempts=0; matched=0; while [ \"$attempts\" -lt 200 ]; do "
+                + "attempts=$((attempts + 1)); "
+                + "set -- $(stty size 2>/dev/null) || exit 76; "
+                + "if [ \"$1\" = \"\(geometry.rows)\" ] && [ \"$2\" = \"\(geometry.cols)\" ]; then matched=1; break; fi; "
+                + "sleep 0.05; done; "
+                + "[ \"$matched\" = 1 ] || exit 77"
+            let attach = AutoTmuxScript.geometryPreservingClientCommand(
+                tmuxCommand: "tmux -u attach-session",
+                arguments: "-t \(identityTarget) "
+                    + "\\; set-option -F -t \(identityTarget) @tessera-size-owner '#{client_name}' "
+                    + (visibleClientOption.map {
+                        "\\; set-option -F -t \(identityTarget) \($0) '#{client_name}|#{client_pid}|#{client_created}' "
+                    } ?? "")
+                    + "\\; set-option -t \(identityTarget) status off"
+            )
+            body = "if tmux -u has-session -t \(identityTarget) 2>/dev/null; then "
+                + verify + " && "
+                + waitForResize + " && "
+                + verify + " && "
+                + attach + "; "
+                + "else exit 75; fi"
+        } else {
+            body = "if tmux -u has-session -t \(namedTarget) 2>/dev/null; then "
+                + "exit 75; "
+                + "else exec tmux -u new-session -s \(namedTarget) "
+                + "\\; set-option -t \(namedTarget) status off "
+                + "\\; set-option -F -t \(namedTarget) @tessera-size-owner '#{client_name}' "
+                + (visibleClientOption.map {
+                    "\\; set-option -F -t \(namedTarget) \($0) '#{client_name}|#{client_pid}|#{client_created}' "
+                } ?? "")
+                + "; fi"
+        }
+        return "sh -lc \(singleQuotedShellString(body))"
+    }
+
+    private static func preservedTmuxGeometry(
+        for host: Host,
+        enabled: Bool,
+        sessionNameResolver: SessionNameResolver,
+        on client: SSHClient
+    ) async throws -> MoshBootstrapGeometry? {
+        guard enabled else { return nil }
+        guard let sessionName = resolvedTmuxSessionName(
+            for: host,
+            sessionNameResolver: sessionNameResolver
+        ) else { return nil }
+
+        let target = singleQuotedShellString(sessionName)
+        let format = singleQuotedShellString(
+            "#{session_id},#{session_created},#{window_id},#{window_width},#{window_height}"
+        )
+        let transcript = try await executeBootstrapCommand(
+            "printf '\\ntessera-geometry:'; "
+                + "if tmux -u has-session -t \(target) 2>/dev/null; then "
+                + "tmux -u display-message -p -t \(target) \(format); "
+                + "else printf 'missing\\n'; fi",
+            on: client
+        )
+        return try parsePreservedTmuxGeometryProbe(transcript.stdout)
+    }
+
+    static func parsePreservedTmuxGeometryProbe(
+        _ output: String
+    ) throws -> MoshBootstrapGeometry? {
+        let marker = "tessera-geometry:"
+        guard let markerRange = output.range(of: marker, options: .backwards) else {
+            throw MoshBootstrapError.connectionFailed(
+                "Could not read the existing tmux session size without changing it."
+            )
+        }
+        let suffix = output[markerRange.upperBound...]
+        let payload = suffix.split(whereSeparator: \.isNewline).first?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if payload == "missing" { return nil }
+        let fields = payload.split(separator: ",", omittingEmptySubsequences: false)
+        guard fields.count == 5,
+              fields[0].first == "$",
+              fields[0].count > 1,
+              fields[0].dropFirst().allSatisfy({ $0.isNumber }),
+              let sessionCreated = Int64(fields[1]),
+              sessionCreated > 0,
+              fields[2].first == "@",
+              fields[2].count > 1,
+              fields[2].dropFirst().allSatisfy({ $0.isNumber }),
+              let cols = Int(fields[3]),
+              let rows = Int(fields[4]),
+              (1...10_000).contains(cols),
+              (1...10_000).contains(rows)
+        else {
+            throw MoshBootstrapError.connectionFailed(
+                "The existing tmux session reported an invalid size."
+            )
+        }
+        return MoshBootstrapGeometry(
+            sessionID: String(fields[0]),
+            sessionCreated: sessionCreated,
+            windowID: String(fields[2]),
+            cols: cols,
+            rows: rows
+        )
     }
 
     static func resolvedTmuxSessionName(
@@ -373,13 +590,15 @@ enum MoshBootstrap {
                 return .authenticationFailed("Jump host \(hopError.hopLabel): \(message)")
             case .connectionFailed(let message):
                 return .connectionFailed("Jump host \(hopError.hopLabel): \(message)")
+            case .hostKeyRejected:
+                return .hostKeyRejected(hopLabel: hopError.hopLabel)
             default:
                 return classified
             }
         }
         switch error {
         case is HostKeyRejectedError:
-            return .hostKeyRejected
+            return .hostKeyRejected(hopLabel: nil)
 
         case let error as AuthResolutionError:
             return .authenticationFailed(
@@ -416,8 +635,8 @@ enum MoshBootstrap {
         }
     }
 
-    private static func isShellSafeSessionName(_ name: String) -> Bool {
-        guard !name.isEmpty else { return false }
+    static func isShellSafeSessionName(_ name: String) -> Bool {
+        guard !name.isEmpty, name.utf8.count <= 256 else { return false }
         let allowed = CharacterSet(
             charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."
         )

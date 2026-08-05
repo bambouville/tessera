@@ -546,7 +546,7 @@ struct PaneHeaderView: View {
             .buttonStyle(.plain)
 
             Text(title)
-                .font(.system(size: max(8, height * 0.52), weight: .medium, design: .monospaced))
+                .font(Typography.tesseraMonoFixed(size: max(8, height * 0.52), weight: .medium))
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .foregroundStyle(isFocused ? chrome.fg : chrome.fgMuted)
@@ -864,7 +864,22 @@ struct PaneGridView: View {
     /// (the handler resolves against the focused pane's cwd).
     let onSelectionPathAction: ((TesseraTerminalSelectionPathAction, String) -> Void)?
     let onUserActivity: (() -> Void)?
+    /// Exact per-pane hook proof from AgentCenter. A closure keeps grid panes
+    /// independent: a working agent in pane A must never disable scrolling in
+    /// pane B merely because both share one tmux window.
+    let agentScrollPreventionForPane: (PaneId) -> AgentScrollPrevention?
+    let onAgentScrollBlocked: (PaneId) -> Void
     let suppressFindReclaim: Bool
+    /// Continued-elsewhere veil: drop every pane's outbound bytes and strip
+    /// held first responder. The reclaim-suppression flag above cannot do
+    /// this — it only prevents grabbing focus, and a pane that already holds
+    /// it would keep feeding the shared PTY from under the blur.
+    let inputSuppressed: Bool
+    /// Phone presentation: keep the remote split layout unchanged, but mount
+    /// only the active pane and scale that pane's authoritative cell grid to
+    /// the available local viewport.
+    var compactSinglePane = false
+    let modifierState: ModifierState
 
     /// Per-pane kitty/2004 mode store, owned by the session so it survives
     /// window switches (panes restore their modes on swap-in repaint).
@@ -933,86 +948,154 @@ struct PaneGridView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let frames = paneFrames
-            let layoutBounds = paneLayoutBounds(frames)
-
-            ZStack(alignment: .topLeading) {
-                if terminalBackground == nil {
-                    backgroundColor
-                }
-
-                // Hairline dividers in the 1-cell gutters between split panes.
-                // Drawn under the panes/headers (they only fill gutter gaps, so
-                // they never underlap a surface) and under the focus ring.
-                ForEach(paneDividers, id: \.self) { line in
-                    Rectangle()
-                        .fill(chrome.border)
-                        .frame(width: line.width, height: line.height)
-                        .offset(x: line.minX, y: line.minY)
-                        .allowsHitTesting(false)
-                }
-
-                // Pane surfaces, positioned by `.offset` (render-only, so it
-                // doesn't disturb the layout the way an explicit position
-                // would). Header chrome and focus rings stack above them.
-                ForEach(frames) { frame in
-                    paneSurface(
-                        paneId: frame.paneId,
-                        isFocused: frame.paneId == window.activePaneId
-                    )
-                    .frame(width: frame.surfaceFrame.width, height: frame.surfaceFrame.height)
-                    .offset(x: frame.surfaceFrame.minX, y: frame.surfaceFrame.minY)
-                }
-
-                // One continuous header bar per row of panes (segments merge
-                // across the gutters), shared with the mosh chrome overlay.
-                if showsHeaders {
-                    PaneHeaderBarLayer(
-                        frames: frames,
-                        titles: Dictionary(uniqueKeysWithValues: frames.map {
-                            ($0.paneId, paneTitle($0.paneId))
-                        }),
-                        activePaneId: window.activePaneId,
-                        chrome: chrome,
-                        baseColor: backgroundColor,
-                        hasImageBackground: terminalBackground != nil,
-                        layoutBounds: layoutBounds,
-                        containerSize: geo.size,
-                        cellWidth: cellSize.width,
-                        onClose: { paneId in
-                            onUserActivity?()
-                            tmux.killPane(paneId)
+            if compactSinglePane {
+                compactPaneGrid(in: geo.size)
+                    .onAppear {
+                        installPaneRefreshHook()
+                    }
+                    .onChange(of: pruneKey) { _, _ in pruneRuntimes() }
+                    .onChange(of: window.activePaneId) { _, activeId in
+                        if let activeId,
+                           let runtime = store.existingRuntime(for: activeId) {
+                            onFocusedBoxChanged(runtime.box)
                         }
-                    )
-                }
+                    }
+                    .onChange(of: compactPaneGeometryKey) { _, _ in
+                        // `%layout-change` updates the SwiftUI frame, but the
+                        // pane sink still contains the capture from before the
+                        // compact client expanded. Repaint on the next runloop
+                        // after the new bounds reach SwiftTerm; otherwise the
+                        // first pane stays half-width until focus changes.
+                        guard let paneID = window.activePaneId else { return }
+                        DispatchQueue.main.async {
+                            guard tmux.activePaneId == paneID else { return }
+                            tmux.refreshPane(paneId: paneID, deep: true)
+                        }
+                    }
+            } else {
+                let frames = paneFrames
+                let layoutBounds = paneLayoutBounds(frames)
 
-                ForEach(frames) { frame in
-                    if frame.paneId == window.activePaneId, frames.count > 1 {
-                        PaneGridFocusRing(
-                            frame: frame,
+                ZStack(alignment: .topLeading) {
+                    if terminalBackground == nil {
+                        backgroundColor
+                    }
+
+                    // Hairline dividers in the 1-cell gutters between split panes.
+                    // Drawn under the panes/headers (they only fill gutter gaps, so
+                    // they never underlap a surface) and under the focus ring.
+                    ForEach(paneDividers, id: \.self) { line in
+                        Rectangle()
+                            .fill(chrome.border)
+                            .frame(width: line.width, height: line.height)
+                            .offset(x: line.minX, y: line.minY)
+                            .allowsHitTesting(false)
+                    }
+
+                    // Pane surfaces, positioned by `.offset` (render-only, so it
+                    // doesn't disturb the layout the way an explicit position
+                    // would). Header chrome and focus rings stack above them.
+                    ForEach(frames) { frame in
+                        paneSurface(
+                            paneId: frame.paneId,
+                            isFocused: frame.paneId == window.activePaneId
+                        )
+                        .frame(width: frame.surfaceFrame.width, height: frame.surfaceFrame.height)
+                        .offset(x: frame.surfaceFrame.minX, y: frame.surfaceFrame.minY)
+                    }
+
+                    // One continuous header bar per row of panes (segments merge
+                    // across the gutters), shared with the mosh chrome overlay.
+                    if showsHeaders {
+                        PaneHeaderBarLayer(
+                            frames: frames,
+                            titles: Dictionary(uniqueKeysWithValues: frames.map {
+                                ($0.paneId, paneTitle($0.paneId))
+                            }),
+                            activePaneId: window.activePaneId,
+                            chrome: chrome,
+                            baseColor: backgroundColor,
+                            hasImageBackground: terminalBackground != nil,
                             layoutBounds: layoutBounds,
                             containerSize: geo.size,
-                            color: chrome.accent.opacity(0.9)
+                            cellWidth: cellSize.width,
+                            onClose: { paneId in
+                                onUserActivity?()
+                                tmux.killPane(paneId)
+                            }
                         )
+                    }
+
+                    ForEach(frames) { frame in
+                        if frame.paneId == window.activePaneId, frames.count > 1 {
+                            PaneGridFocusRing(
+                                frame: frame,
+                                layoutBounds: layoutBounds,
+                                containerSize: geo.size,
+                                color: chrome.accent.opacity(0.9)
+                            )
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .onAppear {
+                    installPaneRefreshHook()
+                    pushGridSize(geo.size)
+                }
+                .onChange(of: geo.size) { _, newSize in pushGridSize(newSize) }
+                .onChange(of: reservedHeaderRows) { _, _ in
+                    if let size = lastGridSize { pushGridSize(size) }
+                }
+                .onChange(of: pruneKey) { _, _ in pruneRuntimes() }
+                .onChange(of: window.activePaneId) { _, activeId in
+                    if let activeId, let runtime = store.existingRuntime(for: activeId) {
+                        onFocusedBoxChanged(runtime.box)
                     }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .onAppear {
-                installPaneRefreshHook()
-                pushGridSize(geo.size)
-            }
-            .onChange(of: geo.size) { _, newSize in pushGridSize(newSize) }
-            .onChange(of: reservedHeaderRows) { _, _ in
-                if let size = lastGridSize { pushGridSize(size) }
-            }
-            .onChange(of: pruneKey) { _, _ in pruneRuntimes() }
-            .onChange(of: window.activePaneId) { _, activeId in
-                if let activeId, let runtime = store.existingRuntime(for: activeId) {
-                    onFocusedBoxChanged(runtime.box)
-                }
-            }
         }
+    }
+
+    @ViewBuilder
+    private func compactPaneGrid(in viewport: CGSize) -> some View {
+        if let paneID = window.activePaneId,
+           let rect = compactPaneRect(paneID),
+           rect.width > 0,
+           rect.height > 0 {
+            let paneSize = CGSize(
+                width: CGFloat(rect.width) * cellSize.width,
+                height: CGFloat(rect.height) * cellSize.height
+            )
+            let scale = min(
+                viewport.width / paneSize.width,
+                viewport.height / paneSize.height
+            )
+
+            ZStack {
+                if terminalBackground == nil { backgroundColor }
+                paneSurface(paneId: paneID, isFocused: true)
+                    .frame(width: paneSize.width, height: paneSize.height)
+                    .scaleEffect(scale)
+                    .position(x: viewport.width / 2, y: viewport.height / 2)
+                    .id(paneID)
+            }
+            .frame(width: viewport.width, height: viewport.height)
+            .clipped()
+        } else {
+            backgroundColor
+        }
+    }
+
+    private func compactPaneRect(_ paneID: PaneId) -> CellRect? {
+        window.panes.first(where: { $0.id == paneID })?.contentRect
+            ?? window.layout?.leaves.first(where: { $0.paneId == paneID })?.rect
+    }
+
+    private var compactPaneGeometryKey: String {
+        guard let paneID = window.activePaneId,
+              let rect = compactPaneRect(paneID)
+        else { return "nil" }
+        return "\(paneID.description):\(rect.width)x\(rect.height)+\(rect.x)+\(rect.y)"
     }
 
     // MARK: - Pane surface
@@ -1020,6 +1103,7 @@ struct PaneGridView: View {
     @ViewBuilder
     private func paneSurface(paneId: PaneId, isFocused: Bool) -> some View {
         let runtime = store.runtime(for: paneId)
+        let agentScrollPrevention = agentScrollPreventionForPane(paneId)
 
         ZStack {
             TerminalSurfaceBound(
@@ -1042,6 +1126,7 @@ struct PaneGridView: View {
                     if isFocused { onFocusedBoxChanged(runtime.box) }
                 },
                 onSend: { bytes in
+                    guard !inputSuppressed else { return }
                     onUserActivity?()
                     tmux.sendInput(Array(bytes), toPane: paneId)
                 },
@@ -1052,8 +1137,11 @@ struct PaneGridView: View {
                 onTitle: { _ in },
                 onUserActivity: onUserActivity,
                 onBell: { [paneId] in onPaneBell(paneTitle(paneId)) },
+                agentScrollBlockingActive: agentScrollPrevention != nil,
+                onAgentScrollBlocked: { [paneId] in onAgentScrollBlocked(paneId) },
                 mouseReportingImpliesAltScreen: false,
                 suppressDirectColorQueryResponses: true,
+                softwareModifierState: modifierState,
                 tmuxShortcutsEnabled: tmuxShortcutsEnabled,
                 onTmuxShortcut: onTmuxShortcut,
                 onFindShortcut: onFindShortcut,
@@ -1063,6 +1151,7 @@ struct PaneGridView: View {
                 // Structural single-claimant: only the focused pane reclaims
                 // first responder (and not while the find bar holds it).
                 suppressFirstResponderReclaim: !isFocused || suppressFindReclaim,
+                forceResignFirstResponder: inputSuppressed,
                 onHardwareKey: nil,
                 onScrollDiagnostic: { [paneId] message in
                     onScrollDiagnostic(paneId, message)
@@ -1215,6 +1304,7 @@ struct PaneGridView: View {
         lastPushedSize = (cols, rows)
         tmux.updateClientSize(cols: cols, rows: rows)
     }
+
 }
 
 /// Small transient toast for a failed pane operation (e.g. tmux refusing a
@@ -1225,7 +1315,7 @@ struct PaneCommandToast: View {
 
     var body: some View {
         Text(message)
-            .font(.system(.footnote, design: .monospaced, weight: .medium))
+            .font(Typography.tesseraMono(size: 13, weight: .medium))
             .foregroundStyle(T.fg)
             .lineLimit(2)
             .padding(.horizontal, 14)

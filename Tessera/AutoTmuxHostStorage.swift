@@ -4,10 +4,8 @@ import TmuxControl
 /// Per-host runtime data we want to remember across connects, separate
 /// from the user-edited `Host` config.
 ///
-/// Today this is just the tmux session name we last attached to or
-/// created. The struct exists as its own type so we can grow it
-/// (last-known geometry, last connection timestamp, MOTD hash, …)
-/// without churning the persistence key shape later.
+/// The struct exists as its own type so runtime discoveries can survive
+/// session teardown without being folded into the user-edited host config.
 struct HostRuntimeState: Codable, Equatable {
     /// The name passed to `tmux -CC attach -t <name>` /
     /// `tmux -CC new -s <name>` on the most recent successful
@@ -15,6 +13,16 @@ struct HostRuntimeState: Codable, Equatable {
     /// to `.tmuxControl` for this host so subsequent connects can
     /// resume the same server-side session.
     var tmuxSessionName: String?
+
+    /// `true` after the auto-tmux sentinel proves that tmux is unavailable.
+    /// A later successful control-mode entry resets this to `false`.
+    var tmuxUnavailable: Bool?
+
+    /// Last high-confidence WSL2/Tailscale MTU risk observed over this exact
+    /// endpoint. Cached locally so an auto-restored session can explain a
+    /// likely stall even when the next SSH handshake never gets far enough to
+    /// run the host probe. A later conclusive safe probe clears it.
+    var wslTailscaleMTUWarning: WSLTailscaleMTUWarning?
 }
 
 /// Tiny UserDefaults wrapper for `HostRuntimeState`. Keyed by
@@ -36,18 +44,111 @@ enum HostRuntimeStateStore {
     }
 
     static func load(for host: Host) -> HostRuntimeState {
+        load(for: host, defaults: defaults)
+    }
+
+    static func load(for host: Host, defaults storage: UserDefaults) -> HostRuntimeState {
         let dictKey = keyPrefix + key(for: host)
-        guard let data = defaults.data(forKey: dictKey),
+        guard let data = storage.data(forKey: dictKey),
               let state = try? JSONDecoder().decode(HostRuntimeState.self, from: data)
         else { return HostRuntimeState() }
         return state
     }
 
     static func save(_ state: HostRuntimeState, for host: Host) {
+        save(state, for: host, defaults: defaults)
+    }
+
+    static func save(
+        _ state: HostRuntimeState,
+        for host: Host,
+        defaults storage: UserDefaults
+    ) {
         let dictKey = keyPrefix + key(for: host)
         if let data = try? JSONEncoder().encode(state) {
-            defaults.set(data, forKey: dictKey)
+            storage.set(data, forKey: dictKey)
         }
+    }
+
+    static func isTmuxKnownUnavailable(for host: Host) -> Bool {
+        isTmuxKnownUnavailable(for: host, defaults: defaults)
+    }
+
+    static func isTmuxKnownUnavailable(
+        for host: Host,
+        defaults storage: UserDefaults
+    ) -> Bool {
+        load(for: host, defaults: storage).tmuxUnavailable == true
+    }
+
+    static func recordTmuxUnavailable(for host: Host) {
+        recordTmuxUnavailable(for: host, defaults: defaults)
+    }
+
+    static func recordTmuxUnavailable(
+        for host: Host,
+        defaults storage: UserDefaults
+    ) {
+        var state = load(for: host, defaults: storage)
+        guard state.tmuxUnavailable != true else { return }
+        state.tmuxUnavailable = true
+        save(state, for: host, defaults: storage)
+    }
+
+    static func recordTmuxAvailable(for host: Host) {
+        recordTmuxAvailable(for: host, defaults: defaults)
+    }
+
+    static func recordTmuxAvailable(
+        for host: Host,
+        defaults storage: UserDefaults
+    ) {
+        var state = load(for: host, defaults: storage)
+        guard state.tmuxUnavailable != false else { return }
+        state.tmuxUnavailable = false
+        save(state, for: host, defaults: storage)
+    }
+
+    static func wslTailscaleMTUWarning(for host: Host) -> WSLTailscaleMTUWarning? {
+        wslTailscaleMTUWarning(for: host, defaults: defaults)
+    }
+
+    static func wslTailscaleMTUWarning(
+        for host: Host,
+        defaults storage: UserDefaults
+    ) -> WSLTailscaleMTUWarning? {
+        load(for: host, defaults: storage).wslTailscaleMTUWarning
+    }
+
+    /// Persist only conclusive results. An unavailable probe leaves prior
+    /// evidence intact so a packet-size failure during the next handshake
+    /// cannot erase the warning that would explain it.
+    static func recordNetworkPathAssessment(
+        _ assessment: NetworkPathAssessment,
+        for host: Host
+    ) {
+        recordNetworkPathAssessment(assessment, for: host, defaults: defaults)
+    }
+
+    static func recordNetworkPathAssessment(
+        _ assessment: NetworkPathAssessment,
+        for host: Host,
+        defaults storage: UserDefaults
+    ) {
+        guard assessment != .unavailable else { return }
+        var state = load(for: host, defaults: storage)
+        let warning: WSLTailscaleMTUWarning?
+        switch assessment {
+        case .unavailable:
+            return
+        case .notAtRisk:
+            warning = nil
+        case .warning(let value):
+            warning = value
+        }
+        guard state.wslTailscaleMTUWarning != warning else { return }
+        state.wslTailscaleMTUWarning = warning
+        save(state, for: host, defaults: storage)
     }
 
     /// Resolve the tmux session name to use for this host on the
@@ -74,8 +175,9 @@ enum HostRuntimeStateStore {
     /// (resume) is a single load + comparison + early return.
     static func recordSessionUsed(_ name: String, for host: Host) {
         var state = load(for: host)
-        if state.tmuxSessionName != name {
+        if state.tmuxSessionName != name || state.tmuxUnavailable != false {
             state.tmuxSessionName = name
+            state.tmuxUnavailable = false
             save(state, for: host)
         }
     }

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tessera://schemas/nearby-bootstrap/v2/completion-acknowledgement.schema.json",
+  "title": "BootstrapGrantCompletionAcknowledgement v2 (completionAcknowledgement payload)",
+  "description": "Payload of encrypted-envelope kind 'completionAcknowledgement'. grantReceiptHash = SHA-256 over the canonical grant-receipt encoding (JSONEncoder with .sortedKeys and .withoutEscapingSlashes). Lenient decoder. Frozen for protocol version 2.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["publicKeyID", "grantReceiptHash"],
+  "properties": {
+    "publicKeyID": { "type": "string", "format": "uuid" },
+    "grantReceiptHash": { "type": "string", "description": "base64, SHA-256 of the canonical receipt bytes" }
+  }
+}

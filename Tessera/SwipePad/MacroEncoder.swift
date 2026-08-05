@@ -5,6 +5,7 @@
 //   - "↵" or "\r"           → 0x0D
 //   - "\n"                  → 0x0A
 //   - "\t" or "tab"         → 0x09
+//   - "shift-tab"            → ESC [ Z
 //   - "esc" or "\e" or "\x1b" → 0x1B
 //   - Any other UTF-8 character passes through as its byte representation.
 //
@@ -71,8 +72,11 @@ public enum MacroEncoder {
                 }
             }
 
-            // Word-tokens "esc" and "tab" (matched only at token boundaries,
+            // Word-tokens "esc", "tab", and "shift-tab" (matched only at token boundaries,
             // i.e. preceded by start/space and followed by end/space/↵/\)
+            if matchesWordToken("shift-tab", in: scalars, at: i) {
+                out.append(contentsOf: [0x1B, 0x5B, 0x5A]); i += 9; continue
+            }
             if matchesWordToken("esc", in: scalars, at: i) {
                 out.append(0x1B); i += 3; continue
             }

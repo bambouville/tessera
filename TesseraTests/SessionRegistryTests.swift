@@ -1,4 +1,5 @@
 import XCTest
+import TmuxControl
 @testable import Tessera
 
 @MainActor
@@ -118,6 +119,37 @@ final class SessionRegistryTests: XCTestCase {
         XCTAssertFalse(registry.isRenderReady(b.id))
     }
 
+    func test_gridAuthorityPeerNameMirrorsAndClearsYieldedSession() {
+        let registry = SessionRegistry()
+        let session = makeLive(name: "continued")
+        registry.syncActiveSessions([session])
+
+        registry.setGridAuthorityPeerName("iPhone", for: session.id)
+        XCTAssertEqual(registry.gridAuthorityPeerName(for: session.id), "iPhone")
+
+        registry.setGridAuthorityPeerName(nil, for: session.id)
+        XCTAssertNil(registry.gridAuthorityPeerName(for: session.id))
+    }
+
+    func test_syncActiveSessionsDropsGridAuthorityForRemovedSession() {
+        let registry = SessionRegistry()
+        let session = makeLive(name: "continued")
+        registry.syncActiveSessions([session])
+        registry.setGridAuthorityPeerName("iPhone", for: session.id)
+
+        registry.syncActiveSessions([])
+
+        XCTAssertNil(registry.gridAuthorityPeerName(for: session.id))
+    }
+
+    func test_gridAuthorityPeerNameIgnoresStaleSession() {
+        let registry = SessionRegistry()
+
+        registry.setGridAuthorityPeerName("iPhone", for: UUID())
+
+        XCTAssertTrue(registry.gridAuthorityPeerNames.isEmpty)
+    }
+
     func test_sessionFor_returnsMatchingSession() {
         let registry = SessionRegistry()
         let a = makeLive(name: "a")
@@ -125,6 +157,76 @@ final class SessionRegistryTests: XCTestCase {
 
         XCTAssertEqual(registry.session(for: a.id)?.id, a.id)
         XCTAssertNil(registry.session(for: UUID()))
+    }
+
+    func test_requestTmuxFocusPublishesStableWindowAndPaneIDs() {
+        let registry = SessionRegistry()
+        let session = makeLive(name: "phone")
+        registry.syncActiveSessions([session])
+
+        registry.requestTmuxFocus(
+            sessionID: session.id,
+            windowID: WindowId(7),
+            paneID: PaneId(11)
+        )
+
+        XCTAssertEqual(
+            registry.tmuxFocusRequest,
+            SessionRegistry.TmuxFocusRequest(
+                token: 1,
+                sessionID: session.id,
+                windowID: WindowId(7),
+                paneID: PaneId(11)
+            )
+        )
+    }
+
+    func test_requestTmuxFocusIgnoresStaleSession() {
+        let registry = SessionRegistry()
+
+        registry.requestTmuxFocus(
+            sessionID: UUID(),
+            windowID: WindowId(7),
+            paneID: PaneId(11)
+        )
+
+        XCTAssertNil(registry.tmuxFocusRequest)
+    }
+
+    func test_requestTmuxClosePublishesStableWindowAndPaneIDs() {
+        let registry = SessionRegistry()
+        let session = makeLive(name: "phone")
+        registry.syncActiveSessions([session])
+
+        registry.requestTmuxClose(
+            .pane(
+                sessionID: session.id,
+                windowID: WindowId(7),
+                paneID: PaneId(11)
+            )
+        )
+
+        XCTAssertEqual(
+            registry.tmuxCloseRequest,
+            SessionRegistry.TmuxCloseRequest(
+                token: 1,
+                action: .pane(
+                    sessionID: session.id,
+                    windowID: WindowId(7),
+                    paneID: PaneId(11)
+                )
+            )
+        )
+    }
+
+    func test_requestTmuxCloseIgnoresStaleSession() {
+        let registry = SessionRegistry()
+
+        registry.requestTmuxClose(
+            .window(sessionID: UUID(), windowID: WindowId(7))
+        )
+
+        XCTAssertNil(registry.tmuxCloseRequest)
     }
 
     // MARK: helpers

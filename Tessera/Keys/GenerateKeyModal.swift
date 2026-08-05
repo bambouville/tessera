@@ -1,26 +1,47 @@
 import SwiftUI
 import SwiftData
+import UIKit
+
+@Observable
+final class GenerateKeyDraft {
+    var name = ""
+    var algorithm: KeyAlgorithm = .ed25519
+    var protectWithUserPresence = false
+    var errorText: String?
+
+    func reset(initialProtection: Bool) {
+        name = ""
+        algorithm = .ed25519
+        protectWithUserPresence = initialProtection
+        errorText = nil
+    }
+
+    func clear() {
+        name = ""
+        errorText = nil
+    }
+}
 
 struct GenerateKeyModal: View {
+    @Bindable var draft: GenerateKeyDraft
     var onClose: () -> Void
     var onCreated: (StoredKey) -> Void
 
     @Environment(\.designTokens) private var T
     @Environment(\.modelContext) private var modelContext
 
-    @State private var name = ""
-    @State private var algorithm: KeyAlgorithm = .ed25519
-    @State private var protectWithUserPresence: Bool
-    @State private var errorText: String?
+    private var isPhone: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+    }
 
     init(
-        initialProtection: Bool,
+        draft: GenerateKeyDraft,
         onClose: @escaping () -> Void,
         onCreated: @escaping (StoredKey) -> Void
     ) {
+        self.draft = draft
         self.onClose = onClose
         self.onCreated = onCreated
-        _protectWithUserPresence = State(initialValue: initialProtection)
     }
 
     var body: some View {
@@ -31,14 +52,14 @@ struct GenerateKeyModal: View {
 
             VStack(alignment: .leading, spacing: 0) {
                 Text("generate key")
-                    .font(Typography.tesseraMono(size: 18, weight: .medium))
+                    .font(Typography.sheetTitle)
                     .foregroundStyle(T.fg)
                     .padding(.bottom, 20)
 
                 Field(label: "name") {
-                    Input(text: $name, placeholder: "my new key")
+                    Input(text: $draft.name, placeholder: "my new key")
 
-                    if let errorText {
+                    if let errorText = draft.errorText {
                         Text(errorText)
                             .font(Typography.tesseraMono(size: 12))
                             .foregroundStyle(T.red)
@@ -80,8 +101,9 @@ struct GenerateKeyModal: View {
                     }
                 }
             }
-            .padding(28)
-            .frame(width: 480)
+            .padding(isPhone ? 18 : 28)
+            .frame(width: isPhone ? nil : 480)
+            .frame(maxWidth: isPhone ? .infinity : nil)
             .background(T.panelBg)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(
@@ -89,17 +111,18 @@ struct GenerateKeyModal: View {
                     .stroke(T.borderStrong, lineWidth: 1)
             )
             .onTapGesture {}
+            .padding(.horizontal, isPhone ? 18 : 0)
         }
-        .onChange(of: name) { _, _ in
-            if errorText == "name is required" {
-                errorText = nil
+        .onChange(of: draft.name) { _, _ in
+            if draft.errorText == "name is required" {
+                draft.errorText = nil
             }
         }
     }
 
     @ViewBuilder
     private var protectionOptions: some View {
-        if algorithm == .ecdsaP256 {
+        if draft.algorithm == .ecdsaP256 {
             VStack(spacing: 0) {
                 Rectangle()
                     .fill(T.border)
@@ -126,11 +149,13 @@ struct GenerateKeyModal: View {
         ToggleRow(
             title: "require biometrics or passcode",
             subtitle: "Face ID/Touch ID or passcode whenever Tessera accesses this key",
-            isOn: $protectWithUserPresence
+            isOn: $draft.protectWithUserPresence
         )
         .padding(.vertical, 12)
 
-        Text("This protection is enforced by iOS at the key boundary. It is separate from the recovery-file passphrase.")
+        Text(draft.algorithm == .ecdsaP256
+            ? "The key remains hardware-bound. Tessera enforces this authentication setting before key use, so you can change it later."
+            : "This protection is enforced by iOS at the key boundary. It is separate from the recovery-file passphrase.")
             .font(Typography.tesseraMono(size: 10))
             .foregroundStyle(T.fgDim)
             .fixedSize(horizontal: false, vertical: true)
@@ -138,10 +163,10 @@ struct GenerateKeyModal: View {
     }
 
     private func algorithmCard(algorithm: KeyAlgorithm, title: String, subtitle: String) -> some View {
-        let selected = self.algorithm == algorithm
+        let selected = draft.algorithm == algorithm
 
         return Button {
-            self.algorithm = algorithm
+            draft.algorithm = algorithm
         } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -167,35 +192,39 @@ struct GenerateKeyModal: View {
     }
 
     private func generate() {
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedName = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
-            errorText = "name is required"
+            draft.errorText = "name is required"
             return
         }
 
         do {
-            let protection: KeyStore.KeyProtection = protectWithUserPresence
+            let softwareProtection: KeyStore.KeyProtection = draft.protectWithUserPresence
                 ? .userPresence
                 : .deviceUnlocked
             let stored: StoredKey
-            switch algorithm {
+            switch draft.algorithm {
             case .ed25519:
                 stored = try KeyStore.generateEd25519(
                     name: trimmedName,
                     context: modelContext,
-                    protection: protection
+                    protection: softwareProtection
                 )
             case .ecdsaP256:
+                // Secure Enclave access-control flags are immutable. Keep the
+                // key hardware-bound but device-unlocked, then enforce the
+                // user's mutable preference through Tessera's shared key-use
+                // authorization gate.
                 stored = try KeyStore.generateP256(
                     name: trimmedName,
                     enclave: true,
-                    protection: protection
+                    protection: .deviceUnlocked
                 )
             case .rsa:
-                errorText = "RSA generation is not supported"
+                draft.errorText = "RSA generation is not supported"
                 return
             }
-            stored.requiresBiometric = protectWithUserPresence
+            stored.requiresBiometric = draft.protectWithUserPresence
 
             try StoredKeyLifecycle.persistCreatedKey(
                 stored,
@@ -203,18 +232,22 @@ struct GenerateKeyModal: View {
                 persistence: KeyLifecyclePersistence.live(modelContext)
             )
             let metadata = KeySecurityMetadataStore()
+            let boundaryProtection: KeyBoundaryProtection =
+                draft.algorithm == .ecdsaP256
+                    ? .deviceUnlocked
+                    : (draft.protectWithUserPresence ? .userPresence : .deviceUnlocked)
             metadata.markBoundaryProtection(
-                protectWithUserPresence ? .userPresence : .deviceUnlocked,
+                boundaryProtection,
                 for: stored.id
             )
             metadata.markMaterialIntegrity(
-                protectWithUserPresence ? .authenticationRequired : .valid,
+                boundaryProtection == .userPresence ? .authenticationRequired : .valid,
                 for: stored.id
             )
             onCreated(stored)
             onClose()
         } catch {
-            errorText = error.localizedDescription
+            draft.errorText = error.localizedDescription
         }
     }
 

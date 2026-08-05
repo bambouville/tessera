@@ -22,6 +22,8 @@ enum AccessoryChipEncoder {
             return []
         case .esc:
             return [0x1B]
+        case .ctrlJ:
+            return [0x0A]
         case .tab:
             return armed.shift ? [0x1B, 0x5B, 0x5A] : [0x09]
         case .left, .down, .up, .right:
@@ -233,5 +235,102 @@ enum AccessoryChipEncoder {
         default:
             preconditionFailure("expected symbol chip")
         }
+    }
+}
+
+/// Applies an accessory-bar modifier to the next software-keyboard payload.
+///
+/// SwiftTerm owns text input, so a key typed on the system keyboard arrives as
+/// the same byte stream as a hardware key. Keeping this transform beside the
+/// accessory encoder gives the phone's "arm Ctrl, then type c" flow the same
+/// terminal semantics as a physical Control-C chord.
+enum SoftwareModifierEncoder {
+    /// A software-keyboard delegate callback may contain a paste or composed
+    /// Unicode text, not one key. One-shot terminal modifiers apply only to a
+    /// single ASCII key event; multi-byte commits pass through and leave the
+    /// modifier armed for the next eligible key.
+    static func encodeNextKey(
+        _ bytes: [UInt8],
+        armed: ArmedModifiers
+    ) -> [UInt8]? {
+        guard bytes.count == 1, armed.isAny else { return nil }
+        return encode(bytes, armed: armed)
+    }
+
+    static func encode(_ bytes: [UInt8], armed: ArmedModifiers) -> [UInt8] {
+        guard !bytes.isEmpty, armed.isAny else { return bytes }
+
+        var transformed = bytes
+        if transformed.count == 1 {
+            var byte = transformed[0]
+
+            if armed.shift {
+                switch byte {
+                case 0x61...0x7A:
+                    byte -= 0x20
+                case 0x31: byte = 0x21 // 1 → !
+                case 0x32: byte = 0x40 // 2 → @
+                case 0x33: byte = 0x23 // 3 → #
+                case 0x34: byte = 0x24 // 4 → $
+                case 0x35: byte = 0x25 // 5 → %
+                case 0x36: byte = 0x5E // 6 → ^
+                case 0x37: byte = 0x26 // 7 → &
+                case 0x38: byte = 0x2A // 8 → *
+                case 0x39: byte = 0x28 // 9 → (
+                case 0x30: byte = 0x29 // 0 → )
+                case 0x2D: byte = 0x5F // - → _
+                case 0x3D: byte = 0x2B // = → +
+                case 0x5B: byte = 0x7B // [ → {
+                case 0x5D: byte = 0x7D // ] → }
+                case 0x5C: byte = 0x7C // \ → |
+                case 0x3B: byte = 0x3A // ; → :
+                case 0x27: byte = 0x22 // ' → "
+                case 0x2C: byte = 0x3C // , → <
+                case 0x2E: byte = 0x3E // . → >
+                case 0x2F: byte = 0x3F // / → ?
+                case 0x60: byte = 0x7E // ` → ~
+                default:
+                    break
+                }
+            }
+
+            if armed.ctrl {
+                switch byte {
+                case 0x40, 0x20:
+                    byte = 0x00
+                case 0x41...0x5F:
+                    byte &= 0x1F
+                case 0x61...0x7A:
+                    byte &= 0x1F
+                case 0x3F:
+                    byte = 0x7F
+                default:
+                    break
+                }
+            }
+
+            transformed[0] = byte
+        }
+
+        if armed.alt {
+            transformed.insert(0x1B, at: 0)
+        }
+        return transformed
+    }
+}
+
+extension ModifierState {
+    /// Shared software-keyboard pipeline used by the terminal delegate. A
+    /// one-shot modifier is consumed only when the payload represents one
+    /// eligible key and the modifier was actually applied.
+    func encodeSoftwareKeyboardPayload(_ bytes: [UInt8]) -> [UInt8] {
+        guard let encoded = SoftwareModifierEncoder.encodeNextKey(
+            bytes,
+            armed: armed
+        ) else {
+            return bytes
+        }
+        _ = consume()
+        return encoded
     }
 }

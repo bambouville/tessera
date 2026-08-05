@@ -238,6 +238,248 @@ final class RemoteAuthorizedKeysInstallerTests: XCTestCase {
         }
     }
 
+    func test_explicitSelfRevokeRequiresTargetKeyWhileInstallStillRejectsIt() {
+        let keyID = UUID()
+        let selfAuthenticated = Host(
+            address: "example.com",
+            user: "alice",
+            storedKeyID: keyID
+        )
+        let alternate = Host(
+            address: "example.com",
+            user: "alice",
+            storedKeyID: UUID()
+        )
+
+        XCTAssertNoThrow(
+            try RemoteAuthorizedKeysInstaller.validateCanSelfRevoke(
+                keyID: keyID,
+                on: selfAuthenticated
+            )
+        )
+        XCTAssertThrowsError(
+            try RemoteAuthorizedKeysInstaller.validateCanInstall(
+                keyID: keyID,
+                on: selfAuthenticated
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? RemoteAuthorizedKeysInstaller.InstallError,
+                .selfInstall
+            )
+        }
+        XCTAssertThrowsError(
+            try RemoteAuthorizedKeysInstaller.validateCanSelfRevoke(
+                keyID: keyID,
+                on: alternate
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? RemoteAuthorizedKeysInstaller.InstallError,
+                .targetKeyRequired
+            )
+        }
+    }
+
+    func test_deviceAccessRevokeUsesTargetKeyOnlyWhileHostStillSelectsIt() {
+        let targetKeyID = UUID()
+        var host = Host(
+            address: "example.com",
+            user: "alice",
+            storedKeyID: targetKeyID
+        )
+
+        XCTAssertTrue(
+            RemoteAuthorizedKeysInstaller.shouldRevokeUsingTargetKey(
+                keyID: targetKeyID,
+                on: host
+            )
+        )
+
+        host.storedKeyID = UUID()
+        XCTAssertFalse(
+            RemoteAuthorizedKeysInstaller.shouldRevokeUsingTargetKey(
+                keyID: targetKeyID,
+                on: host
+            )
+        )
+
+        host.storedKeyID = nil
+        XCTAssertFalse(
+            RemoteAuthorizedKeysInstaller.shouldRevokeUsingTargetKey(
+                keyID: targetKeyID,
+                on: host
+            )
+        )
+    }
+
+    func test_trackedRevocationRequiresExactFrozenRoute() {
+        let jump = Host(
+            id: UUID(),
+            address: "jump.example",
+            port: 2200,
+            user: "relay",
+            transport: .ssh
+        )
+        var host = Host(
+            id: UUID(),
+            address: "target.internal",
+            user: "alice",
+            transport: .mosh,
+            jumpChain: [jump]
+        )
+        let route = RemoteAccessRouteIdentity.value(for: host)
+
+        XCTAssertNoThrow(
+            try RemoteAuthorizedKeysInstaller.validateRevocationRoute(
+                route,
+                on: host
+            )
+        )
+        XCTAssertThrowsError(
+            try RemoteAuthorizedKeysInstaller.validateRevocationRoute(nil, on: host)
+        ) { error in
+            XCTAssertEqual(
+                error as? RemoteAuthorizedKeysInstaller.InstallError,
+                .routeChanged
+            )
+        }
+
+        host.jumpChain[0].port = 2201
+        XCTAssertThrowsError(
+            try RemoteAuthorizedKeysInstaller.validateRevocationRoute(route, on: host)
+        ) { error in
+            XCTAssertEqual(
+                error as? RemoteAuthorizedKeysInstaller.InstallError,
+                .routeChanged
+            )
+        }
+    }
+
+    func test_syncInstallAuthorizationRejectsLiveCredentialReResolution() {
+        let signingKey = Curve25519.Signing.PrivateKey()
+        let line = KeyStore.ed25519AuthorizedKeysLine(
+            publicKey: signingKey.publicKey,
+            comment: "sync-test"
+        )
+        let parts = line.split(separator: " ", maxSplits: 2)
+        let blob = String(parts[1])
+        let blobData = try! XCTUnwrap(Data(base64Encoded: blob))
+        let key = EnrollmentPublicKey(
+            id: UUID(),
+            displayName: "sync test key",
+            algorithm: .ed25519,
+            blob: blob,
+            fingerprint: EnrollmentPublicKey.fingerprint(forSSHBlob: blobData),
+            protection: .software
+        )
+        let jumpID = UUID()
+        let jump = Host(
+            id: jumpID,
+            address: "jump.example",
+            user: "relay",
+            storedKeyID: UUID()
+        )
+        let host = Host(
+            id: UUID(),
+            address: "target.internal",
+            user: "alice",
+            storedKeyID: UUID(),
+            jumpChain: [jump]
+        )
+        let request = SyncDeviceAccessGrantEngine.InstallRequest(
+            host: host,
+            hostLabel: "target",
+            endpoint: "alice@target.internal:22",
+            peerDeviceName: "iPhone",
+            flow: .enrollment,
+            publicKey: key
+        )
+        let context = RemoteAuthorizedKeysInstaller.LedgerContext(
+            keyID: key.id,
+            hostID: host.id,
+            hostLabel: request.hostLabel,
+            endpoint: request.endpoint,
+            routeIdentity: request.routeIdentity,
+            authorizationSnapshot: request.grantSnapshot,
+            peerDeviceName: request.peerDeviceName,
+            direction: .grantedToPeer,
+            flow: .enrollment,
+            publicKeyFingerprint: key.fingerprint,
+            authorizedKeysLine: key.authorizedKeysLine
+        )
+
+        XCTAssertNoThrow(
+            try RemoteAuthorizedKeysInstaller.validateInstallationAuthorization(
+                context,
+                on: host
+            )
+        )
+        var changedCredential = host
+        changedCredential.jumpChain[0].storedKeyID = UUID()
+        XCTAssertThrowsError(
+            try RemoteAuthorizedKeysInstaller.validateInstallationAuthorization(
+                context,
+                on: changedCredential
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? RemoteAuthorizedKeysInstaller.InstallError,
+                .routeChanged
+            )
+        }
+    }
+
+    func test_installAuthorizationCannotOverwriteEarlierRouteLedger() throws {
+        let suite = "RemoteAuthorizedKeysInstallerTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let metadata = KeySecurityMetadataStore(defaults: defaults, storageKey: "ledger")
+        let keyID = UUID()
+        let host = Host(id: UUID(), address: "new.example", user: "alice")
+        let line = KeyStore.ed25519AuthorizedKeysLine(
+            publicKey: Curve25519.Signing.PrivateKey().publicKey,
+            comment: "target"
+        )
+        let fingerprint = KeyStore.canonicalFingerprint(forAuthorizedKeysLine: line)
+        metadata.recordRemoteInstallation(
+            keyID: keyID,
+            hostID: host.id,
+            hostLabel: "old",
+            endpoint: "alice@old.example:22",
+            routeIdentity: "old-route",
+            direction: .localInstallation,
+            publicKeyFingerprint: fingerprint,
+            authorizedKeysLine: line
+        )
+        let context = RemoteAuthorizedKeysInstaller.LedgerContext(
+            metadata: metadata,
+            keyID: keyID,
+            hostID: host.id,
+            hostLabel: "new",
+            endpoint: "alice@new.example:22",
+            routeIdentity: RemoteAccessRouteIdentity.value(for: host),
+            publicKeyFingerprint: fingerprint,
+            authorizedKeysLine: line
+        )
+
+        XCTAssertThrowsError(
+            try RemoteAuthorizedKeysInstaller.validateInstallationAuthorization(
+                context,
+                on: host
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? RemoteAuthorizedKeysInstaller.InstallError,
+                .routeChanged
+            )
+        }
+        XCTAssertEqual(
+            metadata.record(for: keyID).remoteInstallations.first?.routeIdentity,
+            "old-route"
+        )
+    }
+
     func test_validateCanInstall_allowsDifferentAuthKey() {
         let host = Host(
             address: "example.com",

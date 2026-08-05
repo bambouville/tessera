@@ -42,6 +42,20 @@ public final class SSHSession: ObservableObject, TerminalSession {
 
     @Published public private(set) var state: SessionState = .idle
     @Published public private(set) var detectedOSHint: String?
+    @Published private(set) var wslTailscaleMTUWarning: WSLTailscaleMTUWarning?
+    #if DEBUG
+    /// Host-free navigation harness oracles. The task-start count detects view
+    /// remounts immediately; connect calls are intercepted before socket state.
+    @Published private(set) var compactNavigationHarnessSessionTaskStartCount = 0
+    @Published private(set) var compactNavigationHarnessConnectCallCount = 0
+
+    func noteCompactNavigationHarnessSessionTaskStart() {
+        guard ProcessInfo.processInfo.environment[
+            "TESSERA_COMPACT_NAVIGATION_HARNESS"
+        ] == "1" else { return }
+        compactNavigationHarnessSessionTaskStartCount += 1
+    }
+    #endif
 
     // TerminalSession cwd/injection surface — see the protocol docs.
     // Published: the Upload sheet's host rows refresh live when a cwd
@@ -93,6 +107,9 @@ public final class SSHSession: ObservableObject, TerminalSession {
         self.requireBiometric = requireBiometric
         self.isSecureEnclave = isSecureEnclave
         self.portForwarderManager = PortForwarderManager()
+        self.wslTailscaleMTUWarning = HostRuntimeStateStore.wslTailscaleMTUWarning(
+            for: host
+        )
         (outputStream, outputContinuation) = AsyncStream.makeStream(of: [UInt8].self)
         (inputStream, inputContinuation) = AsyncStream.makeStream(of: [UInt8].self)
         (controlStream, controlContinuation) = AsyncStream.makeStream(of: ControlMessage.self)
@@ -109,6 +126,15 @@ public final class SSHSession: ObservableObject, TerminalSession {
     /// Begin connecting to the host and open a PTY shell. Idempotent
     /// while connecting/connected.
     public func connect() {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment[
+            "TESSERA_COMPACT_NAVIGATION_HARNESS"
+        ] == "1" {
+            compactNavigationHarnessConnectCallCount += 1
+            return
+        }
+        #endif
+
         switch state {
         case .connecting, .connected:
             return
@@ -269,10 +295,10 @@ public final class SSHSession: ObservableObject, TerminalSession {
                 self.state = .connected
             }
             Task.detached(priority: .utility) { [weak self, client] in
-                guard let detected = await OSDetectionProbe.run(on: client) else {
+                guard let result = await OSDetectionProbe.run(on: client) else {
                     return
                 }
-                await self?.assignDetectedOSHint(detected)
+                await self?.assignDetectionResult(result)
             }
 
             let rulesToAttach = connectedHost.portForwardRules
@@ -435,11 +461,29 @@ public final class SSHSession: ObservableObject, TerminalSession {
         outputContinuation.yield(bytes)
     }
 
-    /// Main-actor entry point so the detached probe task can assign
-    /// `detectedOSHint` without needing a `[weak self]` mutation
-    /// inside a Sendable closure.
-    fileprivate func assignDetectedOSHint(_ value: String) {
-        detectedOSHint = value
+    /// Main-actor entry point so the detached probe task can publish both OS
+    /// and network-path findings without mutating this session from a Sendable
+    /// closure.
+    fileprivate func assignDetectionResult(_ result: OSDetectionResult) {
+        if let osHint = result.osHint {
+            detectedOSHint = osHint
+        }
+        HostRuntimeStateStore.recordNetworkPathAssessment(
+            result.networkPathAssessment,
+            for: host
+        )
+        switch result.networkPathAssessment {
+        case .unavailable:
+            DiagnosticLogStore.appendSSH("network-path probe=unavailable cachedWarning=\(wslTailscaleMTUWarning != nil)")
+        case .notAtRisk:
+            wslTailscaleMTUWarning = nil
+            DiagnosticLogStore.appendSSH("network-path probe=clear")
+        case .warning(let warning):
+            wslTailscaleMTUWarning = warning
+            DiagnosticLogStore.appendSSH(
+                "network-path probe=wsl-tailscale-mtu-risk outerMTU=\(warning.defaultInterfaceMTU) tailscaleMTU=\(warning.tailscaleInterfaceMTU)"
+            )
+        }
     }
 
     @MainActor
@@ -447,16 +491,29 @@ public final class SSHSession: ObservableObject, TerminalSession {
         _ challenge: HostKeyVerificationChallenge
     ) async -> Bool {
         let status = challenge.isChanged ? "changed" : "unknown"
+        let requestID = UUID()
         DiagnosticLogStore.appendSSH(
             "hostkey prompt status=\(status) keyType=\(challenge.keyType)"
         )
-        let result = await withCheckedContinuation { continuation in
-            pendingHostKeyVerification = HostKeyVerificationRequest(
-                challenge: challenge,
-                continuation: continuation
-            )
+        let result = await withTaskCancellationHandler {
+            guard !Task.isCancelled else { return false }
+            return await withCheckedContinuation { continuation in
+                pendingHostKeyVerification = HostKeyVerificationRequest(
+                    id: requestID,
+                    challenge: challenge,
+                    continuation: continuation
+                )
+            }
+        } onCancel: { [weak self] in
+            Task { @MainActor in
+                guard self?.pendingHostKeyVerification?.id == requestID else { return }
+                self?.pendingHostKeyVerification?.reject()
+                self?.pendingHostKeyVerification = nil
+            }
         }
-        pendingHostKeyVerification = nil
+        if pendingHostKeyVerification?.id == requestID {
+            pendingHostKeyVerification = nil
+        }
         DiagnosticLogStore.appendSSH(
             "hostkey prompt result=\(result ? "accepted" : "rejected") status=\(status) keyType=\(challenge.keyType)"
         )

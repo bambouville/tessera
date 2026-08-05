@@ -15,6 +15,25 @@ import NIOCore
 actor KnownHostsStore {
     static let shared = KnownHostsStore()
 
+    struct TrustedRecordSnapshot: Codable, Equatable, Sendable {
+        let fingerprint: String
+        let keyString: String
+        let firstSeen: Date
+        let lastSeen: Date
+    }
+
+    enum ImportResult: Equatable, Sendable {
+        case inserted
+        case unchanged
+        case conflict
+    }
+
+    enum ImportError: Error, Equatable {
+        case invalidKey
+        case fingerprintMismatch
+        case invalidDates
+    }
+
     /// Days since `lastSeen` after which a known host is reported as
     /// `stale` on the Known Hosts page. 90 days mirrors a common SSH
     /// host-key rotation cadence — long enough that occasional reuse
@@ -43,6 +62,10 @@ actor KnownHostsStore {
         /// fingerprint. Surfaces the "previous fingerprint:" line in
         /// the Known Hosts page detail row.
         var previousFingerprint: String? = nil
+        /// Display-only audit note written when the user explicitly trusted a
+        /// key that matched a continuation peer's fingerprint. It does not
+        /// participate in future validation and is never a shared trust pin.
+        var matchedPeerLabel: String? = nil
     }
 
     /// Read-only display row for the Known Hosts page. Computed at
@@ -59,6 +82,7 @@ actor KnownHostsStore {
         public let firstSeen: Date
         public let lastSeen: Date
         public let status: HostStatus
+        public let matchedPeerLabel: String?
     }
 
     enum VerificationResult {
@@ -105,19 +129,10 @@ actor KnownHostsStore {
             return .unknown(fingerprint: fingerprint, keyString: keyString)
         }
 
-        if Self.unpadded(record.fingerprint) == fingerprint {
-            var dirty = false
-            if record.fingerprint != fingerprint {
-                // Migrate a record stored with base64 padding.
-                record.fingerprint = fingerprint
-                dirty = true
-            }
+        if record.fingerprint == fingerprint {
             if record.pendingFingerprint != nil || record.pendingKeyString != nil {
                 record.pendingFingerprint = nil
                 record.pendingKeyString = nil
-                dirty = true
-            }
-            if dirty {
                 records[endpoint] = record
                 saveToDisk()
             }
@@ -130,7 +145,7 @@ actor KnownHostsStore {
         saveToDisk()
 
         return .changed(
-            oldFingerprint: Self.unpadded(record.fingerprint),
+            oldFingerprint: record.fingerprint,
             newFingerprint: fingerprint,
             keyString: keyString
         )
@@ -140,7 +155,11 @@ actor KnownHostsStore {
     /// On override, the previous fingerprint is preserved on the
     /// record under `previousFingerprint` so the page detail row can
     /// show the rotation history.
-    func trust(_ key: NIOSSHPublicKey, for endpoint: String) {
+    func trust(
+        _ key: NIOSSHPublicKey,
+        for endpoint: String,
+        matchedPeerLabel: String? = nil
+    ) {
         let fingerprint = Self.fingerprint(of: key)
         let keyString = String(openSSHPublicKey: key)
         let now = nowProvider()
@@ -151,9 +170,9 @@ actor KnownHostsStore {
             // Trusting the same key again preserves whatever rotation
             // history the record already had. Trusting a different key
             // captures the just-replaced fingerprint as "previous".
-            return Self.unpadded(existing.fingerprint) == fingerprint
+            return existing.fingerprint == fingerprint
                 ? existing.previousFingerprint
-                : Self.unpadded(existing.fingerprint)
+                : existing.fingerprint
         }()
         records[endpoint] = HostRecord(
             fingerprint: fingerprint,
@@ -162,7 +181,8 @@ actor KnownHostsStore {
             lastSeen: now,
             pendingFingerprint: nil,
             pendingKeyString: nil,
-            previousFingerprint: priorFingerprint
+            previousFingerprint: priorFingerprint,
+            matchedPeerLabel: matchedPeerLabel
         )
         saveToDisk()
     }
@@ -178,6 +198,77 @@ actor KnownHostsStore {
     func remove(endpoint: String) {
         records.removeValue(forKey: endpoint)
         saveToDisk()
+    }
+
+    /// Public comparison material for a continuation descriptor. Callers must
+    /// treat this as a hint for explicit TOFU on the peer, never as a pin to
+    /// import there.
+    func trustedFingerprint(for endpoint: String) -> String? {
+        records[endpoint]?.fingerprint
+    }
+
+    /// Exact public trust material for an explicitly authorized nearby
+    /// bootstrap. Unlike continuation fingerprints, this snapshot is suitable
+    /// for importing as a pin because the encrypted bootstrap flow performs a
+    /// fresh device-owner authorization before releasing its manifest.
+    func trustedRecord(for endpoint: String) -> TrustedRecordSnapshot? {
+        records[endpoint].map {
+            TrustedRecordSnapshot(
+                fingerprint: $0.fingerprint,
+                keyString: $0.keyString,
+                firstSeen: $0.firstSeen,
+                lastSeen: $0.lastSeen
+            )
+        }
+    }
+
+    /// Imports an owner-authorized nearby trust pin without weakening a local
+    /// decision. An identical local pin is idempotently skipped; a different
+    /// local pin wins and is reported as a conflict rather than overwritten.
+    func importTrustedRecord(
+        _ snapshot: TrustedRecordSnapshot,
+        for endpoint: String,
+        fromPeer peerDeviceName: String
+    ) throws -> ImportResult {
+        guard snapshot.firstSeen <= snapshot.lastSeen else {
+            throw ImportError.invalidDates
+        }
+        let key: NIOSSHPublicKey
+        do {
+            key = try NIOSSHPublicKey(openSSHPublicKey: snapshot.keyString)
+        } catch {
+            throw ImportError.invalidKey
+        }
+        guard Self.fingerprint(of: key) == snapshot.fingerprint else {
+            throw ImportError.fingerprintMismatch
+        }
+
+        if var existing = records[endpoint] {
+            guard existing.fingerprint != snapshot.fingerprint else {
+                return .unchanged
+            }
+            // Keep the local trust decision authoritative, but retain the
+            // peer-reported key as a pending mismatch so Known Hosts can show
+            // both fingerprints and offer the existing explicit review flow.
+            existing.pendingFingerprint = snapshot.fingerprint
+            existing.pendingKeyString = String(openSSHPublicKey: key)
+            records[endpoint] = existing
+            saveToDisk()
+            return .conflict
+        }
+
+        records[endpoint] = HostRecord(
+            fingerprint: snapshot.fingerprint,
+            keyString: String(openSSHPublicKey: key),
+            firstSeen: snapshot.firstSeen,
+            lastSeen: snapshot.lastSeen,
+            pendingFingerprint: nil,
+            pendingKeyString: nil,
+            previousFingerprint: nil,
+            matchedPeerLabel: "Imported from \(peerDeviceName)"
+        )
+        saveToDisk()
+        return .inserted
     }
 
     /// Snapshot of the store as display rows for the Known Hosts
@@ -200,13 +291,14 @@ actor KnownHostsStore {
                 id: endpoint,
                 host: Self.endpointHost(endpoint: endpoint),
                 algorithm: Self.algorithmName(from: record.keyString),
-                fingerprint: Self.unpadded(record.fingerprint),
-                previousFingerprint: record.previousFingerprint.map(Self.unpadded),
-                pendingFingerprint: record.pendingFingerprint.map(Self.unpadded),
+                fingerprint: record.fingerprint,
+                previousFingerprint: record.previousFingerprint,
+                pendingFingerprint: record.pendingFingerprint,
                 pendingKeyString: record.pendingKeyString,
                 firstSeen: record.firstSeen,
                 lastSeen: record.lastSeen,
-                status: status
+                status: status,
+                matchedPeerLabel: record.matchedPeerLabel
             )
         }
         return rows.sorted { $0.lastSeen > $1.lastSeen }
@@ -224,14 +316,6 @@ actor KnownHostsStore {
         }
         let hash = SHA256.hash(data: wireData)
         return "SHA256:" + Data(hash).base64EncodedString()
-            .trimmingCharacters(in: CharacterSet(charactersIn: "="))
-    }
-
-    /// Strips base64 padding from a stored fingerprint. Records written
-    /// before the padding fix carry a trailing "=" that OpenSSH never
-    /// prints; comparisons must treat both forms as the same key.
-    static func unpadded(_ fingerprint: String) -> String {
-        fingerprint.trimmingCharacters(in: CharacterSet(charactersIn: "="))
     }
 
     /// Short display form: "SHA256:abc...xyz"

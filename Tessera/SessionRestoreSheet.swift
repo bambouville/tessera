@@ -27,46 +27,59 @@ struct SessionRestoreSheet: View {
     var onNotNow: () -> Void
 
     @Environment(\.designTokens) private var T
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("reopen previous connections")
-                .font(Typography.tesseraMono(size: 18, weight: .semibold))
-                .foregroundStyle(T.fg)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                Text("reopen previous connections")
+                    .font(Typography.sheetTitle)
+                    .foregroundStyle(T.fg)
 
-            Text(summaryText)
-                .font(Typography.tesseraMono(size: 13))
-                .foregroundStyle(T.fgMuted)
-                .fixedSize(horizontal: false, vertical: true)
+                Text(summaryText)
+                    .font(Typography.tesseraMono(size: 13))
+                    .foregroundStyle(T.fgMuted)
+                    .fixedSize(horizontal: false, vertical: true)
 
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(prompt.hostNames.enumerated()), id: \.offset) { _, name in
-                    HStack(spacing: 8) {
-                        StatusDot(color: T.green, pulse: false, size: 6)
-                        Text(name)
-                            .font(Typography.tesseraMono(size: 13))
-                            .foregroundStyle(T.fg)
-                            .lineLimit(1)
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(prompt.hostNames.enumerated()), id: \.offset) { _, name in
+                        HStack(spacing: 8) {
+                            StatusDot(color: T.green, pulse: false, size: 6)
+                            Text(name)
+                                .font(Typography.tesseraMono(size: 13))
+                                .foregroundStyle(T.fg)
+                                .lineLimit(1)
+                        }
                     }
                 }
-            }
-            .padding(.vertical, 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            if prompt.skippedCount > 0 {
-                Text(skippedText)
-                    .font(Typography.tesseraMono(size: 11))
-                    .foregroundStyle(T.fgDim)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+                if prompt.skippedCount > 0 {
+                    Text(skippedText)
+                        .font(Typography.tesseraMono(size: 11))
+                        .foregroundStyle(T.fgDim)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
-            Toggle(isOn: $alwaysReopen) {
-                Text("always reopen")
-                    .font(Typography.tesseraMono(size: 13))
-                    .foregroundStyle(T.fg)
+                Toggle(isOn: $alwaysReopen) {
+                    Text("always reopen")
+                        .font(Typography.tesseraMono(size: 13))
+                        .foregroundStyle(T.fg)
+                }
+                .toggleStyle(.switch)
+                .tint(T.accent)
+                .padding(.top, 2)
+
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .toggleStyle(.switch)
-            .tint(T.accent)
-            .padding(.top, 2)
+            .scrollIndicators(.visible)
+
+            Rectangle()
+                .fill(T.border)
+                .frame(height: 0.5)
 
             HStack(spacing: 10) {
                 Btn(style: .primary, action: onReopen) {
@@ -76,13 +89,17 @@ struct SessionRestoreSheet: View {
 
                 Btn("not now", style: .default, action: onNotNow)
             }
-            .padding(.top, 2)
-
-            Spacer(minLength: 0)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 16)
+            .background(T.presentationBg)
+            .accessibilityElement(children: .contain)
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(T.bg)
+        .background(T.presentationBg)
+        .modifier(
+            SessionRestorePresentationModifier(
+                fallbackHeight: fallbackPresentationHeight
+            )
+        )
     }
 
     private var summaryText: String {
@@ -94,5 +111,35 @@ struct SessionRestoreSheet: View {
     private var skippedText: String {
         let noun = prompt.skippedCount == 1 ? "connection was" : "connections were"
         return "\(prompt.skippedCount) previous \(noun) skipped because the saved host or credentials changed."
+    }
+
+    private var maximumVisibleHostCount: Int {
+        dynamicTypeSize.isAccessibilitySize ? 4 : 7
+    }
+
+    private var hostListHeight: CGFloat {
+        let visibleRows = max(1, min(prompt.hostNames.count, maximumVisibleHostCount))
+        let rowHeight: CGFloat = dynamicTypeSize.isAccessibilitySize ? 40 : 24
+        return CGFloat(visibleRows) * rowHeight
+    }
+
+    private var fallbackPresentationHeight: CGFloat {
+        let accessibilityAllowance: CGFloat = dynamicTypeSize.isAccessibilitySize ? 130 : 0
+        let skippedAllowance: CGFloat = prompt.skippedCount > 0 ? 44 : 0
+        return min(
+            720,
+            238 + hostListHeight + skippedAllowance + accessibilityAllowance
+        )
+    }
+}
+
+private struct SessionRestorePresentationModifier: ViewModifier {
+    let fallbackHeight: CGFloat
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        content
+            .presentationDetents([.height(fallbackHeight), .large])
+            .presentationContentInteraction(.scrolls)
     }
 }

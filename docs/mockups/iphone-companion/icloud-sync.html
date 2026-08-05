@@ -1,0 +1,1851 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tessera — iCloud sync (layer 3)</title>
+<style>
+/* ============================================================
+   Tessera iCloud sync — storyboard mock (P8 layer 3)
+   Companion to sync.html (layers 1+2 contract, S1–S10).
+   Real design tokens (DesignTokens.swift), blue accent.
+   Static frames; page chrome dark-only per house style.
+   ============================================================ */
+:root{
+  --accent:#5B9FFF; --accentSoft:rgba(91,159,255,.14); --accentHi:rgba(91,159,255,.32);
+  --border:rgba(255,255,255,.08); --borderStrong:rgba(255,255,255,.14);
+  --fg:#fff; --fgMuted:rgba(235,235,245,.60); --fgDim:rgba(235,235,245,.35); --fgFaint:rgba(235,235,245,.18);
+  --green:#30D158; --red:#FF453A; --amber:#FF9F0A;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html{background:#181818}
+body{background:#181818;color:var(--fg);font:13px/1.5 var(--sans);padding:48px 28px 120px;-webkit-font-smoothing:antialiased}
+.page{max-width:1300px;margin:0 auto}
+.m{font-family:var(--mono)}
+
+/* ---------- doc chrome (house style) ---------- */
+.doc-h1{font:500 28px/1.2 var(--mono);letter-spacing:-.01em}
+.doc-sub{color:var(--fgMuted);font-size:13px;margin-top:8px;max-width:880px}
+.doc-meta{color:var(--fgDim);font-size:12px;margin-top:10px;font-family:var(--mono)}
+.toc{display:flex;gap:8px;flex-wrap:wrap;margin-top:22px}
+.toc a{font:11.5px/1 var(--mono);color:var(--accent);text-decoration:none;border:1px solid var(--border);border-radius:100px;padding:5px 12px}
+.toc a:hover{background:var(--accentSoft)}
+h2{font:600 19px/1.3 var(--sans);letter-spacing:-.01em;margin:78px 0 4px;padding-top:26px;border-top:1px solid var(--border)}
+h2 .n{font:500 12px/1 var(--mono);color:var(--fgDim);margin-right:10px}
+p.sub{color:var(--fgMuted);font-size:13.5px;margin:6px 0 0;max-width:880px}
+p.note{color:var(--fgDim);font-size:12px;margin:14px 0 0;max-width:880px}
+p.note b{color:var(--fgMuted);font-weight:500}
+code{font-family:var(--mono);font-size:.87em;background:#101010;border:1px solid var(--border);border-radius:4px;padding:1px 5px;color:var(--fgMuted)}
+section{scroll-margin-top:24px}
+
+/* principles strip */
+.prin{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:24px}
+.prin .p{border:1px solid var(--border);border-radius:12px;padding:14px 15px;background:#101012}
+.prin .p .t{font:500 12px/1.3 var(--mono);color:var(--fg)}
+.prin .p .s{font:11.5px/1.5 var(--sans);color:var(--fgDim);margin-top:6px}
+.prin .p .t .ic{color:var(--accent);margin-right:6px}
+
+/* ---------- stage / captions ---------- */
+.stage{display:flex;gap:30px;align-items:flex-start;flex-wrap:wrap;margin-top:26px}
+.stagecol{flex:none}
+.stagecap{font:11.5px/1.5 var(--mono);color:var(--fgDim);margin-top:12px;max-width:393px}
+.stagecap b{color:var(--fgMuted);font-weight:500}
+.arrowcol{align-self:center;color:var(--fgFaint);font:400 22px/1 var(--mono);padding:0 2px;margin-top:-40px}
+
+/* ---------- generic glyph kit ---------- */
+.g{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.g.fill{fill:currentColor;stroke:none}
+
+/* ============================================================
+   iPhone frame (393×852, static; dark device theme tokens)
+   ============================================================ */
+.phone{
+  --dw:393px; --dh:852px; width:var(--dw);height:var(--dh);
+  border-radius:56px;border:1px solid var(--borderStrong);background:#000;position:relative;flex:none;
+  box-shadow:0 30px 60px -30px rgba(0,0,0,.65), inset 0 0 0 2px #2a2a2c;
+  --t-bg:#000; --t-panel:#0A0A0A; --t-input:#141414; --t-inputSoft:#1C1C1E; --t-solid:#1C1C1E;
+  --t-fg:#fff; --t-fgMuted:rgba(235,235,245,.60); --t-fgDim:rgba(235,235,245,.35); --t-fgFaint:rgba(235,235,245,.18);
+  --t-border:rgba(255,255,255,.08); --t-borderStrong:rgba(255,255,255,.14);
+  --t-accent:#5B9FFF; --t-accentSoft:rgba(91,159,255,.14); --t-accentHi:rgba(91,159,255,.32);
+  --t-green:#30D158; --t-red:#FF453A; --t-amber:#FF9F0A;
+  --t-glassBg:rgba(255,255,255,.12); --t-glassRing:rgba(255,255,255,.18);
+  --t-shadow:0 12px 28px -8px rgba(0,0,0,.45), 0 4px 10px rgba(0,0,0,.25);
+  --sa-t:59px; --sa-b:34px;
+}
+.phone .screen{position:absolute;inset:0;border-radius:inherit;overflow:hidden;background:var(--t-bg);color:var(--t-fg)}
+.island{position:absolute;top:12px;left:50%;transform:translateX(-50%);width:118px;height:34px;border-radius:20px;background:#000;z-index:60;box-shadow:inset 0 0 0 1px #1a1a1c}
+.statusbar{position:absolute;top:0;left:0;right:0;height:var(--sa-t);z-index:55;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 6px;font:600 14px/1 var(--sans);color:var(--t-fg);pointer-events:none}
+.sb-icons{display:flex;align-items:center;gap:6px}
+.sb-icons .g{width:16px;height:16px;stroke-width:1.7}
+.home-ind{position:absolute;left:50%;bottom:9px;transform:translateX(-50%);width:134px;height:5px;border-radius:3px;background:rgba(255,255,255,.85);z-index:90;pointer-events:none}
+.glass{background:var(--t-glassBg);backdrop-filter:blur(28px) saturate(180%);-webkit-backdrop-filter:blur(28px) saturate(180%);box-shadow:var(--t-shadow), inset 0 .5px 0 rgba(255,255,255,.16)}
+
+/* chips / tags / dots (in-device kit) */
+.chip{font:500 11px/1 var(--mono);padding:3px 8px;border-radius:4px;border:1px solid var(--t-border,var(--border));background:var(--t-inputSoft,#1C1C1E);color:var(--t-fgMuted,var(--fgMuted))}
+.tag{font:10px/1 var(--mono);padding:2.5px 7px;border-radius:4px;border:1px solid var(--t-border,var(--border));color:var(--t-fgDim,var(--fgDim))}
+.tag.acc{background:var(--t-accentSoft,var(--accentSoft));color:var(--t-accent,var(--accent));border-color:transparent}
+.tag.warn{color:var(--amber);border-color:transparent;background:rgba(255,159,10,.14)}
+.tag.ok{color:var(--green);border-color:transparent;background:rgba(48,209,88,.12)}
+.dot{width:7px;height:7px;border-radius:4px;background:var(--t-fgDim,var(--fgDim));flex:none}
+.dot.g{background:var(--green);animation:pulse 1.6s ease-in-out infinite}
+.dot.a{background:var(--amber);animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.4}}
+
+/* terminal */
+.term{position:absolute;inset:0;background:#000;color:rgba(255,255,255,.88);font:13px/1.45 var(--mono);padding:calc(var(--sa-t) + 62px) 14px 20px 14px;overflow:hidden}
+.term .ln{white-space:pre-wrap;word-break:break-all}
+.term .dim{color:rgba(235,235,245,.45)}
+.term .ok{color:#30D158}.term .cmd{color:#FFD479}.term .dir{color:#b794f4}
+.cur{display:inline-block;width:7px;height:14px;background:#fff;vertical-align:-2px;animation:blink 1.05s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.screen.dimmed .term{opacity:.28;filter:blur(1px)}
+
+/* top pill */
+.toppill{position:absolute;top:calc(var(--sa-t) + 8px);left:12px;right:12px;z-index:45;height:44px;border-radius:14px;display:flex;align-items:center;padding:0 4px 0 6px;border:.5px solid var(--t-glassRing);color:var(--t-fg)}
+.toppill .ib{width:36px;height:36px;display:grid;place-items:center;color:var(--t-fgMuted);border-radius:8px}
+.toppill .st{display:flex;align-items:center;gap:8px;min-width:0;padding:0 6px}
+.toppill .host{font:500 12.5px/1 var(--mono);white-space:nowrap}
+.toppill .sp{flex:1}
+.toppill .ib.red{color:var(--t-red)}
+
+/* accessory bar */
+.accbar{position:absolute;left:0;right:0;bottom:0;z-index:44;height:52px;display:flex;align-items:center;gap:6px;padding:0 8px;border-top:.5px solid rgba(128,128,128,.25);background:var(--t-glassBg);backdrop-filter:blur(28px) saturate(180%);-webkit-backdrop-filter:blur(28px) saturate(180%)}
+.acckey{flex:none;min-width:42px;height:36px;padding:0 11px;border-radius:7px;background:rgba(120,120,128,.24);color:var(--t-fg);font:500 14px/1 var(--mono);display:grid;place-items:center}
+.acckey.lbl{font-size:12px}
+.accbar .vsep{width:.5px;height:26px;background:var(--t-border);flex:none;margin:0 2px}
+
+/* toast */
+.toast{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(var(--sa-b) + 70px);z-index:50;display:flex;align-items:center;gap:9px;padding:10px 16px;border-radius:22px;border:.5px solid var(--t-glassRing);font:500 11.5px/1.3 var(--mono);color:var(--t-fg);white-space:nowrap}
+.toast .g{width:15px;height:15px;color:var(--t-fgMuted)}
+
+/* centered modal card */
+.modalveil{position:absolute;inset:0;z-index:52;background:rgba(0,0,0,.45);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);display:flex;align-items:center;justify-content:center;padding:26px}
+.modalcard{width:100%;border-radius:22px;border:.5px solid var(--t-glassRing);padding:22px 20px 18px;color:var(--t-fg);background:color-mix(in srgb,var(--t-solid) 86%,transparent);backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);box-shadow:0 18px 44px -12px rgba(0,0,0,.55)}
+.modalcard .ic{width:44px;height:44px;border-radius:22px;background:var(--t-accentSoft);color:var(--t-accent);display:grid;place-items:center;margin:0 auto 12px}
+.modalcard .ic .g{width:20px;height:20px}
+.modalcard .ic.warn{background:rgba(255,159,10,.14);color:var(--amber)}
+.modalcard h4{font:600 15px/1.3 var(--sans);text-align:center}
+.modalcard .sub{font:11.5px/1.5 var(--sans);color:var(--t-fgMuted);text-align:center;margin-top:5px}
+.modalcard .body{margin-top:14px}
+.btnrow{display:flex;gap:9px;margin-top:16px}
+.btn{flex:1;appearance:none;border:1px solid var(--t-border);background:var(--t-input);color:var(--t-fg);border-radius:11px;padding:12px 10px;font:500 12.5px/1 var(--mono);cursor:pointer;text-align:center}
+.btn.primary{background:var(--t-accent);border-color:var(--t-accent);color:#fff}
+.btn.neutral{background:var(--t-fg);border-color:var(--t-fg);color:var(--t-bg)}
+.btn.ghost{background:transparent}
+.btn.ghostred{background:transparent;color:var(--t-red);border-color:transparent}
+.btn[disabled]{opacity:.5}
+
+/* fingerprint block */
+.fpblock{background:var(--t-input);border:1px solid var(--t-border);border-radius:10px;padding:11px 12px;font:11px/1.6 var(--mono);color:var(--t-fgMuted);word-break:break-all}
+.fpblock .k{color:var(--t-fgDim)}
+.matchline{display:flex;align-items:flex-start;gap:8px;margin-top:11px;font:11.5px/1.45 var(--mono)}
+.matchline.ok{color:var(--green)}
+.matchline.warn{color:var(--amber)}
+.matchline.neut{color:var(--t-fgMuted)}
+.matchline .g{width:14px;height:14px;margin-top:1px}
+
+/* consent list (consequence-bearing copy — 12px floor, not fingerprint chrome) */
+.xlist{background:var(--t-input);border:1px solid var(--t-border);border-radius:10px;padding:12px 13px;font:12px/1.9 var(--mono);color:var(--t-fg)}
+.xlist .ok{color:var(--green)}
+.xlist .no{color:var(--red)}
+.xlist .dim{color:var(--t-fgDim)}
+.fpblock s{color:var(--t-fgDim)}
+
+/* variant gallery (status states etc.) */
+.vargrid{display:flex;flex-wrap:wrap;gap:16px;margin-top:20px}
+.vargrid .varcard{flex:none}
+
+/* descriptor / spec table */
+.spec{border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-top:18px;max-width:880px}
+.spec table{border-collapse:collapse;width:100%;font:11.5px/1.5 var(--mono)}
+.spec th{font:500 10px/1 var(--mono);text-transform:uppercase;letter-spacing:.07em;color:var(--fgDim);text-align:left;padding:10px 14px;border-bottom:1px solid var(--border);background:#101012}
+.spec td{padding:8px 14px;border-bottom:1px solid var(--border);color:var(--fgMuted);vertical-align:top}
+.spec tr:last-child td{border-bottom:0}
+.spec td:first-child{color:var(--fg);white-space:nowrap}
+.spec .new{color:var(--accent)}
+.spec .newtag{font-size:9px;color:var(--accent);border:1px solid var(--accentHi);border-radius:4px;padding:1px 5px;margin-left:7px;vertical-align:1px}
+
+/* steps card */
+.steps{margin-top:14px;display:flex;flex-direction:column;gap:0}
+.step{display:flex;align-items:flex-start;gap:11px;padding:9px 2px;font:12px/1.45 var(--mono);color:var(--t-fgMuted)}
+.step .bullet{width:20px;height:20px;border-radius:10px;flex:none;display:grid;place-items:center;border:1.5px solid var(--t-fgFaint);color:transparent;margin-top:1px}
+.step.done{color:var(--t-fg)}
+.step.done .bullet{border-color:var(--green);color:var(--green)}
+.step.active{color:var(--t-fg)}
+.step.active .bullet{border-color:var(--t-accent);position:relative}
+.step.active .bullet::after{content:"";position:absolute;inset:4px;border-radius:50%;background:var(--t-accent);animation:pulse 1.2s ease-in-out infinite}
+.step .bullet .g{width:11px;height:11px;stroke-width:2.2}
+.step .sd{font-size:10px;color:var(--t-fgDim);margin-top:2px}
+
+/* spinner */
+.spin{width:26px;height:26px;border-radius:50%;border:2.5px solid var(--t-fgFaint);border-top-color:var(--t-accent);margin:0 auto 14px;animation:rot 1s linear infinite}
+@keyframes rot{to{transform:rotate(360deg)}}
+
+/* sheet (add host) */
+.sheet{position:absolute;left:8px;right:8px;bottom:8px;top:15%;z-index:47;border-radius:26px;border:.5px solid var(--t-glassRing);color:var(--t-fg);display:flex;flex-direction:column;overflow:hidden;background:color-mix(in srgb,var(--t-solid) 88%,transparent);backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);box-shadow:0 18px 44px -12px rgba(0,0,0,.55)}
+.grab{width:36px;height:5px;border-radius:3px;background:var(--t-fgFaint);margin:8px auto 2px;flex:none}
+.sheet .sh-h{display:flex;align-items:center;gap:8px;padding:8px 16px 12px}
+.sheet .sh-h .t{font:600 13.5px/1 var(--sans)}
+.sheet .sh-body{flex:1;overflow:hidden;padding:0 14px}
+.srcchip{margin-left:auto;display:flex;align-items:center;gap:6px;border:.5px solid var(--t-border);border-radius:9px;padding:4px 9px;font:10px/1.3 var(--mono);color:var(--t-fgMuted)}
+.srcchip .g{width:12px;height:12px;color:var(--t-accent)}
+
+/* field rows */
+.fgroup{background:var(--t-panel);border:1px solid var(--t-border);border-radius:12px;overflow:hidden;margin-bottom:14px}
+.frow{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--t-border);min-height:46px}
+.frow:last-child{border-bottom:0}
+.frow .lb{font:11px/1 var(--mono);color:var(--t-fgDim);width:76px;flex:none}
+.frow .vl{font:12.5px/1.3 var(--mono);color:var(--t-fg)}
+.frow .end{margin-left:auto;display:flex;align-items:center;gap:7px}
+.vchip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--t-border);background:var(--t-input);border-radius:7px;padding:5px 9px;font:11px/1.3 var(--mono);color:var(--t-fgMuted)}
+.vchip .g{width:12px;height:12px;color:var(--t-fgDim)}
+.formnote{font:10.5px/1.55 var(--mono);color:var(--t-fgDim);padding:2px 4px 12px;display:flex;gap:8px;align-items:flex-start}
+.formnote .g{width:13px;height:13px;margin-top:1px;color:var(--t-fgMuted)}
+/* consequence-bearing notes — the declared 12px floor, applied where the floor was invented for */
+.formnote.conseq{font-size:12px;line-height:1.6;color:var(--t-fgMuted)}
+.cta{display:block;width:100%;appearance:none;border:0;background:var(--t-accent);color:#fff;border-radius:12px;padding:14px;font:500 13px/1 var(--mono);cursor:pointer;text-align:center}
+
+/* password field */
+.pwfield{display:flex;align-items:center;gap:9px;background:var(--t-input);border:1px solid var(--t-border);border-radius:10px;padding:12px 12px;font:13px/1 var(--mono);color:var(--t-fg)}
+.pwfield .g{width:14px;height:14px;color:var(--t-fgMuted)}
+.pwfield .dots{letter-spacing:3px;color:var(--t-fgDim)}
+.fieldnote{font:10px/1.5 var(--mono);color:var(--t-fgDim);margin:7px 2px 0}
+.ordiv{display:flex;align-items:center;gap:10px;margin:15px 0;color:var(--t-fgFaint);font:10px/1 var(--mono);text-transform:uppercase;letter-spacing:.08em}
+.ordiv::before,.ordiv::after{content:"";flex:1;height:1px;background:var(--t-border)}
+.optbtn{display:flex;align-items:center;gap:11px;width:100%;border:1px solid var(--t-accentHi);background:var(--t-accentSoft);border-radius:12px;padding:13px 13px;cursor:pointer;text-align:left;color:var(--t-fg)}
+.optbtn .g{width:17px;height:17px;color:var(--t-accent)}
+.optbtn .tt{font:500 12.5px/1.3 var(--mono);color:var(--t-accent)}
+.optbtn .ss{font:10px/1.45 var(--mono);color:var(--t-fgMuted);margin-top:3px}
+
+/* first-open welcome / bootstrap */
+.welcome{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;padding:34px 26px calc(var(--sa-b) + 30px);z-index:40}
+.welcome .appmark{width:64px;height:64px;border-radius:16px;background:#0f1420;border:.5px solid rgba(255,255,255,.16);display:grid;place-items:center;font:600 30px/1 var(--mono);color:var(--t-accent);margin:0 auto}
+.welcome h3{font:600 21px/1.3 var(--sans);text-align:center;margin-top:18px}
+.welcome .ws{font:12px/1.5 var(--mono);color:var(--t-fgMuted);text-align:center;margin-top:5px}
+.optstack{display:flex;flex-direction:column;gap:10px;margin-top:30px}
+.optbtn.plain{border-color:var(--t-border);background:var(--t-input)}
+.optbtn.plain .g{color:var(--t-fgMuted)}
+.optbtn.plain .tt{color:var(--t-fg)}
+.wfoot{font:10px/1.6 var(--mono);color:var(--t-fgDim);text-align:center;margin-top:26px;display:flex;gap:8px;align-items:flex-start;text-align:left}
+.wfoot .g{width:13px;height:13px;margin-top:1px;flex:none;color:var(--t-fgMuted)}
+.ipad .welcome{padding:30px 150px}
+/* direction label inside a section */
+.dirlabel{font:500 11px/1 var(--mono);color:var(--fgDim);letter-spacing:.08em;text-transform:uppercase;
+  margin:30px 0 -10px;display:flex;align-items:center;gap:12px}
+.dirlabel::after{content:"";flex:1;height:1px;background:var(--border)}
+/* checklist (per-host authorization) */
+.cklist{background:var(--t-input);border:1px solid var(--t-border);border-radius:12px;overflow:hidden;margin-top:12px}
+.ckrow{display:flex;align-items:center;gap:11px;padding:11px 12px;border-bottom:1px solid var(--t-border)}
+.ckrow:last-child{border-bottom:0}
+.ckrow .nm{font:12.5px/1.2 var(--mono);color:var(--t-fg)}
+.ckrow .ss{font:10px/1.4 var(--mono);color:var(--t-fgDim);margin-top:2px}
+.ckrow.dis .nm{color:var(--t-fgDim)}
+.ckbox{width:21px;height:21px;border-radius:7px;border:1.5px solid var(--t-fgFaint);display:grid;place-items:center;color:transparent;flex:none}
+.ckbox.on{background:var(--t-accent);border-color:var(--t-accent);color:#fff}
+.ckbox .g{width:12px;height:12px;stroke-width:2.4}
+.btn .g{width:14px;height:14px;vertical-align:-3px;margin-right:6px;display:inline-block}
+/* dimmed non-terminal backdrop layer */
+.dimlayer{opacity:.3;filter:blur(1px)}
+/* SAS verification code (nearby peer binding) */
+.sascode{font:500 36px/1 var(--mono);letter-spacing:.16em;text-align:center;color:var(--t-fg);margin:22px 0 6px}
+.sasstrip{display:flex;align-items:center;gap:12px;margin-top:12px;background:var(--t-input);
+  border:1px dashed var(--t-borderStrong);border-radius:10px;padding:10px 13px}
+.sasstrip .code{font:500 19px/1 var(--mono);letter-spacing:.12em;flex:none}
+.sasstrip .lbl{font:10px/1.5 var(--mono);color:var(--t-fgDim)}
+
+/* lock overlay */
+.lockveil{position:absolute;inset:0;z-index:53;background:rgba(0,0,0,.62);backdrop-filter:blur(22px) saturate(140%);-webkit-backdrop-filter:blur(22px) saturate(140%);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;padding:30px}
+.lockveil .lic{width:58px;height:58px;border-radius:29px;background:rgba(255,255,255,.08);display:grid;place-items:center;color:var(--t-fg)}
+.lockveil .lic .g{width:24px;height:24px}
+.lockveil h4{font:600 16px/1.3 var(--sans);margin-top:16px}
+.lockveil .s{font:11.5px/1.5 var(--sans);color:var(--t-fgMuted);margin-top:5px;text-align:center}
+.stash{margin-top:26px;display:flex;align-items:center;gap:10px;border:.5px solid var(--t-glassRing);border-radius:14px;padding:11px 14px;font:11px/1.45 var(--mono);color:var(--t-fg)}
+.stash .g{width:15px;height:15px;color:var(--t-accent)}
+.stash .s2{color:var(--t-fgDim);font-size:10px;margin-top:2px}
+.unlockbtn{margin-top:30px;border:0;background:rgba(255,255,255,.14);color:var(--t-fg);border-radius:20px;padding:11px 26px;font:500 12.5px/1 var(--mono);cursor:pointer}
+
+/* app switcher */
+.aswitch{position:absolute;inset:0;background:
+  radial-gradient(120% 90% at 20% 0%, #1c2233 0%, #101018 55%, #0a0a0e 100%)}
+.appcard{position:absolute;border-radius:22px;overflow:hidden;border:.5px solid rgba(255,255,255,.14);box-shadow:0 24px 50px -18px rgba(0,0,0,.7)}
+.appcard.back{width:250px;height:540px;right:-120px;top:170px;background:linear-gradient(#26262b,#1a1a1e)}
+.appcard.front{width:280px;height:604px;left:36px;top:138px;background:#000}
+.appcard .thumb{position:absolute;inset:0;padding:40px 14px;font:8.5px/1.5 var(--mono);color:rgba(255,255,255,.75)}
+.appcard .thumb .pill{height:18px;border-radius:7px;background:rgba(255,255,255,.1);margin-bottom:10px}
+.appcard .thumb .ok{color:#30D158}.appcard .thumb .dim{color:rgba(235,235,245,.4)}.appcard .thumb .cmd{color:#FFD479}
+.applabel{position:absolute;left:36px;top:100px;display:flex;align-items:center;gap:8px;font:500 12px/1 var(--sans);color:rgba(255,255,255,.85)}
+.appicon{width:22px;height:22px;border-radius:6px;background:#0f1420;border:.5px solid rgba(255,255,255,.2);display:grid;place-items:center;font:600 11px/1 var(--mono);color:var(--accent)}
+.hoffbanner{position:absolute;left:24px;right:24px;bottom:64px;display:flex;align-items:center;gap:12px;border-radius:18px;padding:12px 14px;border:.5px solid rgba(255,255,255,.2);background:rgba(255,255,255,.1);backdrop-filter:blur(28px) saturate(180%);-webkit-backdrop-filter:blur(28px) saturate(180%);box-shadow:0 14px 34px -10px rgba(0,0,0,.5)}
+.hoffbanner .appicon{width:34px;height:34px;border-radius:9px;font-size:15px}
+.hoffbanner .tt{font:600 12.5px/1.3 var(--sans);color:#fff}
+.hoffbanner .ss{font:11px/1.4 var(--sans);color:rgba(235,235,245,.65);display:flex;align-items:center;gap:5px}
+.hoffbanner .ss .g{width:12px;height:12px}
+.hoffbanner .chev{margin-left:auto;color:rgba(235,235,245,.4)}
+
+/* tab pages (keys / settings) */
+.tabpage{position:absolute;inset:0;overflow:hidden;padding:calc(var(--sa-t) + 14px) 18px 130px}
+.pg-h{display:flex;align-items:baseline;justify-content:space-between;margin:6px 2px 16px}
+.pg-h .t{font:500 28px/1 var(--mono)}
+.sec-h{font:11px/1 var(--mono);color:var(--t-fgMuted);letter-spacing:.06em;margin:22px 2px 10px}
+.krow{display:flex;align-items:center;gap:10px;padding:13px 2px;border-bottom:1px solid var(--t-border)}
+.krow .nm{font:13px/1.2 var(--mono)}
+.krow .sub{font:10px/1.3 var(--mono);color:var(--t-fgDim);margin-top:3px}
+.krow .tags{margin-left:auto;display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;max-width:48%}
+.krow .g{width:16px;height:16px;color:var(--t-fgMuted)}
+.revoke{appearance:none;border:1px solid var(--t-border);background:transparent;color:var(--t-red);border-radius:7px;padding:6px 10px;font:500 10.5px/1 var(--mono);cursor:pointer;flex:none}
+.sgroup{background:var(--t-panel);border:1px solid var(--t-border);border-radius:12px;overflow:hidden;margin-bottom:18px}
+.srowline{display:flex;align-items:center;gap:12px;padding:13px 14px;border-bottom:1px solid var(--t-border);min-height:48px}
+.srowline:last-child{border-bottom:0}
+.srowline .t{font:13px/1.2 var(--mono)}
+.srowline .s{font:10px/1.4 var(--mono);color:var(--t-fgDim);margin-top:3px;max-width:250px}
+.srowline .end{margin-left:auto;display:flex;align-items:center;gap:8px;color:var(--t-fgDim);font:11px/1 var(--mono);flex:none}
+.srowline.red .t{color:var(--t-red)}
+.srowline.tight{padding:8px 12px;min-height:0}
+.srowline.tight .s{max-width:330px}
+.switch{width:44px;height:27px;border-radius:14px;background:var(--t-inputSoft);border:1px solid var(--t-borderStrong);position:relative;flex:none}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:21px;height:21px;border-radius:11px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.switch.on{background:var(--t-accent);border-color:var(--t-accent)}
+.switch.on::after{transform:translateX(17px)}
+.gfoot{font:10px/1.55 var(--mono);color:var(--t-fgDim);margin:-8px 4px 18px}
+.chev{width:12px;height:12px;color:var(--t-fgFaint)}
+
+/* variant card (outside frame) */
+.varcard{width:340px;border-radius:18px;border:.5px solid var(--borderStrong);padding:20px 18px 16px;background:#131316;box-shadow:0 14px 34px -14px rgba(0,0,0,.6);
+  --t-solid:#1C1C1E;--t-input:#141414;--t-inputSoft:#1C1C1E;--t-fg:#fff;--t-fgMuted:rgba(235,235,245,.6);--t-fgDim:rgba(235,235,245,.35);--t-fgFaint:rgba(235,235,245,.18);
+  --t-border:rgba(255,255,255,.08);--t-borderStrong:rgba(255,255,255,.14);--t-accent:#5B9FFF;--t-accentSoft:rgba(91,159,255,.14);--t-accentHi:rgba(91,159,255,.32);--t-red:#FF453A;--t-bg:#000;color:#fff}
+.varcard h4{font:600 14px/1.3 var(--sans);text-align:center}
+.varcard .sub{font:11px/1.5 var(--sans);color:var(--fgMuted);text-align:center;margin-top:4px}
+.varcard .ic{width:40px;height:40px;border-radius:20px;display:grid;place-items:center;margin:0 auto 11px}
+.varcard .ic.warn{background:rgba(255,159,10,.14);color:var(--amber)}
+.varcard .ic .g{width:18px;height:18px}
+
+/* ============================================================
+   iPad frame (13" landscape, scaled ≈ 0.5)
+   ============================================================ */
+.ipad{width:688px;height:516px;border-radius:26px;border:1px solid var(--borderStrong);background:#000;position:relative;flex:none;
+  box-shadow:0 30px 60px -30px rgba(0,0,0,.65), inset 0 0 0 2px #2a2a2c;
+  --t-solid:#1C1C1E;--t-input:#141414;--t-inputSoft:#1C1C1E;--t-panel:#0A0A0A;--t-bg:#000;--t-fg:#fff;
+  --t-fgMuted:rgba(235,235,245,.6);--t-fgDim:rgba(235,235,245,.35);--t-fgFaint:rgba(235,235,245,.18);
+  --t-border:rgba(255,255,255,.08);--t-borderStrong:rgba(255,255,255,.14);
+  --t-accent:#5B9FFF;--t-accentSoft:rgba(91,159,255,.14);--t-accentHi:rgba(91,159,255,.32);--t-red:#FF453A;
+  --t-glassBg:rgba(255,255,255,.12);--t-glassRing:rgba(255,255,255,.18);
+  --t-shadow:0 12px 28px -8px rgba(0,0,0,.45), 0 4px 10px rgba(0,0,0,.25)}
+.ipad .screen{position:absolute;inset:0;border-radius:inherit;overflow:hidden;background:#000;color:#fff}
+.ipad .cam{position:absolute;top:50%;left:7px;transform:translateY(-50%);width:5px;height:5px;border-radius:3px;background:#1a1a1c;z-index:60}
+.ipad .term{padding:52px 18px 16px;font-size:11px}
+.ipad .toppill{top:10px;height:32px;border-radius:11px}
+.ipad .toppill .host{font-size:11.5px}
+.ipad .toppill .ib{width:28px;height:28px}
+.ipad .toppill .ib .g{width:14px;height:14px}
+.ipad .modalveil{padding:0}
+.ipad .modalcard{width:372px}
+
+/* iPad dock (handoff receiving affordance) */
+.dock{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);display:flex;align-items:center;gap:11px;
+  padding:9px 13px;border-radius:22px;border:.5px solid var(--t-glassRing);z-index:50}
+.dock .ai{width:42px;height:42px;border-radius:12px;background:linear-gradient(#2a2a2e,#1c1c20);border:.5px solid rgba(255,255,255,.1);flex:none}
+.dock .dsep{width:1px;height:38px;background:var(--t-borderStrong);flex:none;margin:0 2px}
+.dock .ai.tess{background:#0f1420;display:grid;place-items:center;font:600 19px/1 var(--mono);color:var(--t-accent);position:relative;overflow:visible}
+.dock .badge{position:absolute;left:-7px;bottom:-7px;width:21px;height:21px;border-radius:11px;background:#2c2c30;
+  border:1px solid rgba(255,255,255,.28);display:grid;place-items:center;color:#fff}
+.dock .badge .g{width:11px;height:11px}
+
+/* guarantees strip */
+.guar{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:10px;margin-top:24px}
+.guar .gcard{border:1px solid var(--border);border-radius:12px;padding:14px 15px;background:#101012}
+.guar .gcard .t{display:flex;align-items:center;gap:8px;font:500 12px/1.3 var(--mono);color:var(--fg)}
+.guar .gcard .t .g{width:14px;height:14px;color:var(--red)}
+.guar .gcard .s{font:11.5px/1.5 var(--sans);color:var(--fgDim);margin-top:6px}
+
+/* footer */
+.foot{margin-top:80px;padding-top:24px;border-top:1px solid var(--border);color:var(--fgDim);font:11.5px/1.7 var(--mono);max-width:880px}
+.foot b{color:var(--fgMuted);font-weight:500}
+
+/* motion honesty — every animation in this mock must die under reduce-motion (product rule, mocked here) */
+@media (prefers-reduced-motion:reduce){
+  .dot.g,.dot.a,.cur,.spin,.step.active .bullet::after{animation:none}
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="doc-h1">tessera — icloud sync</div>
+  <p class="doc-sub">P8 layer 3 — the piece layers 1+2 deliberately punted. Host configs, jump chains, identities,
+    port forwards, and trust <i>hints</i> stay in step through the user's own iCloud; appearance &amp; settings move
+    once at restore. Never passwords, private keys, or trust pins — the same allowlist the nearby bootstrap already
+    moves, over a third transport. Companion to <code>sync.html</code> (S1–S10 contract); nothing here reopens it.</p>
+  <div class="doc-meta">2026-07-26 · storyboard, static frames · tokens verbatim from DesignTokens.swift · frames
+    I1–I9 · builds on the S1 welcome row and S9 settings frames, which were mocked design-ahead with this file as
+    their target · revised same day against <code>icloud-sync-review.md</code> round 1 (F1–F21) — failure states,
+    recovery framing, hint assurance tiers, merge unification, exit mechanisms · revised again against round 2
+    (F22–F41) — end-to-end encrypted fields adopted (the "not E2E" premise was outdated), skew-write / order-record /
+    tombstone-payload schema fixes, N-device voice, rotation hints, probe &amp; restricted states</div>
+
+  <div class="toc">
+    <a href="#i1">1 opting in</a>
+    <a href="#i2">2 second device joins</a>
+    <a href="#i3">3 fresh install — restore &amp; access</a>
+    <a href="#i4">4 steady state</a>
+    <a href="#i5">5 same host twice</a>
+    <a href="#i6">6 trust &amp; credentials</a>
+    <a href="#i7">7 settings footprint</a>
+    <a href="#i8">8 mechanisms</a>
+    <a href="#i9">9 one mental model</a>
+  </div>
+
+  <div class="prin">
+    <div class="p"><div class="t"><span class="ic">◆</span>one envelope, three transports</div><div class="s">The bootstrap manifest's typed allowlist is the wire format. Nearby channel, Handoff descriptor, and iCloud records all speak it — same UUIDs, same classification table, same CI gate.</div></div>
+    <div class="p"><div class="t"><span class="ic">◆</span>steady state, not ceremony</div><div class="s">iCloud keeps hosts in step in the background. The ceremonies — code compare, Face ID grants — stay nearby, where a live peer actually exists.</div></div>
+    <div class="p"><div class="t"><span class="ic">◆</span>config only</div><div class="s">The map syncs; the keys to it never do. A restored host still asks for a credential once, exactly like a bootstrapped one.</div></div>
+    <div class="p"><div class="t"><span class="ic">◆</span>explainable rules</div><div class="s">Last edit wins, whole-record, everywhere. Delete means delete — with a 30-day undo behind it. Two sentences, no sync dashboard, no conflict queue.</div></div>
+    <div class="p"><div class="t"><span class="ic">◆</span>hints inform, never decide</div><div class="s">Host-key fingerprints — public data by nature — travel as syncable hints so informed TOFU survives a cloud restore. Every trust pin is still born of an explicit per-device confirm.</div></div>
+  </div>
+
+  <!-- ============================================================ I1 -->
+  <section id="i1">
+  <h2><span class="n">I1</span>Opting in — once, honestly</h2>
+  <p class="sub">Existing installs meet the choice card exactly once — on the hosts page at first foreground after
+    the update, never over a live session (fresh installs meet the same choice on the welcome screen, I3). The pitch
+    names both jobs: in step across devices <i>and</i> recoverable if a device is lost. The safe answer is the
+    filled default. After "use my icloud" there is no wizard: the local set publishes, the status row tells the
+    truth, and this device is a peer.</p>
+
+  <div class="stage">
+
+    <!-- P1 · first-run choice card -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen">
+        <div class="tabpage dimlayer">
+          <div class="pg-h"><div class="t">hosts</div></div>
+          <div class="krow"><span class="dot g"></span><div><div class="nm">zeus</div><div class="sub">alice@zeus.lan:22 · mosh · tmux</div></div></div>
+          <div class="krow"><span class="dot"></span><div><div class="nm">helios</div><div class="sub">deploy@helios.internal:22 · ssh · via atlas</div></div></div>
+          <div class="krow" style="border-bottom:0"><span class="dot"></span><div><div class="nm">mercury</div><div class="sub">alice@192.168.7.44:22 · ssh</div></div></div>
+        </div>
+        <div class="modalveil"><div class="modalcard">
+          <div class="ic"><svg class="g" viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-.42-8.98 6 6 0 1 0-11.5 2.2A3.5 3.5 0 0 0 6.5 19z"/></svg></div>
+          <h4>your hosts, on each of your devices?</h4>
+          <div class="sub">sync host configs and jump chains through your own iCloud — in step where you turn it on, and recoverable if a device is lost</div>
+          <div class="body">
+            <div class="xlist">
+              <span class="ok">✓</span> host configs · jump chains · port forwards<br>
+              <span class="ok">✓</span> trust hints <span class="dim">(public fingerprints)</span><br>
+              <span class="no">✗</span> passwords &nbsp;·&nbsp; <span class="no">✗</span> private keys &nbsp;·&nbsp; <span class="no">✗</span> trust pins<br>
+              <span class="dim">deleting a host deletes it everywhere sync is on (30-day undo)</span>
+            </div>
+          </div>
+          <div class="btnrow">
+            <button class="btn neutral">keep on-device</button>
+            <button class="btn ghost" style="color:var(--t-accent)">use my icloud</button>
+          </div>
+          <div class="sub" style="margin-top:12px">change anytime in settings — default is off</div>
+        </div></div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>the card S9 promised, reworked on three axes.</b> <i>Pitch:</i> recovery is named
+        alongside convenience — "they survive if a device doesn't" is the argument that converts a security-minded
+        user. <i>Placement:</i> it appears over the hosts list at first foreground after the update, never over a
+        live session — a modal about a background feature, dismissed reflexively over someone's work, is a
+        considered choice lost. <i>Grammar:</i> the consequence lines leave the fingerprint block (machine chrome)
+        for a 12px consent list — the size floor for consequence-bearing text in this feature. Buttons stay exactly
+        as contracted in S9: the filled answer is the safe one; the valence rule for the whole feature is stated in
+        the footer.</div>
+    </div>
+
+    <div class="arrowcol">→</div>
+
+    <!-- P2 · toggle on, publishing -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen" style="background:var(--t-bg)">
+        <div class="tabpage">
+          <div class="pg-h"><div class="t">settings</div></div>
+
+          <div class="sec-h">continuity</div>
+          <div class="sgroup">
+            <div class="srowline">
+              <div><div class="t">hand off sessions</div><div class="s">focused session appears in the app switcher / dock of your other devices</div></div>
+              <div class="end"><span class="switch on"></span></div>
+            </div>
+            <div class="srowline">
+              <div><div class="t">while locked</div><div class="s">broadcast stops; incoming continuations wait for Face ID</div></div>
+              <div class="end">suppressed</div>
+            </div>
+          </div>
+
+          <div class="sec-h">icloud sync</div>
+          <div class="sgroup">
+            <div class="srowline">
+              <div><div class="t">sync hosts via icloud</div><div class="s">host configs &amp; jump chains — never passwords, keys, or trust pins</div></div>
+              <div class="end"><span class="switch on"></span></div>
+            </div>
+            <div class="srowline">
+              <div><div class="t">status</div></div>
+              <div class="end" style="color:var(--t-accent)">publishing 12 hosts…</div>
+            </div>
+            <div class="srowline">
+              <div><div class="t">what syncs</div></div>
+              <div class="end"><svg class="chev g" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></div>
+            </div>
+          </div>
+          <div class="gfoot">your own icloud container — no vendor servers, no account with us. off by default.</div>
+        </div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>turning it on is a status, not a screen.</b> The first publish takes seconds
+        (~1&nbsp;KB per host). No progress wizard, no "sync now" button — the row reports, the user moves on.
+        <span class="m">what syncs</span> opens the disclosure in I7.</div>
+    </div>
+
+    <div class="arrowcol">→</div>
+
+    <!-- P3 · synced steady state -->
+    <div class="stagecol">
+      <div class="varcard" style="width:360px">
+        <div class="sgroup" style="margin-bottom:0">
+          <div class="srowline">
+            <div><div class="t">sync hosts via icloud</div><div class="s">host configs &amp; jump chains — never passwords, keys, or trust pins</div></div>
+            <div class="end"><span class="switch on"></span></div>
+          </div>
+          <div class="srowline">
+            <div><div class="t">status</div></div>
+            <div class="end">synced · 12 hosts · just now</div>
+          </div>
+          <div class="srowline">
+            <div><div class="t">what syncs</div></div>
+            <div class="end"><svg class="chev g" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></div>
+          </div>
+        </div>
+      </div>
+      <div class="stagecap" style="max-width:360px"><b>steady state, whole footprint.</b> One correction to the S9
+        design-ahead frame: the "devices" row is gone. CloudKit deliberately doesn't disclose your other devices to
+        the app — the status row reports <b>data</b> (count + recency), never peers. Nearby flows remain the only
+        place device names appear.</div>
+    </div>
+  </div>
+  </section>
+
+  <!-- ============================================================ I2 -->
+  <section id="i2">
+  <h2><span class="n">I2</span>The second device joins — one card, then silence</h2>
+  <p class="sub">The iPad already has its own manually-built setup and turns sync on too. It pulls the zone, merges by
+    the rules in I5, and announces the outcome <b>once</b> — the only sync-summary card in the feature. After this,
+    sync is invisible by design.</p>
+
+  <div class="stage">
+
+    <!-- Q1 · join summary card on iPad -->
+    <div class="stagecol">
+      <div class="ipad"><div class="screen">
+        <div class="tabpage dimlayer" style="padding:28px 24px">
+          <div class="pg-h"><div class="t">hosts</div></div>
+          <div class="krow"><span class="dot g"></span><div><div class="nm">zeus</div><div class="sub">alice@zeus.lan:22 · mosh · tmux</div></div></div>
+          <div class="krow"><span class="dot"></span><div><div class="nm">atlas</div><div class="sub">deploy@atlas.internal:22 · ssh</div></div></div>
+          <div class="krow" style="border-bottom:0"><span class="dot"></span><div><div class="nm">helios</div><div class="sub">deploy@helios.internal:22 · ssh · via atlas</div></div></div>
+        </div>
+        <div class="modalveil"><div class="modalcard">
+          <div class="ic"><svg class="g" viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-.42-8.98 6 6 0 1 0-11.5 2.2A3.5 3.5 0 0 0 6.5 19z"/><path d="M12 12v5M9.8 14.8L12 17l2.2-2.2"/></svg></div>
+          <h4>in step with your icloud</h4>
+          <div class="sub m">first sync · Dev One's account</div>
+          <div class="steps">
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>added 9 hosts<div class="sd">artemis, selene, rhea + 6 more</div></span></div>
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>merged 3 that were already here<div class="sd">zeus, atlas, helios — kept the copies edited most recently · each merge is on the host's detail page (I5)</div></span></div>
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>sent 2 hosts to your other devices<div class="sd">backup-fw · home-pi — on this iPad only until now; they surface as "new" over there (I4)</div></span></div>
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>appearance &amp; settings untouched<div class="sd">you already have a setup here — they move only into a fresh install (I3); nearby "send setup" pushes them anytime</div></span></div>
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>no credentials moved<div class="sd">a host that arrives without its key or password asks once — same as a hand-off</div></span></div>
+          </div>
+          <button class="cta" style="margin-top:16px">open hosts</button>
+        </div></div>
+        <div class="cam"></div>
+      </div></div>
+      <div class="stagecap" style="max-width:688px"><b>the one and only sync card.</b> First join announces itself
+        because merging someone's data without a word is how sync features earn distrust; steady state stays silent
+        because a dashboard is how they earn deletion. (<i>In step</i> = the same topology on every synced device —
+        defined once here, used everywhere after.) Three honesty fixes: the card owns <b>both directions</b> of the
+        transaction — a join publishes the joiner's unique locals too, and silently uploaded hosts materializing on
+        the other side are their own small surprise · the merge is announced as a count here and owned as a receipt
+        on each host's detail page (I5) — no per-merge modals · appearance is <b>not</b> applied to an
+        already-configured device — different font sizes on phone and iPad are a deliberate choice for a lot of
+        people, and enabling <i>host</i> sync is not consent to a re-theme. The title names the account's data, not
+        a guessed sibling — with three devices on the account, "your iPhone" is a coin flip.</div>
+    </div>
+
+    <div class="arrowcol">·</div>
+
+    <!-- Q2 · zero-duplicate join -->
+    <div class="stagecol">
+      <div class="varcard" style="width:360px">
+        <div class="ic"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></div>
+        <h4>already in step — nothing to move</h4>
+        <div class="sub m">12 hosts · same envelope, same uuids</div>
+        <div class="body" style="margin-top:12px;font:11px/1.6 var(--mono);color:var(--t-fgDim)">
+          this ipad was set up nearby (S1) before sync was on — every uuid already matched, so the merge found
+          nothing to do. zero duplicates, by construction.</div>
+        <button class="cta" style="margin-top:14px">open hosts</button>
+      </div>
+      <div class="stagecap" style="max-width:360px"><b>the best-case path gets its own copy.</b> Bootstrap-then-iCloud
+        is the composition the architecture exists to make free — "added 0, merged 12" would read as either
+        "nothing happened" or "something happened to all 12." It deserves words of its own.</div>
+    </div>
+  </div>
+  </section>
+
+  <!-- ============================================================ I3 -->
+  <section id="i3">
+  <h2><span class="n">I3</span>Fresh install — restore &amp; the credential bridge</h2>
+  <p class="sub">The S1 welcome screen's grayed row goes live. It is enabled only when there's something to restore —
+    an iCloud account on the device <i>and</i> a zone with records — and its subtitle says what's waiting before
+    anyone commits. The flow mirrors the nearby bootstrap receipt with the honest deltas: the account is the binding
+    (no code, no Face ID), hints arrive instead of pins — and then it faces the one thing sync can never deliver:
+    <b>credentials</b>. The restore doesn't end at the receipt; it ends at an explicit access step that names the
+    three honest ways to connect — a nearby key grant, a manual key install, or one password per host. Shown on a
+    new iPad; the two densest cards are drawn in compact idiom at the end of the section.</p>
+
+  <div class="stage">
+
+    <!-- R1 · iPad welcome, live iCloud row -->
+    <div class="stagecol">
+      <div class="ipad"><div class="screen">
+        <div class="welcome">
+          <div class="appmark">t</div>
+          <h3>welcome to tessera</h3>
+          <div class="ws">ssh · mosh · tmux</div>
+          <div class="optstack">
+            <button class="optbtn plain">
+              <svg class="g" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M12 18h.01"/></svg>
+              <span><span class="tt">bootstrap from your iPhone</span><br>
+              <span class="ss">nearby · encrypted, device-to-device — hosts, jump chains, settings</span></span>
+            </button>
+            <button class="optbtn">
+              <svg class="g" viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-.42-8.98 6 6 0 1 0-11.5 2.2A3.5 3.5 0 0 0 6.5 19z"/><path d="M12 12v5M9.8 14.8L12 17l2.2-2.2"/></svg>
+              <span><span class="tt">restore &amp; keep in sync</span><br>
+              <span class="ss">12 hosts · updated yesterday on Dev One's iPhone · from icloud</span></span>
+            </button>
+            <button class="optbtn plain">
+              <svg class="g" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+              <span><span class="tt">start fresh</span><br>
+              <span class="ss">add your first host manually</span></span>
+            </button>
+          </div>
+          <div class="wfoot"><svg class="g" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+            passwords, private keys, and trust pins never transfer — each device keeps its own.</div>
+        </div>
+        <div class="cam"></div>
+      </div></div>
+      <div class="stagecap" style="max-width:688px"><b>the row earns its state — and its weight.</b> Live only when the
+        account has a zone with records; the subtitle is the zone's own summary (count · when · from which device —
+        records carry <span class="m">originDevice</span>: data, not a peer list). The name is the commitment:
+        "restore &amp; keep in sync," because that's what it does (F6). And the accent follows completability — a
+        zone exists, so the cloud path leads; with no zone the nearby path is primary again. The order never moves;
+        only the emphasis tells the truth about which door opens. Nearby stays the highest-assurance path; start
+        fresh stays free of consequence.</div>
+    </div>
+
+    <div class="arrowcol">·</div>
+
+    <!-- R1b · grayed states -->
+    <div class="stagecol">
+      <div class="varcard" style="width:360px">
+        <div class="optstack" style="margin-top:0">
+          <button class="optbtn plain" style="opacity:.75">
+            <svg class="g" viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-.42-8.98 6 6 0 1 0-11.5 2.2A3.5 3.5 0 0 0 6.5 19z"/><path d="M4 4l16 16"/></svg>
+            <span><span class="tt">restore &amp; keep in sync</span><br>
+            <span class="ss">no icloud account on this device · <span style="color:var(--t-accent)">open settings ›</span></span></span>
+          </button>
+          <button class="optbtn plain" style="opacity:.75">
+            <svg class="g" viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-.42-8.98 6 6 0 1 0-11.5 2.2A3.5 3.5 0 0 0 6.5 19z"/></svg>
+            <span><span class="tt">restore &amp; keep in sync</span><br>
+            <span class="ss">nothing to restore yet — signed in as dev@bambouville.com; sync is off on your other devices</span></span>
+          </button>
+          <button class="optbtn plain" style="opacity:.75">
+            <svg class="g" viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-.42-8.98 6 6 0 1 0-11.5 2.2A3.5 3.5 0 0 0 6.5 19z"/></svg>
+            <span><span class="tt">restore &amp; keep in sync</span><br>
+            <span class="ss">nothing to restore yet — sync is on on Dev One's iPhone, no hosts yet</span></span>
+          </button>
+        </div>
+      </div>
+      <div class="stagecap" style="max-width:360px"><b>grayed means explained — and tappable.</b> Three dead states,
+        not two: no account (deep-links to Settings.app) · sync off elsewhere · sync on but the zone is empty — the
+        last two used to be one lie. The signed-in account is named in every state, because the most common real
+        cause is the <i>wrong</i> account (personal vs work), and an unnamed variable can't be diagnosed. Disabled
+        buttons at 45% opacity looked tappable but did nothing; these do something: they explain.</div>
+
+      <!-- R1c · probe & policy states -->
+      <div class="varcard" style="width:360px;margin-top:22px">
+        <div class="optstack" style="margin-top:0">
+          <button class="optbtn plain" style="opacity:.75">
+            <svg class="g" viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-.42-8.98 6 6 0 1 0-11.5 2.2A3.5 3.5 0 0 0 6.5 19z"/></svg>
+            <span><span class="tt">restore &amp; keep in sync</span><br>
+            <span class="ss">checking icloud…</span></span>
+          </button>
+          <button class="optbtn plain" style="opacity:.75">
+            <svg class="g" viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M4 13h16"/></svg>
+            <span><span class="tt">restore &amp; keep in sync</span><br>
+            <span class="ss">icloud is restricted on this device — a device-management policy may be blocking it · nearby bootstrap still works</span></span>
+          </button>
+          <button class="optbtn plain" style="opacity:.75">
+            <svg class="g" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4M4 4l16 16"/></svg>
+            <span><span class="tt">restore &amp; keep in sync</span><br>
+            <span class="ss">icloud keychain is off — sync's end-to-end keys live there · turn it on in ios settings ›</span></span>
+          </button>
+        </div>
+      </div>
+      <div class="stagecap" style="max-width:360px"><b>before the answer, and when the answer is policy.</b> The probe
+        state renders the stack once — a late "zone found" must never move the accent (or re-rank the primary) under
+        a descending finger; it applies on the next open instead. <i>Restricted</i> is its own state, not a flavor of
+        signed-out: managed devices are this app's home turf, the copy doesn't blame the user, and nearby bootstrap
+        is named as the path for that world. <i>Keychain-off</i> is new with encrypted record fields (I8) — sync's
+        content keys live in icloud keychain, so the feature can't run without it. Explained, not dead.</div>
+    </div>
+  </div>
+
+  <div class="stage">
+
+    <!-- R2 · restoring steps -->
+    <div class="stagecol">
+      <div class="ipad"><div class="screen">
+        <div class="welcome dimlayer"></div>
+        <div class="modalveil"><div class="modalcard">
+          <div class="spin"></div>
+          <h4>restoring from icloud</h4>
+          <div class="sub m">Dev One's account · private database</div>
+          <div class="steps">
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>found your tessera zone<div class="sd">12 hosts · updated yesterday</div></span></div>
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>downloaded hosts · jump chains · forwards<div class="sd">hints included — pins aren't in there</div></span></div>
+            <div class="step active"><span class="bullet"></span>
+              <span>applying appearance &amp; settings<div class="sd">once — after this, only hosts stay in step</div></span></div>
+          </div>
+          <div class="btnrow"><button class="btn ghost">cancel</button></div>
+        </div></div>
+        <div class="cam"></div>
+      </div></div>
+      <div class="stagecap" style="max-width:688px"><b>no ceremony, and says why.</b> The nearby flow needs a code
+        compare because a LAN authenticates nobody; here the Apple account is the binding — the same one that already
+        gates Handoff. No Face ID prompt either: nothing is being granted, and the data leaving the container is
+        going to its owner. Cancel leaves a clean slate, not a half-import (the manifest adapter's all-or-nothing
+        import, reused).</div>
+    </div>
+
+    <div class="arrowcol">→</div>
+
+    <!-- R3 · receipt -->
+    <div class="stagecol">
+      <div class="ipad"><div class="screen">
+        <div class="tabpage dimlayer" style="padding:28px 24px">
+          <div class="pg-h"><div class="t">hosts</div></div>
+          <div class="krow"><span class="dot"></span><div><div class="nm">zeus</div><div class="sub">alice@zeus.lan:22 · mosh · tmux</div></div></div>
+          <div class="krow"><span class="dot"></span><div><div class="nm">helios</div><div class="sub">deploy@helios.internal:22 · ssh · via atlas</div></div></div>
+          <div class="krow" style="border-bottom:0"><span class="dot"></span><div><div class="nm">artemis</div><div class="sub">alice@artemis.dev:22 · ssh</div></div></div>
+        </div>
+        <div class="modalveil"><div class="modalcard">
+          <div class="ic"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></div>
+          <h4>restore complete</h4>
+          <div class="sub m">from icloud · Dev One's account · 0:08</div>
+          <div class="steps">
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>received 12 hosts · jump chains · port forwards</span></div>
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>appearance &amp; settings applied<div class="sd">once — edit freely from here; only hosts keep syncing</div></span></div>
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>trust hints arrived — pins didn't<div class="sd">first connect still asks you to confirm, with a match to check against (I6)</div></span></div>
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>no keys moved<div class="sd">passwords &amp; private keys never sync — access is the next step, below</div></span></div>
+          </div>
+          <div class="formnote conseq" style="margin-top:12px"><svg class="g" viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-.42-8.98 6 6 0 1 0-11.5 2.2A3.5 3.5 0 0 0 6.5 19z"/></svg>
+            sync stays on for this iPad — hosts you add appear on your other devices, and deleting one deletes it everywhere (30-day undo). change anytime in settings.</div>
+          <button class="cta" style="margin-top:16px">continue</button>
+        </div></div>
+        <div class="cam"></div>
+      </div></div>
+      <div class="stagecap" style="max-width:688px"><b>the bootstrap receipt, honest deltas.</b> Same ✓/✗ grammar as
+        S1's receipt — the two flows should feel like one feature with two doors. Two lines carry the truth: "no
+        keys moved" sends the user to the access step instead of a hosts page they can't use yet, and the footnote
+        is the consent the pull-shaped verb owes — "restore" commits to ongoing, bidirectional sync, delete rule
+        included, and the receipt says so rather than letting settings discover it (F6). Appearance applies here
+        because the install is empty; on a join into a configured device it doesn't (I2).</div>
+    </div>
+  </div>
+
+  <div class="stage">
+
+    <!-- R4 · access card (the credential bridge) -->
+    <div class="stagecol">
+      <div class="ipad"><div class="screen">
+        <div class="tabpage dimlayer" style="padding:28px 24px">
+          <div class="pg-h"><div class="t">hosts</div></div>
+          <div class="krow"><span class="dot"></span><div><div class="nm">zeus</div><div class="sub">alice@zeus.lan:22 · mosh · tmux</div></div></div>
+          <div class="krow"><span class="dot"></span><div><div class="nm">helios</div><div class="sub">deploy@helios.internal:22 · ssh · via atlas</div></div></div>
+          <div class="krow" style="border-bottom:0"><span class="dot"></span><div><div class="nm">artemis</div><div class="sub">alice@artemis.dev:22 · ssh</div></div></div>
+        </div>
+        <div class="modalveil"><div class="modalcard" style="width:430px">
+          <div class="ic"><svg class="g" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></div>
+          <h4>set up access to your hosts</h4>
+          <div class="sub">configs synced — credentials never do, by design. this iPad proves itself with its own key or each host's password.</div>
+          <div class="body">
+            <button class="optbtn">
+              <svg class="g" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M12 18h.01"/></svg>
+              <span><span class="tt">authorize keys — nearby</span><br>
+              <span class="ss">a device you already trust installs this iPad's public key on 9 key-auth hosts · one Face ID · about a minute</span></span>
+            </button>
+            <button class="optbtn plain" style="margin-top:9px">
+              <svg class="g" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <span><span class="tt">install the key myself</span><br>
+              <span class="ss">copy this iPad's public key from keys → add it to authorized_keys from any already-authorized machine</span></span>
+            </button>
+            <div class="formnote conseq" style="margin-top:12px"><svg class="g" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+              or skip both — first connect to each host asks for its password once, then remembers it on this iPad. mercury, a password host, always works this way.</div>
+            <div class="formnote conseq" style="padding-top:0"><svg class="g" viewBox="0 0 24 24"><path d="M10.29 3.86l-8.2 14.14A2 2 0 0 0 3.82 21h16.36a2 2 0 0 0 1.73-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+              icloud restores your configuration, never your access. other device gone or sold? <span style="color:var(--t-accent);white-space:nowrap">see your options ›</span></div>
+          </div>
+          <div class="btnrow"><button class="btn ghost">not now</button></div>
+        </div></div>
+        <div class="cam"></div>
+      </div></div>
+      <div class="stagecap" style="max-width:688px"><b>the credential bridge — said out loud, once.</b> This card is the
+        explicit statement the restore owes the user: <i>your hosts are here; your passwords and private keys are not,
+        and never will be — here's exactly how each gap closes.</i> Three lanes cover everyone: peer at hand (the
+        fast lane, next frame), self-serve (the existing keys → public-key flow), or lazy (the S6 card at first
+        connect). Password hosts are named as the standing exception, not discovered as a surprise. The count is not
+        a guess: every host record carries the manifest's <span class="m">authenticationHint</span> (key / password /
+        none — <i>which method, never which credential</i>) — it already powers the nearby grant checklist, and the
+        iCloud record inherits it inside the encrypted fields (I8). The durable sentence is on the card at the 12px
+        consequence floor — <b>icloud restores your configuration, never your access</b> — and the device-loss branch
+        is one tap away (next card). The card appears once, right after a restore or join; "not now" means lane
+        three, and the access screen in keys (below) is its permanent second door.</div>
+    </div>
+
+    <div class="arrowcol">·</div>
+
+    <!-- R4b · device-loss branch -->
+    <div class="stagecol">
+      <div class="varcard" style="width:400px">
+        <div class="ic warn"><svg class="g" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M4 4l16 16M12 18h.01"/></svg></div>
+        <h4>no other device to grant from</h4>
+        <div class="sub">the iPhone that owned this setup is gone, sold, or wiped</div>
+        <div class="body" style="margin-top:13px;font:12px/1.8 var(--mono);color:var(--t-fg)">
+          re-authorize this iPad out of band, per host:<br>
+          <span style="color:var(--t-fgDim)">·</span> the provider's web console (add the public key)<br>
+          <span style="color:var(--t-fgDim)">·</span> the host's password, once, on first connect<br>
+          <span style="color:var(--t-fgDim)">·</span> any machine still authorized — install from there<br>
+          <span style="color:var(--t-fgDim)">once one path works, this iPad's key is on the host — and this iPad can grant onward from keys.</span>
+        </div>
+        <div class="btnrow"><button class="btn neutral">got it</button></div>
+      </div>
+      <div class="stagecap" style="max-width:400px"><b>the worst day, designed.</b> Recovery is the strongest reason to
+        turn sync on — and the moment lanes 1 and 2 can both be impossible. No heuristic guesses at device death
+        (zones have many writers; a quiet device isn't a dead one) — the user taps, the card collapses lane 1 and
+        says the honest thing. Key-only hosts with no reachable authorized machine are the one true dead end, and
+        they're named rather than discovered.</div>
+    </div>
+  </div>
+
+  <div class="stage">
+
+    <!-- R5 · recipient waiting (lane 1) -->
+    <div class="stagecol">
+      <div class="ipad"><div class="screen">
+        <div class="tabpage dimlayer" style="padding:28px 24px">
+          <div class="pg-h"><div class="t">hosts</div></div>
+          <div class="krow"><span class="dot"></span><div><div class="nm">zeus</div><div class="sub">alice@zeus.lan:22 · mosh · tmux</div></div></div>
+          <div class="krow"><span class="dot"></span><div><div class="nm">helios</div><div class="sub">deploy@helios.internal:22 · ssh · via atlas</div></div></div>
+          <div class="krow" style="border-bottom:0"><span class="dot"></span><div><div class="nm">artemis</div><div class="sub">alice@artemis.dev:22 · ssh</div></div></div>
+        </div>
+        <div class="modalveil"><div class="modalcard">
+          <div class="ic"><svg class="g" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></div>
+          <h4>authorizing this iPad's key</h4>
+          <div class="sub m">nearby · encrypted, device-to-device</div>
+          <div class="steps">
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>created device key<div class="sd">Tessera device key · P-256 · secure enclave — on demand, never at restore</div></span></div>
+            <div class="step active"><span class="bullet"></span>
+              <span>waiting for a nearby device…<div class="sd">on any device that already has access: settings → continuity → send setup to nearby device — whichever shows up grants</div></span></div>
+            <div class="step"><span class="bullet"></span>
+              <span>compare the code, approve there<div class="sd">6 digits both screens · Face ID on the granting device</div></span></div>
+            <div class="step"><span class="bullet"></span>
+              <span>key installed on 9 hosts<div class="sd">→ ~/.ssh/authorized_keys</div></span></div>
+          </div>
+          <div class="btnrow"><button class="btn ghost">cancel</button></div>
+        </div></div>
+        <div class="cam"></div>
+      </div></div>
+      <div class="stagecap" style="max-width:688px"><b>lane 1, recipient side.</b> The device key is created on demand
+        here — never during the restore, so someone who syncs and never grants never grows a key they don't use.
+        The instruction line is the honest cost of a peer-to-peer ceremony: the origin device is the one that grants,
+        so someone has to press its button. (Entry points, both already built: this card, or settings → continuity →
+        receive setup.)</div>
+    </div>
+
+    <div class="arrowcol">→</div>
+
+    <!-- R6 · origin grant card on iPhone -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen">
+        <div class="tabpage dimlayer">
+          <div class="pg-h"><div class="t">hosts</div></div>
+          <div class="krow"><span class="dot g"></span><div><div class="nm">zeus</div><div class="sub">alice@zeus.lan:22 · mosh · tmux</div></div></div>
+          <div class="krow"><span class="dot"></span><div><div class="nm">helios</div><div class="sub">deploy@helios.internal:22 · ssh · via atlas</div></div></div>
+          <div class="krow" style="border-bottom:0"><span class="dot"></span><div><div class="nm">mercury</div><div class="sub">alice@192.168.7.44:22 · ssh</div></div></div>
+        </div>
+        <div class="modalveil"><div class="modalcard">
+          <div class="ic"><svg class="g" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8"/></svg></div>
+          <h4>authorize »Dev One's iPad«?</h4>
+          <div class="sub">installs its public key on your key-auth hosts</div>
+          <div class="body">
+            <div class="fpblock" style="word-break:normal;overflow-wrap:anywhere"><span class="k">key</span> Tessera device key · P-256 · secure enclave<br>
+              <span class="k">fp</span> SHA256:Jk2mR8vXeQw5tZpN4cY7fAaU1oGdL0sBhH6nEiC3xMg</div>
+            <div class="formnote conseq" style="padding:10px 2px 0"><svg class="g" viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-.42-8.98 6 6 0 1 0-11.5 2.2A3.5 3.5 0 0 0 6.5 19z"/><path d="M20 6L9 17l-5-5"/></svg>
+              setup already in sync via icloud — this transfer grants keys only</div>
+            <div class="cklist">
+              <div class="ckrow"><span class="ckbox on"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+                <div><div class="nm">zeus</div><div class="ss">key auth · alice@zeus.lan</div></div></div>
+              <div class="ckrow"><span class="ckbox on"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+                <div><div class="nm">helios</div><div class="ss">key auth · via atlas</div></div></div>
+              <div class="ckrow"><span class="ckbox on"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+                <div><div class="nm">artemis</div><div class="ss">key auth · alice@artemis.dev</div></div></div>
+              <div class="ckrow"><span class="ckbox on"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+                <div><div class="nm" style="color:var(--t-fgDim)">… 6 more, all selected</div><div class="ss">list scrolls · per-row toggles · select all / none</div></div></div>
+              <div class="ckrow dis"><span class="ckbox"></span>
+                <div><div class="nm">mercury</div><div class="ss">password host — will ask on the iPad instead</div></div></div>
+            </div>
+          </div>
+          <div class="btnrow">
+            <button class="btn ghost">skip</button>
+            <button class="btn primary"><svg class="g" viewBox="0 0 24 24"><path d="M7 3H5a2 2 0 0 0-2 2v2M17 3h2a2 2 0 0 1 2 2v2M7 21H5a2 2 0 0 1-2-2v-2M17 21h2a2 2 0 0 0 2-2v-2M9 9v1M15 9v1M9 15a4 4 0 0 0 6 0"/></svg>authorize on 9 hosts</button>
+          </div>
+        </div></div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>the S1 grant card with exactly one new line.</b> "Setup already in sync via icloud —
+        this transfer grants keys only" <i>is</i> the interaction between the two features: the bootstrap manifest
+        import is idempotent (same UUIDs → data is a no-op), so running the nearby flow after an iCloud restore
+        performs precisely the key grants. No fork, no grant-only mode, no new protocol. The 6-digit code compare
+        runs right before this card, unchanged (S1) — nearby still binds the peer, iCloud never could. The button
+        count binds to the visible selection (9 = 3 shown + 6 scrolled), and the outcome is never assumed — next
+        frame.</div>
+    </div>
+  </div>
+
+  <div class="stage">
+
+    <!-- R7 · grant results -->
+    <div class="stagecol">
+      <div class="ipad"><div class="screen">
+        <div class="tabpage dimlayer" style="padding:28px 24px">
+          <div class="pg-h"><div class="t">hosts</div></div>
+          <div class="krow"><span class="dot"></span><div><div class="nm">zeus</div><div class="sub">alice@zeus.lan:22 · mosh · tmux</div></div></div>
+          <div class="krow"><span class="dot"></span><div><div class="nm">helios</div><div class="sub">deploy@helios.internal:22 · ssh · via atlas</div></div></div>
+          <div class="krow" style="border-bottom:0"><span class="dot"></span><div><div class="nm">artemis</div><div class="sub">alice@artemis.dev:22 · ssh</div></div></div>
+        </div>
+        <div class="modalveil"><div class="modalcard">
+          <div class="ic"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></div>
+          <h4>7 of 9 hosts authorized</h4>
+          <div class="sub m">via Dev One's iPhone · 0:52</div>
+          <div class="steps">
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>key installed — zeus, helios, artemis + 4<div class="sd">recorded in the ledger on both devices (S8)</div></span></div>
+            <div class="step done"><span class="bullet" style="border-color:var(--amber);color:var(--amber)"><svg class="g" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01"/></svg></span>
+              <span>selene — unreachable from the granting device<div class="sd">host down or off-network · no grant made — retry from keys when reachable (next frame), or install the key manually</div></span></div>
+            <div class="step done"><span class="bullet" style="border-color:var(--amber);color:var(--amber)"><svg class="g" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01"/></svg></span>
+              <span>rhea — jump host atlas unreachable<div class="sd">one broken hop fails the chain, not the batch · retry when atlas is back</div></span></div>
+          </div>
+          <div class="btnrow">
+            <button class="btn ghost">done</button>
+            <button class="btn primary">keys · access on this device</button>
+          </div>
+        </div></div>
+        <div class="cam"></div>
+      </div></div>
+      <div class="stagecap" style="max-width:688px"><b>the outcome is a result, not an assumption.</b> Partial failure
+        is the norm — a LAN host the grantor can't reach from cellular, one dead jump host taking out a chain, a
+        host that's simply down. A silent partial success is how a user ends up believing they're set up and hitting
+        a password prompt on host #8 with no explanation. And the fallback is honest about auth method: these are
+        key-auth hosts — a key-only host has nothing to "ask" at first connect, so its next step is a retry from the
+        access screen or a manual install, never a fake password promise. (A password host's failure would say
+        "first connect asks instead" — and mean it. The record's auth hint tells the copy which sentence it's allowed
+        to use.) The next frame is where the state lives permanently.</div>
+    </div>
+
+    <div class="arrowcol">→</div>
+
+    <!-- R8 · access on this device (keys tab) -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen" style="background:var(--t-bg)">
+        <div class="tabpage">
+          <div class="pg-h"><div class="t">keys</div></div>
+          <div class="krow">
+            <svg class="g" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+            <div><div class="nm">Tessera device key</div><div class="sub">P-256 · created today</div></div>
+            <div class="tags"><span class="tag acc">secure enclave</span></div>
+          </div>
+
+          <div class="sec-h">access on this device</div>
+          <div class="sgroup" style="margin-bottom:10px">
+            <div class="srowline tight" style="background:var(--t-accentSoft)">
+              <div><div class="t" style="color:var(--t-accent)">authorize keys — nearby</div><div class="s">your other device grants, one Face ID — covers every key-auth host at once</div></div>
+              <div class="end"><svg class="chev g" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></div>
+            </div>
+            <div class="srowline tight">
+              <div><div class="t">no device to grant from?</div><div class="s">lost or sold — the out-of-band paths (I3)</div></div>
+              <div class="end"><svg class="chev g" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></div>
+            </div>
+            <div class="srowline tight"><div><div class="t">zeus</div></div><div class="end" style="color:var(--t-green)">key installed</div></div>
+            <div class="srowline tight"><div><div class="t">helios</div></div><div class="end" style="color:var(--t-green)">key installed</div></div>
+            <div class="srowline tight"><div><div class="t">selene</div></div><div class="end" style="color:var(--t-amber)">no credential yet</div></div>
+            <div class="srowline tight"><div><div class="t">rhea</div></div><div class="end" style="color:var(--t-amber)">no credential yet</div></div>
+            <div class="srowline tight"><div><div class="t">mercury</div></div><div class="end">password host</div></div>
+          </div>
+          <div class="gfoot">answers the only question a restored device has: which of my hosts can I reach from here? grant state from the ledger (S8); first connect closes any gap.</div>
+        </div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>the second door, with a guardrail.</b> The access card is shown once and declines
+        forever — this section is its permanent home, inside the keys tab that already exists. The device-loss
+        branch lives here too: R4's worst-day lane collapses into a row, because the day someone needs it is
+        precisely not the day they'll remember a card they dismissed months ago. The section earns its place only by
+        staying action-anchored: the grant entry is on top, every row is a state with a next step, and there are no
+        charts, no feed, no sync monitoring. The moment it grows those, it's the dashboard this design refuses to
+        build.</div>
+    </div>
+  </div>
+
+  <div class="stage">
+
+    <!-- R3c · compact restore receipt -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen" style="background:var(--t-bg)">
+        <div class="tabpage dimlayer">
+          <div class="pg-h"><div class="t">hosts</div></div>
+          <div class="krow"><span class="dot"></span><div><div class="nm">zeus</div><div class="sub">alice@zeus.lan:22 · mosh · tmux</div></div></div>
+          <div class="krow"><span class="dot"></span><div><div class="nm">helios</div><div class="sub">deploy@helios.internal:22 · ssh · via atlas</div></div></div>
+          <div class="krow" style="border-bottom:0"><span class="dot"></span><div><div class="nm">artemis</div><div class="sub">alice@artemis.dev:22 · ssh</div></div></div>
+        </div>
+        <div class="sheet" style="top:5%">
+          <div class="grab"></div>
+          <div class="sh-h"><div class="t">restore complete</div>
+            <span class="srcchip"><svg class="g" viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-.42-8.98 6 6 0 1 0-11.5 2.2A3.5 3.5 0 0 0 6.5 19z"/></svg>icloud · 0:08</span></div>
+          <div class="sh-body">
+            <div class="steps" style="margin-top:2px">
+              <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+                <span>received 12 hosts · jump chains · port forwards</span></div>
+              <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+                <span>appearance &amp; settings applied<div class="sd">once — edit freely from here; only hosts keep syncing</div></span></div>
+              <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+                <span>trust hints arrived — pins didn't<div class="sd">first connect still asks you to confirm, with a match to check against (I6)</div></span></div>
+              <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+                <span>no keys moved<div class="sd">passwords &amp; private keys never sync — access is the next step</div></span></div>
+            </div>
+          </div>
+          <div style="padding:0 14px 14px;flex:none">
+            <div class="formnote conseq" style="padding-bottom:10px"><svg class="g" viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-.42-8.98 6 6 0 1 0-11.5 2.2A3.5 3.5 0 0 0 6.5 19z"/></svg>
+              sync stays on for this iPhone — hosts you add appear on your other devices, and deleting one deletes it everywhere (30-day undo). change anytime in settings.</div>
+            <button class="cta">continue</button>
+          </div>
+        </div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>the receipt, compact.</b> Full-height sheet; the steps list may scroll, but the
+        consent footnote is pinned above "continue" — it is the consequence text, and it does not scroll away.</div>
+    </div>
+
+    <div class="arrowcol">·</div>
+
+    <!-- R4c · compact access card -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen" style="background:var(--t-bg)">
+        <div class="tabpage dimlayer">
+          <div class="pg-h"><div class="t">hosts</div></div>
+          <div class="krow"><span class="dot"></span><div><div class="nm">zeus</div><div class="sub">alice@zeus.lan:22 · mosh · tmux</div></div></div>
+          <div class="krow"><span class="dot"></span><div><div class="nm">helios</div><div class="sub">deploy@helios.internal:22 · ssh · via atlas</div></div></div>
+          <div class="krow" style="border-bottom:0"><span class="dot"></span><div><div class="nm">artemis</div><div class="sub">alice@artemis.dev:22 · ssh</div></div></div>
+        </div>
+        <div class="sheet" style="top:12%">
+          <div class="grab"></div>
+          <div class="sh-h"><div class="t">set up access to your hosts</div></div>
+          <div class="sh-body">
+            <div style="font:11.5px/1.5 var(--sans);color:var(--t-fgMuted);padding:0 2px 12px">configs synced — credentials never do, by design. this iPhone proves itself with its own key or each host's password.</div>
+            <button class="optbtn">
+              <svg class="g" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M12 18h.01"/></svg>
+              <span><span class="tt">authorize keys — nearby</span><br>
+              <span class="ss">a device you already trust installs this iPhone's public key on 9 key-auth hosts · one Face ID</span></span>
+            </button>
+            <button class="optbtn plain" style="margin-top:9px">
+              <svg class="g" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <span><span class="tt">install the key myself</span><br>
+              <span class="ss">copy the public key from keys → add to authorized_keys from any authorized machine</span></span>
+            </button>
+            <div class="formnote conseq" style="margin-top:12px"><svg class="g" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+              or skip both — first connect to each host asks for its password once.</div>
+            <div class="formnote conseq" style="padding-top:0"><svg class="g" viewBox="0 0 24 24"><path d="M10.29 3.86l-8.2 14.14A2 2 0 0 0 3.82 21h16.36a2 2 0 0 0 1.73-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+              icloud restores your configuration, never your access. other device gone? <span style="color:var(--t-accent);white-space:nowrap">options ›</span></div>
+            <button class="btn ghost" style="width:100%">not now</button>
+          </div>
+        </div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>the access card, compact.</b> Large-detent sheet, lanes stacked — both consequence
+        notes sit on the first screen at the 12px floor. No scrolling consent.</div>
+    </div>
+  </div>
+
+  <p class="note"><b>The compact budget rule, now falsifiable at a glance:</b> the two densest cards in the feature
+    ship on the 393pt phone as the real layouts above — drawn, not described, because "it fits" is the kind of claim
+    a frame settles in one look. If either card can't hold its consequence text at Dynamic Type sizes without
+    scrolling, the card is over budget — that's the rule, not a rendering accident to catch later.</p>
+  </section>
+
+  <!-- ============================================================ I4 -->
+  <section id="i4">
+  <h2><span class="n">I4</span>Steady state — it just stays in step</h2>
+  <p class="sub">Tuesday: a host added on the phone. On a good day it's on the iPad in seconds; in reality arrival is
+    <b>at next foreground</b> — push is best-effort, and a terminated app or Low Power Mode means minutes to hours.
+    No toast, no badge that overstays its welcome: the "new" marker shows only for arrivals since the last
+    foreground, fades on first view, and is gone within a day. Edits and deletes behave identically: they arrive.
+    The only standing surface is the settings status row — and it has more to say than three states (below).</p>
+
+  <div class="stage">
+
+    <!-- T1 · add host on iPhone -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen dimmed">
+        <div class="term"><div class="ln dim">&nbsp;</div></div>
+        <div class="sheet">
+          <div class="grab"></div>
+          <div class="sh-h"><div class="t">add host</div></div>
+          <div class="sh-body">
+            <div class="fgroup">
+              <div class="frow"><span class="lb">name</span><span class="vl">artemis</span></div>
+              <div class="frow"><span class="lb">user</span><span class="vl">alice</span></div>
+              <div class="frow"><span class="lb">address</span><span class="vl">artemis.dev</span></div>
+              <div class="frow"><span class="lb">port</span><span class="vl">22</span></div>
+              <div class="frow"><span class="lb">transport</span><span class="vl">ssh</span><span class="end"><span class="tag acc">auto-tmux</span></span></div>
+            </div>
+            <button class="cta">add host</button>
+          </div>
+        </div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>an ordinary add.</b> Nothing about the editor changes — no "sync this one?" checkbox,
+        no per-host scope. Opt-in is per device, never per host; a sync feature with a scope matrix is a sync feature
+        nobody can model.</div>
+    </div>
+
+    <div class="arrowcol">→</div>
+
+    <!-- T2 · arrives on iPad -->
+    <div class="stagecol">
+      <div class="ipad"><div class="screen">
+        <div class="tabpage" style="padding:28px 24px">
+          <div class="pg-h"><div class="t">hosts</div></div>
+          <div class="krow"><span class="dot g"></span><div><div class="nm">zeus</div><div class="sub">alice@zeus.lan:22 · mosh · tmux</div></div></div>
+          <div class="krow"><span class="dot"></span><div><div class="nm">helios</div><div class="sub">deploy@helios.internal:22 · ssh · via atlas</div></div></div>
+          <div class="krow" style="border-bottom:0;background:var(--t-accentSoft);border-radius:9px;margin:0 -6px;padding-left:8px;padding-right:8px"><span class="dot"></span><div><div class="nm">artemis</div><div class="sub">alice@artemis.dev:22 · ssh · auto-tmux</div></div><div class="tags"><span class="tag acc">new</span></div></div>
+        </div>
+        <div class="cam"></div>
+      </div></div>
+      <div class="stagecap" style="max-width:688px"><b>the arrival is the row.</b> The accent wash and "new" tag mark
+        a moment, they don't become chrome — they show only for arrivals since the last foreground, fade on first
+        view, and expire within a day (a host that landed three days ago while the iPad slept does <i>not</i> glow
+        at breakfast). First connect asks for a credential (S6) and checks the hint at its stated assurance (I6);
+        after that, artemis behaves exactly as if typed in on this iPad. Edits arrive as quietly as adds — so the
+        host's detail page carries one provenance line, <span class="m">updated from icloud · yesterday</span>, and
+        the next connection failure has an explanation. Deletes land the same way: the row is simply gone — with a
+        30-day undo behind it (next frame), not a per-delete confirmation.</div>
+    </div>
+
+    <div class="arrowcol">→</div>
+
+    <!-- T2b · delete undo toast -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen" style="background:var(--t-bg)">
+        <div class="tabpage">
+          <div class="pg-h"><div class="t">hosts</div></div>
+          <div class="krow"><span class="dot g"></span><div><div class="nm">zeus</div><div class="sub">alice@zeus.lan:22 · mosh · tmux</div></div></div>
+          <div class="krow"><span class="dot"></span><div><div class="nm">helios</div><div class="sub">deploy@helios.internal:22 · ssh · via atlas</div></div></div>
+          <div class="krow" style="border-bottom:0"><span class="dot"></span><div><div class="nm">artemis</div><div class="sub">alice@artemis.dev:22 · ssh · auto-tmux</div></div></div>
+        </div>
+        <div class="toast glass"><svg class="g" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+          rhea deleted · everywhere sync is on &nbsp;<span style="color:var(--t-accent);font-weight:600">undo</span></div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>the destructive action gets an undo.</b> Every other action in the feature is
+        reversible; the one instant, cross-device delete was not. The tombstone that makes propagation work also
+        makes undo cheap — it carries rhea's <b>final record</b>, so the toast's undo works on the deleting device
+        and recently-deleted (settings → icloud, I7) restores it on <i>any</i> device, for 30 days. Which makes the
+        honest sentence "delete means delete <i>after 30 days</i>" — <span class="m">remove synced data</span> is the
+        immediate purge, and the disclosure says so. Also said there: icloud is sync, not a backup — a deletion
+        propagates to the cloud copy too; the undo window is the safety net, not a trash folder.</div>
+    </div>
+
+    <div class="arrowcol">·</div>
+
+    <!-- T3 · offline status variant -->
+    <div class="stagecol">
+      <div class="varcard" style="width:360px">
+        <div class="sgroup" style="margin-bottom:0">
+          <div class="srowline">
+            <div><div class="t">status</div></div>
+            <div class="end" style="color:var(--amber)">waiting for network · tap to retry</div>
+          </div>
+          <div class="srowline">
+            <div><div class="t" style="font-weight:400;font-size:11px;color:var(--t-fgDim)">changes stay on this device until it returns</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="stagecap" style="max-width:360px"><b>offline is a status, not an error — and the row is the retry.</b>
+        No alert, no red. Local edits queue in the sidecar store and catch up when the network does. There is no
+        "sync now" button, but a stalled sync's only recourse shouldn't be the scary toggle: tapping the row retries
+        (<span class="m">retrying…</span>), one affordance, no new screen.</div>
+    </div>
+
+    <div class="arrowcol">·</div>
+
+    <!-- T4 · dangling jump chain -->
+    <div class="stagecol">
+      <div class="varcard" style="width:360px">
+        <div class="sgroup" style="margin-bottom:0">
+          <div class="krow" style="padding:12px 14px"><span class="dot g"></span><div><div class="nm">zeus</div><div class="sub">alice@zeus.lan:22 · mosh · tmux</div></div></div>
+          <div class="krow" style="padding:12px 14px;border-bottom:0"><span class="dot"></span><div><div class="nm">helios</div><div class="sub">deploy@helios.internal:22 · ssh · <span style="color:var(--amber)">via atlas — missing</span></div></div></div>
+        </div>
+      </div>
+      <div class="stagecap" style="max-width:360px"><b>a deleted jump host leaves a dangling chain — the row says so.</b>
+        Tombstone-beats-edit means atlas can vanish under helios. Chains are validated on arrival (same posture as
+        forward rules), and the degraded state lives where the user will look: amber on the row, and one line on the
+        host's detail page — <span class="m">jump host atlas is missing (deleted on another device) · connect asks
+        how to proceed</span> — never a confusing failure at connect time.</div>
+    </div>
+  </div>
+
+  <div class="dirlabel">the status row — every state it can be in</div>
+  <div class="vargrid">
+    <div class="varcard" style="width:330px"><div class="sgroup" style="margin-bottom:0"><div class="srowline tight"><div><div class="t">status</div></div><div class="end" style="color:var(--t-accent)">publishing 12 hosts…</div></div></div>
+      <div class="stagecap" style="margin-top:8px">first enable, seconds.</div></div>
+    <div class="varcard" style="width:330px"><div class="sgroup" style="margin-bottom:0"><div class="srowline tight"><div><div class="t">status</div></div><div class="end" style="color:var(--t-accent)">fetching…</div></div></div>
+      <div class="stagecap" style="margin-top:8px">every foreground — brief, expected.</div></div>
+    <div class="varcard" style="width:330px"><div class="sgroup" style="margin-bottom:0"><div class="srowline tight"><div><div class="t">status</div></div><div class="end">up to date · fetched 2 min ago</div></div></div>
+      <div class="stagecap" style="margin-top:8px">recency is fetch-recency — never a claim it can't keep.</div></div>
+    <div class="varcard" style="width:360px"><div class="sgroup" style="margin-bottom:0"><div class="srowline tight"><div><div class="t">status</div></div><div class="end" style="color:var(--amber)">waiting for network · tap to retry</div></div></div>
+      <div class="stagecap" style="margin-top:8px">offline. local edits safe, queued.</div></div>
+    <div class="varcard" style="width:330px"><div class="sgroup" style="margin-bottom:0"><div class="srowline tight"><div><div class="t">status</div></div><div class="end" style="color:var(--amber)">11 of 12 · retrying</div></div></div>
+      <div class="stagecap" style="margin-top:8px">partial save — the row never rounds up to "synced".</div></div>
+    <div class="varcard" style="width:330px"><div class="sgroup" style="margin-bottom:0"><div class="srowline tight"><div><div class="t">status</div></div><div class="end" style="color:var(--amber)">paused · signed out of icloud</div></div></div>
+      <div class="stagecap" style="margin-top:8px">signed out after enabling — the row must not keep claiming "synced".</div></div>
+    <div class="varcard" style="width:330px"><div class="sgroup" style="margin-bottom:0"><div class="srowline tight"><div><div class="t">status</div></div><div class="end" style="color:var(--amber)">can't save — icloud storage full</div></div>
+      <div class="srowline tight"><div><div class="t" style="font-weight:400;font-size:11px;color:var(--t-fgDim)">your edits are safe locally · freeing space resumes sync</div></div></div></div>
+      <div class="stagecap" style="margin-top:8px">billed against the user's <i>whole</i> icloud quota — usually full of photos. the most common silent failure this feature will have.</div></div>
+    <div class="varcard" style="width:330px"><div class="sgroup" style="margin-bottom:0"><div class="srowline tight"><div><div class="t">status</div></div><div class="end" style="color:var(--amber)">some hosts need a newer tessera</div></div></div>
+      <div class="stagecap" style="margin-top:8px">version skew — older builds preserve newer fields and re-emit them on publish (I8); what they can't render degrades to no-update, said once.</div></div>
+    <div class="varcard" style="width:360px"><div class="sgroup" style="margin-bottom:0"><div class="srowline tight"><div><div class="t">status</div></div><div class="end" style="color:var(--t-fgDim)">sync stopped — icloud data removed</div></div></div>
+      <div class="stagecap" style="margin-top:8px">the zone is gone (removed here, on another device, or from ios settings) — never republish into a missing zone (I7).</div></div>
+    <div class="varcard" style="width:330px"><div class="sgroup" style="margin-bottom:0"><div class="srowline tight"><div><div class="t">status</div></div><div class="end" style="color:var(--amber)">paused · icloud restricted</div></div>
+      <div class="srowline tight"><div><div class="t" style="font-weight:400;font-size:11px;color:var(--t-fgDim)">a device-management policy may be blocking sync · local edits safe</div></div></div></div>
+      <div class="stagecap" style="margin-top:8px">.restricted is not signed-out — mdm / screen time. managed devices are this app's home turf; the copy doesn't blame, and nearby bootstrap is the path for that world.</div></div>
+    <div class="varcard" style="width:330px"><div class="sgroup" style="margin-bottom:0"><div class="srowline tight"><div><div class="t">status</div></div><div class="end" style="color:var(--amber)">can't save — icloud keychain off</div></div>
+      <div class="srowline tight"><div><div class="t" style="font-weight:400;font-size:11px;color:var(--t-fgDim)">sync's end-to-end keys live there · edits safe locally · turn it on to resume</div></div></div></div>
+      <div class="stagecap" style="margin-top:8px">encrypted record fields (I8) need icloud keychain; turned off later, sync pauses and says why instead of failing silently.</div></div>
+  </div>
+  <p class="note"><b>The no-alerts principle holds — the row just grew a vocabulary.</b> Every state is the same row
+    in the same place; nothing pops, nothing badges the icon. Change-token expiry and re-fetch are invisible by
+    design — the only rule is that the row never claims a recency it doesn't have.</p>
+  </section>
+
+  <!-- ============================================================ I5 -->
+  <section id="i5">
+  <h2><span class="n">I5</span>Same host twice — one rule, then a receipt</h2>
+  <p class="sub">Before sync, both devices independently added <span class="m">zeus</span> — same endpoint, different
+    UUIDs, drifted details. At first join the records collide by <b>endpoint</b> (the typed
+    transport·user@address:port·via-chain coordinates the continuity resolver already matches on) and merge
+    <b>automatically</b> — no prompt, because the join card (I2) already announced the count, and three colliding
+    hosts as three modals is how "the one and only sync card" dies. The rule is the same one as everywhere else:
+    <b>the copy edited most recently wins</b>, whole-record (<i>most recently</i> = server receipt order — device
+    wall clocks are never trusted across devices, I8); tags and port forwards union in; the duplicate retires
+    with a tombstone. What one of those merges did lives where it can actually be checked: the host's detail page.</p>
+
+  <div class="stage">
+
+    <!-- U1 · merge receipt on the host detail page -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen" style="background:var(--t-bg)">
+        <div class="tabpage">
+          <div class="pg-h"><div class="t">zeus</div></div>
+          <div class="fgroup">
+            <div class="frow"><span class="lb">name</span><span class="vl">zeus</span></div>
+            <div class="frow"><span class="lb">user</span><span class="vl">alice</span></div>
+            <div class="frow"><span class="lb">address</span><span class="vl">zeus.internal</span></div>
+            <div class="frow"><span class="lb">port</span><span class="vl">22</span></div>
+            <div class="frow"><span class="lb">transport</span><span class="vl">mosh</span><span class="end"><span class="tag acc">tmux</span></span></div>
+            <div class="frow"><span class="lb">tags</span><span class="vl">prod · ops</span></div>
+          </div>
+          <div class="sec-h">sync</div>
+          <div class="fpblock" style="line-height:1.9;word-break:normal">
+            <span class="k">updated from icloud</span>&nbsp; yesterday<br>
+            <span class="k">merged</span>&nbsp; same host was added on both devices<br>
+            <span class="k">kept</span>&nbsp; the copy edited most recently <span class="k">(iPhone · jul 21)</span><br>
+            <span class="k">merged in</span>&nbsp; tag “prod” · 1 port forward <span class="k">(from the iPad copy)</span><br>
+            <span class="k">discarded</span>&nbsp; <s>address zeus.lan · port 2222</s> <span class="k">(stale since mar)</span><br>
+            <span class="k">retired</span>&nbsp; the duplicate — credentials untouched on both devices
+          </div>
+          <div class="btnrow">
+            <button class="btn ghost">keep both copies instead</button>
+          </div>
+          <div class="fieldnote">re-splits as “zeus” + “zeus (ipad)” — auto-suffixed, and sync never re-asks about the pair</div>
+        </div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>a receipt, not a referendum.</b> The old frame was a blocking prompt that contradicted
+        the join card; the merge now just happens, and this page is where its reasoning lives — including
+        <b>what was discarded</b>, struck through, because "retiring the duplicate" without showing the dropped
+        values is silent data loss when the loser had the better fields. The escape hatch survives with its own
+        hygiene: kept-both copies are auto-suffixed so two identical rows can't happen, and the decision is never
+        re-asked. The provenance line doubles as I4's edit-explanation.</div>
+    </div>
+  </div>
+
+  <div class="spec"><table>
+    <tr><th>situation</th><th>rule</th><th>why this one</th></tr>
+    <tr><td>same uuid, newer edit</td><td>the whole record replaces — never field-merged</td><td>per-field merges produce franken-hosts (name from one device, port from another) nobody can explain; whole-record last-edit-wins is one sentence</td></tr>
+    <tr><td>same endpoint, different uuids</td><td>merge once at arrival — <b>same rule</b>: most-recent edit wins, tags &amp; forwards union, duplicate retires with a tombstone</td><td>one rule, not two that contradict: "your newest edit wins" is the whole story. an endpoint merge happens once, so there's nothing to flip — and the receipt (above) shows what was discarded</td></tr>
+    <tr><td>same identity (name + login), different uuids</td><td>same rule — most-recent edit wins; host references re-point to the survivor; the duplicate retires with a tombstone</td><td>identities collide exactly like hosts do — created independently on two devices before the join. silent duplicates in the identity picker read as a sync bug; one rule covers both</td></tr>
+    <tr><td>list order</td><td>one dedicated order record — an ordered uuid list; conflicts collapse to list-level last-drag-wins</td><td>a reorder must be the lightest write in the zone. <span class="m">sortOrder</span> inside every host record made one drag rewrite N records — and clobber any concurrent single-host edit under whole-record last-edit-wins</td></tr>
+    <tr><td>delete vs edit</td><td>the tombstone wins; undo restores within 30 days</td><td>resurrection is the failure mode users actually notice; undo is the other one they actually need</td></tr>
+    <tr><td>device out of sync &gt; 30 days</td><td>re-joins through the first-join merge path (I2) — never a silent republish</td><td>tombstones purge at 30 days; without this rule a stale device republishes hosts the user deleted elsewhere. covers toggle off→on and the long-drawer iPad alike</td></tr>
+    <tr><td>zone gone (removed anywhere)</td><td>stop syncing; never republish into a missing zone</td><td>the privacy exit must not undo itself — "remove synced data" loses its meaning if the next device to check in recreates everything (I7)</td></tr>
+    <tr><td>newer app's fields</td><td>older builds preserve unknown fields opaquely per record and re-emit them untouched on publish; what a build can't <i>render</i> degrades to no-update, said once (status row)</td><td>whole-record last-edit-wins turns an old build's <b>write</b> into a rollback of every field it dropped — opaque round-trip means an old build's edit can never destroy a new build's data. a deliberate departure from the manifest's reject-unknown posture: a poisoned nearby manifest is trust-relevant; your own newer build's fields are not (I8)</td></tr>
+    <tr><td>appearance &amp; settings</td><td>apply once, into an <b>empty</b> install only (restore) — never on join</td><td>a configured device didn't consent to a re-theme by enabling host sync (I2); ongoing settings sync is how devices fight under your fingers; nearby "send setup" stays the deliberate push</td></tr>
+  </table></div>
+  </section>
+
+  <!-- ============================================================ I6 -->
+  <section id="i6">
+  <h2><span class="n">I6</span>Trust &amp; credentials after a cloud restore</h2>
+  <p class="sub">A restored device's first connect to a host runs the S5 card — but the hint arrived over iCloud, and
+    the card <b>grades</b> it: a hint is labeled by the strength of the channel that carried it, not rendered as one
+    uniform green. Neutral recall for cloud-delivered ("your iPad recorded this"); green stays reserved for verified
+    channels (a SAS-bound bootstrap hint, or a match against an existing local pin). The pin this tap creates is
+    still born on this device, and the credential step right after is still the S6 card — now with a memory of how
+    many passwords you've typed. The same tiered line rides the changed-key card: a rotation another device already
+    accepted arrives with context instead of bare alarm (V3). iCloud changes <b>how the map arrives</b>, never what
+    trust costs.</p>
+
+  <div class="stage">
+
+    <!-- V1 · trust card with iCloud hint -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen dimmed">
+        <div class="term"><div class="ln dim">connecting to artemis…</div></div>
+        <div class="modalveil"><div class="modalcard">
+          <div class="ic"><svg class="g" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+          <h4>first connection to artemis</h4>
+          <div class="sub">verify the host key before trusting it</div>
+          <div class="body">
+            <div class="fpblock"><span class="k">ed25519</span><br>SHA256:pX7nQ2wLmR9vKcB4tYuH8sD1fG6jA0eZoI3xMqWkN5s</div>
+            <div class="matchline neut"><svg class="g" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+              your iPad recorded this fingerprint — delivered via icloud, not independently verified</div>
+          </div>
+          <div class="btnrow">
+            <button class="btn ghost">cancel</button>
+            <button class="btn primary">trust &amp; connect</button>
+          </div>
+        </div></div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>assurance is legible, not uniform.</b> Two channels deliver hints, and they are not
+        the same strength: a SAS-bound bootstrap hint was verified <i>between the devices</i>; an iCloud hint was
+        recorded on one device and delivered later. Its contents now ride end-to-end-encrypted record fields (I8),
+        so they can't be forged server-side — but <b>recorded is not verified</b>: nobody checked it against the
+        live host from <i>this</i> device, and whole-record replay is the one server trick encryption doesn't stop.
+        At a first connect, the match line <i>is</i> the trust decision — so the tiers stay: neutral recall for
+        cloud-delivered, green reserved for verified channels. Mismatch stays demoted in both. The hint record
+        carries <span class="m">originDevice</span> so the line can say "your iPad" and mean it, and hints rewrite
+        only on change — two devices must not churn the record on every connect. Why not sync the pins themselves?
+        A pin is a decision, and decisions don't sync: every device confirms explicitly, once, and its pin is its
+        own. Named follow-up, not absorbed: S5's Handoff-delivered hint currently renders the same green —
+        reconciling that touches the layers 1+2 contract and is a separate decision. (The old "sign hints with a
+        key that never enters CloudKit" project mostly dissolved with encrypted fields — what remains of the gap to
+        green is replay, not forgery.)</div>
+    </div>
+
+    <div class="arrowcol">→</div>
+
+    <!-- V2 · credential card recap -->
+    <div class="stagecol">
+      <div class="varcard" style="width:360px">
+        <div class="ic"><svg class="g" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></div>
+        <h4>authenticate to artemis</h4>
+        <div class="sub">first time on this iPad · the S6 card, verbatim</div>
+        <div class="body" style="margin-top:13px">
+          <div class="pwfield"><svg class="g" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+            <span class="dots">••••••••</span></div>
+          <div class="fieldnote">stored only in this iPad's keychain — never synced</div>
+          <div class="ordiv">or</div>
+          <button class="optbtn">
+            <svg class="g" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M12 18h.01"/></svg>
+            <span><span class="tt">authorize this iPad from a nearby device</span><br>
+            <span class="ss">you've typed 3 passwords since the restore — one Face ID covers every key-auth host</span></span>
+          </button>
+        </div>
+      </div>
+      <div class="stagecap" style="max-width:360px"><b>the deferred lane, with a memory.</b> This is lane 2 from the
+        restore's access card (I3). After the third post-restore password, the S6 card's accent lane stops offering
+        and starts <i>observing</i> — "one Face ID covers every key-auth host" routes to the same nearby grant (R5),
+        so the fast lane finds the user at the moment the slow lane starts to hurt. No new card was designed for
+        this moment; the credential step just learned to count.</div>
+    </div>
+
+    <div class="arrowcol">·</div>
+
+    <!-- V3 · rotation — the hint earns its keep -->
+    <div class="stagecol">
+      <div class="varcard" style="width:400px">
+        <div class="ic warn"><svg class="g" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4M12 15.5h.01"/></svg></div>
+        <h4>zeus's host key changed</h4>
+        <div class="sub">the presented key no longer matches this iPhone's pin</div>
+        <div class="body" style="margin-top:13px">
+          <div class="fpblock"><span class="k">ed25519 · new</span><br>SHA256:kR8wN3qXmT6vYcB1uHfP9sD4gJ7lA0eZoI2xMqWkN5s</div>
+          <div class="matchline neut"><svg class="g" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+            your iPad accepted this new key yesterday — via icloud, not independently verified</div>
+        </div>
+        <div class="btnrow">
+          <button class="btn ghost">cancel</button>
+          <button class="btn primary">trust new key</button>
+        </div>
+      </div>
+      <div class="stagecap" style="max-width:400px"><b>rotation — the moment hints earn their keep.</b> First-connect
+        hints were the design; a pinned host rotating its key is the common real-world alarm, and today the user
+        faces it alone — twice per rotation, once per device. In a synced world the hint store knows another of
+        your devices already examined and accepted the new key, so the changed-key card carries the same tiered
+        grammar as V1 at the channel's stated strength. No hint, or hint ≠ presented key: the card is exactly as
+        alarming as it is today. The hint informs; it never lowers the alarm.</div>
+    </div>
+  </div>
+  </section>
+
+  <!-- ============================================================ I7 -->
+  <section id="i7">
+  <h2><span class="n">I7</span>Settings — the entire footprint, and the exits</h2>
+  <p class="sub">On state is a toggle, two truth rows, and a disclosure; off state advertises what's waiting. The
+    exits are two plainly-labeled rows with one-sentence confirms that include their mechanism: <b>stop syncing</b>
+    is local (this device leaves; the cloud copy stays for the others), <b>remove synced data</b> is global (the
+    zone is deleted; local copies stay; every device stops when it finds the zone gone — none republishes it back).
+    Neither asks for Face ID — nothing secret is at stake — and both ends of the global exit get a receipt.</p>
+
+  <div class="stage">
+
+    <!-- W1 · iPad settings group -->
+    <div class="stagecol">
+      <div class="ipad"><div class="screen">
+        <div class="tabpage" style="padding:28px 24px">
+          <div class="pg-h"><div class="t">settings</div></div>
+          <div class="sec-h">icloud sync</div>
+          <div class="sgroup">
+            <div class="srowline">
+              <div><div class="t">sync hosts via icloud</div><div class="s" style="max-width:330px">host configs &amp; jump chains — never passwords, keys, or trust pins</div></div>
+              <div class="end"><span class="switch on"></span></div>
+            </div>
+            <div class="srowline">
+              <div><div class="t">status</div></div>
+              <div class="end">up to date · fetched 2 min ago · 12 hosts</div>
+            </div>
+            <div class="srowline">
+              <div><div class="t">while locked</div><div class="s" style="max-width:330px">config still arrives; nothing connects</div></div>
+              <div class="end">arrives</div>
+            </div>
+            <div class="srowline">
+              <div><div class="t">what syncs</div></div>
+              <div class="end"><svg class="chev g" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></div>
+            </div>
+            <div class="srowline">
+              <div><div class="t">recently deleted</div><div class="s" style="max-width:330px">restorable for 30 days, from any device — the undo window behind "delete means delete"</div></div>
+              <div class="end">1 · rhea <svg class="chev g" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></div>
+            </div>
+            <div class="srowline red">
+              <div><div class="t">remove synced data from icloud</div><div class="s" style="max-width:330px">deletes the cloud copy — local copies stay</div></div>
+              <div class="end"><svg class="chev g" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></div>
+            </div>
+          </div>
+          <div class="gfoot">your own icloud container — no vendor servers. deleting a host deletes it everywhere (30-day undo).</div>
+        </div>
+        <div class="cam"></div>
+      </div></div>
+      <div class="stagecap" style="max-width:688px"><b>status is still a row, not a screen.</b> The group now tells two
+        truths it used to hide: the lock posture (continuity's truth row says "suppressed"; sync's says config
+        arrives but nothing connects — adjacent rows, no assumed symmetry), and the undo window. Recently deleted
+        appears only when non-empty — backed by tombstones that carry the final record, so <i>any</i> device can
+        restore, not just the one that deleted — restore-only, no browsing chrome. The destructive exit sits
+        in the group it concerns, red, with its consequence in the subtitle.</div>
+    </div>
+
+    <div class="arrowcol">·</div>
+
+    <!-- W1b · off state with discovery -->
+    <div class="stagecol">
+      <div class="varcard" style="width:400px">
+        <div class="sgroup" style="margin-bottom:0">
+          <div class="srowline">
+            <div><div class="t">sync hosts via icloud</div><div class="s" style="max-width:250px"><span style="color:var(--t-accent)">12 hosts available from icloud</span> · updated yesterday — never passwords, keys, or trust pins</div></div>
+            <div class="end"><span class="switch"></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="stagecap" style="max-width:400px"><b>the off state advertises what's waiting.</b> CloudKit answers
+        "does a zone with records exist" without disclosing any device — data, not a peer list, the same standard
+        the welcome row meets. Without this subtitle, adoption depends on the user remembering to visit settings on
+        every device; with it, the second device opts in because there's something to gain.</div>
+    </div>
+  </div>
+
+  <div class="stage">
+
+    <!-- W2 · exit confirms -->
+    <div class="stagecol">
+      <div class="varcard">
+        <div class="ic"><svg class="g" viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-.42-8.98 6 6 0 1 0-11.5 2.2A3.5 3.5 0 0 0 6.5 19z"/><path d="M9 19h6"/></svg></div>
+        <h4>stop syncing this iPad?</h4>
+        <div class="sub">hosts already here stay. icloud keeps a copy for your other devices.</div>
+        <div class="btnrow">
+          <button class="btn neutral">keep syncing</button>
+          <button class="btn ghost">stop syncing</button>
+        </div>
+      </div>
+      <div class="varcard" style="margin-top:22px">
+        <div class="ic warn"><svg class="g" viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-.42-8.98 6 6 0 1 0-11.5 2.2A3.5 3.5 0 0 0 6.5 19z"/><path d="M18 6L6 18M6 6l12 12"/></svg></div>
+        <h4>remove synced data from icloud?</h4>
+        <div class="sub">deletes the cloud copy for every device. local copies stay. each device's toggle stays on, but none will republish — sync stops for each when it next checks in and finds the zone gone.</div>
+        <div class="btnrow">
+          <button class="btn neutral">cancel</button>
+          <button class="btn ghostred">remove</button>
+        </div>
+      </div>
+      <div class="stagecap" style="max-width:340px"><b>local exit, global exit — one sentence each, mechanism
+        included.</b> The global confirm says the part that makes it true: other devices stop because they find
+        the zone gone — <b>a device never republishes into a missing zone</b> — not because this button reaches
+        them. It also declines to promise what it can't do: if you want every device's toggle off, that's per-device,
+        and the card says so. Button grammar is the refined valence rule (footer): <b>white-filled is always the
+        answer that changes nothing</b> — "keep on-device" in I1, "keep syncing" and "cancel" here; accent-fill is
+        reserved for a recommended proceed (I5's "keep merged"); ghost is available, unpushed. These two cards were
+        the rule's first test case — the proceed buttons used to carry the white fill, teaching the opposite
+        mapping — so the fills swapped.</div>
+    </div>
+
+    <div class="arrowcol">→</div>
+
+    <!-- W2b · removal receipt + zone-gone -->
+    <div class="stagecol">
+      <div class="varcard" style="width:360px">
+        <div class="ic"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></div>
+        <h4>synced data removed</h4>
+        <div class="sub">the icloud copy is gone. hosts on this device are untouched — sync is off here.</div>
+      </div>
+      <div class="varcard" style="width:360px;margin-top:22px">
+        <div class="ic warn"><svg class="g" viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-.42-8.98 6 6 0 1 0-11.5 2.2A3.5 3.5 0 0 0 6.5 19z"/><path d="M18 6L6 18M6 6l12 12"/></svg></div>
+        <h4>icloud sync stopped</h4>
+        <div class="sub">synced data was removed on another device (or in ios settings). your 12 local hosts are untouched — nothing was uploaded back. turn sync on again anytime to start a fresh zone.</div>
+      </div>
+      <div class="stagecap" style="max-width:360px"><b>both ends of the privacy exit get a receipt.</b> The remover
+        gets told it happened (a red button with no confirmation is a button nobody believes), and the <i>other</i>
+        device — whose toggle was still on — lands here instead of silently re-creating the zone. Same posture as
+        the join card: shown <b>once, at next foreground, over the hosts page</b> — never as an alert mid-session,
+        or the no-alerts principle has an exception shaped exactly like one. Re-enabling later starts fresh;
+        nothing about the old zone lingers.</div>
+    </div>
+  </div>
+
+  <div class="stage">
+
+    <!-- W3 · what syncs disclosure (iPhone) -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen" style="background:var(--t-bg)">
+        <div class="tabpage" style="padding-bottom:60px">
+          <div class="pg-h"><div class="t">what syncs</div></div>
+
+          <div class="sec-h">kept in step — all contents end-to-end encrypted (I8)</div>
+          <div class="sgroup">
+            <div class="srowline tight"><div><div class="t">host configs</div><div class="s">name · address · port · user · transport · launch · tmux · tags · auth hint (key / password)</div></div></div>
+            <div class="srowline tight"><div><div class="t">free text</div><div class="s">notes · env vars · launch commands · snippets — encrypted like the rest (I8)</div></div></div>
+            <div class="srowline tight"><div><div class="t">jump chains &amp; port forwards</div><div class="s">whole routes · typed rules — validated on arrival; dangling hops surface on the row (I4)</div></div></div>
+            <div class="srowline tight"><div><div class="t">identities</div><div class="s">name + login — never which credential</div></div></div>
+            <div class="srowline tight"><div><div class="t">trust hints</div><div class="s">fingerprints + recording device (I6)</div></div></div>
+            <div class="srowline tight"><div><div class="t">list order</div><div class="s">one record — last drag wins (I5)</div></div></div>
+          </div>
+
+          <div class="sec-h">moves once — at restore into an empty install</div>
+          <div class="sgroup">
+            <div class="srowline tight"><div><div class="t">appearance &amp; settings</div><div class="s">theme · accent · cursor · scrollback — key list is decision D3; font size stays per-device</div></div></div>
+          </div>
+
+          <div class="sec-h">never syncs</div>
+          <div class="sgroup">
+            <div class="srowline tight"><div><div class="t">passwords · keys · pins · the ledger</div><div class="s">credentials &amp; decisions stay per-device — access is earned (I3)</div></div></div>
+            <div class="srowline tight"><div><div class="t">device-idiom &amp; security settings</div><div class="s">swipe pad · backgrounds · face id</div></div></div>
+          </div>
+          <div class="gfoot" style="margin-top:2px">enforced, not promised: an unclassified field fails the build · deletes propagate · deleting the app doesn't delete the zone — reinstall brings your hosts back.</div>
+        </div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>the classification table, rendered as a screen.</b> Three groups that match how a user
+        thinks — "in step," "moves once," "never" — rather than how the code is organized. The footer is the feature:
+        this list can't drift from reality, because the build breaks if it does. Round 2 moved the free-text row up:
+        with every content field end-to-end encrypted (I8), "free text can hold secrets" stopped being an exclusion
+        rationale — and a restored host now <i>does</i> what it does on the origin device, instead of connecting
+        into a shell that lost its behavior. The never-list keeps exactly what E2E doesn't argue for: credentials
+        (access is earned per device, I3) and decisions (pins, ledger). And the footer states sync's best unsold
+        benefit beside its scariest truth: deletes propagate — but deleting the app doesn't delete the zone;
+        reinstall next year, and the welcome row offers your hosts back.</div>
+    </div>
+  </div>
+  </section>
+
+  <!-- ============================================================ I8 -->
+  <section id="i8">
+  <h2><span class="n">I8</span>Mechanisms — what's actually in the cloud</h2>
+  <p class="sub">The sync payload is the bootstrap manifest's typed allowlist, one record per thing, in a custom zone
+    of the user's <b>private</b> iCloud database. The manifest adapter is the single serializer — the nearby channel,
+    Handoff descriptors, and these records are three transports over one wire format, which is why a bootstrapped
+    device joining iCloud merges with zero duplicates: the UUIDs already match.</p>
+
+  <div class="spec"><table>
+    <tr><th>record</th><th>contents (allowlist only)</th><th>key &amp; recency</th></tr>
+    <tr><td>host</td><td>the manifest host fields — name · address · port · user · transport · launchMode · tmuxSessionName · tags · osHint · identityID · authenticationHint · notes · envVars · launchCommand · startupSnippet · portForwards — <b>every value an encrypted field</b> (<span class="m">sortOrder</span> deliberately shed to the order record)</td><td>record name = host UUID · updatedAt + originDevice on every write · unknown fields round-trip opaquely (skew-safe writes, below)</td></tr>
+    <tr><td>order</td><td>one ordered UUID list — nothing else</td><td>single record; list-level last-drag-wins — a drag never touches host records</td></tr>
+    <tr><td>identity</td><td>id · name · login — credential-free by type</td><td>identity UUID · endpoint rule: name + login (I5)</td></tr>
+    <tr><td>jump link</td><td>hostID → jumpHostID</td><td>pair key; whole routes arrive or none · dangling hops validated on arrival (I4)</td></tr>
+    <tr><td>trust hint</td><td>hostID · fingerprint · keyString · firstSeen · lastSeen · <b>originDevice</b></td><td>hostID; lands in the sidecar hint store, never KnownHostsStore · rewritten only on change — no per-connect churn</td></tr>
+    <tr><td>tombstone</td><td>UUID · deletedAt · <b>the final record payload</b></td><td>wins over edits; powers undo + recently-deleted on any device; purged after 30 days</td></tr>
+  </table></div>
+
+  <p class="note"><b>Transport honesty, said plainly:</b> every content field rides in CloudKit's encrypted record
+    values — sealed on-device, keys chained through your icloud keychain, which Apple cannot read. That is end-to-end
+    for every user with icloud keychain on (Advanced Data Protection not required; ADP users were <i>already</i>
+    end-to-end — an earlier draft of this section called the transport "not end-to-end, a deliberate choice," on a
+    premise that stopped being true: per-field E2E has shipped since iOS 15). What stays standard-iCloud: record
+    shape and timing — a zone of UUID-named records with modification times, never contents. Two honest costs, both
+    designed for: encrypted fields can't be server-queried (irrelevant — the zone is fetched whole, never queried),
+    and icloud keychain must stay on (its own explained states, I3/I4). Adopting this <b>before</b> the zone ships is
+    a field-type choice; after, it's a re-upload of every record plus version-gating — the cheapest this decision
+    will ever be, so an engineering spike gates the plumbing milestone. And the bright line holds: credentials never
+    enter the zone at all. E2E is not an argument to sync keys — the credential bridge exists because access is
+    earned per device (I3). No Tessera account, no vendor server, no analytics on sync contents. Size is a non-issue —
+    ~1&nbsp;KB per host against the user's own quota; the manifest's existing caps (≤1000 hosts, 1&nbsp;MiB) bound
+    the zone.</p>
+
+  <p class="note"><b>Version skew, the write side:</b> the sidecar preserves fields it doesn't know opaquely, per
+    record, and re-emits them untouched on publish — so an older build's edit can never roll back a newer build's
+    data (under whole-record last-edit-wins, a naive old-build write is exactly that rollback). This is a deliberate,
+    recorded departure from the manifest's reject-unknown decoder posture: a poisoned nearby manifest is
+    trust-relevant — it could pre-seed false fingerprints — while your own newer build's fields are not. What an old
+    build can't <i>render</i> still degrades to no-update, and the status row says so once (I4).</p>
+
+  <p class="note"><b>Ordering authority:</b> "edited most recently" is decided by CloudKit server receipt order
+    (record change tags), never by device wall clocks — a phone that's wrong by minutes must not silently win or
+    lose edits. The dates printed on merge receipts (I5) are for humans; they never order anything.</p>
+
+  <p class="note"><b>Why not SwiftData↔CloudKit mirroring:</b> mirroring can't enforce
+    <code>@Attribute(.unique)</code> on <code>PersistedHost.id</code>, forces every relationship optional, and demands
+    a custom migration stage per schema change — for a sync that is, at heart, "apply this allowlist to the store."
+    So sync lives in a <b>sidecar store</b>: records map through the manifest adapter into the existing SwiftData
+    models on arrival, and local edits publish out of the same adapter. <code>PersistedHost</code> /
+    <code>Identity</code> schema stays byte-identical (the iOS 26 migration-crash rule is untouched), and the posture
+    tests stay green — <code>cloudKitDatabase: .none</code> on the model container, no
+    <code>kSecAttrSynchronizable</code> anywhere. The CloudKit client is the only new dependency surface.</p>
+
+  <p class="note"><b>Lifecycle honesty:</b> sync may <i>write config</i> while the app is locked — it can never
+    <i>act</i>: no arrival opens a connection, grants a key, or pins a host (never-auto-connect holds; the lock still
+    wins). Push failures surface only as the status row (I4), never as alerts. Two devices on <b>different Apple
+    accounts</b> simply never see a zone — the welcome row reports "no icloud account" (I3) and nearby bootstrap is
+    the path, as designed in S1.</p>
+
+  <p class="note"><b>The nearby flow doubles as the grant flow — no fork.</b> Bootstrap's manifest import is
+    idempotent (adopt-UUID, skip-on-collision), so "send/receive setup" rerun after an iCloud restore is a data
+    no-op whose real payload is the per-host key authorization (I3): the S1 surfaces are reused verbatim, with one
+    added copy line ("setup already in sync via icloud — this transfer grants keys only") on the origin's grant
+    card. No grant-only mode, no new protocol, and the SAS + Face ID order is inherited unchanged. The device key
+    stays lazy in the cloud era too: created on the first grant or credential tap, never at restore.</p>
+  </section>
+
+  <!-- ============================================================ I9 -->
+  <section id="i9">
+  <h2><span class="n">I9</span>One mental model — four mechanisms, four jobs</h2>
+  <p class="sub">iCloud sync doesn't replace anything layers 1+2 built; it takes over the one job they were never
+    meant to do — keeping topology in step when the devices aren't in the same room. Each mechanism answers a
+    different "when," and each trusts a different anchor:</p>
+
+  <div class="spec"><table>
+    <tr><th>mechanism</th><th>carries</th><th>moment</th><th>trust anchor</th></tr>
+    <tr><td>hand off</td><td>a pointer to the live session (descriptor, secret-free)</td><td>right now · one tap</td><td>same Apple account, system Handoff</td></tr>
+    <tr><td class="new">icloud sync<span class="newtag">this file</span></td><td class="new">host topology — hosts · chains · identities · forwards · hints · free text (encrypted)</td><td class="new">background · always</td><td class="new">your private iCloud database — field contents end-to-end encrypted</td></tr>
+    <tr><td>nearby bootstrap</td><td>the whole setup — once (manifest + settings) · also the key-grant channel after an iCloud restore</td><td>first open · settings push · access card</td><td>6-digit code + Face ID on the origin</td></tr>
+    <tr><td>enrollment</td><td>public-key grants</td><td>when the devices meet</td><td>Face ID on the grantor · Apple-bound stream</td></tr>
+  </table></div>
+
+  <p class="note"><b>Composition rules (how the nearby era and the cloud era fit):</b><br>
+    1 · <b>Bootstrap, then turn on iCloud → zero duplicates.</b> Same UUIDs, same envelope — the merge in I5 finds
+    nothing to do. The two paths were built on one wire format precisely so this upgrade is free.<br>
+    2 · <b>Restore from iCloud, then bridge the credential gap (I3).</b> The restore ends in the access card: grant
+    keys nearby (the S1 flow rerun — idempotent import makes the data a no-op, the grants are the payload), install
+    the key yourself, or pay one password per host at first connect (S6, with S7 opportunistic when devices meet).
+    Two halves of one onboarding: iCloud moves the map asynchronously; the nearby ceremony hands out keys when a
+    live, authenticated peer exists.<br>
+    3 · <b>Look &amp; settings move once</b> — at restore into an empty install — or anytime, deliberately, via
+    nearby "send setup." Steady-state iCloud sync never touches them, and a join into a configured device leaves
+    its theme alone.<br>
+    4 · <b>Nothing in iCloud can open a connection or grant access.</b> Sync writes config; acting on it always
+    takes a tap, a credential, or a Face ID.</p>
+
+  <div class="guar">
+    <div class="gcard"><div class="t"><svg class="g" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>secrets never move — here either</div>
+      <div class="s">Passwords and private keys stay in per-device keychain &amp; Secure Enclave. The allowlist is enforced by CI, not by carefulness.</div></div>
+    <div class="gcard"><div class="t"><svg class="g" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>configuration, never access</div>
+      <div class="s">iCloud restores the map, not the keys to it. A restored device still earns every connection — a credential or a nearby Face ID grant.</div></div>
+    <div class="gcard"><div class="t"><svg class="g" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>pins never sync — and hints are graded</div>
+      <div class="s">Fingerprints travel as syncable hints, labeled by channel strength: green for verified (SAS-bound), neutral recall for cloud-delivered. Every pin is an explicit, per-device decision.</div></div>
+    <div class="gcard"><div class="t"><svg class="g" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>no grants through the cloud</div>
+      <div class="s">There is no live authenticated channel in a database. Key installs stay a Face ID ceremony between devices that are actually present.</div></div>
+    <div class="gcard"><div class="t"><svg class="g" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>off by default</div>
+      <div class="s">One toggle; the safe answer is the filled default on the choice card; the delete rule is stated before opt-in, not discovered after.</div></div>
+    <div class="gcard"><div class="t"><svg class="g" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>no silent reshaping</div>
+      <div class="s">The first join announces its merges once; the rules never change after — last edit wins everywhere, delete means delete (30-day undo), stale devices re-join, a removed zone is never republished.</div></div>
+    <div class="gcard"><div class="t"><svg class="g" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>your container, unreadable even there</div>
+      <div class="s">Private iCloud database; every content field end-to-end encrypted — keys live in your iCloud Keychain. Record shape and timing stay standard iCloud, and the mock says so. No vendor servers, no Tessera account.</div></div>
+    <div class="gcard"><div class="t"><svg class="g" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>no device enumeration</div>
+      <div class="s">We never list your devices — CloudKit can't disclose a list, and we wouldn't build one. A record names only the device that wrote it.</div></div>
+    <div class="gcard"><div class="t"><svg class="g" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>the lock still wins</div>
+      <div class="s">Sync may write config while locked; it can never act. Every connection still starts with a tap.</div></div>
+  </div>
+  </section>
+
+  <div class="foot">
+    <b>decisions recorded 2026-07-26:</b> scope — steady state syncs topology (hosts, jump chains, identities, port
+    forwards, trust hints); ongoing settings sync rejected (devices fight under your fingers; nearby "send setup"
+    remains the deliberate push) · deletes propagate via 30-day tombstones and the rule is printed on the opt-in
+    card · trust hints sync (public data); pins never do · the S9 design-ahead "devices" row is dropped — CloudKit
+    discloses no peer list · transport is CloudKit private DB in a custom zone, honestly labeled not-end-to-end;
+    the secret-bearing fields are exactly the neverSyncs set · SwiftData mirroring rejected — sidecar store +
+    manifest adapter, model schema untouched, posture tests (<span class="m">cloudKitDatabase: .none</span>, no
+    <span class="m">kSecAttrSynchronizable</span>) stay green · <b>credential bridge:</b> a restore ends in an
+    explicit access card — grant keys nearby / install the key yourself / one password per host; the S1 nearby flow
+    doubles as the grant channel (idempotent import ⇒ data no-op, grants are the payload); the device key is created
+    lazily, never at restore.<br>
+    <b>revised 2026-07-26, review round (<span class="m">icloud-sync-review.md</span> F1–F21):</b> status row grew a
+    vocabulary — ~9 states incl. quota-full (billed against the user's whole iCloud quota; the most common silent
+    failure), partial save, signed-out, version skew, zone-gone; no-alerts principle holds, row is tappable-to-retry ·
+    opt-in pitch names recovery alongside convenience; card shows on the hosts page, never over a live session ·
+    device-loss branch on the access card (manual, no heuristic); "icloud restores your configuration, never your
+    access" is durable copy · <b>reopened:</b> first-created-wins → <b>last-edit-wins everywhere</b> (F9 — an
+    endpoint merge happens once, nothing to flip); merges are automatic, announced as a count on the join card, and
+    owned as receipts (with the discarded values, struck through) on each host's detail page; keep-both auto-suffixes ·
+    <b>reopened:</b> uniform green hints → <b>two assurance tiers</b> (F3) — neutral recall for cloud-delivered,
+    green reserved for verified channels; S5's Handoff hint green is a named layers-1+2 follow-up, not silently
+    changed; honest green over iCloud = hints signed with a key that never enters CloudKit, named as a separate
+    project · delete gains undo (toast + recently-deleted, tombstone-backed) and the stale-device rule (out of sync
+    &gt; 30 days ⇒ re-join via first-join merge, never silent republish) · "remove synced data" mechanism stated:
+    devices stop on finding the zone gone — never republish into a missing zone — and both ends get a receipt ·
+    restore receipt carries the sync-stays-on consent line; the welcome row is renamed "restore &amp; keep in sync"
+    and accent follows completability (never order) · appearance applies into empty installs only, never on join;
+    the moves-once key list is decision D3, named open · grant results frame (partial failure is the norm); the
+    "access on this device" keys section is the bridge's permanent second door — action-anchored, no charts, or it's
+    the dashboard this design refuses · timing honesty: arrival is at-next-foreground; "new" expires; edits leave a
+    provenance line on the detail page · edge states: empty zone, wrong account (named, tappable, deep-linked),
+    zero-duplicate join copy, dangling chains validated on arrival · consistency: valence rule (accent-filled =
+    recommended proceed, white-filled = safe answer, ghost = unpushed; the S9 card stays as contracted) · 12px floor
+    for consequence text, consent lists leave fingerprint chrome · sync gains a "while locked" truth row.<br>
+    <b>revised 2026-07-26, review round 2 (F22–F41):</b> <b>reopened: transport</b> — the "not end-to-end, deliberate
+    choice" premise was outdated (per-field E2E since iOS 15; ADP already covers this data), so every content field
+    moves to encrypted record values. New honest label: "contents end-to-end; record shape + timing standard";
+    icloud-keychain-off becomes an explained state; a spike gates the I8 plumbing milestone. The adoption collapses
+    three findings: free text (notes · env · launch commands · snippets) joins the sync set (F27) · the auth hint is
+    classifiable inside the encrypted fields (F26 — it already exists in the manifest) · the hint-signing project
+    mostly dissolves, though neutral stays the default tier — recorded ≠ verified, and replay remains (F3 residual) ·
+    <b>schema fixes while the format is still ink:</b> unknown fields round-trip opaquely — old-build writes can't
+    roll back new-build data (F23) · sortOrder sheds to a single order record — a drag never clobbers concurrent
+    edits (F24) · tombstones carry the final payload, so undo works on any device and "delete means delete" gains its
+    honest suffix "after 30 days" (F25) · hint records gain originDevice and rewrite only on change (F30) · identities
+    merge by the same rule as hosts (F28) · ordering authority is server receipt order, never device clocks (F37) ·
+    <b>new frames &amp; states:</b> the rotation hint card (F29) · probe / restricted / keychain-off states (F32/F33)
+    · dangling-chain row treatment (F41) · compact R3/R4 drawn at 393pt (F39) · join card owns both directions
+    ("sent 2 hosts", F34) and titles name the account's data; the copy deck passed the three-device test — grant
+    lanes say "a device you already trust," waiting cards accept whichever peer shows up (F31) · R7's fallback copy
+    is auth-method-honest — a key-only host has nothing to "ask" (F41) · the disclosure gains the app-delete line:
+    deleting the app doesn't delete the zone — reinstall, and your hosts come back (F35) · R4's consequence notes
+    reach the 12px floor they invented (F36) · <b>valence rule refined</b> (F40): white-filled = the answer that
+    changes nothing · accent-filled = recommended proceed · ghost = available, unpushed; W2's fills swapped to pass
+    it, and the S9 card's filled-decline reads correctly under it ("keep on-device" changes nothing) · zone-gone
+    cards appear once at next foreground over the hosts page — join-card posture, never an alert (F41) · motion
+    honesty: every animation in the feature dies under reduce-motion (mocked in this file's CSS).<br>
+    <b>build order suggestion:</b> F22 spike — encrypted record values + the icloud-keychain requirement, verified
+    against a CK stub (gates the record format) → I8 sidecar + adapter + zone plumbing (order record, tombstone
+    payloads, opaque unknown-field round-trip, hint origin — pure, unit-testable) → I1/I7 settings + disclosure +
+    exits → I2 join merge + card → I4 steady state + status vocabulary → I3 welcome restore + access card + access
+    screen (the nearby re-run reuses S1 wholesale) → I6 hint tiers + rotation line → I5 merge receipts. Regression
+    gate: this is squarely the "large-scale" class — full integration suite plus
+    merge/tombstone/stale-device/zone-gone/version-skew unit lanes before handoff.<br>
+    <b>files:</b> this mock <span class="m">docs/mockups/iphone-companion/icloud-sync.html</span> · review
+    <span class="m">icloud-sync-review.md</span> · layers 1+2 contract <span class="m">sync.html</span> (S1–S10) ·
+    implementation plan <span class="m">sync-implementation-plan.md</span> (§7 non-goals — resolved by this file) ·
+    notes <span class="m">design-notes.md</span>.
+  </div>
+
+</div>
+</body>
+</html>

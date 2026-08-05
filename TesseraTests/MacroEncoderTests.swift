@@ -15,6 +15,7 @@ final class MacroEncoderTests: XCTestCase {
         XCTAssertEqual(MacroEncoder.encode("\\n"), [0x0A])
         XCTAssertEqual(MacroEncoder.encode("\\t"), [0x09])
         XCTAssertEqual(MacroEncoder.encode("tab"), [0x09])
+        XCTAssertEqual(MacroEncoder.encode("shift-tab"), [0x1B, 0x5B, 0x5A])
         XCTAssertEqual(MacroEncoder.encode("p"), [0x70])
         XCTAssertEqual(MacroEncoder.encode("3 ↵"), [0x33, 0x0D])
         XCTAssertEqual(MacroEncoder.encode("yes↵"), [0x79, 0x65, 0x73, 0x0D])

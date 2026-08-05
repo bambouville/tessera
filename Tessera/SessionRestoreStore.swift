@@ -7,6 +7,18 @@ enum SessionRestorePolicy: String, CaseIterable, Codable {
     case never
 }
 
+enum SessionRestorePresentationPolicy {
+    /// Compact navigation has no multi-session restore chooser. Preserve the
+    /// stored cross-device preference, but treat `ask` as restore-on-launch
+    /// while presenting the phone shell.
+    static func effective(
+        stored: SessionRestorePolicy,
+        usesCompactShell: Bool
+    ) -> SessionRestorePolicy {
+        usesCompactShell && stored == .ask ? .always : stored
+    }
+}
+
 struct SessionRestoreSnapshot: Codable, Equatable, Identifiable {
     var id: UUID { liveSessionID }
 
@@ -14,6 +26,21 @@ struct SessionRestoreSnapshot: Codable, Equatable, Identifiable {
     let persistedHostID: UUID
     let displayName: String
     let createdAt: Date
+    let effectiveLaunchMode: HostLaunchMode?
+
+    init(
+        liveSessionID: UUID,
+        persistedHostID: UUID,
+        displayName: String,
+        createdAt: Date,
+        effectiveLaunchMode: HostLaunchMode? = nil
+    ) {
+        self.liveSessionID = liveSessionID
+        self.persistedHostID = persistedHostID
+        self.displayName = displayName
+        self.createdAt = createdAt
+        self.effectiveLaunchMode = effectiveLaunchMode
+    }
 }
 
 struct SessionRestoreDocument: Codable, Equatable {

@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tessera — Unlimited Saved Hosts IAP mock</title>
+<style>
+  /* Tessera DesignTokens.swift — dark/light, blue accent. */
+  :root {
+    color-scheme: dark;
+    --page: #181818;
+    --page-fg: #fff;
+    --page-muted: rgba(235,235,245,.60);
+    --page-dim: rgba(235,235,245,.35);
+    --page-border: rgba(255,255,255,.10);
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { min-height: 100%; }
+  body {
+    margin: 0;
+    padding: 40px 28px 80px;
+    background: var(--page);
+    color: var(--page-fg);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; }
+  .page { width: min(1440px, 100%); margin: 0 auto; }
+  .doc-title { margin: 0; font: 500 27px/1.25 var(--mono); letter-spacing: -.02em; }
+  .doc-sub { max-width: 880px; margin: 9px 0 0; color: var(--page-muted); font-size: 14px; line-height: 1.55; }
+  .doc-note { margin: 8px 0 0; color: var(--page-dim); font: 11px/1.5 var(--mono); }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 18px 26px; margin: 26px 0 8px; }
+  .control { display: grid; gap: 7px; }
+  .control-label { color: var(--page-dim); font: 600 9px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+  .seg { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--page-border); border-radius: 9px; background: #101010; }
+  .seg button {
+    min-height: 32px; padding: 0 12px; border: 0; border-radius: 6px; cursor: pointer;
+    background: transparent; color: var(--page-muted); font: 500 11px/1 var(--mono);
+  }
+  .seg button[aria-pressed="true"] { background: rgba(91,159,255,.14); color: #5B9FFF; }
+  .seg button:focus-visible { outline: 2px solid #5B9FFF; outline-offset: 2px; }
+
+  .devices { display: grid; grid-template-columns: minmax(680px, 1fr) 340px; gap: 34px; align-items: start; margin-top: 30px; }
+  .device-slot { min-width: 0; }
+  .caption { margin: 0 0 10px 2px; color: var(--page-dim); font: 10px/1.4 var(--mono); }
+  .caption b { color: var(--page-muted); font-weight: 500; }
+
+  .device {
+    --bg: #000000;
+    --sidebar: rgba(210,210,214,.18);
+    --sidebar-border: rgba(255,255,255,.06);
+    --panel: #0A0A0A;
+    --input: #141414;
+    --input-soft: #1C1C1E;
+    --fg: #FFFFFF;
+    --fg-muted: rgba(235,235,245,.60);
+    --fg-dim: rgba(235,235,245,.35);
+    --fg-faint: rgba(235,235,245,.18);
+    --accent: #5B9FFF;
+    --accent-soft: rgba(91,159,255,.14);
+    --green: #30D158;
+    --red: #FF453A;
+    --amber: #FF9F0A;
+    --border: rgba(255,255,255,.08);
+    --border-strong: rgba(255,255,255,.14);
+    position: relative;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border-strong);
+    box-shadow: 0 28px 60px rgba(0,0,0,.34), inset 0 0 0 1px rgba(255,255,255,.03);
+  }
+  body[data-theme="light"] .device {
+    --bg: #F2F2F7;
+    --sidebar: rgba(255,255,255,.74);
+    --sidebar-border: rgba(0,0,0,.08);
+    --panel: rgba(255,255,255,.78);
+    --input: rgba(255,255,255,.88);
+    --input-soft: rgba(255,255,255,.64);
+    --fg: #1A1A1A;
+    --fg-muted: rgba(0,0,0,.60);
+    --fg-dim: rgba(0,0,0,.40);
+    --fg-faint: rgba(0,0,0,.18);
+    --accent: #0060DF;
+    --accent-soft: rgba(0,96,223,.10);
+    --green: #00A63C;
+    --red: #D70015;
+    --amber: #B26B00;
+    --border: rgba(0,0,0,.08);
+    --border-strong: rgba(0,0,0,.14);
+    color-scheme: light;
+  }
+  .ipad { width: 100%; aspect-ratio: 1194/720; min-height: 430px; border-radius: 24px; }
+  .iphone { width: 340px; aspect-ratio: 393/852; border-radius: 50px; }
+  .iphone::before {
+    content: ""; position: absolute; z-index: 80; top: 12px; left: 50%; translate: -50% 0;
+    width: 104px; height: 29px; border-radius: 18px; background: #000;
+  }
+  .iphone::after {
+    content: ""; position: absolute; z-index: 80; bottom: 8px; left: 50%; translate: -50% 0;
+    width: 118px; height: 4px; border-radius: 3px; background: var(--fg); opacity: .82;
+  }
+
+  .ipad-shell { position: absolute; inset: 0; display: grid; grid-template-columns: 210px 1fr; }
+  .rail { padding: 22px 8px; border-right: 1px solid var(--border); background: var(--bg); }
+  .rail-title { margin: 2px 12px 17px; font: 500 18px/1.2 var(--mono); }
+  .nav-row {
+    display: flex; align-items: center; gap: 9px; min-height: 33px; padding: 0 11px; border-radius: 8px;
+    color: var(--fg-muted); font: 11px/1 var(--mono);
+  }
+  .nav-row .ico { width: 15px; color: var(--fg-dim); text-align: center; font-family: var(--sans); }
+  .nav-row.selected { background: var(--accent-soft); color: var(--accent); }
+  .nav-row.selected .ico { color: var(--accent); }
+  .ipad-main { position: relative; min-width: 0; background: var(--bg); overflow: hidden; }
+
+  .hosts-page { position: absolute; inset: 0; padding: 27px 34px; }
+  .page-head { display: flex; align-items: center; justify-content: space-between; }
+  .page-head h2 { margin: 0; font: 400 25px/1 var(--mono); }
+  .small-btn {
+    min-height: 34px; padding: 0 12px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--input); color: var(--fg); font: 11px/1 var(--mono);
+  }
+  .search {
+    height: 38px; margin-top: 18px; padding: 0 13px; display: flex; align-items: center; gap: 9px;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--input); color: var(--fg-dim);
+    font: 11px/1 var(--mono);
+  }
+  .section-label { margin: 24px 0 10px; color: var(--fg-dim); font: 600 9px/1 var(--mono); letter-spacing: .1em; }
+  .host-card { width: min(300px, 48%); padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+  .host-card-top { display: flex; align-items: center; gap: 9px; }
+  .host-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+  .host-name { font: 500 12px/1 var(--mono); }
+  .host-address { margin-top: 8px; color: var(--fg-muted); font: 10px/1.4 var(--mono); }
+  .chips { display: flex; gap: 6px; margin-top: 12px; }
+  .chip { padding: 4px 7px; border: 1px solid var(--border); border-radius: 5px; color: var(--fg-dim); font: 9px/1 var(--mono); }
+
+  .scrim { position: absolute; inset: 0; z-index: 20; background: rgba(0,0,0,.58); }
+  .paywall {
+    position: absolute; z-index: 30; top: 50%; left: 50%; translate: -50% -50%;
+    width: min(440px, calc(100% - 42px)); padding: 22px;
+    border: 1px solid var(--border-strong); border-radius: 14px;
+    background: color-mix(in srgb, var(--panel) 92%, transparent);
+    backdrop-filter: blur(22px); -webkit-backdrop-filter: blur(22px);
+    box-shadow: 0 24px 70px rgba(0,0,0,.48);
+  }
+  .paywall-top { display: flex; align-items: flex-start; gap: 15px; }
+  .mosaic {
+    flex: none; display: grid; grid-template-columns: repeat(3, 8px); gap: 3px; padding: 10px;
+    border: 1px solid var(--border); border-radius: 10px; background: var(--input);
+  }
+  .mosaic i { width: 8px; height: 8px; border-radius: 2px; background: var(--fg-faint); }
+  .mosaic i:nth-child(2), .mosaic i:nth-child(4), .mosaic i:nth-child(8) { background: var(--accent); }
+  .paywall h3 { margin: 1px 0 6px; font: 500 20px/1.2 var(--mono); letter-spacing: -.02em; }
+  .paywall .lede { margin: 0; color: var(--fg-muted); font-size: 12px; line-height: 1.5; }
+  .included { display: grid; gap: 7px; margin: 17px 0; padding: 13px 0; border-block: 1px solid var(--border); }
+  .included-row { display: flex; align-items: center; gap: 9px; color: var(--fg-muted); font: 10px/1.35 var(--mono); }
+  .included-row .check { color: var(--green); font-family: var(--sans); }
+  .included-row b { color: var(--fg); font-weight: 500; }
+  .purchase-btn {
+    width: 100%; min-height: 46px; border: 1px solid var(--fg); border-radius: 7px;
+    background: var(--fg); color: var(--bg); cursor: pointer; font: 600 11px/1.25 var(--mono);
+  }
+  .purchase-btn:disabled { cursor: default; opacity: .62; }
+  .paywall-actions { display: flex; align-items: center; justify-content: center; gap: 18px; margin-top: 12px; }
+  .link-btn { min-height: 34px; border: 0; background: transparent; color: var(--accent); cursor: pointer; font: 10px/1 var(--mono); }
+  .link-btn.muted { color: var(--fg-muted); }
+  .fine { margin: 9px 0 0; color: var(--fg-dim); text-align: center; font: 9px/1.5 var(--mono); }
+  .state-note { display: none; margin: 0 0 11px; padding: 9px 10px; border-radius: 7px; font: 10px/1.45 var(--mono); }
+  body[data-state="loading"] .state-note.loading,
+  body[data-state="pending"] .state-note.pending,
+  body[data-state="error"] .state-note.error { display: block; }
+  .state-note.loading { color: var(--fg-muted); background: var(--input); }
+  .state-note.pending { color: var(--amber); background: color-mix(in srgb, var(--amber) 12%, transparent); }
+  .state-note.error { color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); }
+
+  .limit-notice {
+    display: none; position: absolute; z-index: 32; top: 72px; right: 28px; width: 292px; padding: 14px;
+    border: 1px solid var(--border-strong); border-radius: 10px; background: var(--input-soft);
+    box-shadow: 0 16px 36px rgba(0,0,0,.34);
+  }
+  .limit-notice h4 { margin: 0; font: 500 12px/1.35 var(--mono); }
+  .limit-notice p { margin: 7px 0 11px; color: var(--fg-muted); font-size: 11px; line-height: 1.45; }
+  .limit-actions { display: flex; align-items: center; gap: 10px; }
+  .notice-action {
+    min-height: 36px; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--input); color: var(--fg); cursor: pointer; font: 10px/1 var(--mono);
+  }
+  .notice-action.primary { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 38%, transparent); }
+  body[data-customer="free"][data-offer="repeat"][data-screen="limit"] .limit-notice { display: block; }
+  body[data-offer="repeat"] .paywall,
+  body[data-offer="repeat"] .scrim,
+  body[data-offer="none"] .paywall,
+  body[data-offer="none"] .scrim { display: none; }
+  body:not([data-customer="free"]) .paywall,
+  body:not([data-customer="free"]) .scrim,
+  body:not([data-customer="free"]) .limit-notice { display: none; }
+
+  .settings-page { position: absolute; inset: 0; display: none; overflow: auto; padding: 27px 40px 42px; }
+  .settings-content { max-width: 560px; }
+  .settings-content h2 { margin: 0 0 22px; font: 500 20px/1 var(--mono); }
+  .plan-card { padding: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); }
+  .plan-eyebrow { color: var(--fg-dim); font: 600 9px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+  .plan-title { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; margin-top: 10px; }
+  .plan-title h3 { margin: 0; font: 500 16px/1.2 var(--mono); }
+  .plan-status { color: var(--accent); font: 600 10px/1 var(--mono); white-space: nowrap; }
+  .plan-copy { margin: 10px 0 0; color: var(--fg-muted); font-size: 12px; line-height: 1.55; }
+  .feature-list { display: grid; gap: 8px; margin: 17px 0; padding: 14px 0; border-block: 1px solid var(--border); }
+  .feature { display: flex; justify-content: space-between; gap: 16px; color: var(--fg-muted); font: 10px/1.4 var(--mono); }
+  .feature b { color: var(--fg); font-weight: 500; }
+  .feature span:last-child { color: var(--green); }
+  .legacy-box, .purchased-box { display: none; margin-top: 14px; padding: 12px; border-radius: 8px; background: var(--accent-soft); color: var(--fg-muted); font: 10px/1.5 var(--mono); }
+  body[data-customer="legacy"] .legacy-box,
+  body[data-customer="purchased"] .purchased-box { display: block; }
+  body:not([data-customer="free"]) .settings-purchase { display: none; }
+
+  body[data-screen="settings"] .hosts-page,
+  body[data-screen="settings"] .scrim,
+  body[data-screen="settings"] .paywall,
+  body[data-screen="settings"] .limit-notice { display: none; }
+  body[data-screen="settings"] .settings-page { display: block; }
+  body[data-screen="settings"] .nav-hosts { background: transparent; color: var(--fg-muted); }
+  body[data-screen="settings"] .nav-unlimited { background: var(--accent-soft); color: var(--accent); }
+  body[data-screen="limit"] .nav-unlimited { background: transparent; color: var(--fg-muted); }
+
+  .phone-screen { position: absolute; inset: 0; padding-top: 48px; background: var(--bg); }
+  .phone-nav { height: 46px; display: flex; align-items: center; padding: 0 17px; border-bottom: 1px solid var(--border); }
+  .phone-nav .back { color: var(--accent); font: 11px/1 var(--mono); }
+  .phone-nav .title { margin: 0 auto; translate: -25px 0; font: 600 12px/1 var(--mono); }
+  .phone-hosts { padding: 22px 18px; }
+  .phone-hosts h2 { margin: 0; font: 400 24px/1 var(--mono); }
+  .iphone .host-card { width: 100%; margin-top: 15px; }
+  .iphone .scrim { top: 48px; }
+  .iphone .paywall {
+    top: auto; bottom: 0; left: 0; translate: 0 0; width: 100%; padding: 22px 20px 33px;
+    border-radius: 18px 18px 0 0; border-inline: 0; border-bottom: 0;
+  }
+  .iphone .paywall h3 { font-size: 18px; }
+  .iphone .included { margin-block: 14px; }
+  .iphone .limit-notice {
+    top: auto; right: 0; bottom: 0; width: 100%; padding: 18px 20px 32px;
+    border-radius: 16px 16px 0 0; border-inline: 0; border-bottom: 0;
+  }
+  .iphone .settings-page { padding: 20px 18px 38px; }
+  .iphone .settings-content h2 { font-size: 18px; margin-bottom: 18px; }
+  .iphone .plan-title { display: grid; }
+  .iphone .feature { display: grid; gap: 3px; }
+
+  .spinner { display: none; width: 12px; height: 12px; margin-right: 7px; vertical-align: -2px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .75s linear infinite; }
+  body[data-state="loading"] .spinner, body[data-state="purchasing"] .spinner { display: inline-block; }
+  @keyframes spin { to { rotate: 360deg; } }
+
+  @media (max-width: 1100px) {
+    .devices { grid-template-columns: 1fr; }
+    .iphone { margin-inline: auto; }
+  }
+  @media (max-width: 760px) {
+    body { padding: 28px 14px 60px; }
+    .ipad { min-height: 0; aspect-ratio: 393/852; border-radius: 32px; }
+    .ipad-shell { grid-template-columns: 1fr; }
+    .ipad .rail { display: none; }
+    .ipad .paywall { bottom: 0; top: auto; left: 0; translate: 0; width: 100%; border-radius: 18px 18px 0 0; }
+    .devices { display: block; }
+    .device-slot:first-child .caption b::after { content: " (narrow preview)"; }
+    .device-slot + .device-slot { margin-top: 28px; }
+  }
+</style>
+</head>
+<body data-theme="dark" data-screen="limit" data-customer="free" data-state="ready" data-offer="first">
+<main class="page">
+  <h1 class="doc-title">Tessera · unlimited saved hosts</h1>
+  <p class="doc-sub">Paid → free transition proposal. Every terminal feature stays free on iPhone and iPad; a new free customer can remember one host, and a one-time non-consumable purchase unlocks unlimited saved hosts.</p>
+  <p class="doc-note">Mock price only — production must use StoreKit’s localized Product.displayPrice. Existing paid customers receive unlimited hosts automatically.</p>
+
+  <section class="controls" aria-label="Mock controls">
+    <div class="control">
+      <span class="control-label">screen</span>
+      <div class="seg" data-control="screen">
+        <button data-value="limit" aria-pressed="true">limit prompt</button>
+        <button data-value="settings" aria-pressed="false">settings</button>
+      </div>
+    </div>
+    <div class="control">
+      <span class="control-label">customer</span>
+      <div class="seg" data-control="customer">
+        <button data-value="free" aria-pressed="true">new free</button>
+        <button data-value="legacy" aria-pressed="false">existing paid</button>
+        <button data-value="purchased" aria-pressed="false">IAP unlocked</button>
+      </div>
+    </div>
+    <div class="control">
+      <span class="control-label">purchase state</span>
+      <div class="seg" data-control="state">
+        <button data-value="ready" aria-pressed="true">ready</button>
+        <button data-value="loading" aria-pressed="false">loading</button>
+        <button data-value="pending" aria-pressed="false">pending</button>
+        <button data-value="error" aria-pressed="false">error</button>
+      </div>
+    </div>
+    <div class="control">
+      <span class="control-label">limit encounter</span>
+      <div class="seg" data-control="offer">
+        <button data-value="first" aria-pressed="true">first</button>
+        <button data-value="repeat" aria-pressed="false">later</button>
+      </div>
+    </div>
+    <div class="control">
+      <span class="control-label">appearance</span>
+      <div class="seg" data-control="theme">
+        <button data-value="dark" aria-pressed="true">dark</button>
+        <button data-value="light" aria-pressed="false">light</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="devices">
+    <div class="device-slot">
+      <p class="caption"><b>iPad · landscape</b> — centered limit sheet / Settings detail</p>
+      <div class="device ipad">
+        <div class="ipad-shell">
+          <aside class="rail">
+            <div class="rail-title">tessera</div>
+            <div class="nav-row nav-hosts selected"><span class="ico">▦</span>hosts</div>
+            <div class="nav-row"><span class="ico">⌘</span>keys</div>
+            <div class="nav-row"><span class="ico">⇄</span>tunnels</div>
+            <div style="height:14px"></div>
+            <div class="nav-row"><span class="ico">◐</span>appearance</div>
+            <div class="nav-row"><span class="ico">↗</span>sync &amp; continuity</div>
+            <div class="nav-row"><span class="ico">⌨</span>keyboard &amp; input</div>
+            <div class="nav-row"><span class="ico">◇</span>diagnostics</div>
+            <div class="nav-row nav-unlimited"><span class="ico">∞</span>unlimited hosts</div>
+            <div class="nav-row"><span class="ico">ⓘ</span>about</div>
+          </aside>
+          <div class="ipad-main">
+            <div class="hosts-page">
+              <div class="page-head"><h2>hosts</h2><button class="small-btn new-host-trigger">＋ new host&nbsp;&nbsp;⌘N</button></div>
+              <div class="search">⌕&nbsp;&nbsp;search hosts, or type user@host to quick-connect</div>
+              <div class="section-label">ALL HOSTS</div>
+              <div class="host-card">
+                <div class="host-card-top"><span class="host-dot"></span><span class="host-name">perch</span></div>
+                <div class="host-address">dev@192.0.2.42 · mosh + tmux</div>
+                <div class="chips"><span class="chip">linux</span><span class="chip">files</span><span class="chip">primary</span></div>
+              </div>
+            </div>
+            <div class="settings-page">
+              <div class="settings-content">
+                <h2>unlimited hosts</h2>
+                <div class="plan-card">
+                  <div class="plan-eyebrow">your access</div>
+                  <div class="plan-title"><h3 data-plan-title>free · 1 saved host</h3><span class="plan-status" data-plan-status>1 of 1 saved</span></div>
+                  <p class="plan-copy" data-plan-copy>SSH, mosh, tmux, Files, forwarding, and every other Tessera feature are included. The one-time purchase changes only how many hosts Tessera remembers.</p>
+                  <div class="feature-list">
+                    <div class="feature"><b>features on every allowed host</b><span>included</span></div>
+                    <div class="feature"><b>iPhone + iPad</b><span>included</span></div>
+                    <div class="feature"><b>subscription or Tessera account</b><span>never</span></div>
+                  </div>
+                  <div class="settings-purchase">
+                    <div class="state-note loading">Checking the App Store for product and purchase status…</div>
+                    <div class="state-note pending">Waiting for purchase approval. You can keep using Tessera.</div>
+                    <div class="state-note error">The App Store could not load this purchase. Existing hosts remain available.</div>
+                    <button class="purchase-btn"><span class="spinner"></span><span data-purchase-label>unlock unlimited hosts · $14.99</span></button>
+                    <div class="paywall-actions"><button class="link-btn restore">restore purchases</button></div>
+                  </div>
+                  <div class="legacy-box">Unlimited hosts are included with your original paid Tessera purchase. Thank you for supporting the app early.</div>
+                  <div class="purchased-box">Unlimited saved hosts are active on this Apple Account and available on your iPhone and iPad.</div>
+                </div>
+              </div>
+            </div>
+            <div class="scrim"></div>
+            <div class="paywall" role="dialog" aria-modal="true" aria-labelledby="ipad-paywall-title">
+              <div class="paywall-top">
+                <div class="mosaic" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                <div><h3 id="ipad-paywall-title">save every host</h3><p class="lede">Your free host is already saved. Unlock unlimited saved hosts with one purchase — every Tessera feature stays included either way.</p></div>
+              </div>
+              <div class="included">
+                <div class="included-row"><span class="check">✓</span><span><b>Unlimited saved hosts</b> — the only paid upgrade</span></div>
+                <div class="included-row"><span class="check">✓</span><span>One purchase on your <b>iPhone and iPad</b></span></div>
+                <div class="included-row"><span class="check">✓</span><span><b>No subscription</b> and no Tessera account</span></div>
+              </div>
+              <div class="state-note loading">Checking the App Store for the localized product and price…</div>
+              <div class="state-note pending">Waiting for approval. You can close this and keep using Tessera.</div>
+              <div class="state-note error">The App Store could not complete the request. Your saved host is unchanged.</div>
+              <button class="purchase-btn"><span class="spinner"></span><span data-purchase-label>unlock unlimited hosts · $14.99</span></button>
+              <div class="paywall-actions"><button class="link-btn restore">restore purchases</button><button class="link-btn muted dismiss">not now</button></div>
+              <p class="fine">Quick Connect remains available without saving. Payment is handled by the App Store.</p>
+            </div>
+            <div class="limit-notice" role="status">
+              <h4>free Tessera remembers one host</h4>
+              <p>Your saved host is unchanged. Remove it to save a different one, or view the one-time unlimited-hosts option.</p>
+              <div class="limit-actions"><button class="notice-action primary view-offer">view unlimited hosts</button><button class="notice-action dismiss-notice">cancel</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="device-slot">
+      <p class="caption"><b>iPhone · portrait</b> — bottom sheet / compact Settings page</p>
+      <div class="device iphone">
+        <div class="phone-screen">
+          <div class="phone-nav"><span class="back">‹ settings</span><span class="title" data-phone-title>hosts</span></div>
+          <div class="phone-hosts hosts-page">
+            <div class="page-head"><h2>hosts</h2><button class="small-btn new-host-trigger">＋ new</button></div>
+            <div class="search">⌕&nbsp;&nbsp;search hosts or user@host</div>
+            <div class="host-card">
+              <div class="host-card-top"><span class="host-dot"></span><span class="host-name">perch</span></div>
+              <div class="host-address">dev@192.0.2.42 · mosh + tmux</div>
+              <div class="chips"><span class="chip">linux</span><span class="chip">files</span></div>
+            </div>
+          </div>
+          <div class="settings-page">
+            <div class="settings-content">
+              <h2>unlimited hosts</h2>
+              <div class="plan-card">
+                <div class="plan-eyebrow">your access</div>
+                <div class="plan-title"><h3 data-plan-title>free · 1 saved host</h3><span class="plan-status" data-plan-status>1 of 1 saved</span></div>
+                <p class="plan-copy" data-plan-copy>All Tessera features are included. Upgrade once only if you want Tessera to remember more hosts.</p>
+                <div class="feature-list">
+                  <div class="feature"><b>all terminal features</b><span>included</span></div>
+                  <div class="feature"><b>iPhone + iPad</b><span>included</span></div>
+                  <div class="feature"><b>subscription</b><span>never</span></div>
+                </div>
+                <div class="settings-purchase">
+                  <div class="state-note loading">Checking the App Store…</div>
+                  <div class="state-note pending">Waiting for purchase approval.</div>
+                  <div class="state-note error">Could not reach the App Store. Your host is unchanged.</div>
+                  <button class="purchase-btn"><span class="spinner"></span><span data-purchase-label>unlock unlimited hosts · $14.99</span></button>
+                  <div class="paywall-actions"><button class="link-btn restore">restore purchases</button></div>
+                </div>
+                <div class="legacy-box">Unlimited hosts are included with your original paid Tessera purchase. Thank you.</div>
+                <div class="purchased-box">Unlimited saved hosts are active on this Apple Account.</div>
+              </div>
+            </div>
+          </div>
+          <div class="scrim"></div>
+          <div class="paywall" role="dialog" aria-modal="true" aria-labelledby="phone-paywall-title">
+            <div class="paywall-top">
+              <div class="mosaic" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+              <div><h3 id="phone-paywall-title">save every host</h3><p class="lede">Your free host is saved. Unlock unlimited saved hosts with one purchase.</p></div>
+            </div>
+            <div class="included">
+              <div class="included-row"><span class="check">✓</span><span><b>Only the saved-host count changes</b></span></div>
+              <div class="included-row"><span class="check">✓</span><span>One purchase · <b>no subscription</b></span></div>
+            </div>
+            <div class="state-note loading">Checking the App Store…</div>
+            <div class="state-note pending">Waiting for approval. You may close this.</div>
+            <div class="state-note error">Could not complete the request. Your host is unchanged.</div>
+            <button class="purchase-btn"><span class="spinner"></span><span data-purchase-label>unlock unlimited hosts · $14.99</span></button>
+            <div class="paywall-actions"><button class="link-btn restore">restore purchases</button><button class="link-btn muted dismiss">not now</button></div>
+            <p class="fine">Available on iPhone and iPad through the App Store.</p>
+          </div>
+          <div class="limit-notice" role="status">
+            <h4>free Tessera remembers one host</h4>
+            <p>Remove it to save another, or view the one-time unlimited-hosts option.</p>
+            <div class="limit-actions"><button class="notice-action primary view-offer">view unlimited hosts</button><button class="notice-action dismiss-notice">cancel</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+  const body = document.body;
+  const labels = {
+    ready: "unlock unlimited hosts · $14.99",
+    loading: "checking App Store…",
+    purchasing: "confirming with App Store…",
+    pending: "purchase pending",
+    error: "try again · $14.99"
+  };
+
+  function syncControls(name, value) {
+    document.querySelectorAll(`[data-control="${name}"] button`).forEach(button => {
+      button.setAttribute("aria-pressed", String(button.dataset.value === value));
+    });
+  }
+
+  function setValue(name, value) {
+    body.dataset[name] = value;
+    syncControls(name, value);
+    if (name === "screen") {
+      document.querySelectorAll("[data-phone-title]").forEach(node => {
+        node.textContent = value === "settings" ? "settings" : "hosts";
+      });
+    }
+    render();
+  }
+
+  function render() {
+    const customer = body.dataset.customer;
+    const state = body.dataset.state;
+    const plan = customer === "legacy"
+      ? ["unlimited hosts", "included", "Unlimited hosts are included with your original paid Tessera purchase. No additional purchase is required."]
+      : customer === "purchased"
+        ? ["unlimited hosts", "active", "Your one-time Unlimited Saved Hosts purchase is active on this Apple Account."]
+        : ["free · 1 saved host", "1 of 1 saved", "SSH, mosh, tmux, Files, forwarding, and every other Tessera feature are included. The one-time purchase changes only how many hosts Tessera remembers."];
+
+    document.querySelectorAll("[data-plan-title]").forEach(node => node.textContent = plan[0]);
+    document.querySelectorAll("[data-plan-status]").forEach(node => node.textContent = plan[1]);
+    document.querySelectorAll("[data-plan-copy]").forEach(node => node.textContent = plan[2]);
+    document.querySelectorAll("[data-purchase-label]").forEach(node => node.textContent = labels[state] || labels.ready);
+    document.querySelectorAll(".purchase-btn").forEach(button => {
+      button.disabled = state === "loading" || state === "purchasing" || state === "pending";
+    });
+  }
+
+  document.querySelectorAll("[data-control] button").forEach(button => {
+    button.addEventListener("click", () => setValue(button.parentElement.dataset.control, button.dataset.value));
+  });
+
+  document.querySelectorAll(".purchase-btn").forEach(button => {
+    button.addEventListener("click", () => {
+      if (body.dataset.state === "error") {
+        setValue("state", "ready");
+        return;
+      }
+      setValue("state", "purchasing");
+      window.setTimeout(() => {
+        if (body.dataset.state === "purchasing") setValue("customer", "purchased");
+      }, 1100);
+    });
+  });
+
+  document.querySelectorAll(".restore").forEach(button => {
+    button.addEventListener("click", () => {
+      setValue("state", "loading");
+      window.setTimeout(() => {
+        if (body.dataset.state === "loading") setValue("customer", "purchased");
+      }, 900);
+    });
+  });
+
+  document.querySelectorAll(".dismiss").forEach(button => {
+    button.addEventListener("click", () => setValue("offer", "none"));
+  });
+
+  document.querySelectorAll(".view-offer").forEach(button => {
+    button.addEventListener("click", () => setValue("offer", "first"));
+  });
+
+  document.querySelectorAll(".dismiss-notice").forEach(button => {
+    button.addEventListener("click", () => setValue("offer", "none"));
+  });
+
+  document.querySelectorAll(".new-host-trigger").forEach(button => {
+    button.addEventListener("click", () => {
+      if (body.dataset.customer === "free") setValue("offer", body.dataset.offer === "first" ? "first" : "repeat");
+    });
+  });
+
+  render();
+</script>
+</body>
+</html>

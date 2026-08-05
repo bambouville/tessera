@@ -20,9 +20,15 @@ public enum SwipeDirection: String, Codable, CaseIterable, Hashable {
 /// corresponding petal is hidden in the radial.
 public struct SwipePadBinding: Codable, Equatable, Hashable {
     public var macro: String
+    /// Optional human-readable petal label. nil falls back to the macro text
+    /// itself — never to a direction-derived name, so a custom macro can no
+    /// longer masquerade as "deny". Optional keeps stored JSON from older
+    /// builds decodable unchanged.
+    public var label: String?
 
-    public init(macro: String) {
+    public init(macro: String, label: String? = nil) {
         self.macro = macro
+        self.label = label
     }
 
     public var isBound: Bool { !macro.isEmpty }
@@ -121,7 +127,13 @@ public extension SwipePadProfile {
         UUID(uuidString: "B17710C0-0000-0000-0000-000000000003")!,  // aider, retired 2026-05-16
     ]
 
-    /// → 1↵ (approve), ← 2↵ (deny), ↑ 3↵ (always allow this session).
+    /// → 1↵ (approve), ← 3↵ (deny), ↑ 2↵ (always allow).
+    /// Claude's current permission menu is `1. Yes / 2. Yes, and always
+    /// allow… / 3. No` — deny must send 3, always must send 2. (The menu was
+    /// `1. Yes / 2. No / 3. Yes, don't ask again` when these bindings first
+    /// shipped; the drift test in SwipePadPetalLayoutTests pins label↔macro
+    /// against the parser's fixture so a future reorder can't silently turn
+    /// the deny gesture into a consent grant again.)
     /// Match expression catches both the semver-style `process.title` Claude
     /// Code sets at runtime (e.g. `2.1.143`) and npm wrapper argv names
     /// (`claude`, `claude-code`) that show up in plain-SSH `ps` snapshots.
@@ -131,9 +143,9 @@ public extension SwipePadProfile {
             name: "claude code",
             matchProcess: "regex:^(\\d+\\.\\d+\\.\\d+|claude(?:-code)?)$",
             bindings: [
-                .right: SwipePadBinding(macro: "1↵"),
-                .left:  SwipePadBinding(macro: "2↵"),
-                .up:    SwipePadBinding(macro: "3↵"),
+                .right: SwipePadBinding(macro: "1↵", label: "approve"),
+                .left:  SwipePadBinding(macro: "3↵", label: "deny"),
+                .up:    SwipePadBinding(macro: "2↵", label: "always"),
             ],
             isBuiltIn: true,
             agentDetection: AgentDetectionRules(
@@ -166,9 +178,9 @@ public extension SwipePadProfile {
             name: "codex cli",
             matchProcess: "regex:^codex",
             bindings: [
-                .right: SwipePadBinding(macro: "y"),
-                .left:  SwipePadBinding(macro: "esc"),
-                .up:    SwipePadBinding(macro: "p"),
+                .right: SwipePadBinding(macro: "y", label: "approve"),
+                .left:  SwipePadBinding(macro: "esc", label: "deny"),
+                .up:    SwipePadBinding(macro: "p", label: "always"),
             ],
             isBuiltIn: true,
             agentDetection: AgentDetectionRules(

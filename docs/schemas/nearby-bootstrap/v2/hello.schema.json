@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tessera://schemas/nearby-bootstrap/v2/hello.schema.json",
+  "title": "NearbyHandshakeHello v2",
+  "description": "Cleartext handshake hello. Lenient decoder: unknown keys are ignored, which is how the optional advisory fields stay wire-compatible within v2. The 'version' key name/type is the permanent probe contract. Frozen for protocol version 2.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["version", "role", "ephemeralPublicKey"],
+  "properties": {
+    "version": { "type": "integer", "const": 2 },
+    "role": { "type": "string", "enum": ["origin", "recipient"] },
+    "ephemeralPublicKey": { "type": "string", "description": "base64, 32-byte X25519 public key" },
+    "displayName": { "type": "string", "description": "Sanitized self-asserted device label; never a trust input" },
+    "appVersion": { "type": "string", "description": "Advisory: sender's CFBundleShortVersionString; sanitize before display" },
+    "supportedVersions": { "type": "array", "items": { "type": "integer" }, "description": "Advisory: ascending protocol versions the sender can complete" }
+  }
+}

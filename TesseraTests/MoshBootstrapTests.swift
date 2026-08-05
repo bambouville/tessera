@@ -1,4 +1,5 @@
 import XCTest
+import TmuxControl
 @testable import Tessera
 
 final class MoshBootstrapTests: XCTestCase {
@@ -18,6 +19,203 @@ final class MoshBootstrapTests: XCTestCase {
             command,
             "mosh-server new -- tmux -u new-session -A -s tessera-auto1234 \\; set-option -t tessera-auto1234 status off"
         )
+    }
+
+    @MainActor
+    func test_bootstrapCommand_visibleMoshTmuxClientCanIgnoreSize() {
+        let host = Host(
+            address: "example.test",
+            user: "test",
+            transport: .mosh,
+            launchMode: .autoTmux
+        )
+
+        let command = MoshBootstrap.bootstrapCommand(
+            for: host,
+            visibleTmuxClientIgnoresSize: true
+        ) { _ in
+            "tessera-auto1234"
+        }
+
+        XCTAssertTrue(command.hasPrefix("mosh-server new -- sh -lc "))
+        XCTAssertTrue(command.contains("tmux -V 2>/dev/null"))
+        XCTAssertTrue(command.contains("new-session -A -f ignore-size"))
+        XCTAssertTrue(command.contains("else exec tmux -u new-session -A"))
+        XCTAssertEqual(
+            TmuxControlChannel.attachCommand(sessionName: "tessera-auto1234"),
+            "tmux -CC attach -t tessera-auto1234"
+        )
+        let sideChannelCommand = TmuxControlChannel.attachCommand(
+            sessionName: "tessera-auto1234",
+            preserveTmuxGeometry: true
+        )
+        XCTAssertTrue(sideChannelCommand.contains("tmux -V 2>/dev/null"))
+        XCTAssertTrue(sideChannelCommand.contains(
+            "exec tmux -CC attach -f ignore-size -t tessera-auto1234"
+        ))
+        XCTAssertTrue(sideChannelCommand.contains(
+            "else exec tmux -CC attach -t tessera-auto1234"
+        ))
+    }
+
+    func test_bootstrapCommand_tagsVisibleTmuxClientForSafeAutoReclaim() {
+        let host = Host(
+            address: "example.test",
+            user: "test",
+            transport: .mosh,
+            launchMode: .autoTmux
+        )
+        let option = TmuxController.gridAuthorityVisibleClientOption(
+            identityID: "DEVICE 123"
+        )
+
+        let command = MoshBootstrap.bootstrapCommand(
+            for: host,
+            visibleTmuxClientIgnoresSize: true,
+            gridAuthorityDeviceID: "DEVICE 123"
+        ) { _ in
+            "tessera-auto1234"
+        }
+
+        XCTAssertEqual(option, "@tessera-visible-DEVICE-123")
+        XCTAssertTrue(command.contains(option), command)
+        XCTAssertTrue(
+            command.contains("#{client_name}|#{client_pid}|#{client_created}"),
+            command
+        )
+
+        let preservingNewSession = MoshBootstrap.bootstrapCommand(
+            for: host,
+            preserveTmuxGeometry: true,
+            gridAuthorityDeviceID: "DEVICE 123"
+        ) { _ in
+            "tessera-auto1234"
+        }
+        XCTAssertTrue(preservingNewSession.contains(option), preservingNewSession)
+        XCTAssertTrue(
+            preservingNewSession.contains("set-option -F"),
+            preservingNewSession
+        )
+
+        let preservingExistingSession = MoshBootstrap.bootstrapCommand(
+            for: host,
+            preserveTmuxGeometry: true,
+            preservedTmuxGeometry: MoshBootstrapGeometry(
+                sessionID: "$7",
+                sessionCreated: 1_721_234_567,
+                windowID: "@11",
+                cols: 132,
+                rows: 44
+            ),
+            gridAuthorityDeviceID: "DEVICE 123"
+        )
+        XCTAssertTrue(
+            preservingExistingSession.contains(option),
+            preservingExistingSession
+        )
+        XCTAssertTrue(
+            preservingExistingSession.contains("attach-session -f ignore-size"),
+            preservingExistingSession
+        )
+    }
+
+    func test_bootstrapCommand_geometryNeutralTmuxPreservesOnlyExistingSession() {
+        let host = Host(
+            address: "example.com",
+            user: "alice",
+            launchMode: .autoTmux
+        )
+
+        let command = MoshBootstrap.bootstrapCommand(
+            for: host,
+            preserveTmuxGeometry: true
+        ) { _ in
+            "tessera-auto1234"
+        }
+
+        XCTAssertFalse(command.contains("stty cols"))
+        XCTAssertTrue(command.contains("then exit 75"))
+        XCTAssertTrue(command.contains(
+            "else exec tmux -u new-session -s '\\''tessera-auto1234'\\''"
+        ))
+        XCTAssertTrue(command.contains(
+            "@tessera-size-owner '\\''#{client_name}'\\''"
+        ))
+    }
+
+    func test_bootstrapCommand_geometryNeutralExistingSessionWaitsForVerifiedMoshPTY() {
+        let host = Host(
+            address: "example.com",
+            user: "alice",
+            launchMode: .pinnedTmux,
+            tmuxSessionName: "shared"
+        )
+
+        let command = MoshBootstrap.bootstrapCommand(
+            for: host,
+            preserveTmuxGeometry: true,
+            preservedTmuxGeometry: MoshBootstrapGeometry(
+                sessionID: "$7",
+                sessionCreated: 1_721_234_567,
+                windowID: "@11",
+                cols: 132,
+                rows: 44
+            )
+        )
+
+        XCTAssertFalse(command.contains("stty cols"))
+        XCTAssertTrue(command.contains("stty size 2>/dev/null"))
+        XCTAssertTrue(command.contains("[ \"$1\" = \"44\" ]"))
+        XCTAssertTrue(command.contains("[ \"$2\" = \"132\" ]"))
+        XCTAssertTrue(command.contains("[ \"$attempts\" -lt 200 ]"))
+        XCTAssertTrue(command.contains("matched=1"))
+        XCTAssertTrue(command.contains("[ \"$matched\" = 1 ]"))
+        XCTAssertTrue(command.contains("exit 77"))
+        XCTAssertTrue(command.contains("attach-session -f ignore-size -t"))
+        XCTAssertTrue(command.contains("$7,1721234567,@11,132,44"))
+        XCTAssertTrue(command.contains("attach-session -f ignore-size"))
+        XCTAssertTrue(command.contains("else exec tmux -u attach-session"))
+        XCTAssertTrue(command.contains("@tessera-size-owner"))
+        XCTAssertFalse(command.contains("refresh-client -C"))
+    }
+
+    func test_parsePreservedTmuxGeometryProbe() throws {
+        XCTAssertEqual(
+            try MoshBootstrap.parsePreservedTmuxGeometryProbe(
+                "shell noise\ntessera-geometry:$2,1721234567,@4,120,40\n"
+            ),
+            MoshBootstrapGeometry(
+                sessionID: "$2",
+                sessionCreated: 1_721_234_567,
+                windowID: "@4",
+                cols: 120,
+                rows: 40
+            )
+        )
+        XCTAssertNil(try MoshBootstrap.parsePreservedTmuxGeometryProbe(
+            "noise without newline before marker tessera-geometry:missing\n"
+        ))
+        XCTAssertThrowsError(
+            try MoshBootstrap.parsePreservedTmuxGeometryProbe(
+                "tessera-geometry:$2,1721234567,@4,0,40\n"
+            )
+        )
+        XCTAssertThrowsError(
+            try MoshBootstrap.parsePreservedTmuxGeometryProbe("not-a-probe\n")
+        )
+    }
+
+    @MainActor
+    func test_moshSessionPromotesCededGridIntoDurableRemoteHold() {
+        let session = MoshSession(
+            host: Host(address: "example.com", user: "alice"),
+            preserveTmuxGeometry: true
+        )
+
+        XCTAssertNil(session.preservedRemoteTmuxSize)
+        session.preserveRemoteTmuxSizeAfterCede(cols: 132, rows: 44)
+        XCTAssertEqual(session.preservedRemoteTmuxSize?.cols, 132)
+        XCTAssertEqual(session.preservedRemoteTmuxSize?.rows, 44)
     }
 
     func test_bootstrapCommand_pinnedTmuxUsesTrimmedPinnedName() {
@@ -345,7 +543,7 @@ final class PrivateKeyAuditMoshCredentialLifetimeTests: XCTestCase {
             host: "127.0.0.1",
             udpPort: 60_004,
             base64Key: "qiXpjXIk6M8/nWtBn9s6rQ",
-            onOutput: { _ in },
+            onOutput: { _, _ in },
             onConnected: {},
             onDisconnected: {},
             onFailed: { _ in },

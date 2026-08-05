@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tessera://schemas/nearby-bootstrap/v2/import-acceptance.schema.json",
+  "title": "BootstrapImportAcceptance v2 (importAcceptance payload)",
+  "description": "Payload of encrypted-envelope kind 'importAcceptance'. manifestHash = SHA-256 over the canonical manifest encoding (JSONEncoder with .sortedKeys and .withoutEscapingSlashes) - byte-stable canonical re-encoding is part of the frozen contract. Lenient decoder. Frozen for protocol version 2.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["manifestHash", "acceptedHostIDs"],
+  "properties": {
+    "manifestHash": { "type": "string", "description": "base64, SHA-256 of the canonical manifest bytes" },
+    "acceptedHostIDs": { "type": "array", "items": { "type": "string", "format": "uuid" } }
+  }
+}

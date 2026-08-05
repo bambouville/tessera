@@ -1,23 +1,73 @@
 import Foundation
+import Observation
+import TmuxControl
+
+struct CommandPaletteNotice: Equatable {
+    let title: String
+    let message: String
+    let actionLabel: String?
+}
 
 enum CommandPaletteCommit: Equatable {
     case agent(AgentInstanceID)
+    case home
+    case pane(sessionID: UUID, windowID: WindowId, paneID: PaneId)
     case session(UUID)
+    case window(sessionID: UUID, windowID: WindowId)
+}
+
+enum CommandPaletteTmuxClose: Equatable {
+    case pane(sessionID: UUID, windowID: WindowId, paneID: PaneId)
+    case window(sessionID: UUID, windowID: WindowId)
+}
+
+enum CommandPaletteTmuxMutation: Equatable {
+    case split(
+        sessionID: UUID,
+        paneID: PaneId,
+        axis: PaneSplitAxis
+    )
+    case rename(
+        sessionID: UUID,
+        windowID: WindowId,
+        name: String
+    )
+}
+
+struct CommandPaletteTmuxPane: Identifiable, Equatable {
+    let id: PaneId
+    let title: String
+    let command: String?
+}
+
+struct CommandPaletteTmuxWindow: Identifiable, Equatable {
+    let id: WindowId
+    let title: String
+    let panes: [CommandPaletteTmuxPane]
 }
 
 enum CommandPaletteEntry: Identifiable {
     enum ID: Hashable {
         case agent(AgentInstanceID)
+        case home
+        case pane(WindowId, PaneId)
         case session(UUID)
+        case window(WindowId)
     }
 
     case agent(AgentInstance)
+    case home
+    case pane(window: CommandPaletteTmuxWindow, pane: CommandPaletteTmuxPane)
     case session(LiveSession)
+    case window(CommandPaletteTmuxWindow)
 
     var id: ID {
         switch self {
         case .agent(let agent): return .agent(agent.id)
+        case .home: return .home
+        case .pane(let window, let pane): return .pane(window.id, pane.id)
         case .session(let session): return .session(session.id)
+        case .window(let window): return .window(window.id)
         }
     }
 }
@@ -27,8 +77,8 @@ enum CommandPaletteEntry: Identifiable {
 ///
 /// The palette filters snapshots of active agents and sessions by a substring
 /// query, lists MRU sessions before urgency-ranked agents, and tracks which
-/// unified result is highlighted. `@` scopes to agents. It remains a pure
-/// navigation surface: the caller performs the pane/session jump.
+/// unified result is highlighted. `@` scopes to agents. The caller performs
+/// navigation and any explicitly requested tmux mutation.
 @MainActor
 @Observable
 final class CommandPalette {
@@ -51,6 +101,23 @@ final class CommandPalette {
     /// window name). Keyed by session id. Looked up during filter +
     /// rendering — if absent, only the LiveSession fields are matched.
     private(set) var paneTitles: [UUID: String] = [:]
+    private(set) var tmuxWindows: [CommandPaletteTmuxWindow] = []
+    private(set) var currentSessionID: UUID?
+    private(set) var activeWindowID: WindowId?
+    private(set) var activePaneID: PaneId?
+    private(set) var includesHome = false
+    private(set) var allowsTmuxMutation = true
+    /// Optional compact-terminal warning rendered above every navigation
+    /// result. It is deliberately outside `entries`: switching targets keeps
+    /// its established keyboard order, while touch users get the requested
+    /// first-line action without a warning row masquerading as navigation.
+    private(set) var notice: CommandPaletteNotice?
+    @ObservationIgnored private var noticeAction: (() -> Void)?
+
+    var visibleNotice: CommandPaletteNotice? {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? notice : nil
+    }
 
     /// Bumped each time `open()` is called so the SwiftUI view layer
     /// can `.onChange(of:)` the token and re-focus the input even when
@@ -115,10 +182,45 @@ final class CommandPalette {
         }
     }
 
+    var homeResults: [CommandPaletteEntry] {
+        guard includesHome else { return [] }
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard needle.isEmpty || "hosts home".contains(needle) else { return [] }
+        return [.home]
+    }
+
+    var tmuxResults: [CommandPaletteEntry] {
+        guard currentSessionID != nil else { return [] }
+        let raw = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.hasPrefix("@") else { return [] }
+        let needle = raw.lowercased()
+
+        return tmuxWindows.flatMap { window -> [CommandPaletteEntry] in
+            let windowMatches = needle.isEmpty || window.title.lowercased().contains(needle)
+            let matchingPanes = window.panes.filter { pane in
+                windowMatches
+                    || pane.title.lowercased().contains(needle)
+                    || (pane.command?.lowercased().contains(needle) ?? false)
+                    || pane.id.description.lowercased().contains(needle)
+            }
+            guard windowMatches || !matchingPanes.isEmpty else { return [] }
+
+            var entries: [CommandPaletteEntry] = [.window(window)]
+            if window.panes.count > 1 {
+                entries.append(contentsOf: matchingPanes.map {
+                    .pane(window: window, pane: $0)
+                })
+            }
+            return entries
+        }
+    }
+
     /// Unified keyboard-navigation order: existing MRU-ordered sessions first,
     /// followed by agents ranked by urgency. The palette remains navigation-only.
     var entries: [CommandPaletteEntry] {
-        results.map(CommandPaletteEntry.session)
+        homeResults
+            + tmuxResults
+            + results.map(CommandPaletteEntry.session)
             + agentResults.map(CommandPaletteEntry.agent)
     }
 
@@ -131,12 +233,28 @@ final class CommandPalette {
         sessions: [LiveSession],
         agents: [AgentInstance] = [],
         paneTitles: [UUID: String] = [:],
-        lastTouched: [UUID: Date] = [:]
+        lastTouched: [UUID: Date] = [:],
+        tmuxWindows: [CommandPaletteTmuxWindow] = [],
+        currentSessionID: UUID? = nil,
+        activeWindowID: WindowId? = nil,
+        activePaneID: PaneId? = nil,
+        includesHome: Bool = false,
+        allowsTmuxMutation: Bool = true,
+        notice: CommandPaletteNotice? = nil,
+        onNoticeAction: (() -> Void)? = nil
     ) {
         self.sessions = sessions
         self.agents = agents
         self.paneTitles = paneTitles
         self.lastTouched = lastTouched
+        self.tmuxWindows = tmuxWindows
+        self.currentSessionID = currentSessionID
+        self.activeWindowID = activeWindowID
+        self.activePaneID = activePaneID
+        self.includesHome = includesHome
+        self.allowsTmuxMutation = allowsTmuxMutation
+        self.notice = notice
+        self.noticeAction = onNoticeAction
         self.query = ""
         self.selectedIndex = 0
         self.isOpen = true
@@ -145,6 +263,14 @@ final class CommandPalette {
 
     func close() {
         isOpen = false
+        notice = nil
+        noticeAction = nil
+    }
+
+    func performNoticeAction() {
+        let action = noticeAction
+        close()
+        action?()
     }
 
     /// Refresh the captured snapshot mid-open. Used by the SwiftUI host
@@ -154,13 +280,23 @@ final class CommandPalette {
         sessions: [LiveSession],
         agents: [AgentInstance] = [],
         paneTitles: [UUID: String],
-        lastTouched: [UUID: Date]
+        lastTouched: [UUID: Date],
+        tmuxWindows: [CommandPaletteTmuxWindow]? = nil,
+        currentSessionID: UUID? = nil,
+        activeWindowID: WindowId? = nil,
+        activePaneID: PaneId? = nil
     ) {
         guard isOpen else { return }
         self.sessions = sessions
         self.agents = agents
         self.paneTitles = paneTitles
         self.lastTouched = lastTouched
+        if let tmuxWindows {
+            self.tmuxWindows = tmuxWindows
+            self.currentSessionID = currentSessionID
+            self.activeWindowID = activeWindowID
+            self.activePaneID = activePaneID
+        }
         clampSelectionToResults()
     }
 
@@ -191,7 +327,18 @@ final class CommandPalette {
               selectedIndex < current.count else { return nil }
         switch current[selectedIndex] {
         case .agent(let agent): return .agent(agent.id)
+        case .home: return .home
+        case .pane(let window, let pane):
+            guard let currentSessionID else { return nil }
+            return .pane(
+                sessionID: currentSessionID,
+                windowID: window.id,
+                paneID: pane.id
+            )
         case .session(let session): return .session(session.id)
+        case .window(let window):
+            guard let currentSessionID else { return nil }
+            return .window(sessionID: currentSessionID, windowID: window.id)
         }
     }
 

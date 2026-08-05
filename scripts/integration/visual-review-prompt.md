@@ -1,15 +1,19 @@
 # Tessera aggregate visual regression review
 
-You are the visual reviewer for a deterministic iPad terminal test run. Review
+You are the visual reviewer for a deterministic simulator test run. Review
 every case in the attached aggregate manifest and every attached image. The
 images are extracted frames, crops, or contact sheets from the same run. Video
 and metric artifacts that are not directly attached are represented in the
 manifest with paths, hashes, dimensions, timing summaries, and deterministic
 pre-check results.
 
-All attached screenshots and video-derived images are physically normalized to
-landscape pixels before attachment. Do not infer portrait orientation from the
-original simulator framebuffer convention.
+Unless a case says otherwise, screenshots and video-derived images use the
+landscape iPad fixture and are physically normalized to landscape pixels before
+attachment. P1-iphone-keyboard includes an unrotated portrait iPhone image plus
+a landscape iPad image of the same live tmux session; judge the phone geometry
+and software-keyboard layout in portrait, then the expanded grid on iPad. Do not
+infer portrait orientation for any other case from the original iPad simulator
+framebuffer convention.
 
 For F12 specifically, the implementation intentionally replaces suppressed
 Liquid Glass with a near-black opaque backstop over a dark terminal. That black

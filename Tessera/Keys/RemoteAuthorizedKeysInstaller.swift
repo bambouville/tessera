@@ -3,11 +3,109 @@ import Citadel
 import NIOCore
 
 enum RemoteAuthorizedKeysInstaller {
+    struct LedgerContext {
+        let metadata: KeySecurityMetadataStore
+        let keyID: UUID
+        let hostID: UUID
+        let hostLabel: String
+        let endpoint: String
+        /// Exact route authorized for this mutation. An omitted value is
+        /// retained only for legacy/manual call sites; tracked revocation
+        /// fails closed when it cannot prove a match.
+        let routeIdentity: String?
+        /// Full consent-time routing and credential semantics for sync grants.
+        /// Manual installs have no cross-device capability and leave this nil.
+        let authorizationSnapshot: SyncDeviceAccessGrantEngine.GrantSnapshot?
+        let peerDeviceName: String?
+        let direction: KeySecurityRecord.RemoteAccessDirection
+        let flow: KeySecurityRecord.RemoteAccessFlow
+        let publicKeyFingerprint: String?
+        let authorizedKeysLine: String
+        private let preserveExistingAuditFields: Bool
+
+        init(
+            metadata: KeySecurityMetadataStore = KeySecurityMetadataStore(),
+            keyID: UUID,
+            hostID: UUID,
+            hostLabel: String,
+            endpoint: String,
+            routeIdentity: String? = nil,
+            authorizationSnapshot: SyncDeviceAccessGrantEngine.GrantSnapshot? = nil,
+            peerDeviceName: String? = nil,
+            direction: KeySecurityRecord.RemoteAccessDirection = .localInstallation,
+            flow: KeySecurityRecord.RemoteAccessFlow = .manual,
+            publicKeyFingerprint: String? = nil,
+            authorizedKeysLine: String,
+            preserveExistingAuditFields: Bool = false
+        ) {
+            self.metadata = metadata
+            self.keyID = keyID
+            self.hostID = hostID
+            self.hostLabel = hostLabel
+            self.endpoint = endpoint
+            self.routeIdentity = routeIdentity
+            self.authorizationSnapshot = authorizationSnapshot
+            self.peerDeviceName = peerDeviceName
+            self.direction = direction
+            self.flow = flow
+            self.publicKeyFingerprint = publicKeyFingerprint
+            self.authorizedKeysLine = authorizedKeysLine
+            self.preserveExistingAuditFields = preserveExistingAuditFields
+        }
+
+        func record(_ state: KeySecurityRecord.RemoteInstallationVerificationState) {
+            if preserveExistingAuditFields {
+                metadata.markRemoteInstallationVerificationState(
+                    state,
+                    keyID: keyID,
+                    hostID: hostID,
+                    hostLabel: hostLabel,
+                    endpoint: endpoint,
+                    routeIdentity: routeIdentity,
+                    publicKeyFingerprint: publicKeyFingerprint,
+                    authorizedKeysLine: authorizedKeysLine
+                )
+                return
+            }
+            metadata.recordRemoteInstallation(
+                keyID: keyID,
+                hostID: hostID,
+                hostLabel: hostLabel,
+                endpoint: endpoint,
+                routeIdentity: routeIdentity,
+                peerDeviceName: peerDeviceName,
+                direction: direction,
+                flow: flow,
+                verificationState: state,
+                publicKeyFingerprint: publicKeyFingerprint,
+                authorizedKeysLine: authorizedKeysLine
+            )
+        }
+
+        func markUncertainPreservingAuditFields() {
+            metadata.markRemoteInstallationUncertain(
+                keyID: keyID,
+                hostID: hostID,
+                hostLabel: hostLabel,
+                endpoint: endpoint,
+                routeIdentity: routeIdentity,
+                publicKeyFingerprint: publicKeyFingerprint,
+                authorizedKeysLine: authorizedKeysLine
+            )
+        }
+
+        func removeAfterVerifiedRevocation() {
+            metadata.removeRemoteInstallation(keyID: keyID, hostID: hostID)
+        }
+    }
+
     enum InstallError: LocalizedError, Equatable, Sendable {
         case authentication(String)
         case network(String)
         case hostKeyRejected
         case selfInstall
+        case targetKeyRequired
+        case routeChanged
         case invalidPublicKey
         case remoteCommandFailed(stderr: String)
         case verificationFailed(stderr: String)
@@ -24,6 +122,10 @@ enum RemoteAuthorizedKeysInstaller {
                 return "Host key was not trusted. Connect once first to review it, then retry."
             case .selfInstall:
                 return "This host uses this key for authentication. Choose a host identity that uses a different key or password."
+            case .targetKeyRequired:
+                return "This host is no longer configured to authenticate with the key being revoked."
+            case .routeChanged:
+                return "This host or jump route changed after authorization. Review the saved route before changing remote access."
             case .invalidPublicKey:
                 return "The stored public key is malformed and cannot be revoked safely."
             case .remoteCommandFailed(let stderr):
@@ -54,7 +156,8 @@ enum RemoteAuthorizedKeysInstaller {
         keyID: UUID,
         on host: Host,
         requireBiometric: Bool = false,
-        isSecureEnclave: Bool = false
+        isSecureEnclave: Bool = false,
+        ledgerContext: LedgerContext? = nil
     ) async throws {
         DiagnosticLogStore.appendKeys(
             "install begin key=\(shortID(keyID)) host=\(shortID(host.id)) authKind=\(authKindDescription(for: host, isSecureEnclave: isSecureEnclave)) biometricRequired=\(requireBiometric)"
@@ -70,7 +173,8 @@ enum RemoteAuthorizedKeysInstaller {
             on: host,
             targetKeyID: keyID,
             requireBiometric: requireBiometric,
-            isSecureEnclave: isSecureEnclave
+            isSecureEnclave: isSecureEnclave,
+            ledgerContext: ledgerContext
         )
     }
 
@@ -81,13 +185,74 @@ enum RemoteAuthorizedKeysInstaller {
         keyID: UUID,
         on host: Host,
         requireBiometric: Bool = false,
-        isSecureEnclave: Bool = false
+        isSecureEnclave: Bool = false,
+        ledgerContext: LedgerContext? = nil
     ) async throws {
-        try validateCanInstall(keyID: keyID, on: host)
+        try await revoke(
+            line: authorizedKeysLine,
+            keyID: keyID,
+            on: host,
+            requireBiometric: requireBiometric,
+            isSecureEnclave: isSecureEnclave,
+            ledgerContext: ledgerContext,
+            authenticationMode: .alternateCredential
+        )
+    }
+
+    /// Explicitly authenticates with the key being revoked, then removes and
+    /// verifies that same public key over the already-established SSH client.
+    /// This is safe for requester-side Device Access cleanup: authentication
+    /// finishes before authorized_keys changes, and no reconnect is attempted.
+    static func revokeUsingTargetKey(
+        line authorizedKeysLine: String,
+        keyID: UUID,
+        on host: Host,
+        requireBiometric: Bool = false,
+        isSecureEnclave: Bool = false,
+        ledgerContext: LedgerContext? = nil
+    ) async throws {
+        try await revoke(
+            line: authorizedKeysLine,
+            keyID: keyID,
+            on: host,
+            requireBiometric: requireBiometric,
+            isSecureEnclave: isSecureEnclave,
+            ledgerContext: ledgerContext,
+            authenticationMode: .targetKey
+        )
+    }
+
+    private enum RevocationAuthenticationMode {
+        case alternateCredential
+        case targetKey
+    }
+
+    private static func revoke(
+        line authorizedKeysLine: String,
+        keyID: UUID,
+        on host: Host,
+        requireBiometric: Bool,
+        isSecureEnclave: Bool,
+        ledgerContext: LedgerContext?,
+        authenticationMode: RevocationAuthenticationMode
+    ) async throws {
+        let tracking = ledgerContext ?? defaultLedgerContext(
+            line: authorizedKeysLine,
+            keyID: keyID,
+            host: host
+        )
+        try validateRevocationAuthentication(
+            authenticationMode,
+            keyID: keyID,
+            on: host
+        )
+        try validateRevocationRoute(tracking.routeIdentity, on: host)
 
         let chain: EstablishedSSHChain
         do {
-            await SSHAuthenticationPolicyStore.shared.registerPersistedHost(host.id)
+            if await SSHAuthenticationPolicyStore.shared.hasCurrentPolicyProvider {
+                await SSHAuthenticationPolicyStore.shared.registerPersistedHost(host.id)
+            }
             chain = try await withPendingSSHConnectionAttempt {
                 let chain = try await establishSSHChain(
                     for: host,
@@ -96,10 +261,19 @@ enum RemoteAuthorizedKeysInstaller {
                     hostKeyPrompt: nil
                 )
                 // The initial UI Host is only a snapshot. The credential that
-                // authenticated this socket must still be an alternate after
-                // live policy resolution; nothing has been written yet.
+                // authenticated this socket must still match the requested
+                // revocation mode after live policy resolution; nothing has
+                // been written yet.
                 do {
-                    try validateCanInstall(keyID: keyID, on: chain.resolvedHost)
+                    try validateRevocationAuthentication(
+                        authenticationMode,
+                        keyID: keyID,
+                        on: chain.resolvedHost
+                    )
+                    try validateRevocationRoute(
+                        tracking.routeIdentity,
+                        on: chain.resolvedHost
+                    )
                 } catch {
                     await chain.closeAll()
                     throw error
@@ -115,14 +289,20 @@ enum RemoteAuthorizedKeysInstaller {
 
         do {
             try Task.checkCancellation()
+            let revokeCommand = try makeRevokeCommand(line: authorizedKeysLine)
+            // This durable downgrade occurs immediately before the first
+            // remote mutation. A crash after this point leaves an honest
+            // uncertain placement for manual retry/review.
+            tracking.markUncertainPreservingAuditFields()
             let output = try await execute(
-                try makeRevokeCommand(line: authorizedKeysLine),
+                revokeCommand,
                 on: client
             )
             await chain.closeAll()
             guard output.contains(revocationMarker) else {
                 throw InstallError.verificationFailed(stderr: output)
             }
+            tracking.removeAfterVerifiedRevocation()
         } catch is CancellationError {
             await chain.closeAll()
             throw CancellationError()
@@ -142,13 +322,22 @@ enum RemoteAuthorizedKeysInstaller {
         on host: Host,
         targetKeyID: UUID,
         requireBiometric: Bool = false,
-        isSecureEnclave: Bool = false
+        isSecureEnclave: Bool = false,
+        ledgerContext: LedgerContext? = nil
     ) async throws {
         let startedAt = Date()
+        let tracking = ledgerContext ?? defaultLedgerContext(
+            line: authorizedKeysLine,
+            keyID: targetKeyID,
+            host: host
+        )
+        try validateInstallationAuthorization(tracking, on: host)
         let chain: EstablishedSSHChain
         do {
             DiagnosticLogStore.appendKeys("install step=auth-resolve host=\(shortID(host.id))")
-            await SSHAuthenticationPolicyStore.shared.registerPersistedHost(host.id)
+            if await SSHAuthenticationPolicyStore.shared.hasCurrentPolicyProvider {
+                await SSHAuthenticationPolicyStore.shared.registerPersistedHost(host.id)
+            }
             chain = try await withPendingSSHConnectionAttempt {
                 DiagnosticLogStore.appendKeys(
                     "install step=connect host=\(shortID(host.id)) hops=\(host.jumpChain.count + 1)"
@@ -161,6 +350,10 @@ enum RemoteAuthorizedKeysInstaller {
                 )
                 do {
                     try validateCanInstall(keyID: targetKeyID, on: chain.resolvedHost)
+                    try validateInstallationAuthorization(
+                        tracking,
+                        on: chain.resolvedHost
+                    )
                 } catch {
                     await chain.closeAll()
                     throw error
@@ -180,6 +373,7 @@ enum RemoteAuthorizedKeysInstaller {
         do {
             try Task.checkCancellation()
             DiagnosticLogStore.appendKeys("install step=append-key host=\(shortID(host.id))")
+            tracking.record(.uncertain)
             _ = try await execute(
                 makeInstallCommand(line: authorizedKeysLine),
                 on: client
@@ -226,6 +420,7 @@ enum RemoteAuthorizedKeysInstaller {
             )
             throw InstallError.verificationFailed(stderr: verificationOutput)
         }
+        tracking.record(.verified)
         DiagnosticLogStore.appendKeys(
             "install result=success host=\(shortID(host.id)) durationMs=\(durationMs(since: startedAt))"
         )
@@ -461,6 +656,88 @@ enum RemoteAuthorizedKeysInstaller {
         guard host.storedKeyID != keyID else {
             throw InstallError.selfInstall
         }
+    }
+
+    static func validateCanSelfRevoke(keyID: UUID, on host: Host) throws {
+        guard host.storedKeyID == keyID else {
+            throw InstallError.targetKeyRequired
+        }
+    }
+
+    /// Device Access revocation only needs the target private key when that is
+    /// still the credential configured for this host. If the user has since
+    /// switched the host to a password or another key, the ordinary revoke
+    /// path must use that alternate credential instead.
+    static func shouldRevokeUsingTargetKey(keyID: UUID, on host: Host) -> Bool {
+        host.storedKeyID == keyID
+    }
+
+    /// A tracked remote-access mutation may only touch its exact destination
+    /// and ordered jump route. Legacy records have no such proof and therefore
+    /// require manual recovery.
+    static func validateRevocationRoute(
+        _ expectedRouteIdentity: String?,
+        on host: Host
+    ) throws {
+        guard let expectedRouteIdentity,
+              expectedRouteIdentity == RemoteAccessRouteIdentity.value(for: host)
+        else {
+            throw InstallError.routeChanged
+        }
+    }
+
+    static func validateInstallationAuthorization(
+        _ context: LedgerContext,
+        on host: Host
+    ) throws {
+        try validateRevocationRoute(context.routeIdentity, on: host)
+        guard !context.metadata.hasConflictingRemoteInstallation(
+            keyID: context.keyID,
+            hostID: context.hostID,
+            routeIdentity: context.routeIdentity,
+            publicKeyFingerprint: context.publicKeyFingerprint,
+            authorizedKeysLine: context.authorizedKeysLine,
+            direction: context.direction
+        ) else {
+            throw InstallError.routeChanged
+        }
+        guard context.flow == .manual
+                || context.authorizationSnapshot?.matchesResolvedHost(host) == true
+        else {
+            throw InstallError.routeChanged
+        }
+    }
+
+    private static func validateRevocationAuthentication(
+        _ mode: RevocationAuthenticationMode,
+        keyID: UUID,
+        on host: Host
+    ) throws {
+        switch mode {
+        case .alternateCredential:
+            try validateCanInstall(keyID: keyID, on: host)
+        case .targetKey:
+            try validateCanSelfRevoke(keyID: keyID, on: host)
+        }
+    }
+
+    private static func defaultLedgerContext(
+        line: String,
+        keyID: UUID,
+        host: Host
+    ) -> LedgerContext {
+        LedgerContext(
+            keyID: keyID,
+            hostID: host.id,
+            hostLabel: host.name.isEmpty ? "\(host.address):\(host.port)" : host.name,
+            endpoint: "\(host.user)@\(host.address):\(host.port)",
+            routeIdentity: RemoteAccessRouteIdentity.value(for: host),
+            publicKeyFingerprint: KeyStore.canonicalFingerprint(
+                forAuthorizedKeysLine: line
+            ),
+            authorizedKeysLine: line,
+            preserveExistingAuditFields: true
+        )
     }
 
     private static func execute(_ command: String, on client: SSHClient) async throws -> String {

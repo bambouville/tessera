@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tessera — Tab overflow: down-arrow window list for touch</title>
+<style>
+  /* ── Real chrome tokens: themeChromeTokens for theme Void (dark) + blue accent ──
+     TerminalTheme.swift:150-209 / DesignTokens.swift:26-50 */
+  :root {
+    --bg:            #000000;
+    --fg:            #D4D4D4;
+    --fg-muted:      rgba(212,212,212,0.65);
+    --fg-dim:        rgba(212,212,212,0.40);
+    --fg-faint:      rgba(212,212,212,0.18);
+    --border:        rgba(212,212,212,0.10);
+    --border-strong: rgba(212,212,212,0.18);
+    --accent:        #5B9FFF;
+    --accent-soft:   rgba(91,159,255,0.14);
+    --green:         #30D158;
+    --amber:         #FF9F0A;
+    --red:           #FF453A;
+    --glass-tint:    rgba(0,0,0,0.35);      /* T.sidebarBg = bg.opacity(0.35) */
+    --solid-fill:    #1C1C1E;               /* solid material fallback (dark) */
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    /* page-only tokens (match sibling mockups) */
+    --panel-bg:      #0A0A0A;
+    --input-bg:      #141414;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { background: var(--bg); }
+  body {
+    font-family: var(--sans); color: var(--fg); background: var(--bg);
+    padding: 48px 32px 120px; max-width: 1280px; margin: 0 auto;
+    -webkit-font-smoothing: antialiased; line-height: 1.5;
+  }
+  h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; color: #fff; }
+  h2 { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; margin: 72px 0 6px;
+       padding-top: 24px; border-top: 1px solid var(--border); color: #fff; }
+  h3 { font-size: 15px; font-weight: 600; margin: 28px 0 8px; color: #fff; }
+  p.sub  { color: var(--fg-muted); font-size: 14px;   margin: 8px 0 0; max-width: 880px; }
+  p.note { color: var(--fg-dim);   font-size: 12.5px; margin: 10px 0 0; max-width: 880px; }
+  code { font-family: var(--mono); font-size: 0.86em; background: var(--input-bg);
+         border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; color: var(--fg-muted); }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
+  .chip { font-size: 11.5px; font-family: var(--mono); color: var(--fg-muted);
+          border: 1px solid var(--border-strong); border-radius: 100px; padding: 3px 10px;
+          display: inline-flex; align-items: center; gap: 6px; }
+  .chip .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .dot.ok  { background: var(--green); }
+  .dot.acc { background: var(--accent); }
+  .dot.mid { background: var(--amber); }
+
+  svg.g { stroke: currentColor; fill: none; stroke-width: 1.6;
+          stroke-linecap: round; stroke-linejoin: round; flex: none; display: block; }
+
+  /* ───────────────────────── demo controls ───────────────────────── */
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 22px 0 14px; }
+  .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 9px; overflow: hidden; }
+  .seg button { appearance: none; background: none; border: none; color: var(--fg-muted);
+    font: 500 12px var(--sans); padding: 6px 14px; cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button.on { background: var(--accent-soft); color: var(--accent); }
+  .ctl { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-muted); }
+  .ctl input[type=range] { width: 170px; accent-color: var(--accent); }
+  .ctl input[type=checkbox] { accent-color: var(--accent); }
+  .ctl .val { font-family: var(--mono); font-size: 11px; color: var(--fg-dim); min-width: 52px; }
+
+  /* ───────────────────────── device frame ───────────────────────── */
+  .stageWrap { position: relative; }
+  .deviceScale { transform-origin: top left; }
+  .device {
+    position: relative; overflow: hidden;
+    border-radius: 22px; border: 1px solid rgba(255,255,255,0.14);
+    box-shadow: 0 18px 60px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(0,0,0,0.8);
+    background: var(--bg);
+    height: 380px; /* cropped view of the top of the screen */
+  }
+  .device.portraitCrop { height: 440px; }
+
+  /* fake terminal canvas under the floating pill */
+  .term { position: absolute; inset: 0; padding: 56px 18px 12px;
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.55; color: var(--fg);
+    user-select: none; overflow: hidden; }
+  .term .p  { color: var(--green); }
+  .term .d  { color: var(--fg-dim); }
+  .term .b  { color: var(--accent); }
+  .term .y  { color: var(--amber); }
+  .term .dim{ color: var(--fg-muted); }
+  .term .cursor { display: inline-block; width: 7px; height: 14px; background: var(--fg);
+    vertical-align: text-bottom; animation: blink 1.1s step-end infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* iPadOS system window-drag region (annotation) */
+  .dragRegion { position: absolute; top: 0; left: 0; right: 0; height: 16px; z-index: 40;
+    background: repeating-linear-gradient(-45deg, rgba(255,69,58,0.16) 0 8px, rgba(255,69,58,0.05) 8px 16px);
+    border-bottom: 1px dashed rgba(255,69,58,0.5); display: none; pointer-events: none; }
+  .dragRegion .lbl { position: absolute; right: 10px; top: 1px; font: 500 9px var(--mono);
+    color: var(--red); letter-spacing: 0.04em; }
+  .device.showDrag .dragRegion { display: block; }
+
+  /* ───────────────────────── the floating pill (SessionTopBar) ─────────────────────
+     height 32, radius 13, margins 8/10, inner pad 0 4, hairline 0.5, glass tint bg@0.35 */
+  .pill { position: absolute; top: 8px; left: 10px; right: 10px; height: 32px; z-index: 30;
+    border-radius: 13px; display: flex; align-items: center; padding: 0 4px;
+    background:
+      linear-gradient(rgba(210,210,214,0.07), rgba(210,210,214,0.04)),
+      var(--glass-tint);
+    -webkit-backdrop-filter: blur(20px) saturate(160%); backdrop-filter: blur(20px) saturate(160%);
+    box-shadow: 0 0 0 0.5px var(--border), 0 6px 22px rgba(0,0,0,0.35); }
+
+  /* chromeIconButton: 28×24 visual box, r7, 14pt symbol .medium, 36pt hit frame */
+  .cib { width: 36px; height: 32px; display: flex; align-items: center; justify-content: center;
+    background: none; border: none; cursor: pointer; color: var(--fg-muted); flex: none; padding: 0; }
+  .cib .box { width: 28px; height: 24px; border-radius: 7px; display: flex;
+    align-items: center; justify-content: center; }
+  .cib svg.g { width: 15px; height: 15px; }
+  .cib:hover .box { background: rgba(212,212,212,0.06); }
+  .cib.toggled { color: var(--accent); }
+  .cib.toggled .box { background: var(--accent-soft); }
+
+  /* host pill: dot 7 + name mono 12 medium + · + tmux tag */
+  .hostpill { display: flex; align-items: center; gap: 6px; padding: 0 8px; height: 32px;
+    flex: none; cursor: pointer; background: none; border: none; }
+  .hostpill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex: none; }
+  .hostpill .name { font: 500 12px var(--mono); color: var(--fg); white-space: nowrap; }
+  .hostpill .sep { font: 400 11px var(--mono); color: var(--fg-dim); }
+  .hostpill .tag { font: 600 10px var(--sans); letter-spacing: 0.05em; color: var(--fg-muted); }
+
+  /* tab strip: horizontal scroll, no indicators, HStack spacing 6, outer pad 4 */
+  .stripWrap { flex: 1 1 auto; min-width: 40px; position: relative; height: 32px; padding: 0 4px; }
+  .strip { display: flex; align-items: center; gap: 6px; height: 32px;
+    overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -ms-overflow-style: none;
+    scroll-behavior: smooth; }
+  .strip::-webkit-scrollbar { display: none; }
+  /* optional edge fade hint when scrollable */
+  .stripWrap::before, .stripWrap::after { content: ""; position: absolute; top: 2px; bottom: 2px;
+    width: 18px; z-index: 5; pointer-events: none; opacity: 0; transition: opacity 0.15s ease; }
+  .stripWrap::before { left: 0;  background: linear-gradient(90deg,  rgba(16,16,18,0.85), transparent); }
+  .stripWrap::after  { right: 0; background: linear-gradient(270deg, rgba(16,16,18,0.85), transparent); }
+  .stripWrap.fadeL::before { opacity: 1; }
+  .stripWrap.fadeR::after  { opacity: 1; }
+
+  /* one tab: 24pt capsule (r12), lead pad 11, label mono 12, ⌘N mono 10.5, X = 16pt circle in 28pt box +7 lead */
+  .tab { display: flex; align-items: center; height: 24px; border-radius: 12px; flex: none;
+    padding-left: 11px; background: transparent; border: none; cursor: pointer; }
+  .tab .ttl { font: 400 12px var(--mono); color: var(--fg-muted); white-space: nowrap; }
+  .tab .hint { font: 400 10.5px var(--mono); color: var(--fg-faint); margin-left: 6px; white-space: nowrap; }
+  .tab.active { background: var(--accent-soft); }
+  .tab.active .ttl { font-weight: 500; color: var(--fg); }
+  .tab.active .hint { color: var(--accent); }
+  .tab .spark { width: 11px; height: 11px; margin-right: 6px; color: var(--fg-muted); }
+  .tab .spark.needs { color: var(--amber); filter: drop-shadow(0 0 3px rgba(255,159,10,0.55)); }
+  .tab .spark.done  { color: var(--green); filter: drop-shadow(0 0 3px rgba(48,209,88,0.5)); }
+  .tab.agentline { position: relative; }
+  .tab.agentline::after { content: ""; position: absolute; left: 5px; right: 5px; bottom: 0;
+    height: 1.2px; background: var(--amber); box-shadow: 0 0 3px rgba(255,159,10,0.7); }
+  .tabx { width: 28px; height: 24px; margin-left: 7px; display: flex; align-items: center;
+    justify-content: center; background: none; border: none; cursor: pointer; padding: 0; flex: none; }
+  .tabx .circ { width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center;
+    justify-content: center; background: rgba(212,212,212,0.06);
+    box-shadow: 0 0 0 1px var(--fg-faint); color: var(--fg-dim); }
+  .tab.active .tabx .circ { box-shadow: 0 0 0 1px var(--fg-dim); color: var(--fg-muted); }
+  .tabx:hover .circ { background: rgba(212,212,212,0.14); color: var(--fg); box-shadow: 0 0 0 1px var(--fg-muted); }
+  .tabx svg.g { width: 8px; height: 8px; stroke-width: 2.2; }
+
+  /* ── NEW: overflow chevron (chromeIconButton clone, appears only when strip overflows) ── */
+  .cib.overflowBtn { display: none; }
+  .cib.overflowBtn.visible { display: flex; }
+
+  /* ── NEW: window list dropdown ── */
+  .winmenu { position: absolute; top: 46px; z-index: 60; width: 288px;
+    border-radius: 13px; padding: 5px;
+    background:
+      linear-gradient(rgba(210,210,214,0.06), rgba(210,210,214,0.03)),
+      rgba(18,18,20,0.88);
+    -webkit-backdrop-filter: blur(28px) saturate(160%); backdrop-filter: blur(28px) saturate(160%);
+    box-shadow: 0 0 0 0.5px var(--border-strong), 0 18px 48px rgba(0,0,0,0.55);
+    display: none; max-height: 300px; overflow-y: auto; overscroll-behavior: contain; }
+  .winmenu.open { display: block; animation: menuIn 0.14s ease-out; }
+  @keyframes menuIn { from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+                      to   { opacity: 1; transform: none; } }
+  .winrow { display: flex; align-items: center; gap: 8px; width: 100%; height: 40px;
+    padding: 0 6px 0 10px; border: none; background: none; border-radius: 9px;
+    cursor: pointer; text-align: left; }
+  .winrow:hover { background: rgba(212,212,212,0.06); }
+  .winrow.active { background: var(--accent-soft); }
+  .winrow .num { font: 400 10.5px var(--mono); color: var(--fg-faint); width: 16px; flex: none; }
+  .winrow .spark { width: 11px; height: 11px; flex: none; color: var(--fg-muted); }
+  .winrow .spark.needs { color: var(--amber); }
+  .winrow .spark.done  { color: var(--green); }
+  .winrow .ttl { font: 400 12.5px var(--mono); color: var(--fg-muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; }
+  .winrow.active .ttl { color: var(--fg); font-weight: 500; }
+  .winrow .hint { font: 400 10.5px var(--mono); color: var(--fg-faint); flex: none; }
+  .winrow.active .hint { color: var(--accent); }
+  .winrow .rowx { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+    border-radius: 7px; color: var(--fg-dim); flex: none; }
+  .winrow .rowx:hover { background: rgba(212,212,212,0.10); color: var(--fg); }
+  .winrow .rowx svg.g { width: 9px; height: 9px; stroke-width: 2.2; }
+  .winmenu .msep { height: 1px; background: var(--border); margin: 5px 8px; }
+  .winmenu .mfoot { display: flex; align-items: center; gap: 8px; width: 100%; height: 36px;
+    padding: 0 10px; border: none; background: none; border-radius: 9px; cursor: pointer; }
+  .winmenu .mfoot:hover { background: rgba(212,212,212,0.06); }
+  .winmenu .mfoot svg.g { width: 12px; height: 12px; color: var(--fg-muted); }
+  .winmenu .mfoot span { font: 500 12px var(--sans); color: var(--fg-muted); }
+
+  .stagecap { font-size: 11.5px; color: var(--fg-dim); margin-top: 12px; font-family: var(--mono); }
+
+  /* ───────────────────────── states + anatomy sections ───────────────────────── */
+  .stage { display: flex; gap: 26px; flex-wrap: wrap; margin-top: 22px; align-items: flex-start; }
+  .statecard { border: 1px solid var(--border); border-radius: 14px; padding: 16px;
+    background: var(--panel-bg); flex: 1 1 340px; max-width: 560px; }
+  .statecard h4 { font-size: 13px; font-weight: 600; margin-bottom: 4px; color: #fff; }
+  .statecard p { font-size: 12px; color: var(--fg-muted); margin-bottom: 12px; }
+  .miniStage { background: #000; border-radius: 10px; padding: 18px 10px 20px; overflow: hidden;
+    position: relative; border: 1px solid rgba(255,255,255,0.05); }
+  .miniStage .pill { position: relative; top: 0; left: 0; right: 0; }
+
+  .speclist { margin-top: 12px; }
+  .speclist li { font-size: 12.5px; color: var(--fg-muted); margin: 5px 0 5px 18px; }
+  .speclist li b { color: var(--fg); font-weight: 500; }
+  .speclist code { font-size: 11px; }
+
+  table.spec { border-collapse: collapse; margin-top: 14px; font-size: 12.5px; }
+  table.spec th, table.spec td { text-align: left; padding: 6px 18px 6px 0; vertical-align: top; }
+  table.spec th { color: var(--fg-dim); font-weight: 500; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.06em; border-bottom: 1px solid var(--border); }
+  table.spec td { color: var(--fg-muted); border-bottom: 1px solid rgba(255,255,255,0.04); }
+  table.spec td:first-child { color: var(--fg); font-family: var(--mono); font-size: 11.5px; }
+</style>
+</head>
+<body>
+
+<h1>Terminal top bar — tab overflow window list</h1>
+<p class="sub">When tmux windows overflow the tab strip, touch scrolling fights the iPadOS
+window-drag region at the top edge. Proposal: keep the horizontal scroll exactly as-is
+(trackpad unchanged), and when the strip overflows, surface a <b>chevron.down</b> button —
+left of <b>+</b> — that opens a window list for direct touch selection.</p>
+<div class="chips">
+  <span class="chip"><span class="dot acc"></span>chevron appears only on overflow</span>
+  <span class="chip"><span class="dot ok"></span>strip geometry untouched — trackpad scroll identical</span>
+  <span class="chip"><span class="dot ok"></span>landscape · portrait · Stage&nbsp;Manager widths</span>
+  <span class="chip"><span class="dot mid"></span>44pt touch rows in the list</span>
+</div>
+
+<h2 id="demo">1 · Interactive demo</h2>
+<p class="sub">This is live: scroll the tab strip, tap the chevron, pick a window, add tabs
+with <b>+</b>, close them with <b>×</b>. Resize the viewport with the presets or the slider —
+the chevron appears and disappears with real overflow measurement, exactly as rotation or a
+Stage&nbsp;Manager resize would trigger it.</p>
+
+<div class="controls">
+  <span class="seg" id="orientSeg">
+    <button data-w="1194" class="on">Landscape 1194</button>
+    <button data-w="834">Portrait 834</button>
+    <button data-w="694">Split view 694</button>
+  </span>
+  <label class="ctl">width
+    <input type="range" id="widthSlider" min="500" max="1194" value="1194" step="1">
+    <span class="val" id="widthVal">1194 pt</span>
+  </label>
+  <label class="ctl"><input type="checkbox" id="dragToggle"> show system drag region</label>
+</div>
+
+<div class="stageWrap">
+  <div class="deviceScale" id="deviceScale">
+    <div class="device" id="device" style="width:1194px">
+      <div class="term" aria-hidden="true">
+        <div><span class="p">dev@do-nyc</span><span class="d">:</span><span class="b">~/tessera</span><span class="d">$</span> git log --oneline -4</div>
+        <div><span class="y">605d0b7</span> Never prompt when closing a single-pane tmux window</div>
+        <div><span class="y">ff59ba1</span> add iphone install pipeline</div>
+        <div><span class="y">ea6ac5b</span> Keep no-tmux badge correct after restore decline</div>
+        <div><span class="y">87eb206</span> Fix no-tmux Recent host badge</div>
+        <div><span class="p">dev@do-nyc</span><span class="d">:</span><span class="b">~/tessera</span><span class="d">$</span> ./scripts/integration/run-integration-tests.sh --list</div>
+        <div class="dim">S1 scroll-primary        S6 scroll-vim        T3 mouse-click-mosh</div>
+        <div class="dim">D2 window-naming         D4 fullscreen        A1 aggregate-visual</div>
+        <div><span class="p">dev@do-nyc</span><span class="d">:</span><span class="b">~/tessera</span><span class="d">$</span> <span class="cursor"></span></div>
+      </div>
+
+      <div class="dragRegion"><span class="lbl">iPadOS window-drag region</span></div>
+
+      <div class="pill" id="pill">
+        <!-- sidebar toggle -->
+        <button class="cib" title="Sidebar"><span class="box">
+          <svg class="g" viewBox="0 0 16 16"><path d="M2 4h12M2 8h12M2 12h12"/></svg></span></button>
+
+        <!-- host pill -->
+        <button class="hostpill" title="Connection status">
+          <span class="dot"></span><span class="name">dev@do-nyc</span>
+          <span class="sep">·</span><span class="tag">TMUX</span>
+        </button>
+
+        <!-- tab strip -->
+        <div class="stripWrap" id="stripWrap">
+          <div class="strip" id="strip"></div>
+        </div>
+
+        <!-- NEW: overflow chevron, left of + -->
+        <button class="cib overflowBtn" id="overflowBtn" title="All windows"
+                aria-label="Show all windows" aria-haspopup="menu">
+          <span class="box"><svg class="g" viewBox="0 0 16 16"><path d="M3.5 6l4.5 4.5L12.5 6"/></svg></span>
+        </button>
+
+        <!-- + new window -->
+        <button class="cib" id="addBtn" title="New window"><span class="box">
+          <svg class="g" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg></span></button>
+
+        <!-- find -->
+        <button class="cib" title="Find"><span class="box">
+          <svg class="g" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2L13.5 13.5"/></svg></span></button>
+
+        <!-- files -->
+        <button class="cib" title="Files"><span class="box">
+          <svg class="g" viewBox="0 0 16 16"><path d="M2 4.5c0-.8.7-1.5 1.5-1.5h2.6l1.5 1.6h4.9c.8 0 1.5.7 1.5 1.5v6c0 .8-.7 1.5-1.5 1.5h-9C2.7 13.6 2 12.9 2 12.1z"/></svg></span></button>
+
+        <!-- home -->
+        <button class="cib" title="Home"><span class="box">
+          <svg class="g" viewBox="0 0 16 16"><path d="M2.5 8L8 2.8 13.5 8M4 7v6h8V7"/></svg></span></button>
+      </div>
+
+      <!-- NEW: window list -->
+      <div class="winmenu" id="winmenu" role="menu" aria-label="tmux windows"></div>
+    </div>
+  </div>
+</div>
+<p class="stagecap" id="stateCap"></p>
+
+<h2 id="anatomy">2 · Anatomy &amp; spec</h2>
+<div class="stage">
+  <div class="statecard">
+    <h4>Overflow chevron</h4>
+    <p>Byte-for-byte a <code>chromeIconButton</code> — the same component as +, find, files.</p>
+    <ul class="speclist">
+      <li><b>Symbol</b> <code>chevron.down</code>, 14pt <code>.medium</code></li>
+      <li><b>Box</b> 28×24, radius 7 · <b>hit frame</b> 36pt wide × bar height</li>
+      <li><b>Color</b> <code>T.fgMuted</code>; while menu is open: <code>T.accent</code> on <code>T.accentSoft</code> (isToggled)</li>
+      <li><b>Position</b> after the tab strip, before <b>+</b> — inserted in the tmux branch of the bar's HStack only</li>
+      <li><b>Visibility</b> only when strip content width &gt; strip visible width (see rules below)</li>
+      <li><b>A11y</b> id <code>tmux-tab-overflow</code>, label “Show all windows”</li>
+    </ul>
+  </div>
+  <div class="statecard">
+    <h4>Window list</h4>
+    <p>Floating glass panel anchored under the chevron, right-aligned. No scrim; tap-outside or Esc dismisses.</p>
+    <ul class="speclist">
+      <li><b>Panel</b> width 288pt, radius 13, padding 5, hairline <code>T.borderStrong</code>, same glass material family as the pill; max-height ≈ 60% of screen, scrolls vertically</li>
+      <li><b>Row</b> 40pt tall (+ padding ⇒ ≥44pt touch pitch), radius 9: window number <code>mono 10.5 fgFaint</code> · optional agent <code>sparkles</code> (amber = needs input, green = finished) · title <code>mono 12.5</code>, middle-truncated · <code>⌘N</code> hint for windows 1–9 · a 28pt <code>×</code> affordance (the strip's 16pt close circle is itself hard to touch)</li>
+      <li><b>Active row</b> <code>T.accentSoft</code> fill, title <code>T.fg</code> medium, hint <code>T.accent</code> — same ladder as the active tab capsule</li>
+      <li><b>Order</b> tmux window order, identical to the strip</li>
+      <li><b>Footer</b> “New window” row (same action as <b>+</b>) — optional, keeps one-handed flows in the menu</li>
+      <li><b>On select</b> switch window <i>and</i> scroll the strip so the selected tab is visible (also fixes the existing ⌘1–9 no-scroll gap)</li>
+    </ul>
+  </div>
+</div>
+
+<h2 id="states">3 · States</h2>
+<div class="stage">
+  <div class="statecard" style="max-width:560px; flex-basis:460px">
+    <h4>A · Few windows — nothing changes</h4>
+    <p>Strip fits ⇒ no chevron, no fades. Pixel-identical to today.</p>
+    <div class="miniStage"><div class="pill" id="miniA"></div></div>
+  </div>
+  <div class="statecard" style="max-width:560px; flex-basis:460px">
+    <h4>B · Overflow — chevron appears</h4>
+    <p>Strip scrolls (trackpad unchanged); edge fade hints replace the hard clip; chevron slots in left of +.</p>
+    <div class="miniStage"><div class="pill" id="miniB"></div></div>
+  </div>
+</div>
+
+<h2 id="rules">4 · Behavior rules</h2>
+<table class="spec">
+  <tr><th>Rule</th><th>Detail</th></tr>
+  <tr><td>appear</td><td>Chevron shows when <code>stripContentWidth &gt; stripVisibleWidth + 2pt</code>, measured via <code>onGeometryChange</code> on the ScrollView content vs container — so it reacts to rotation, Stage Manager resizes, Split View, Slide Over, and tab add/close/rename, with no orientation-specific code.</td></tr>
+  <tr><td>hysteresis</td><td>Showing the chevron costs the strip 36pt, which could flap at the boundary. Once visible, it hides only when content would fit <i>with the 36pt reclaimed</i> (content ≤ visible + 36 − 2).</td></tr>
+  <tr><td>scroll unchanged</td><td>The strip keeps its exact geometry, scroll behavior, and hidden indicators. Trackpad and finger scrolling both still work; the menu is an additive affordance, not a replacement.</td></tr>
+  <tr><td>selection</td><td>Menu tap ⇒ <code>tmux.selectWindow</code> + close menu + scroll strip to reveal the tab (ScrollViewReader). Same reveal is applied to ⌘1–9 and palette switches — an existing gap this feature closes.</td></tr>
+  <tr><td>dismiss</td><td>Tap outside, Esc, selecting a row, or rotating/resizing the window (popover-standard). State is ephemeral — never persisted.</td></tr>
+  <tr><td>rotation</td><td>Anchored as a SwiftUI <code>.popover</code>-style overlay on the chevron; on size-class or geometry change it dismisses, and the chevron's visibility re-derives from the new measurement. Portrait simply overflows sooner — no special-casing.</td></tr>
+  <tr><td>close in list</td><td>Row × routes through the same close path as the strip (incl. the pending-close confirm for busy panes). Row stays 40pt; × target 28pt.</td></tr>
+  <tr><td>degraded tmux</td><td>Amber ladder carries over: active row fill <code>amber@0.16</code>, hints amber — same as the strip's degraded styling.</td></tr>
+  <tr><td>transports</td><td>Tabs exist only under tmux, so this covers SSH+tmux and mosh+tmux identically (one shared code path in <code>tabStrip</code>); plain SSH / plain mosh have no strip and are untouched.</td></tr>
+  <tr><td>iPhone</td><td>Deliberate decision: compact bar has no tab strip at all — window switching already goes through the session switcher — so the chevron is iPad-only by construction. Nothing to adapt.</td></tr>
+</table>
+
+<p class="note">Implementation lands entirely in <code>SessionView.swift</code>'s <code>tabStrip</code>
+(≈ line 7697): one measured-width state, one <code>chromeIconButton("chevron.down")</code>, one overlay
+list reusing the tab model the strip already iterates. Edge fades are an optional half-day cosmetic
+(shown in the demo) and can be dropped without affecting the proposal.</p>
+
+<script>
+(function () {
+  // ───────── model ─────────
+  let tabs = [
+    { n: 1, t: "zsh" },
+    { n: 2, t: "vim ~/tessera" },
+    { n: 3, t: "htop", agent: "needs" },
+    { n: 4, t: "logs" },
+    { n: 5, t: "ssh do-nyc" },
+    { n: 6, t: "build", agent: "done" },
+    { n: 7, t: "git" },
+    { n: 8, t: "mosh-dbg" },
+    { n: 9, t: "docs" },
+  ];
+  let active = 2;
+  let nextN = 10;
+  const newNames = ["scratch", "tail -f", "make", "psql", "top", "node", "cargo", "deploy"];
+
+  const strip = document.getElementById("strip");
+  const stripWrap = document.getElementById("stripWrap");
+  const overflowBtn = document.getElementById("overflowBtn");
+  const winmenu = document.getElementById("winmenu");
+  const device = document.getElementById("device");
+  const pill = document.getElementById("pill");
+  const stateCap = document.getElementById("stateCap");
+
+  const SPARK = '<svg class="g spark" viewBox="0 0 12 12" style="fill:currentColor;stroke:none">' +
+    '<path d="M6 0.5 7.2 4 10.8 5.2 7.2 6.4 6 10 4.8 6.4 1.2 5.2 4.8 4z"/>' +
+    '<path d="M10.2 8.2 10.7 9.5 12 10 10.7 10.5 10.2 11.8 9.7 10.5 8.4 10 9.7 9.5z" opacity="0.8"/></svg>';
+  const XICON = '<svg class="g" viewBox="0 0 10 10"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"/></svg>';
+
+  function tabHTML(tab) {
+    const cls = ["tab"];
+    if (tab.n === active) cls.push("active");
+    if (tab.agent === "needs") cls.push("agentline");
+    const spark = tab.agent ? SPARK.replace("spark", "spark " + tab.agent) : "";
+    const hint = tab.n <= 9 ? '<span class="hint">⌘' + tab.n + "</span>" : "";
+    return '<div class="' + cls.join(" ") + '" data-n="' + tab.n + '" role="button">' +
+      spark + '<span class="ttl">' + tab.t + "</span>" + hint +
+      '<button class="tabx" title="Close"><span class="circ">' + XICON + "</span></button></div>";
+  }
+
+  function renderStrip() {
+    strip.innerHTML = tabs.map(tabHTML).join("");
+    strip.querySelectorAll(".tab").forEach((el) => {
+      el.addEventListener("click", (e) => {
+        if (e.target.closest(".tabx")) return;
+        active = +el.dataset.n; renderAll();
+      });
+      el.querySelector(".tabx").addEventListener("click", () => closeTab(+el.dataset.n));
+    });
+    requestAnimationFrame(measure);
+  }
+
+  function closeTab(n) {
+    const i = tabs.findIndex((t) => t.n === n);
+    if (i < 0) return;
+    tabs.splice(i, 1);
+    if (active === n && tabs.length) active = tabs[Math.min(i, tabs.length - 1)].n;
+    renderAll();
+  }
+
+  document.getElementById("addBtn").addEventListener("click", () => {
+    tabs.push({ n: nextN, t: newNames[(nextN - 10) % newNames.length] });
+    active = nextN; nextN += 1;
+    renderAll();
+    requestAnimationFrame(() => { strip.scrollLeft = strip.scrollWidth; });
+  });
+
+  // ───────── overflow measurement (the core rule) ─────────
+  let chevronVisible = false;
+  function measure() {
+    const content = strip.scrollWidth, visible = strip.clientWidth;
+    if (!chevronVisible) {
+      chevronVisible = content > visible + 2;
+    } else {
+      // hysteresis: hide only if content fits with the chevron's 36pt reclaimed
+      chevronVisible = !(content <= visible + 36 - 2);
+    }
+    overflowBtn.classList.toggle("visible", chevronVisible);
+    updateFades();
+    stateCap.textContent = chevronVisible
+      ? tabs.length + " windows · strip overflows by " + Math.max(0, content - visible) +
+        "pt → chevron shown. Tap it, or scroll the strip."
+      : tabs.length + " windows · strip fits → chevron hidden. Add tabs (+) or narrow the width.";
+    if (!chevronVisible) closeMenu();
+  }
+  function updateFades() {
+    const canL = strip.scrollLeft > 2;
+    const canR = strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 2;
+    stripWrap.classList.toggle("fadeL", chevronVisible && canL);
+    stripWrap.classList.toggle("fadeR", chevronVisible && canR);
+  }
+  strip.addEventListener("scroll", updateFades, { passive: true });
+  new ResizeObserver(() => measure()).observe(strip);
+
+  // ───────── window list ─────────
+  let menuOpen = false;
+  function renderMenu() {
+    const rows = tabs.map((tab) => {
+      const cls = "winrow" + (tab.n === active ? " active" : "");
+      const spark = tab.agent ? SPARK.replace("spark", "spark " + tab.agent) : "";
+      const hint = tab.n <= 9 ? '<span class="hint">⌘' + tab.n + "</span>" : "";
+      return '<button class="' + cls + '" data-n="' + tab.n + '" role="menuitem">' +
+        '<span class="num">' + tab.n + "</span>" + spark +
+        '<span class="ttl">' + tab.t + "</span>" + hint +
+        '<span class="rowx" title="Close window">' + XICON + "</span></button>";
+    }).join("");
+    winmenu.innerHTML = rows +
+      '<div class="msep"></div><button class="mfoot" id="menuNew">' +
+      '<svg class="g" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg><span>New window</span></button>';
+    winmenu.querySelectorAll(".winrow").forEach((el) => {
+      el.addEventListener("click", (e) => {
+        const n = +el.dataset.n;
+        if (e.target.closest(".rowx")) { closeTab(n); renderMenu(); return; }
+        active = n; closeMenu(); renderAll();
+        const t = strip.querySelector('.tab[data-n="' + n + '"]');
+        if (t) t.scrollIntoView({ inline: "nearest", block: "nearest", behavior: "smooth" });
+      });
+    });
+    winmenu.querySelector("#menuNew").addEventListener("click", () => {
+      closeMenu(); document.getElementById("addBtn").click();
+    });
+  }
+  function positionMenu() {
+    // right-align the panel to the chevron's right edge, 6pt below the pill
+    const dr = device.getBoundingClientRect();
+    const br = overflowBtn.getBoundingClientRect();
+    const scale = dr.width / device.offsetWidth;
+    const rightEdge = (dr.right - br.right) / scale;
+    winmenu.style.right = Math.max(10, rightEdge - 4) + "px";
+    winmenu.style.left = "auto";
+  }
+  function openMenu() {
+    renderMenu(); positionMenu();
+    winmenu.classList.add("open"); overflowBtn.classList.add("toggled");
+    menuOpen = true;
+  }
+  function closeMenu() {
+    winmenu.classList.remove("open"); overflowBtn.classList.remove("toggled");
+    menuOpen = false;
+  }
+  overflowBtn.addEventListener("click", (e) => {
+    e.stopPropagation(); menuOpen ? closeMenu() : openMenu();
+  });
+  document.addEventListener("click", (e) => {
+    if (menuOpen && !winmenu.contains(e.target)) closeMenu();
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
+
+  function renderAll() { renderStrip(); if (menuOpen) renderMenu(); }
+
+  // ───────── viewport controls ─────────
+  const slider = document.getElementById("widthSlider");
+  const widthVal = document.getElementById("widthVal");
+  const seg = document.getElementById("orientSeg");
+  const deviceScale = document.getElementById("deviceScale");
+
+  function setWidth(w, fromSlider) {
+    device.style.width = w + "px";
+    device.classList.toggle("portraitCrop", w < 900);
+    widthVal.textContent = w + " pt";
+    if (!fromSlider) slider.value = w;
+    seg.querySelectorAll("button").forEach((b) => b.classList.toggle("on", +b.dataset.w === +w));
+    fitScale();
+    closeMenu(); // popover-standard: dismiss on geometry change
+    requestAnimationFrame(measure);
+  }
+  function fitScale() {
+    const avail = deviceScale.parentElement.clientWidth;
+    const w = device.offsetWidth;
+    const s = Math.min(1, avail / w);
+    deviceScale.style.transform = "scale(" + s + ")";
+    deviceScale.style.height = device.offsetHeight * s + "px";
+  }
+  seg.querySelectorAll("button").forEach((b) =>
+    b.addEventListener("click", () => setWidth(+b.dataset.w, false)));
+  slider.addEventListener("input", () => setWidth(+slider.value, true));
+  window.addEventListener("resize", () => { fitScale(); measure(); });
+
+  document.getElementById("dragToggle").addEventListener("change", (e) =>
+    device.classList.toggle("showDrag", e.target.checked));
+
+  // ───────── static state cards ─────────
+  function staticPill(el, tabList, activeN, withChevron) {
+    const chip = (tab) => {
+      const cls = "tab" + (tab.n === activeN ? " active" : "");
+      const hint = tab.n <= 9 ? '<span class="hint">⌘' + tab.n + "</span>" : "";
+      return '<div class="' + cls + '"><span class="ttl">' + tab.t + "</span>" + hint +
+        '<span class="tabx"><span class="circ">' + XICON + "</span></span></div>";
+    };
+    el.innerHTML =
+      '<span class="cib"><span class="box"><svg class="g" viewBox="0 0 16 16"><path d="M2 4h12M2 8h12M2 12h12"/></svg></span></span>' +
+      '<span class="hostpill"><span class="dot"></span><span class="name">dev@do-nyc</span><span class="sep">·</span><span class="tag">TMUX</span></span>' +
+      '<div class="stripWrap' + (withChevron ? " fadeR" : "") + '" style="flex:1"><div class="strip">' +
+      tabList.map(chip).join("") + "</div></div>" +
+      (withChevron
+        ? '<span class="cib overflowBtn visible"><span class="box"><svg class="g" viewBox="0 0 16 16"><path d="M3.5 6l4.5 4.5L12.5 6"/></svg></span></span>'
+        : "") +
+      '<span class="cib"><span class="box"><svg class="g" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg></span></span>' +
+      '<span class="cib"><span class="box"><svg class="g" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2L13.5 13.5"/></svg></span></span>';
+  }
+  staticPill(document.getElementById("miniA"),
+    [{ n: 1, t: "zsh" }, { n: 2, t: "vim" }, { n: 3, t: "htop" }], 2, false);
+  staticPill(document.getElementById("miniB"),
+    [{ n: 1, t: "zsh" }, { n: 2, t: "vim ~/tessera" }, { n: 3, t: "htop" },
+     { n: 4, t: "logs" }, { n: 5, t: "ssh do-nyc" }, { n: 6, t: "build" }], 2, true);
+
+  // ───────── boot ─────────
+  const params = new URLSearchParams(location.search);
+  renderStrip();
+  setWidth(+(params.get("w") || 1194) || 1194, false);
+  if (params.get("drag") === "1") {
+    document.getElementById("dragToggle").checked = true;
+    device.classList.add("showDrag");
+  }
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure);
+  if (params.get("menu") === "1") setTimeout(() => { measure(); openMenu(); }, 300);
+})();
+</script>
+
+</body>
+</html>

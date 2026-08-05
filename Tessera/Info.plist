@@ -13,6 +13,16 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_tessera-bootstrap._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Find a nearby iPhone or iPad to transfer your Tessera setup securely.</string>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>com.bambouville.tessera.session</string>
+	</array>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

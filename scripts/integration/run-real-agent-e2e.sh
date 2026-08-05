@@ -44,17 +44,36 @@ INTEGRATION_VERSION=8
 cleanup() {
     outcome=$?
     trap - EXIT HUP INT TERM
-    "$TMUX_BIN" -L "$SOCKET" kill-server >/dev/null 2>&1 || true
+    # Nothing in cleanup may abort it or replace the functional outcome:
+    # under `set -e` a single failed command here (e.g. rm racing a late
+    # provider write) previously skipped the rest of the trap and turned a
+    # PASS into exit 1.
+    set +e
+    "$TMUX_BIN" -L "$SOCKET" kill-server >/dev/null 2>&1
     if [ -r "$PRODUCTION_HOME/.config/tessera/agent-lifecycle-diagnostics.log" ]; then
         cp "$PRODUCTION_HOME/.config/tessera/agent-lifecycle-diagnostics.log" \
-            "$RUN_DIR/provider-lifecycle-diagnostics.log" 2>/dev/null || true
+            "$RUN_DIR/provider-lifecycle-diagnostics.log" 2>/dev/null
     fi
     if [ -r "$PRODUCTION_HOME/.config/tessera/codex-readiness-diagnostics.log" ]; then
         cp "$PRODUCTION_HOME/.config/tessera/codex-readiness-diagnostics.log" \
-            "$RUN_DIR/codex-readiness-diagnostics.log" 2>/dev/null || true
+            "$RUN_DIR/codex-readiness-diagnostics.log" 2>/dev/null
     fi
-    rm -rf "$PRODUCTION_HOME" "$RUN_DIR/swift-module-cache"
-    rm -f "$DUMPER"
+    # kill-server SIGHUPs the providers, but Claude/Codex descendants can
+    # keep flushing session files for a few seconds — an immediate rm -rf
+    # races those writes ("Directory not empty"). Retry until the tree is
+    # gone, then give up loudly without failing the gate.
+    removal_attempts=0
+    while [ -e "$PRODUCTION_HOME" ] && [ "$removal_attempts" -lt 10 ]; do
+        rm -rf "$PRODUCTION_HOME" 2>/dev/null
+        [ -e "$PRODUCTION_HOME" ] || break
+        removal_attempts=$((removal_attempts + 1))
+        sleep 1
+    done
+    if [ -e "$PRODUCTION_HOME" ]; then
+        printf 'warning: disposable home not fully removed: %s\n' "$PRODUCTION_HOME" >&2
+    fi
+    rm -rf "$RUN_DIR/swift-module-cache" 2>/dev/null
+    rm -f "$DUMPER" 2>/dev/null
     if [ "$outcome" -ne 0 ]; then
         printf 'real Agent Center E2E failed; preserved artifacts=%s\n' "$RUN_DIR" >&2
     fi
@@ -459,28 +478,43 @@ accept_workspace_trust_if_present() {
 assert_permission_cursor_row() {
     target=$1
     label=$2
-    cursor_y=$("$TMUX_BIN" -L "$SOCKET" display-message -p -t "$target" '#{cursor_y}')
-    case "$cursor_y" in ''|*[!0-9]*)
-        printf 'invalid cursor row for %s: %s\n' "$label" "$cursor_y" >&2
-        return 1
-        ;;
-    esac
-    screen=$("$TMUX_BIN" -L "$SOCKET" capture-pane -p -N -t "$target")
-    cursor_line=$(printf '%s\n' "$screen" | sed -n "$((cursor_y + 1))p")
-    # Codex may park the terminal cursor on a blank row while its selected
-    # option and confirmation footer are rendered immediately above it. This
-    # matches AgentPromptParser's deliberately inconclusive blank-row branch;
-    # the caller has already required an exact visible permission pattern.
-    if printf '%s\n' "$cursor_line" | grep -Eq '^[[:space:]]*$'; then
-        return 0
-    fi
-    if ! printf '%s\n' "$cursor_line" | grep -Eqi \
-        '^[[:space:]]*[›❯>]?[[:space:]]*[0-9]+\.|press enter|enter to (confirm|continue)|esc to (cancel|go back)'; then
-        printf '%s cursor row does not own its visible permission menu: %s\n' \
-            "$label" "$cursor_line" >&2
-        printf '%s\n' "$screen" >&2
-        return 1
-    fi
+    # Codex briefly renders a transient "Running PermissionRequest hook"
+    # status row between the hook event and the settled approval menu; a
+    # single-shot assertion races it and fails even though the hook state
+    # exists. Poll until the menu settles instead of asserting one frame.
+    attempts=0
+    while [ "$attempts" -lt 50 ]; do
+        cursor_y=$("$TMUX_BIN" -L "$SOCKET" display-message -p -t "$target" '#{cursor_y}' 2>/dev/null || true)
+        case "$cursor_y" in ''|*[!0-9]*)
+            cursor_line=""
+            screen=""
+            ;;
+        *)
+            screen=$("$TMUX_BIN" -L "$SOCKET" capture-pane -p -N -t "$target")
+            cursor_line=$(printf '%s\n' "$screen" | sed -n "$((cursor_y + 1))p")
+            if ! printf '%s\n' "$screen" | grep -Eqi 'Running [A-Za-z]+ hook'; then
+                # Codex may park the terminal cursor on a blank row while its
+                # selected option and confirmation footer are rendered
+                # immediately above it. This matches AgentPromptParser's
+                # deliberately inconclusive blank-row branch; the caller has
+                # already required an exact visible permission pattern.
+                if printf '%s\n' "$cursor_line" | grep -Eq '^[[:space:]]*$'; then
+                    return 0
+                fi
+                if printf '%s\n' "$cursor_line" | grep -Eqi \
+                    '^[[:space:]]*[›❯>]?[[:space:]]*[0-9]+\.|press enter|enter to (confirm|continue)|esc to (cancel|go back)'; then
+                    return 0
+                fi
+            fi
+            ;;
+        esac
+        attempts=$((attempts + 1))
+        sleep 0.2
+    done
+    printf '%s cursor row does not own its visible permission menu: %s\n' \
+        "$label" "$cursor_line" >&2
+    printf '%s\n' "${screen:-}" >&2
+    return 1
 }
 
 send_staged_prompt() {

@@ -46,7 +46,7 @@ struct InstallKeyToHostFlow: View {
                 .padding(.bottom, 32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(T.bg.ignoresSafeArea())
+        .background(T.presentationBg.ignoresSafeArea())
         .onDisappear {
             installTask?.cancel()
         }
@@ -55,7 +55,7 @@ struct InstallKeyToHostFlow: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("copy key to host")
-                .font(Typography.tesseraMono(size: 20, weight: .medium))
+                .font(Typography.sheetTitle)
                 .foregroundStyle(T.fg)
 
             Text(stepLabel)
@@ -336,12 +336,6 @@ struct InstallKeyToHostFlow: View {
                     on: host,
                     requireBiometric: requireBiometric,
                     isSecureEnclave: isSecureEnclave
-                )
-                KeySecurityMetadataStore().recordRemoteInstallation(
-                    keyID: keyID,
-                    hostID: persistedHost.id,
-                    hostLabel: displayName(for: persistedHost),
-                    endpoint: "\(persistedHost.address):\(persistedHost.port)"
                 )
                 outcome = .success
             } catch {

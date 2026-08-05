@@ -2,6 +2,20 @@ import XCTest
 @testable import Tessera
 
 final class AccessoryChipEncoderTests: XCTestCase {
+    func testDefaultBarOrderUsesCompactPhoneLayout() {
+        XCTAssertEqual(
+            AccessoryChip.defaultBarOrder(for: .phone),
+            [.esc, .ctrl, .tab, .left, .right, .down, .up, .alt, .ctrlJ]
+        )
+    }
+
+    func testDefaultBarOrderPreservesPadLayout() {
+        XCTAssertEqual(
+            AccessoryChip.defaultBarOrder(for: .pad),
+            [.esc, .ctrl, .alt, .tab, .left, .down, .up, .right, .pipe, .tilde]
+        )
+    }
+
     func test_escIgnoresArmedAndApplicationCursor() {
         XCTAssertEqual(
             AccessoryChipEncoder.encode(
@@ -10,6 +24,13 @@ final class AccessoryChipEncoderTests: XCTestCase {
                 applicationCursor: true
             ),
             [0x1B]
+        )
+    }
+
+    func test_ctrlJEncodesLineFeed() {
+        XCTAssertEqual(
+            AccessoryChipEncoder.encode(.ctrlJ, armed: .none, applicationCursor: false),
+            [0x0A]
         )
     }
 
@@ -215,6 +236,105 @@ final class AccessoryChipEncoderTests: XCTestCase {
                 applicationCursor: false
             ),
             [0x7C]
+        )
+    }
+}
+
+final class SoftwareModifierEncoderTests: XCTestCase {
+    func test_ctrlLetterProducesControlByte() {
+        XCTAssertEqual(
+            SoftwareModifierEncoder.encode(
+                Array("c".utf8),
+                armed: ArmedModifiers(ctrl: true)
+            ),
+            [0x03]
+        )
+    }
+
+    func test_altPrefixesEscape() {
+        XCTAssertEqual(
+            SoftwareModifierEncoder.encode(
+                Array("f".utf8),
+                armed: ArmedModifiers(alt: true)
+            ),
+            [0x1B, 0x66]
+        )
+    }
+
+    func test_shiftUppercasesAsciiLetterBeforeControlMapping() {
+        XCTAssertEqual(
+            SoftwareModifierEncoder.encode(
+                Array("z".utf8),
+                armed: ArmedModifiers(ctrl: true, alt: true, shift: true)
+            ),
+            [0x1B, 0x1A]
+        )
+    }
+
+    func test_shiftMapsAsciiNumberAndPunctuationKeys() {
+        XCTAssertEqual(
+            SoftwareModifierEncoder.encode(
+                Array("1".utf8),
+                armed: ArmedModifiers(shift: true)
+            ),
+            Array("!".utf8)
+        )
+        XCTAssertEqual(
+            SoftwareModifierEncoder.encode(
+                Array("[".utf8),
+                armed: ArmedModifiers(shift: true)
+            ),
+            Array("{".utf8)
+        )
+    }
+
+    func test_ctrlTerminalPunctuationMappings() {
+        XCTAssertEqual(
+            SoftwareModifierEncoder.encode(
+                Array("[".utf8),
+                armed: ArmedModifiers(ctrl: true)
+            ),
+            [0x1B]
+        )
+        XCTAssertEqual(
+            SoftwareModifierEncoder.encode(
+                Array("?".utf8),
+                armed: ArmedModifiers(ctrl: true)
+            ),
+            [0x7F]
+        )
+    }
+
+    func test_noModifiersLeavesPayloadUnchanged() {
+        let payload = Array("hello".utf8)
+        XCTAssertEqual(
+            SoftwareModifierEncoder.encode(payload, armed: .none),
+            payload
+        )
+    }
+
+    func test_nextKeyRejectsPasteAndComposedUnicodeCommits() {
+        XCTAssertNil(
+            SoftwareModifierEncoder.encodeNextKey(
+                Array("paste".utf8),
+                armed: ArmedModifiers(ctrl: true)
+            )
+        )
+        XCTAssertNil(
+            SoftwareModifierEncoder.encodeNextKey(
+                Array("é".utf8),
+                armed: ArmedModifiers(alt: true)
+            )
+        )
+    }
+
+    func test_nextKeyEncodesSingleAsciiKey() {
+        XCTAssertEqual(
+            SoftwareModifierEncoder.encodeNextKey(
+                Array("c".utf8),
+                armed: ArmedModifiers(ctrl: true)
+            ),
+            [0x03]
         )
     }
 }

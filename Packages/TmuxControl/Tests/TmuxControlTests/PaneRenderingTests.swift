@@ -245,7 +245,18 @@ final class PaneRenderingTests: XCTestCase {
         XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).contains("display-message -p -t %10"))
         sent.clear()
         controller.ingest(Array("%begin 0 21 1\r\n%10\t0\t0\r\n%end 0 21 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 22 1\r\ngrid viewport\r\n%end 0 22 1\r\n".utf8))
+        controller.ingest(Array("%begin 0 22 1\r\ngrid history\r\n%end 0 22 1\r\n".utf8))
+        XCTAssertTrue(
+            String(decoding: sent.bytes, as: UTF8.self)
+                .contains("display-message -p -t %10")
+        )
+        XCTAssertTrue(
+            String(decoding: sent.bytes, as: UTF8.self)
+                .contains("capture-pane -p -e -N -t %10")
+        )
+        sent.clear()
+        controller.ingest(Array("%begin 0 23 1\r\n%10\t0\t0\r\n%end 0 23 1\r\n".utf8))
+        controller.ingest(Array("%begin 0 24 1\r\ngrid viewport\r\n%end 0 24 1\r\n".utf8))
 
         XCTAssertEqual(paneFeed.chunks.first, Array("retained-grid-output".utf8))
         XCTAssertTrue(String(decoding: paneFeed.bytes, as: UTF8.self).contains("grid viewport"))

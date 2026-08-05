@@ -53,7 +53,7 @@ struct TunnelsPageView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Text("tunnels")
-                    .font(Typography.tesseraMono(size: 17, weight: .medium))
+                    .font(Typography.pageTitle)
                     .foregroundStyle(T.fg)
                 Text("all forwarding rules across your hosts.")
                     .font(Typography.tesseraMono(size: 12))
@@ -130,7 +130,9 @@ struct TunnelsPageView: View {
             }
         }()
 
-        HStack(spacing: 12) {
+        // spacing 0 — the trailing buttons carry 44pt hit frames that
+        // absorb the old 12pt gaps (glyph centers drift <= 2pt).
+        HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 0) {
                     Text(String(rule.localPort))
@@ -153,7 +155,7 @@ struct TunnelsPageView: View {
                     .foregroundStyle(subStatusColor(runtime: runtimeState))
             }
 
-            Spacer()
+            Spacer(minLength: 12)
 
             if isRunning && isHTTPPort(rule.localPort) {
                 Button {
@@ -164,7 +166,13 @@ struct TunnelsPageView: View {
                     Image(systemName: "arrow.up.right.square")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(T.accent)
+                        // 28pt visual box inside a 44pt hit frame. Must not
+                        // shrink below 44pt: iPadOS 26 expands sub-44pt
+                        // targets itself and mis-assigns taps between
+                        // adjacent small controls.
                         .frame(width: 28, height: 28)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
@@ -175,7 +183,10 @@ struct TunnelsPageView: View {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(T.fgMuted)
+                    // 28pt visual box inside a 44pt hit frame (see above).
                     .frame(width: 28, height: 28)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
@@ -183,9 +194,12 @@ struct TunnelsPageView: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .tint(T.accent)
+                // 2pt + the chevron frame's 8pt overhang ≈ the old 12pt gap.
+                .padding(.leading, 2)
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        // 6pt + the 44pt hit frames keeps the old ~56pt card height.
+        .padding(.vertical, 6)
         .background(T.inputBg)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(T.border, lineWidth: 1))

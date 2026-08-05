@@ -12,6 +12,25 @@ enum CursorStyleOption: String, CaseIterable {
     case block, bar, underline
 }
 
+enum AppLockSettingsPolicy {
+    static func isBackgroundLockEnabled(
+        requiresOwnerAuthentication: Bool,
+        locksWhenBackgrounded: Bool
+    ) -> Bool {
+        requiresOwnerAuthentication && locksWhenBackgrounded
+    }
+
+    static func applyingBackgroundLockSelection(
+        _ isEnabled: Bool,
+        requiresOwnerAuthentication: Bool
+    ) -> (requiresOwnerAuthentication: Bool, locksWhenBackgrounded: Bool) {
+        (
+            requiresOwnerAuthentication: isEnabled || requiresOwnerAuthentication,
+            locksWhenBackgrounded: isEnabled
+        )
+    }
+}
+
 @Observable
 final class AppearancePreferences {
     /// Baseline used by SessionTopBar to derive a scale factor from the
@@ -107,6 +126,19 @@ final class AppearancePreferences {
         }
     }
 
+    // MARK: - Continuity
+    /// Publishes only the focused connected session as a secret-free Handoff
+    /// activity. This is device-local: disabling broadcast here does not alter
+    /// the peer's preference and never changes session restore behavior.
+    var handoffSessionsEnabled: Bool = true {
+        didSet {
+            UserDefaults.standard.set(
+                handoffSessionsEnabled,
+                forKey: "tessera.pref.handoffSessionsEnabled"
+            )
+        }
+    }
+
     // MARK: - Themes (M4 §settings.themes)
     /// One of the named TerminalTheme IDs (void, graphite, amber, paper, dracula, nord).
     /// Wired to SwiftTerm.installColors at session boot in W2.
@@ -195,9 +227,7 @@ final class AppearancePreferences {
     /// failing to decode the whole array. Initial value matches
     /// `AccessoryChip.defaultBarOrder`; the source of truth for that list is in
     /// the Keyboard module.
-    var accessoryBarKeys: [String] = [
-        "esc", "ctrl", "alt", "tab", "left", "down", "up", "right", "pipe", "tilde"
-    ] {
+    var accessoryBarKeys: [String] = AccessoryChip.defaultBarOrder.map(\.rawValue) {
         didSet { UserDefaults.standard.set(accessoryBarKeys, forKey: "tessera.pref.accessoryBarKeys") }
     }
 
@@ -227,8 +257,28 @@ final class AppearancePreferences {
     var lockWhenBackgrounded: Bool = true {
         didSet { UserDefaults.standard.set(lockWhenBackgrounded, forKey: "tessera.pref.lockWhenBackgrounded") }
     }
-    /// App-level authorization for a short connection burst. This complements,
-    /// but does not replace, each key item's OS-enforced Keychain ACL.
+
+    var effectiveLockWhenBackgrounded: Bool {
+        AppLockSettingsPolicy.isBackgroundLockEnabled(
+            requiresOwnerAuthentication: requireFaceIDToUnlock,
+            locksWhenBackgrounded: lockWhenBackgrounded
+        )
+    }
+
+    func setBackgroundLockEnabled(_ isEnabled: Bool) {
+        let selection = AppLockSettingsPolicy.applyingBackgroundLockSelection(
+            isEnabled,
+            requiresOwnerAuthentication: requireFaceIDToUnlock
+        )
+
+        // Persist the child policy first so RootView's observation of a newly
+        // enabled app-lock requirement always sees the complete configuration.
+        lockWhenBackgrounded = selection.locksWhenBackgrounded
+        requireFaceIDToUnlock = selection.requiresOwnerAuthentication
+    }
+    /// App-level authorization for a short connection burst. Software-key ACLs
+    /// can additionally enforce this in Keychain; device-unlocked Secure
+    /// Enclave keys use this mutable Tessera gate while remaining hardware-bound.
     var requireBiometricForKeyUse: Bool = false {
         didSet { UserDefaults.standard.set(requireBiometricForKeyUse, forKey: "tessera.pref.requireBiometricForKeyUse") }
     }
@@ -373,6 +423,11 @@ final class AppearancePreferences {
         if let raw = ud.string(forKey: "tessera.pref.sessionRestorePolicy"),
            let v = SessionRestorePolicy(rawValue: raw) {
             sessionRestorePolicy = v
+        }
+        if ud.object(forKey: "tessera.pref.handoffSessionsEnabled") != nil {
+            handoffSessionsEnabled = ud.bool(
+                forKey: "tessera.pref.handoffSessionsEnabled"
+            )
         }
 
         if let raw = ud.string(forKey: "tessera.pref.terminalThemeID"), !raw.isEmpty {

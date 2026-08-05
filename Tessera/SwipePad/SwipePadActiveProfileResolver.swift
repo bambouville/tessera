@@ -24,6 +24,15 @@ enum SwipePadDiagnostics {
         DiagnosticLogStore.appendSwipePad(message())
     }
 
+    /// Per-tick chatter (poll cadence, query round trips, drag deltas) that
+    /// the standard filter would drop anyway. Gating on the verbose flag
+    /// *before* the autoclosure evaluates skips the interpolation entirely
+    /// on the hot path instead of discarding it later on the log queue.
+    static func verbose(_ message: @autoclosure () -> String) {
+        guard DiagnosticLogStore.isVerboseEnabled else { return }
+        DiagnosticLogStore.appendSwipePad(message())
+    }
+
     static func preview(_ bytes: some Collection<UInt8>, limit: Int = 160) -> String {
         guard !bytes.isEmpty else { return "<empty>" }
 
@@ -61,6 +70,116 @@ enum SwipePadDiagnostics {
     }
 }
 
+/// Per-session circuit breaker for plain-mosh's SSH sidecar process probe.
+/// Refreshes honor bounded exponential backoff after a failure and join an
+/// already running attempt so polling never stacks SSH work.
+@MainActor
+final class SwipePadSidecarProbeGate {
+    enum Outcome {
+        case success([String])
+        case failure(type: String)
+
+        var names: [String] {
+            if case .success(let names) = self { return names }
+            return []
+        }
+    }
+
+    private struct Attempt {
+        let id: UInt64
+        let identity: String
+        let task: Task<Outcome, Never>
+    }
+
+    private static let retryDelays: [TimeInterval] = [5, 15, 30, 60]
+
+    private let now: @MainActor () -> Date
+    private var identity: String?
+    private var attempt: Attempt?
+    private var attemptID: UInt64 = 0
+    private(set) var consecutiveFailures = 0
+    private(set) var retryAfter: Date?
+
+    init(now: @escaping @MainActor () -> Date = { .now }) {
+        self.now = now
+    }
+
+    func reset() {
+        identity = nil
+        attemptID &+= 1
+        attempt?.task.cancel()
+        attempt = nil
+        consecutiveFailures = 0
+        retryAfter = nil
+    }
+
+    func probe(
+        identity newIdentity: String,
+        operation: @escaping @MainActor () async -> Outcome
+    ) async -> [String] {
+        if identity != newIdentity {
+            reset()
+            identity = newIdentity
+        }
+
+        if let attempt {
+            let outcome = await attempt.task.value
+            guard attemptID == attempt.id,
+                  identity == attempt.identity,
+                  identity == newIdentity
+            else { return [] }
+            return outcome.names
+        }
+
+        let requestedAt = now()
+        if let retryAfter, requestedAt < retryAfter {
+            SwipePadDiagnostics.verbose(
+                "provider mosh source=ssh-sidecar cooldown remainingMs=\(Int(retryAfter.timeIntervalSince(requestedAt) * 1_000))"
+            )
+            return []
+        }
+
+        attemptID &+= 1
+        let id = attemptID
+        let task = Task { @MainActor in await operation() }
+        attempt = Attempt(id: id, identity: newIdentity, task: task)
+        let outcome = await task.value
+        guard attemptID == id, identity == newIdentity else { return [] }
+        guard attempt?.id == id else { return [] }
+        attempt = nil
+
+        switch outcome {
+        case .success(let names):
+            let priorFailures = consecutiveFailures
+            consecutiveFailures = 0
+            retryAfter = nil
+            if priorFailures > 0 {
+                SwipePadDiagnostics.log(
+                    "provider mosh source=ssh-sidecar transition=recovered priorFailures=\(priorFailures)"
+                )
+            }
+            return names
+        case .failure(let type):
+            consecutiveFailures += 1
+            let delay = Self.retryDelays[min(
+                consecutiveFailures - 1,
+                Self.retryDelays.count - 1
+            )]
+            retryAfter = now().addingTimeInterval(delay)
+            if consecutiveFailures == 1 {
+                SwipePadDiagnostics.log(
+                    "provider mosh source=ssh-sidecar failed failureType=\(type) retrySeconds=\(Int(delay))"
+                )
+            } else {
+                SwipePadDiagnostics.verbose(
+                    "provider mosh source=ssh-sidecar failure-repeat count=\(consecutiveFailures) failureType=\(type) retrySeconds=\(Int(delay))"
+                )
+            }
+            return []
+        }
+    }
+}
+
 @MainActor
 @Observable
 public final class SwipePadActiveProfileResolver {
@@ -72,8 +191,56 @@ public final class SwipePadActiveProfileResolver {
     public private(set) var currentProfile: SwipePadProfile?
     private var refreshInFlight = false
     private var refreshPending = false
+    /// True while the overlay's polling gates are closed (hook mode, hidden
+    /// session, backgrounded app). A suspended resolver drops background
+    /// refreshes and never publishes from queries already in flight —
+    /// stopping the polling *task* alone would still let a queued completion
+    /// schedule work or overwrite state after the gate closed.
+    private var isSuspended = false
+    /// Bumped by `invalidate()`. Queries capture the epoch when they start;
+    /// a completion whose epoch is stale publishes nothing, so an in-flight
+    /// resolution from before a focus/hook transition can never re-install
+    /// the very state the invalidation just cleared.
+    private var resolutionEpoch: UInt64 = 0
+
+    /// Live origin gates for asynchronous callers (the VoiceOver fallback
+    /// action). Suspension and invalidation stop *publication* but never
+    /// cancel caller completions — a completion that lands after its
+    /// originating surface was suspended (hidden session, backgrounded
+    /// app, hook mode) or invalidated must re-check these and refuse.
+    public var isCurrentlySuspended: Bool { isSuspended }
+    public var currentResolutionEpoch: UInt64 { resolutionEpoch }
 
     public init() {}
+
+    /// Equality-gated publish: the 1 s polling loop re-resolves the same
+    /// profile almost every tick, and `@Observable` has no built-in equality
+    /// check — an unguarded write would invalidate the puck once per second
+    /// even when nothing changed.
+    private func publishCurrentProfile(_ profile: SwipePadProfile) {
+        guard currentProfile != profile else { return }
+        currentProfile = profile
+    }
+
+    /// Forget the retained profile. Called when the surface it described is
+    /// gone — hook proof just vanished (agent exited, pane focus moved off
+    /// the hooked pane): the retained profile belongs to the *previous*
+    /// program, and an immediate gesture would otherwise fire its macro into
+    /// the new foreground. A nil profile shows no petals until a fresh
+    /// resolution lands.
+    public func invalidate(reason: String) {
+        resolutionEpoch &+= 1
+        SwipePadDiagnostics.log("resolver-invalidate reason=\(reason)")
+        if currentProfile != nil { currentProfile = nil }
+    }
+
+    /// Open/close the background-work gate. Closing also clears any queued
+    /// coalesced refresh.
+    public func setSuspended(_ suspended: Bool) {
+        guard isSuspended != suspended else { return }
+        isSuspended = suspended
+        if suspended { refreshPending = false }
+    }
 
     /// Background refresh — fire a resolution and update `currentProfile`
     /// without anyone waiting for the result. Concurrent refreshes are
@@ -85,6 +252,10 @@ public final class SwipePadActiveProfileResolver {
         processNameProvider: SwipePadProcessNameProvider? = nil,
         paneProcessNameProvider: SwipePadPaneProcessNameProvider? = nil
     ) {
+        guard !isSuspended else {
+            SwipePadDiagnostics.verbose("refresh-dropped reason=suspended")
+            return
+        }
         guard !refreshInFlight else {
             refreshPending = true
             SwipePadDiagnostics.log("refresh-coalesced reason=in-flight")
@@ -102,7 +273,10 @@ public final class SwipePadActiveProfileResolver {
                 guard let self else { return }
                 self.refreshInFlight = false
 
-                guard self.refreshPending else { return }
+                guard !self.isSuspended, self.refreshPending else {
+                    self.refreshPending = false
+                    return
+                }
                 self.refreshPending = false
                 SwipePadDiagnostics.log("refresh-coalesced action=run-pending")
                 self.refresh(
@@ -131,6 +305,10 @@ public final class SwipePadActiveProfileResolver {
         let candidates = store.profiles
         let fallback = candidates.first(where: { $0.id == SwipePadProfile.fallbackID })
             ?? SwipePadProfile.fallback
+        // Queries publish only if no invalidation happened while they were
+        // in flight; the caller's completion still always fires (fresh data
+        // for the gesture in progress) so coalescing can never deadlock.
+        let startEpoch = resolutionEpoch
 
         SwipePadDiagnostics.log(
             "resolve begin tmux.mode=\(tmux.mode) activeWindowPresent=\(tmux.activeWindowId != nil) activePanePresent=\(tmux.activePaneId != nil) candidateCount=\(candidates.count) customMatcherCount=\(candidates.filter { !$0.matchProcess.isEmpty }.count)"
@@ -139,7 +317,7 @@ public final class SwipePadActiveProfileResolver {
         guard tmux.mode == .tmuxControl else {
             guard let processNameProvider else {
                 SwipePadDiagnostics.log("resolve fallback reason=no-tmux-no-provider")
-                currentProfile = fallback
+                publishCurrentProfile(fallback)
                 completion(fallback)
                 return
             }
@@ -152,10 +330,12 @@ public final class SwipePadActiveProfileResolver {
                     fallback: fallback,
                     processNames: processNames
                 )
-                SwipePadDiagnostics.log(
+                SwipePadDiagnostics.verbose(
                     "resolve complete source=plain-ssh candidateCount=\(processNames.count) matched=\(resolved.id != fallback.id)"
                 )
-                currentProfile = resolved
+                if self.resolutionEpoch == startEpoch, !self.isSuspended {
+                    self.publishCurrentProfile(resolved)
+                }
                 completion(resolved)
             }
             return
@@ -207,7 +387,14 @@ public final class SwipePadActiveProfileResolver {
                     SwipePadDiagnostics.log(
                         "resolve discard source=tmux reason=focus-changed queriedPane=\(queriedPaneID?.rawValue.description ?? "missing") activePane=\(tmux.activePaneId?.rawValue.description ?? "missing")"
                     )
-                    self?.resolveActiveProfile(
+                    // A suspended resolver must not chain fresh queries off
+                    // a stale completion — answer with fallback (no matcher,
+                    // no petals) instead of following the focus further.
+                    guard let self, !self.isSuspended else {
+                        completion(fallback)
+                        return
+                    }
+                    self.resolveActiveProfile(
                         tmux: tmux,
                         store: store,
                         processNameProvider: processNameProvider,
@@ -216,10 +403,12 @@ public final class SwipePadActiveProfileResolver {
                     )
                     return
                 }
-                SwipePadDiagnostics.log(
+                SwipePadDiagnostics.verbose(
                     "resolve complete source=tmux candidateCount=\(processNames.count) matched=\(resolved.id != fallback.id) panePIDPresent=\(parsed.panePID != nil)"
                 )
-                self?.currentProfile = resolved
+                if let self, self.resolutionEpoch == startEpoch, !self.isSuspended {
+                    self.publishCurrentProfile(resolved)
+                }
                 completion(resolved)
             }
         }
@@ -296,10 +485,7 @@ public final class SwipePadActiveProfileResolver {
 
         if spec.hasPrefix("regex:") {
             let pattern = String(spec.dropFirst(6))
-            guard let regex = try? NSRegularExpression(
-                pattern: pattern,
-                options: [.caseInsensitive]
-            ) else {
+            guard let regex = AgentRegexCache.regex(pattern) else {
                 SwipePadDiagnostics.log("match-check invalid-regex")
                 return false
             }
@@ -326,6 +512,65 @@ public final class SwipePadActiveProfileResolver {
         }
 
         return fallback
+    }
+}
+
+/// Origin token for the VoiceOver fallback action. The action starts an
+/// asynchronous foreground resolution; by the time it completes, the
+/// surface that offered it can be gone — session hidden, app backgrounded,
+/// or hook mode started (all folded into resolver suspension by the
+/// overlay's gate wiring), the resolver invalidated, or tmux focus moved
+/// to another pane (the resolver deliberately retries an in-flight query
+/// against the NEW pane and answers the original completion). Equal
+/// resolved data would then pass a profile/petal equality check and fire a
+/// user-configured macro into a surface the user never aimed at. The token
+/// pins everything about the origin that must still hold at completion.
+struct SwipePadAccessibilityOrigin: Equatable {
+    let tmuxMode: TmuxController.Mode
+    let paneID: PaneId?
+    let resolutionEpoch: UInt64
+}
+
+enum SwipePadAccessibilityFallbackGate {
+    /// nil when the surface is already inactive — the action refuses at
+    /// invoke instead of starting a resolution it may not honor.
+    @MainActor
+    static func captureOrigin(
+        resolver: SwipePadActiveProfileResolver,
+        tmux: TmuxController
+    ) -> SwipePadAccessibilityOrigin? {
+        guard !resolver.isCurrentlySuspended else { return nil }
+        return SwipePadAccessibilityOrigin(
+            tmuxMode: tmux.mode,
+            paneID: tmux.activePaneId,
+            resolutionEpoch: resolver.currentResolutionEpoch
+        )
+    }
+
+    /// Completion-time verdict: nil allows the fire, otherwise the
+    /// diagnostic refusal reason. `current` must be re-captured at
+    /// completion from live references (resolver, tmux, agent context) —
+    /// never from values frozen into the closure at invoke time.
+    static func refusalReason(
+        origin: SwipePadAccessibilityOrigin,
+        current: SwipePadAccessibilityOrigin?,
+        liveHookSnapshot: SwipePadAgentSnapshot?,
+        resolvedProfile: SwipePadProfile,
+        model: SwipePadPetalModel
+    ) -> String? {
+        guard let current else { return "surface-inactive" }
+        guard current.resolutionEpoch == origin.resolutionEpoch else {
+            return "state-invalidated"
+        }
+        guard current.tmuxMode == origin.tmuxMode,
+              current.paneID == origin.paneID else {
+            return "focus-changed"
+        }
+        guard liveHookSnapshot == nil else { return "hook-mode-started" }
+        guard SwipePadPetalLayout.petals(for: resolvedProfile).contains(model) else {
+            return "foreground-changed"
+        }
+        return nil
     }
 }
 
