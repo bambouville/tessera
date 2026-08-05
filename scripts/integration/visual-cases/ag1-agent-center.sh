@@ -29,6 +29,7 @@ TESSERA_VISUAL_CAPTURE=1 xcodebuild test-without-building \
   -only-testing:TesseraUITests/VisualCaptureProbe/testAgentCenterInstallPromptOpensHelpAndSource \
   -only-testing:TesseraUITests/VisualCaptureProbe/testAgentIntegrationMissingAgentConfirmationDisclosesOneStepActivation \
   -only-testing:TesseraUITests/VisualCaptureProbe/testAgentIntegrationWarningOpensHelpAndSource \
+  -only-testing:TesseraUITests/VisualCaptureProbe/testCompactAgentIntegrationWarningAppearsInHostSwitcher \
   >"$CASE_DIR/hook-disclosure-xctest.log" 2>&1
 
 xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
@@ -70,8 +71,10 @@ SIMCTL_CHILD_TESSERA_AGENT_HOOK_SOURCE_HARNESS=1 \
 # The exact source is a width-constrained, vertically scrollable, selectable
 # text view. Its first layout can outlive the generic two-second launch settle
 # on a cold sim, leaving the app's launch progress veil in the screenshot.
-# Capture the stable disclosure state that a person actually reads.
-sleep 4
+# Capture the stable disclosure state that a person actually reads. Under
+# concurrent simulator load, four seconds can still catch SpringBoard between
+# the test runner yielding foreground and the harness scene becoming active.
+sleep 6
 xcrun simctl io "$UDID" screenshot "$CASE_DIR/hook-source.raw.png" >/dev/null
 sips -r 270 "$CASE_DIR/hook-source.raw.png" --out "$CASE_DIR/hook-source.png" >/dev/null
 rm "$CASE_DIR/hook-source.raw.png"
@@ -79,10 +82,58 @@ rm "$CASE_DIR/hook-source.raw.png"
 xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
 SIMCTL_CHILD_TESSERA_AGENT_INTEGRATION_WARNING_HARNESS=1 \
   xcrun simctl launch "$UDID" "$BUNDLE_ID" >"$CASE_DIR/integration-warning-launch.txt"
-sleep 2
+# The warning popover mounts from SessionTopBar.onAppear. A cold simulator can
+# still be showing the launch snapshot after the generic two-second settle,
+# producing a blank attachment even though the XCUITest interaction passed.
+sleep 4
 xcrun simctl io "$UDID" screenshot "$CASE_DIR/integration-warning.raw.png" >/dev/null
 sips -r 270 "$CASE_DIR/integration-warning.raw.png" --out "$CASE_DIR/integration-warning.png" >/dev/null
 rm "$CASE_DIR/integration-warning.raw.png"
+
+xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
+SIMCTL_CHILD_TESSERA_AGENT_INTEGRATION_WARNING_HARNESS=1 \
+SIMCTL_CHILD_TESSERA_AGENT_INTEGRATION_WARNING_AUTO_OPEN=0 \
+SIMCTL_CHILD_TESSERA_AGENT_INTEGRATION_WARNING_COMPACT=1 \
+SIMCTL_CHILD_TESSERA_AGENT_INTEGRATION_WARNING_STATE=missing-agent \
+  xcrun simctl launch "$UDID" "$BUNDLE_ID" >"$CASE_DIR/compact-integration-warning-bar-launch.txt"
+sleep 2
+xcrun simctl io "$UDID" screenshot "$CASE_DIR/compact-integration-warning-bar.raw.png" >/dev/null
+sips -r 270 "$CASE_DIR/compact-integration-warning-bar.raw.png" --out "$CASE_DIR/compact-integration-warning-bar.png" >/dev/null
+rm "$CASE_DIR/compact-integration-warning-bar.raw.png"
+
+xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
+SIMCTL_CHILD_TESSERA_AGENT_INTEGRATION_WARNING_HARNESS=1 \
+SIMCTL_CHILD_TESSERA_AGENT_INTEGRATION_WARNING_AUTO_OPEN=0 \
+SIMCTL_CHILD_TESSERA_AGENT_INTEGRATION_WARNING_COMPACT=1 \
+SIMCTL_CHILD_TESSERA_AGENT_INTEGRATION_WARNING_STATE=missing-agent \
+SIMCTL_CHILD_TESSERA_AGENT_INTEGRATION_WARNING_SWITCHER_AUTO_OPEN=1 \
+  xcrun simctl launch "$UDID" "$BUNDLE_ID" >"$CASE_DIR/compact-integration-warning-switcher-launch.txt"
+sleep 2
+xcrun simctl io "$UDID" screenshot "$CASE_DIR/compact-integration-warning-switcher.raw.png" >/dev/null
+sips -r 270 "$CASE_DIR/compact-integration-warning-switcher.raw.png" --out "$CASE_DIR/compact-integration-warning-switcher.png" >/dev/null
+rm "$CASE_DIR/compact-integration-warning-switcher.raw.png"
+
+xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
+SIMCTL_CHILD_TESSERA_SWIPEPAD_FAN_HARNESS=1 \
+SIMCTL_CHILD_TESSERA_SWIPEPAD_FAN_OPTIONS=3 \
+SIMCTL_CHILD_TESSERA_SWIPEPAD_FAN_CORNER=bottomRight \
+SIMCTL_CHILD_TESSERA_SWIPEPAD_FORCE_RADIAL_OPEN=1 \
+  xcrun simctl launch "$UDID" "$BUNDLE_ID" >"$CASE_DIR/swipepad-partial-fan-launch.txt"
+sleep 2
+xcrun simctl io "$UDID" screenshot "$CASE_DIR/swipepad-partial-fan.raw.png" >/dev/null
+sips -r 270 "$CASE_DIR/swipepad-partial-fan.raw.png" --out "$CASE_DIR/swipepad-partial-fan.png" >/dev/null
+rm "$CASE_DIR/swipepad-partial-fan.raw.png"
+
+xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
+SIMCTL_CHILD_TESSERA_SWIPEPAD_FAN_HARNESS=1 \
+SIMCTL_CHILD_TESSERA_SWIPEPAD_FAN_OPTIONS=idle \
+SIMCTL_CHILD_TESSERA_SWIPEPAD_FAN_CORNER=bottomRight \
+SIMCTL_CHILD_TESSERA_SWIPEPAD_FORCE_RADIAL_OPEN=1 \
+  xcrun simctl launch "$UDID" "$BUNDLE_ID" >"$CASE_DIR/swipepad-idle-launch.txt"
+sleep 2
+xcrun simctl io "$UDID" screenshot "$CASE_DIR/swipepad-idle.raw.png" >/dev/null
+sips -r 270 "$CASE_DIR/swipepad-idle.raw.png" --out "$CASE_DIR/swipepad-idle.png" >/dev/null
+rm "$CASE_DIR/swipepad-idle.raw.png"
 
 xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
 SIMCTL_CHILD_TESSERA_AGENT_PALETTE_HARNESS=1 \
@@ -110,11 +161,14 @@ cat >"$CASE_DIR/case.json" <<'JSON'
     "The unavailable card exposes an explicit install-status-hook action rather than implying that remote mutation is automatic.",
     "Hook help explains why lifecycle integration is necessary, enumerates every remote mutation and privacy boundary, and its show-more state exposes readable exact source without clipping the primary disclosure controls.",
     "The terminal top bar warning is visible at the far right only when Agent Center integration needs attention, and its popover gives a succinct reason plus a state-specific fix action.",
+    "At compact width the host-name switcher itself carries the integration warning, and the switcher's first section explains the missing hook with its install action without adding another top-bar button.",
+    "A hook-proven idle Codex or Claude composer exposes one SwipePad switch-mode target whose Shift-Tab action and label remain readable without crowding the compact screen.",
+    "When fewer than four SwipePad actions are available, the fan packs only the live targets into a centered continuous arc without a reserved empty slot or a large visual gap.",
     "An inactive shell warning offers distinct immediate and automatic activation actions; automatic activation names the future-window startup behavior and remains behind explicit confirmation.",
     "The command palette lists sessions before urgency-ranked agents, shows location context, and remains navigation-only.",
     "The page is landscape, uses the Tessera flat frosted design language, and has no horizontal truncation of the primary actions at iPad width."
   ],
-  "capture_notes": "DEBUG Agent Center, attention, and hook-disclosure harnesses with deterministic in-memory state; no host connection, mutation, or user data. The aggregate programmatic lane separately drives real installed Codex and Claude through idle, working, visible permission, approval, and idle. Screenshot pixels were rotated counter-clockwise to normalize simctl's fixed portrait framebuffer into landscape.",
-  "deterministic_precheck": {"verdict": "pass", "details": "XCUITest proves current-window completion-marker suppression, unread tab clearing, top-bar/popover counts, and real local-notification delivery while backgrounded; it also expands direct Help and reaches exact source through both the Agent Center install and terminal-warning repair confirmations. Unit and real-provider lanes verify scene direction, background-assertion policy, plan, and permission classification."}
+  "capture_notes": "DEBUG Agent Center, attention, hook-disclosure, and SwipePad harnesses with deterministic in-memory state; no host connection, mutation, or user data. The aggregate programmatic lane separately drives real installed Codex and Claude through idle, working, visible permission, approval, and idle. Screenshot pixels were rotated counter-clockwise to normalize simctl's fixed portrait framebuffer into landscape.",
+  "deterministic_precheck": {"verdict": "pass", "details": "XCUITest proves current-window completion-marker suppression, unread tab clearing, top-bar/popover counts, compact host-switcher warning placement, and real local-notification delivery while backgrounded; it also expands direct Help and reaches exact source through both the Agent Center install and terminal-warning repair confirmations. Unit coverage proves exact Shift-Tab bytes, idle-only target selection, and packed fan gesture geometry; real-provider lanes verify scene direction, background-assertion policy, plan, and permission classification."}
 }
 JSON

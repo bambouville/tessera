@@ -20,6 +20,10 @@ struct ImportKeyModal: View {
     @State private var importError: String?
     @State private var privacyShielded = false
 
+    private var isPhone: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+    }
+
     init(
         initialProtection: Bool,
         onClose: @escaping () -> Void,
@@ -38,7 +42,7 @@ struct ImportKeyModal: View {
 
             VStack(alignment: .leading, spacing: 0) {
                 Text("import OpenSSH key")
-                    .font(Typography.tesseraMono(size: 18, weight: .medium))
+                    .font(Typography.sheetTitle)
                     .foregroundStyle(T.fg)
                     .padding(.bottom, 20)
 
@@ -106,8 +110,9 @@ struct ImportKeyModal: View {
                     }
                 }
             }
-            .padding(28)
-            .frame(width: 520)
+            .padding(isPhone ? 18 : 28)
+            .frame(width: isPhone ? nil : 520)
+            .frame(maxWidth: isPhone ? .infinity : nil)
             .background(T.panelBg)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(
@@ -115,6 +120,7 @@ struct ImportKeyModal: View {
                     .stroke(T.borderStrong, lineWidth: 1)
             )
             .onTapGesture {}
+            .padding(.horizontal, isPhone ? 18 : 0)
 
             if privacyShielded {
                 Color.black
@@ -128,12 +134,16 @@ struct ImportKeyModal: View {
                     .transaction { $0.animation = nil }
             }
         }
-        .fileImporter(
-            isPresented: $showFileImporter,
-            allowedContentTypes: [.data, .plainText],
-            allowsMultipleSelection: false,
-            onCompletion: handleFileSelection
-        )
+        // Present the UIKit document picker explicitly. SwiftUI's fileImporter
+        // modifier is attached beneath this custom full-screen modal and can
+        // silently decline to present on iOS 26.
+        .sheet(isPresented: $showFileImporter) {
+            OpenSSHKeyDocumentPicker { result in
+                showFileImporter = false
+                handleFileSelection(result)
+            }
+            .ignoresSafeArea()
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 privacyShielded = UIScreen.main.isCaptured
@@ -231,6 +241,48 @@ struct ImportKeyModal: View {
     private func clearSecrets() {
         passphrase = ""
         clearFileData()
+    }
+}
+
+private struct OpenSSHKeyDocumentPicker: UIViewControllerRepresentable {
+    let onCompletion: (Result<[URL], Error>) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onCompletion: onCompletion)
+    }
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(
+            forOpeningContentTypes: [.data, .plainText],
+            asCopy: true
+        )
+        picker.delegate = context.coordinator
+        picker.allowsMultipleSelection = false
+        return picker
+    }
+
+    func updateUIViewController(
+        _ uiViewController: UIDocumentPickerViewController,
+        context: Context
+    ) {}
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onCompletion: (Result<[URL], Error>) -> Void
+
+        init(onCompletion: @escaping (Result<[URL], Error>) -> Void) {
+            self.onCompletion = onCompletion
+        }
+
+        func documentPicker(
+            _ controller: UIDocumentPickerViewController,
+            didPickDocumentsAt urls: [URL]
+        ) {
+            onCompletion(.success(urls))
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            onCompletion(.success([]))
+        }
     }
 }
 

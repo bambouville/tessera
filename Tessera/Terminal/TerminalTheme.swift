@@ -177,8 +177,6 @@ struct TerminalTheme: Identifiable, Equatable {
             amber:         Color(rgbInt: 0xFF9F0A),
             border:        fg.opacity(0.10),
             borderStrong:  fg.opacity(0.18),
-            mono:          "JetBrainsMono-Regular",
-            sans:          "SF Pro Text",
             isLight:       isLight
         )
     }

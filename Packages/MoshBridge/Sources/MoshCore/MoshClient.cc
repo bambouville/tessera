@@ -283,6 +283,30 @@ public:
         network_->get_current_state().push_back(Parser::Resize(cols, rows));
     }
 
+    /// Repaint the whole screen from the client's authoritative framebuffer.
+    ///
+    /// The SSP diff stream assumes the local terminal shows exactly what
+    /// `local_framebuffer_` holds. Anything that paints the terminal outside
+    /// this client (a tmux window redraw replayed through a buffered attach,
+    /// a restored continuity snapshot) breaks that assumption, and because
+    /// the diff engine believes those cells are already correct it will never
+    /// repaint them. Emitting one uninitialized frame — a clear plus every
+    /// cell of the current state — resynchronizes the terminal with the
+    /// model; subsequent diffs stay consistent from there.
+    void force_full_repaint() {
+        freeze_timestamp();
+
+        if (!started_ || terminated_ || !network_
+            || network_->shutdown_in_progress() || still_connecting()) {
+            return;
+        }
+
+        next_framebuffer_ = network_->get_latest_remote_state().state.get_fb();
+        overlays_.apply(next_framebuffer_);
+        emit_bytes(display_.new_frame(false, next_framebuffer_, next_framebuffer_));
+        local_framebuffer_ = next_framebuffer_;
+    }
+
     void shutdown() {
         freeze_timestamp();
 
@@ -541,6 +565,10 @@ void MoshClient::inject_user_bytes(const uint8_t *bytes, size_t length) {
 
 void MoshClient::resize(int cols, int rows) {
     impl_->resize(cols, rows);
+}
+
+void MoshClient::force_full_repaint() {
+    impl_->force_full_repaint();
 }
 
 void MoshClient::shutdown() {

@@ -1,4 +1,5 @@
 import XCTest
+import TmuxControl
 @testable import Tessera
 
 @MainActor
@@ -26,6 +27,41 @@ final class CommandPaletteTests: XCTestCase {
         palette.open(sessions: [])
 
         XCTAssertEqual(palette.focusRequestToken, token &+ 1)
+    }
+
+    func test_compactNoticeIsFirstLineOnlyForAnEmptyQuery() {
+        let palette = CommandPalette()
+        let notice = CommandPaletteNotice(
+            title: "Agent integration not installed",
+            message: "Install the status hook for precise state.",
+            actionLabel: "Install integration"
+        )
+
+        palette.open(sessions: [], notice: notice)
+        XCTAssertEqual(palette.visibleNotice, notice)
+
+        palette.query = "host"
+        XCTAssertNil(palette.visibleNotice)
+    }
+
+    func test_compactNoticeActionClosesPaletteAndRunsCallback() {
+        let palette = CommandPalette()
+        var performed = false
+        palette.open(
+            sessions: [],
+            notice: CommandPaletteNotice(
+                title: "Agent integration not installed",
+                message: "Install the status hook for precise state.",
+                actionLabel: "Install integration"
+            ),
+            onNoticeAction: { performed = true }
+        )
+
+        palette.performNoticeAction()
+
+        XCTAssertTrue(performed)
+        XCTAssertFalse(palette.isOpen)
+        XCTAssertNil(palette.notice)
     }
 
     func test_close_clearsIsOpenWithoutResettingSnapshot() {
@@ -248,6 +284,82 @@ final class CommandPaletteTests: XCTestCase {
         XCTAssertNil(palette.commit())
     }
 
+    func test_compactSwitcherOrdersHomeThenWindowsAndPaneTargets() {
+        let palette = CommandPalette()
+        let session = makeLive(name: "phone")
+        let firstWindow = CommandPaletteTmuxWindow(
+            id: WindowId(4),
+            title: "shell",
+            panes: [
+                CommandPaletteTmuxPane(id: PaneId(8), title: "zsh", command: "zsh"),
+            ]
+        )
+        let splitWindow = CommandPaletteTmuxWindow(
+            id: WindowId(5),
+            title: "work",
+            panes: [
+                CommandPaletteTmuxPane(id: PaneId(9), title: "editor", command: "nvim"),
+                CommandPaletteTmuxPane(id: PaneId(10), title: "tests", command: "swift"),
+            ]
+        )
+
+        palette.open(
+            sessions: [session],
+            tmuxWindows: [firstWindow, splitWindow],
+            currentSessionID: session.id,
+            activeWindowID: splitWindow.id,
+            activePaneID: PaneId(9),
+            includesHome: true
+        )
+
+        XCTAssertEqual(palette.entries.map(\.id), [
+            .home,
+            .window(firstWindow.id),
+            .window(splitWindow.id),
+            .pane(splitWindow.id, PaneId(9)),
+            .pane(splitWindow.id, PaneId(10)),
+            .session(session.id),
+        ])
+    }
+
+    func test_compactSwitcherFiltersPaneByTitleAndCommitsStableIDs() {
+        let palette = CommandPalette()
+        let session = makeLive(name: "phone")
+        let window = CommandPaletteTmuxWindow(
+            id: WindowId(12),
+            title: "work",
+            panes: [
+                CommandPaletteTmuxPane(id: PaneId(20), title: "editor", command: "nvim"),
+                CommandPaletteTmuxPane(id: PaneId(21), title: "tests", command: "swift test"),
+            ]
+        )
+        palette.open(
+            sessions: [session],
+            tmuxWindows: [window],
+            currentSessionID: session.id,
+            includesHome: true
+        )
+
+        palette.query = "tests"
+
+        XCTAssertEqual(palette.entries.map(\.id), [
+            .window(window.id),
+            .pane(window.id, PaneId(21)),
+        ])
+        palette.selectedIndex = 1
+        XCTAssertEqual(
+            palette.commitResult(),
+            .pane(sessionID: session.id, windowID: window.id, paneID: PaneId(21))
+        )
+    }
+
+    func test_compactSwitcherHomeCommitIsIndependentOfSessions() {
+        let palette = CommandPalette()
+        palette.open(sessions: [], includesHome: true)
+
+        XCTAssertEqual(palette.commitResult(), .home)
+    }
+
     // MARK: helpers
 
     private func makeLive(name: String, hostKeyOverride: String? = nil) -> LiveSession {
@@ -297,5 +409,56 @@ final class CommandPaletteTests: XCTestCase {
             actionMessage: nil,
             actionIsError: false
         )
+    }
+}
+
+@MainActor
+final class CompactNavigationPresentationTests: XCTestCase {
+    func test_regularDestinationsMapToTheirCompactPresentation() {
+        let id = UUID()
+        assertPresentation(nil, tab: .hosts)
+        assertPresentation(.host(id), tab: .hosts)
+        assertPresentation(.session(id), tab: .sessions, sessions: .sessions)
+        assertPresentation(.agents, tab: .sessions, sessions: .agents)
+        assertPresentation(.keys, tab: .keys, keys: .keys)
+        assertPresentation(.knownHosts, tab: .keys, keys: .knownHosts)
+        assertPresentation(.settings, tab: .settings)
+    }
+
+    func test_iPadOnlyTunnelsFallsBackToHostsWithoutOwningRegularSelection() {
+        var presentation = CompactNavigationPresentation(tab: .settings)
+
+        presentation.reconcile(with: .tunnels)
+
+        XCTAssertEqual(presentation.tab, .hosts)
+    }
+
+    func test_unrelatedSubviewChoicesSurviveReconciliation() {
+        var presentation = CompactNavigationPresentation(
+            tab: .keys,
+            sessionsView: .agents,
+            keysView: .knownHosts
+        )
+
+        presentation.reconcile(with: .settings)
+
+        XCTAssertEqual(presentation.tab, .settings)
+        XCTAssertEqual(presentation.sessionsView, .agents)
+        XCTAssertEqual(presentation.keysView, .knownHosts)
+    }
+
+    private func assertPresentation(
+        _ selection: SidebarItem?,
+        tab: CompactRootTab,
+        sessions: CompactSessionsView = .sessions,
+        keys: CompactKeysView = .keys,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        var presentation = CompactNavigationPresentation()
+        presentation.reconcile(with: selection)
+        XCTAssertEqual(presentation.tab, tab, file: file, line: line)
+        XCTAssertEqual(presentation.sessionsView, sessions, file: file, line: line)
+        XCTAssertEqual(presentation.keysView, keys, file: file, line: line)
     }
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct AgentCenterPage: View {
     @Bindable var center: AgentCenter
@@ -7,13 +8,17 @@ struct AgentCenterPage: View {
     @State private var focusedAgentID: AgentInstanceID?
     @State private var messages: [AgentInstanceID: String] = [:]
 
+    private var isPhone: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: 14) {
+                    LazyVStack(spacing: isPhone ? 10 : 14) {
                         if center.agents.isEmpty {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("no agents detected")
@@ -46,7 +51,7 @@ struct AgentCenterPage: View {
 
             footer
         }
-        .padding(.horizontal, 40)
+        .padding(.horizontal, isPhone ? 18 : 40)
         .background(T.panelBg)
         .onAppear {
             center.setAgentCenterSurfaceVisible(true)
@@ -64,28 +69,44 @@ struct AgentCenterPage: View {
         .accessibilityIdentifier("agent-center-page")
     }
 
+    @ViewBuilder
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("agents")
-                    .font(Typography.tesseraMono(size: 20, weight: .medium))
-                    .foregroundStyle(T.fg)
-
-                Spacer(minLength: 12)
-
-                Text(summary)
-                    .font(Typography.tesseraMono(size: 11))
+        if isPhone {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("agent center · \(center.agents.count)")
+                    .font(Typography.tesseraMono(size: 11, weight: .medium))
+                    .tracking(0.4)
+                    .foregroundStyle(T.fgMuted)
+                Text("tap an agent to jump into its session; answer or send directly from its card.")
+                    .font(Typography.tesseraMono(size: 10))
                     .foregroundStyle(T.fgDim)
+                    .fixedSize(horizontal: false, vertical: true)
+                Rectangle().fill(T.border).frame(height: 1)
             }
+            .padding(.top, 14)
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("agents")
+                        .font(Typography.pageTitle)
+                        .foregroundStyle(T.fg)
 
-            Text("view and answer every agent across your sessions — tmux windows, panes, and raw connections")
-                .font(Typography.tesseraMono(size: 12))
-                .foregroundStyle(T.fgMuted)
-                .padding(.bottom, 16)
+                    Spacer(minLength: 12)
 
-            Rectangle().fill(T.border).frame(height: 1)
+                    Text(summary)
+                        .font(Typography.tesseraMono(size: 11))
+                        .foregroundStyle(T.fgDim)
+                }
+
+                Text("view and answer every agent across your sessions — tmux windows, panes, and raw connections")
+                    .font(Typography.tesseraMono(size: 12))
+                    .foregroundStyle(T.fgMuted)
+                    .padding(.bottom, 16)
+
+                Rectangle().fill(T.border).frame(height: 1)
+            }
+            .padding(.top, 28)
         }
-        .padding(.top, 28)
     }
 
     @ViewBuilder
@@ -142,18 +163,28 @@ struct AgentCenterPage: View {
         }
     }
 
+    @ViewBuilder
     private var footer: some View {
-        HStack(spacing: 16) {
+        if isPhone {
             Text("answers re-check the live prompt · sends verify submission")
                 .font(Typography.tesseraMono(size: 10))
                 .foregroundStyle(T.fgDim)
-            Spacer(minLength: 8)
-            hint("⇥", "next card")
-            hint("1–9", "answer")
-            hint("⌘↩", "open")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 12)
+                .overlay(alignment: .top) { Rectangle().fill(T.border).frame(height: 1) }
+        } else {
+            HStack(spacing: 16) {
+                Text("answers re-check the live prompt · sends verify submission")
+                    .font(Typography.tesseraMono(size: 10))
+                    .foregroundStyle(T.fgDim)
+                Spacer(minLength: 8)
+                hint("⇥", "next card")
+                hint("1–9", "answer")
+                hint("⌘↩", "open")
+            }
+            .padding(.vertical, 12)
+            .overlay(alignment: .top) { Rectangle().fill(T.border).frame(height: 1) }
         }
-        .padding(.vertical, 12)
-        .overlay(alignment: .top) { Rectangle().fill(T.border).frame(height: 1) }
     }
 
     private func hint(_ key: String, _ label: String) -> some View {
@@ -240,6 +271,10 @@ private struct AgentCard: View {
     @State private var showingIntegrationConfirmation = false
     @State private var showingIntegrationHelp = false
 
+    private var isPhone: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
@@ -252,7 +287,7 @@ private struct AgentCard: View {
                         .lineLimit(1)
                 }
                 .font(Typography.tesseraMono(size: 10))
-                .padding(.leading, 36)
+                .padding(.leading, isPhone ? 0 : 36)
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("agent-task-\(agent.location.paneID.map(String.init) ?? "raw")")
             }
@@ -262,11 +297,11 @@ private struct AgentCard: View {
                 Text(actionMessage)
                     .font(Typography.tesseraMono(size: 10))
                     .foregroundStyle(agent.actionIsError ? T.red : T.fgDim)
-                    .padding(.leading, 36)
+                    .padding(.leading, isPhone ? 0 : 36)
             }
         }
         .padding(.vertical, 12)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, isPhone ? 12 : 16)
         .background(T.inputBg)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay {
@@ -306,63 +341,114 @@ private struct AgentCard: View {
         }
     }
 
+    @ViewBuilder
     private var header: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(agentIconColor)
-                .frame(width: 26, height: 26)
-                .background(T.inputBgSoft)
-                .clipShape(RoundedRectangle(cornerRadius: 7))
-                .overlay(RoundedRectangle(cornerRadius: 7).stroke(T.border, lineWidth: 1))
+        if isPhone {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 8) {
+                    agentIcon
+                    Text(agent.name)
+                        .font(Typography.tesseraMono(size: 13))
+                        .foregroundStyle(T.fg)
+                        .lineLimit(1)
+                    statusChip
+                    Spacer(minLength: 4)
+                    TimelineView(.periodic(from: .now, by: 5)) { context in
+                        Text(duration(at: context.date))
+                            .font(Typography.tesseraMono(size: 10))
+                            .foregroundStyle(T.fgDim)
+                    }
+                    Button(action: onOpen) {
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(T.accent)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("open \(agent.name)")
+                }
 
-            Text(agent.name)
-                .font(Typography.tesseraMono(size: 13))
-                .foregroundStyle(T.fg)
-
-            statusChip
-
-            Text(agent.location.transportLabel)
+                HStack(spacing: 7) {
+                    transportChip
+                    if let sessionReference = agent.providerSessionReference {
+                        Text("session \(sessionReference)")
+                            .lineLimit(1)
+                            .accessibilityLabel("provider session \(sessionReference)")
+                            .accessibilityIdentifier("agent-provider-session-\(agent.location.paneID.map(String.init) ?? "raw")")
+                    }
+                    Text(agent.location.addressText)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
                 .font(Typography.tesseraMono(size: 9))
-                .tracking(0.3)
                 .foregroundStyle(T.fgFaint)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
-                .overlay(RoundedRectangle(cornerRadius: 4).stroke(T.border, lineWidth: 1))
-
-            if let sessionReference = agent.providerSessionReference {
-                Text("session \(sessionReference)")
-                    .font(Typography.tesseraMono(size: 9))
-                    .foregroundStyle(T.fgFaint)
-                    .lineLimit(1)
-                    .accessibilityLabel("provider session \(sessionReference)")
-                    .accessibilityIdentifier("agent-provider-session-\(agent.location.paneID.map(String.init) ?? "raw")")
             }
+        } else {
+            HStack(spacing: 10) {
+                agentIcon
 
-            Text(agent.location.addressText)
-                .font(Typography.tesseraMono(size: 11))
-                .foregroundStyle(T.fgDim)
-                .lineLimit(1)
-                .truncationMode(.middle)
+                Text(agent.name)
+                    .font(Typography.tesseraMono(size: 13))
+                    .foregroundStyle(T.fg)
 
-            Spacer(minLength: 0)
+                statusChip
+                transportChip
 
-            TimelineView(.periodic(from: .now, by: 5)) { context in
-                Text(duration(at: context.date))
+                if let sessionReference = agent.providerSessionReference {
+                    Text("session \(sessionReference)")
+                        .font(Typography.tesseraMono(size: 9))
+                        .foregroundStyle(T.fgFaint)
+                        .lineLimit(1)
+                        .accessibilityLabel("provider session \(sessionReference)")
+                        .accessibilityIdentifier("agent-provider-session-\(agent.location.paneID.map(String.init) ?? "raw")")
+                }
+
+                Text(agent.location.addressText)
                     .font(Typography.tesseraMono(size: 11))
                     .foregroundStyle(T.fgDim)
-            }
+                    .lineLimit(1)
+                    .truncationMode(.middle)
 
-            Button(action: onOpen) {
-                Text("open ↩")
-                    .font(Typography.tesseraMono(size: 11))
-                    .foregroundStyle(T.fgMuted)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(T.border, lineWidth: 1))
+                Spacer(minLength: 0)
+
+                TimelineView(.periodic(from: .now, by: 5)) { context in
+                    Text(duration(at: context.date))
+                        .font(Typography.tesseraMono(size: 11))
+                        .foregroundStyle(T.fgDim)
+                }
+
+                Button(action: onOpen) {
+                    Text("open ↩")
+                        .font(Typography.tesseraMono(size: 11))
+                        .foregroundStyle(T.fgMuted)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(T.border, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
+    }
+
+    private var agentIcon: some View {
+        Image(systemName: "sparkles")
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(agentIconColor)
+            .frame(width: 26, height: 26)
+            .background(T.inputBgSoft)
+            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(T.border, lineWidth: 1))
+    }
+
+    private var transportChip: some View {
+        Text(agent.location.transportLabel)
+            .font(Typography.tesseraMono(size: 9))
+            .tracking(0.3)
+            .foregroundStyle(T.fgFaint)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(T.border, lineWidth: 1))
     }
 
     private var statusChip: some View {
@@ -388,76 +474,121 @@ private struct AgentCard: View {
             .background(Color.black.opacity(T.isLight ? 0.06 : 1))
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(T.sidebarBorder, lineWidth: 1))
-            .padding(.leading, 36)
+            .padding(.leading, isPhone ? 0 : 36)
     }
 
     @ViewBuilder
     private var controls: some View {
         if agent.status == .waitingForInput, let prompt = agent.prompt {
-            HStack(spacing: 8) {
-                ForEach(prompt.options) { option in
-                    Button { onAnswer(option.id) } label: {
-                        HStack(spacing: 7) {
-                            Text(String(option.id))
-                                .font(Typography.tesseraMono(size: 9))
-                                .foregroundStyle(option.isDefault ? T.accent : T.fgDim)
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .overlay(RoundedRectangle(cornerRadius: 3).stroke(T.border, lineWidth: 1))
-                            Text(option.label)
-                                .lineLimit(1)
+            Group {
+                if isPhone {
+                    VStack(spacing: 6) {
+                        ForEach(prompt.options) { option in
+                            promptOptionButton(option)
                         }
-                        .font(Typography.tesseraMono(size: 11))
-                        .foregroundStyle(option.isDefault ? T.fg : T.fgMuted)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(option.isDefault ? T.accentSoft : T.inputBgSoft)
-                        .clipShape(RoundedRectangle(cornerRadius: 7))
-                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(T.border, lineWidth: 1))
                     }
-                    .buttonStyle(.plain)
-                    .disabled(agent.sendInFlight)
+                } else {
+                    HStack(spacing: 8) {
+                        ForEach(prompt.options) { option in
+                            promptOptionButton(option)
+                        }
+                        Spacer(minLength: 0)
+                    }
                 }
-                Spacer(minLength: 0)
             }
-            .padding(.leading, 36)
+            .padding(.leading, isPhone ? 0 : 36)
         } else if agent.status == .working {
-            HStack(spacing: 8) {
-                inputRow(label: "message \(agent.name)…", actionLabel: "↩ queue")
-                Button("⎋ interrupt", action: onInterrupt)
-                    .agentSecondaryButton(T: T)
-                    .disabled(agent.sendInFlight)
+            Group {
+                if isPhone {
+                    VStack(spacing: 8) {
+                        inputRow(label: "message \(agent.name)…", actionLabel: "queue")
+                        Button("interrupt", action: onInterrupt)
+                            .agentSecondaryButton(T: T)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .disabled(agent.sendInFlight)
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        inputRow(label: "message \(agent.name)…", actionLabel: "↩ queue")
+                        Button("⎋ interrupt", action: onInterrupt)
+                            .agentSecondaryButton(T: T)
+                            .disabled(agent.sendInFlight)
+                    }
+                }
             }
-            .padding(.leading, 36)
+            .padding(.leading, isPhone ? 0 : 36)
         } else if agent.status == .justFinished || agent.status == .idle {
             inputRow(label: "prompt \(agent.name)…", actionLabel: "↩ send")
-                .padding(.leading, 36)
+                .padding(.leading, isPhone ? 0 : 36)
         } else if agent.status == .unavailable, canInstallLifecycleIntegration {
-            HStack(spacing: 10) {
-                Text(integrationMessage)
-                    .font(Typography.tesseraMono(size: 10))
-                    .foregroundStyle(T.fgDim)
-                Spacer(minLength: 8)
-                if integrationState == .checking {
-                    ProgressView()
-                        .controlSize(.small)
-                        .accessibilityLabel("checking agent status integration")
-                } else if integrationState == .notChecked {
-                    Button("check status hook", action: onRetryLifecycleIntegrationProbe)
-                        .agentSecondaryButton(T: T)
-                } else if integrationState == .checkUnavailable {
-                    Button("retry check", action: onRetryLifecycleIntegrationProbe)
-                        .agentSecondaryButton(T: T)
-                } else if integrationState != .active && integrationState != .installedInactive {
-                    Button(integrationInstallLabel) {
-                        showingIntegrationConfirmation = true
+            Group {
+                if isPhone {
+                    VStack(alignment: .leading, spacing: 8) {
+                        integrationStatusContents
                     }
-                    .agentSecondaryButton(T: T)
-                    .disabled(agent.sendInFlight)
+                } else {
+                    HStack(spacing: 10) {
+                        integrationStatusContents
+                    }
                 }
             }
-            .padding(.leading, 36)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, isPhone ? 0 : 36)
         }
+    }
+
+    @ViewBuilder
+    private var integrationStatusContents: some View {
+        Text(integrationMessage)
+            .font(Typography.tesseraMono(size: 10))
+            .foregroundStyle(T.fgDim)
+        if !isPhone {
+            Spacer(minLength: 8)
+        }
+        if integrationState == .checking {
+            ProgressView()
+                .controlSize(.small)
+                .accessibilityLabel("checking agent status integration")
+        } else if integrationState == .notChecked {
+            Button("check status hook", action: onRetryLifecycleIntegrationProbe)
+                .agentSecondaryButton(T: T)
+        } else if integrationState == .checkUnavailable {
+            Button("retry check", action: onRetryLifecycleIntegrationProbe)
+                .agentSecondaryButton(T: T)
+        } else if integrationState != .active && integrationState != .installedInactive {
+            Button(integrationInstallLabel) {
+                showingIntegrationConfirmation = true
+            }
+            .agentSecondaryButton(T: T)
+            .disabled(agent.sendInFlight)
+        }
+    }
+
+    private func promptOptionButton(_ option: AgentPromptOption) -> some View {
+        Button { onAnswer(option.id) } label: {
+            HStack(spacing: 7) {
+                Text(String(option.id))
+                    .font(Typography.tesseraMono(size: 9))
+                    .foregroundStyle(option.isDefault ? T.accent : T.fgDim)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(T.border, lineWidth: 1))
+                Text(option.label)
+                    .lineLimit(isPhone ? 2 : 1)
+                if isPhone {
+                    Spacer(minLength: 0)
+                }
+            }
+            .font(Typography.tesseraMono(size: 11))
+            .foregroundStyle(option.isDefault ? T.fg : T.fgMuted)
+            .padding(.horizontal, 10)
+            .frame(minHeight: isPhone ? 44 : nil)
+            .background(option.isDefault ? T.accentSoft : T.inputBgSoft)
+            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(T.border, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .disabled(agent.sendInFlight)
     }
 
     private var integrationMessage: String {
@@ -510,6 +641,7 @@ private struct AgentCard: View {
                 .foregroundStyle(T.accent)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
+                .frame(minHeight: isPhone ? 44 : nil)
                 .overlay(RoundedRectangle(cornerRadius: 7).stroke(T.accentSoft, lineWidth: 1))
                 .buttonStyle(.plain)
                 .disabled(agent.sendInFlight || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -771,6 +903,7 @@ struct AgentLifecycleIntegrationHelpView: View {
                 }
             }
         }
+        .background(T.presentationBg.ignoresSafeArea())
         .presentationDetents([.large])
     }
 
@@ -811,36 +944,40 @@ struct AgentCenterHarnessView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Tessera")
-                    .font(Typography.tesseraMono(size: 17, weight: .medium))
-                    .foregroundStyle(T.fg)
-                    .padding(.horizontal, 18)
-                    .padding(.top, 18)
-                Spacer()
-                BottomNavigationRow(
-                    item: .agents,
-                    systemName: "sparkles",
-                    label: "agents",
-                    badges: AgentSidebarBadgeFactory.make(
-                        waitingCount: center.waitingCount,
-                        justFinishedCount: center.unreadJustFinishedCount,
-                        totalCount: center.agents.count
-                    ),
-                    isSelected: true,
-                    action: {}
-                )
-                .padding(10)
-            }
-            .frame(width: 270)
-            .background(T.sidebarBg)
-
-            Rectangle()
-                .fill(T.border)
-                .frame(width: 1)
-
+        if UIDevice.current.userInterfaceIdiom == .phone {
             AgentCenterPage(center: center)
+        } else {
+            HStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Tessera")
+                        .font(Typography.tesseraMono(size: 17, weight: .medium))
+                        .foregroundStyle(T.fg)
+                        .padding(.horizontal, 18)
+                        .padding(.top, 18)
+                    Spacer()
+                    BottomNavigationRow(
+                        item: .agents,
+                        systemName: "sparkles",
+                        label: "agents",
+                        badges: AgentSidebarBadgeFactory.make(
+                            waitingCount: center.waitingCount,
+                            justFinishedCount: center.unreadJustFinishedCount,
+                            totalCount: center.agents.count
+                        ),
+                        isSelected: true,
+                        action: {}
+                    )
+                    .padding(10)
+                }
+                .frame(width: 270)
+                .background(T.sidebarBg)
+
+                Rectangle()
+                    .fill(T.border)
+                    .frame(width: 1)
+
+                AgentCenterPage(center: center)
+            }
         }
     }
 }

@@ -12,6 +12,10 @@ struct TerminalSettingsView: View {
 
     @State private var showDenialSheet = false
 
+    private var isPhone: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+    }
+
     var body: some View {
         @Bindable var appearance = appearance
 
@@ -84,14 +88,29 @@ struct TerminalSettingsView: View {
             SettingsH("startup")
                 .padding(.top, 6)
 
-            Field(label: "previous connections", sub: startupPolicyDescription) {
-                HStack(spacing: 8) {
-                    ForEach(SessionRestorePolicy.allCases, id: \.rawValue) { policy in
-                        startupPolicyChip(
-                            policy,
-                            selected: appearance.sessionRestorePolicy == policy
-                        ) {
-                            appearance.sessionRestorePolicy = policy
+            Group {
+                if isPhone {
+                    ToggleRow(
+                        title: "restore on launch",
+                        subtitle: "reopen restorable saved-host sessions automatically",
+                        isOn: Binding(
+                            get: { appearance.sessionRestorePolicy != .never },
+                            set: {
+                                appearance.sessionRestorePolicy = $0 ? .always : .never
+                            }
+                        )
+                    )
+                } else {
+                    Field(label: "previous connections", sub: startupPolicyDescription) {
+                        HStack(spacing: 8) {
+                            ForEach(SessionRestorePolicy.allCases, id: \.rawValue) { policy in
+                                startupPolicyChip(
+                                    policy,
+                                    selected: appearance.sessionRestorePolicy == policy
+                                ) {
+                                    appearance.sessionRestorePolicy = policy
+                                }
+                            }
                         }
                     }
                 }
@@ -322,7 +341,7 @@ struct NotificationPermissionDenialSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("notifications denied")
-                .font(Typography.tesseraMono(size: 16, weight: .semibold))
+                .font(Typography.sheetTitle)
                 .foregroundStyle(T.fg)
 
             Text(detail)
@@ -361,6 +380,6 @@ struct NotificationPermissionDenialSheet: View {
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(T.bg)
+        .background(T.presentationBg)
     }
 }

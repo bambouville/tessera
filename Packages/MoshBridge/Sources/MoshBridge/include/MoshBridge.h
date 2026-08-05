@@ -47,6 +47,10 @@ typedef void (^MoshBridgeOutputHandler)(NSData *data);
 - (BOOL)resizeWithColumns:(NSInteger)columns
                      rows:(NSInteger)rows
                     error:(NSError * _Nullable * _Nullable)error;
+/// Emit one full-screen frame (clear + every cell of the current remote
+/// state) so the terminal resynchronizes with the client's framebuffer
+/// model after something painted the terminal outside the SSP diff stream.
+- (BOOL)forceFullRepaint:(NSError * _Nullable * _Nullable)error;
 - (void)shutdown;
 
 @end

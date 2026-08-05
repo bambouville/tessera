@@ -57,6 +57,14 @@ public struct Host: Identifiable, Equatable, Sendable {
     /// bastion UUID, cycle, depth overflow). Connection code fails closed
     /// on this instead of silently connecting directly.
     public var jumpChainBrokenReason: String?
+    /// Public fingerprints asserted by an authenticated continuation peer,
+    /// keyed by the stable host UUID for the destination and every bastion.
+    /// These values only annotate the local TOFU prompt; they never create a
+    /// KnownHostsStore pin without the user's explicit local confirmation.
+    public var continuationHostKeyFingerprints: [UUID: String]
+    /// Display-only origin label for informed TOFU and enrollment copy. It is
+    /// never used as peer identity or authorization input.
+    public var continuationPeerLabel: String?
 
     public init(
         id: UUID = UUID(),
@@ -76,7 +84,9 @@ public struct Host: Identifiable, Equatable, Sendable {
         startupSnippet: String = "",
         portForwardRules: [PortForwardRule] = [],
         jumpChain: [Host] = [],
-        jumpChainBrokenReason: String? = nil
+        jumpChainBrokenReason: String? = nil,
+        continuationHostKeyFingerprints: [UUID: String] = [:],
+        continuationPeerLabel: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -99,6 +109,8 @@ public struct Host: Identifiable, Equatable, Sendable {
         self.portForwardRules = portForwardRules
         self.jumpChain = jumpChain
         self.jumpChainBrokenReason = jumpChainBrokenReason
+        self.continuationHostKeyFingerprints = continuationHostKeyFingerprints
+        self.continuationPeerLabel = continuationPeerLabel
     }
 }
 

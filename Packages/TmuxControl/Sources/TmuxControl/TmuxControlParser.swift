@@ -129,19 +129,36 @@ public struct TmuxControlParser {
 
     private mutating func parseBeginEnd(line: [UInt8], kind: BeginEndKind) -> TmuxMessage? {
         let text = String(decoding: line, as: UTF8.self)
+        let kindDescription: String
+        switch kind {
+        case .begin: kindDescription = "begin"
+        case .end: kindDescription = "end"
+        case .error: kindDescription = "error"
+        }
         // Format: "%<tag> <time> <number> <flags>"
         let components = text.split(separator: " ", omittingEmptySubsequences: true)
         guard components.count >= 4 else {
             // Bare tag with no args — rare but tolerate it.
+            TmuxDiagnostics.sink?(
+                "command-guard-parse-fallback kind=\(kindDescription) reason=missing-fields componentCount=\(components.count) lineBytes=\(line.count) fallbackTime=0 fallbackNumber=0 fallbackFlags=0"
+            )
             switch kind {
             case .begin: return .begin(time: 0, commandNumber: 0, flags: 0)
             case .end:   return .end(time: 0, commandNumber: 0, flags: 0)
             case .error: return .error(time: 0, commandNumber: 0, flags: 0)
             }
         }
-        let time = Int(components[1]) ?? 0
-        let number = Int(components[2]) ?? 0
-        let flags = Int(components[3]) ?? 0
+        let parsedTime = Int(components[1])
+        let parsedNumber = Int(components[2])
+        let parsedFlags = Int(components[3])
+        let time = parsedTime ?? 0
+        let number = parsedNumber ?? 0
+        let flags = parsedFlags ?? 0
+        if parsedTime == nil || parsedNumber == nil || parsedFlags == nil {
+            TmuxDiagnostics.sink?(
+                "command-guard-parse-fallback kind=\(kindDescription) reason=invalid-integer componentCount=\(components.count) lineBytes=\(line.count) timeValid=\(parsedTime != nil) numberValid=\(parsedNumber != nil) flagsValid=\(parsedFlags != nil) fallbackTime=\(time) fallbackNumber=\(number) fallbackFlags=\(flags)"
+            )
+        }
         switch kind {
         case .begin: return .begin(time: time, commandNumber: number, flags: flags)
         case .end:   return .end(time: time, commandNumber: number, flags: flags)

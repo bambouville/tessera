@@ -498,7 +498,11 @@ enum AgentSessionSourceFactory {
                 guard let paneID = location.paneID,
                       tmux.mode == .tmuxControl else { return }
                 if let windowID = location.windowID {
-                    tmux.sendControlCommand("select-window -t @\(windowID)")
+                    // Use the controller's guarded user-mutation path. A raw
+                    // control command would bypass continuity authority and
+                    // let an Agent Center jump steal the peer's current grid
+                    // from underneath the continued-elsewhere veil.
+                    tmux.selectWindow(WindowId(windowID))
                 }
                 tmux.selectPane(PaneId(paneID))
             }

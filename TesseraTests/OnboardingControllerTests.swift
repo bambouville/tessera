@@ -3,6 +3,22 @@ import XCTest
 
 @MainActor
 final class OnboardingControllerTests: XCTestCase {
+    func test_spotlightExpansionStaysInsideEveryOverlayEdge() {
+        let bounds = CGRect(x: 0, y: 0, width: 320, height: 480)
+        for target in [
+            CGRect(x: 0, y: 100, width: 80, height: 44),
+            CGRect(x: 240, y: 100, width: 80, height: 44),
+            CGRect(x: 100, y: 0, width: 80, height: 44),
+            CGRect(x: 100, y: 436, width: 80, height: 44),
+        ] {
+            let hole = OnboardingOverlay.spotlightHole(for: target, in: bounds)
+            XCTAssertGreaterThanOrEqual(hole.minX, 2)
+            XCTAssertGreaterThanOrEqual(hole.minY, 2)
+            XCTAssertLessThanOrEqual(hole.maxX, 318)
+            XCTAssertLessThanOrEqual(hole.maxY, 478)
+        }
+    }
+
 
     private func makeController() -> (OnboardingController, AppearancePreferences) {
         let appearance = AppearancePreferences()
@@ -134,17 +150,40 @@ final class OnboardingControllerTests: XCTestCase {
 
     // MARK: - Step list shape
 
-    func test_firstRun_hasEightStepsInOrder() {
+    func test_firstRun_hasNineStepsInOrder() {
         let steps = OnboardingStep.firstRun
-        XCTAssertEqual(steps.count, 8)
+        XCTAssertEqual(steps.count, 9)
         XCTAssertEqual(steps[0].kind, .spotlight(.addHost, .below))
         XCTAssertEqual(steps[1].kind, .spotlight(.keysNav, .right))
         XCTAssertEqual(steps[2].kind, .illustration(.mockTerminal))
-        XCTAssertEqual(steps[3].kind, .illustration(.claudeCodePromptWithPuck))
-        XCTAssertEqual(steps[4].kind, .illustration(.filesPanel))
-        XCTAssertEqual(steps[5].kind, .illustration(.shareInOut))
-        XCTAssertEqual(steps[6].kind, .illustration(.agentImagePaste))
-        XCTAssertEqual(steps[7].kind, .illustration(.shortcuts))
+        XCTAssertEqual(steps[3].kind, .illustration(.agentCenter))
+        XCTAssertEqual(steps[4].kind, .illustration(.swipePad))
+        XCTAssertEqual(steps[5].kind, .illustration(.filesPanel))
+        XCTAssertEqual(steps[6].kind, .illustration(.shareInOut))
+        XCTAssertEqual(steps[7].kind, .illustration(.agentImagePaste))
+        XCTAssertEqual(steps[8].kind, .illustration(.shortcuts))
+        XCTAssertTrue(steps[4].body.contains("swipe toward an option"))
+        XCTAssertTrue(steps[4].body.contains("release"))
+    }
+
+    func test_compactFirstRun_adaptsDeviceSpecificStepsWithoutChangingSequence() {
+        let steps = OnboardingStep.firstRun.map { $0.presentation(compact: true) }
+
+        XCTAssertEqual(steps.count, 9)
+        XCTAssertEqual(steps[0].kind, .spotlight(.addHost, .below))
+        XCTAssertEqual(steps[1].kind, .illustration(.keySecurity))
+        XCTAssertEqual(steps[2].kind, .illustration(.mockTerminal))
+        XCTAssertEqual(steps[3].kind, .illustration(.agentCenter))
+        XCTAssertEqual(steps[4].kind, .illustration(.swipePad))
+        XCTAssertEqual(steps[5].kind, .illustration(.filesPanel))
+        XCTAssertEqual(steps[6].kind, .illustration(.shareInOut))
+        XCTAssertEqual(steps[7].kind, .illustration(.agentImagePaste))
+        XCTAssertEqual(steps[8].kind, .illustration(.phoneControls))
+        XCTAssertEqual(steps[5].title, "files from your phone")
+        XCTAssertEqual(steps[8].title, "terminal controls")
+        XCTAssertFalse(steps[0].body.contains("⌘"))
+        XCTAssertFalse(steps[8].body.contains("Magic Keyboard"))
+        XCTAssertTrue(steps[2].body.contains("focused pane fits the phone viewport"))
     }
 
     func test_controllerStepsMatchFirstRun() {

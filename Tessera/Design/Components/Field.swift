@@ -18,6 +18,7 @@ struct Field<Content: View>: View {
             Text(label)
                 .font(Typography.tesseraMono(size: 11))
                 .foregroundStyle(T.fgMuted)
+                .fixedSize(horizontal: false, vertical: true)
 
             content()
 
@@ -25,6 +26,7 @@ struct Field<Content: View>: View {
                 Text(sub)
                     .font(Typography.tesseraMono(size: 11))
                     .foregroundStyle(T.fgDim)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer()

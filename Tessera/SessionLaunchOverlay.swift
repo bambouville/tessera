@@ -23,6 +23,19 @@
 // readiness signal.
 import SwiftUI
 
+struct SessionLaunchFailurePresentation: Equatable {
+    let title: String
+    let isCancellation: Bool
+
+    static func resolve(reason: String) -> Self {
+        let cancellation = reason.localizedCaseInsensitiveContains("connection cancelled")
+        return Self(
+            title: cancellation ? "not connected" : "connection failed",
+            isCancellation: cancellation
+        )
+    }
+}
+
 enum SessionLaunchPhase: Equatable {
     case connecting
     case startingTmux
@@ -52,6 +65,9 @@ struct SessionLaunchOverlay: View {
     /// layout space even when nil so the caption block height is
     /// stable as the overlay transitions through phases.
     let subtitle: String?
+    /// Cached or freshly probed high-confidence WSL2/Tailscale MTU risk.
+    /// Loading remains non-blocking; this only explains why progress may stall.
+    var wslTailscaleMTUWarning: WSLTailscaleMTUWarning? = nil
 
     /// When non-nil the overlay renders its terminal/error state instead
     /// of the loading state: the connect attempt failed before reaching
@@ -75,6 +91,7 @@ struct SessionLaunchOverlay: View {
                 LaunchOverlayFailure(
                     T: T,
                     reason: failureReason,
+                    wslTailscaleMTUWarning: wslTailscaleMTUWarning,
                     onEditHost: onEditHost,
                     onRetry: onRetry,
                     onBack: onBack
@@ -88,13 +105,90 @@ struct SessionLaunchOverlay: View {
 
                     LaunchOverlayIndeterminateBar(T: T)
                         .frame(width: 200, height: 2)
+
+                    if let wslTailscaleMTUWarning {
+                        WSLTailscaleMTUWarningView(
+                            warning: wslTailscaleMTUWarning,
+                            T: T
+                        )
+                        .frame(maxWidth: 520)
+                    }
                 }
-                .accessibilityElement(children: .combine)
+                .padding(.horizontal, 20)
+                .accessibilityElement(
+                    children: wslTailscaleMTUWarning == nil ? .combine : .contain
+                )
                 .accessibilityLabel("connecting — \(phase.caption)")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
+    }
+}
+
+/// Shared launch/terminal warning. It deliberately reports observed MTU
+/// values rather than claiming that every WSL or Tailscale failure has the
+/// same cause. The public help destination stays centralized on the warning
+/// model so future documentation moves remain mechanical.
+struct WSLTailscaleMTUWarningView: View {
+    let warning: WSLTailscaleMTUWarning
+    let T: DesignTokens
+    var onDismiss: (() -> Void)? = nil
+
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(T.amber)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("possible WSL2 / Tailscale MTU issue")
+                    .font(Typography.tesseraMono(size: 12, weight: .medium))
+                    .foregroundStyle(T.fg)
+
+                Text(warning.detail)
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.fgMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button("learn more") {
+                    openURL(WSLTailscaleMTUWarning.helpURL)
+                }
+                .font(Typography.tesseraMono(size: 11, weight: .medium))
+                .foregroundStyle(T.accent)
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("wsl-tailscale-mtu-help")
+            }
+
+            Spacer(minLength: 4)
+
+            if let onDismiss {
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(T.fgDim)
+                        .padding(6)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss network warning")
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .frame(maxWidth: 540)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(T.panelBg.opacity(0.96))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(T.amber.opacity(0.28), lineWidth: 0.5)
+                )
+        )
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -108,9 +202,14 @@ struct SessionLaunchOverlay: View {
 private struct LaunchOverlayFailure: View {
     let T: DesignTokens
     let reason: String
+    let wslTailscaleMTUWarning: WSLTailscaleMTUWarning?
     let onEditHost: () -> Void
     let onRetry: () -> Void
     let onBack: () -> Void
+
+    private var presentation: SessionLaunchFailurePresentation {
+        .resolve(reason: reason)
+    }
 
     var body: some View {
         VStack(spacing: 28) {
@@ -118,7 +217,7 @@ private struct LaunchOverlayFailure: View {
                 .frame(width: 64, height: 64)
 
             VStack(spacing: 10) {
-                Text("connection failed")
+                Text(presentation.title)
                     .font(Typography.tesseraMono(size: 14))
                     .foregroundStyle(T.fg)
 
@@ -129,6 +228,14 @@ private struct LaunchOverlayFailure: View {
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: 360)
+            }
+
+            if let wslTailscaleMTUWarning {
+                WSLTailscaleMTUWarningView(
+                    warning: wslTailscaleMTUWarning,
+                    T: T
+                )
+                .frame(maxWidth: 520)
             }
 
             HStack(spacing: 12) {
@@ -144,9 +251,31 @@ private struct LaunchOverlayFailure: View {
         }
         .padding(.horizontal, 24)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("connection failed. \(reason)")
+        .accessibilityLabel("\(presentation.title). \(reason)")
     }
 }
+
+#if DEBUG
+/// Host-free presentation oracle for the WSL2/Tailscale MTU warning. It
+/// exercises the same launch-overlay component on iPad and iPhone without
+/// opening a transport or depending on a deliberately broken network path.
+struct NetworkPathWarningHarnessView: View {
+    private let T = DesignTokens.make(mode: .dark, accent: .blue)
+
+    var body: some View {
+        SessionLaunchOverlay(
+            T: T,
+            phase: .attachingPane,
+            subtitle: "work",
+            wslTailscaleMTUWarning: WSLTailscaleMTUWarning(
+                defaultInterfaceMTU: 1280,
+                tailscaleInterfaceMTU: 1280
+            )
+        )
+        .environment(\.designTokens, T)
+    }
+}
+#endif
 
 // MARK: - mark + breathing glow + blinking cursor
 

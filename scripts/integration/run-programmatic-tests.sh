@@ -7,6 +7,9 @@ source "$HERE/lib.sh"
 
 RUN_DIR="${1:-}"
 [[ -n "$RUN_DIR" ]] || { printf 'usage: run-programmatic-tests.sh RUN_DIR\n' >&2; exit 2; }
+if [[ -z "${TESSERA_INTEGRATION_SIMULATOR_RUN_ID:-}" ]]; then
+  export TESSERA_INTEGRATION_SIMULATOR_RUN_ID="programmatic-$(basename "$RUN_DIR")-$$"
+fi
 
 load_fixture_config
 ensure_fixture_credentials
@@ -25,11 +28,14 @@ failed=0
 # Avoid three shutdown/boot cycles; this parent owns the final cleanup.
 export TESSERA_KEEP_TEST_SIM_BOOTED=1
 cleanup_programmatic_simulator() {
-  if [[ -f "$FIXTURE_STATE/simulator_udid" ]]; then
-    local udid
-    IFS= read -r udid <"$FIXTURE_STATE/simulator_udid"
-    [[ -n "$udid" ]] && xcrun simctl shutdown "$udid" >/dev/null 2>&1 || true
-  fi
+  local udid_file
+  for udid_file in \
+    "$SIMULATOR_STATE/simulator_udid" \
+    "$SIMULATOR_STATE/iphone_keyboard_simulator_udid" \
+    "$SIMULATOR_STATE/continuity_iphone_simulator_udid" \
+    "$SIMULATOR_STATE/touch_simulator_udid"; do
+    delete_owned_test_simulator "$udid_file" || true
+  done
 }
 trap cleanup_programmatic_simulator EXIT
 
@@ -188,8 +194,13 @@ run_case sftp_chaos test_sftp_listing "$TESSERA_FIXTURE_CHAOS_HOST" chaos
 run_case agent_integration_scripts \
   "$HERE/run-agent-integration-script-tests.sh" "$RUN_DIR"
 run_case app_offline_oracles "$HERE/run-offline-oracle-tests.sh" "$RUN_DIR"
+run_case app_sync_security_and_lifecycle_units \
+  "$HERE/run-sync-unit-tests.sh" "$RUN_DIR" --without-building
 run_case tmux_control_pane_commands \
   swift test --package-path "$HERE/../../Packages/TmuxControl" --filter PaneCommandTests
+run_case tmux_control_compact_client_role \
+  swift test --package-path "$HERE/../../Packages/TmuxControl" \
+    --filter TmuxControllerTests/test_compact
 run_case app_live_transports_tmux_files_forwarding \
   "$HERE/run-app-transport-tests.sh" "$RUN_DIR"
 # Credentialed, local-provider gate. It is deliberately opt-in because CI and
@@ -214,7 +225,21 @@ else
 fi
 run_case app_terminal_scroll_wiring \
   "$HERE/run-scroll-harness-tests.sh" "$RUN_DIR" --without-building
+run_case app_compact_navigation_transition \
+  "$HERE/run-compact-navigation-transition-tests.sh" "$RUN_DIR" --without-building
+run_case app_iphone_keyboard_and_tmux_viewport \
+  "$HERE/run-iphone-keyboard-harness-tests.sh" "$RUN_DIR"
+run_case app_continuity_descriptor_routes \
+  "$HERE/run-continuity-harness-tests.sh" "$RUN_DIR" --without-building
 run_case mosh_orphan_budget_stable test_mosh_orphan_budget "$TESSERA_FIXTURE_STABLE_HOST"
 run_case mosh_orphan_budget_chaos test_mosh_orphan_budget "$TESSERA_FIXTURE_CHAOS_HOST"
+run_case app_nearby_bootstrap_two_sim \
+  "$HERE/run-bootstrap-network-harness-tests.sh" "$RUN_DIR" --without-building
+run_case app_nearby_bootstrap_rejection_two_sim \
+  env TESSERA_BOOTSTRAP_HARNESS_SCENARIO=rejection \
+  "$HERE/run-bootstrap-network-harness-tests.sh" "$RUN_DIR" --without-building
+run_case app_nearby_bootstrap_rejection_reversed_two_sim \
+  env TESSERA_BOOTSTRAP_HARNESS_SCENARIO=rejection-reversed \
+  "$HERE/run-bootstrap-network-harness-tests.sh" "$RUN_DIR" --without-building
 
 exit "$failed"

@@ -174,6 +174,41 @@ final class SessionRestoreResolverTests: XCTestCase {
         XCTAssertEqual(plan.skippedCount, 1)
     }
 
+    func test_continuationCredentialEligibilityUsesTheRestoreSafetyBoundaryForAllModes() {
+        let passwordIdentity = makeIdentity(.password)
+        let keyID = UUID()
+        let keyIdentity = makeIdentity(.key(keyID))
+        let noneHost = makeHost(identity: makeIdentity(.none))
+        let passwordHost = makeHost(identity: passwordIdentity)
+        let keyHost = makeHost(identity: keyIdentity)
+        let key = StoredKey(id: keyID, algorithm: .ecdsaP256)
+
+        func eligible(
+            _ host: PersistedHost,
+            password: PasswordMaterialAvailability = .missing,
+            integrity: KeyMaterialIntegrity = .missing
+        ) -> Bool {
+            SessionRestoreEligibility.isRestorable(
+                host: host,
+                storedKey: { $0 == keyID ? key : nil },
+                privateMaterialIntegrity: { _ in integrity },
+                passwordAvailability: { identityID in
+                    identityID == passwordIdentity.id ? password : .missing
+                },
+                legacyDevKeyExists: { _ in false }
+            )
+        }
+
+        XCTAssertFalse(eligible(noneHost))
+        XCTAssertFalse(eligible(passwordHost, password: .missing))
+        XCTAssertTrue(eligible(passwordHost, password: .available))
+        XCTAssertTrue(eligible(passwordHost, password: .unavailable))
+        XCTAssertFalse(eligible(passwordHost, password: .invalid))
+        XCTAssertFalse(eligible(keyHost, integrity: .missing))
+        XCTAssertTrue(eligible(keyHost, integrity: .valid))
+        XCTAssertTrue(eligible(keyHost, integrity: .authenticationRequired))
+    }
+
     func test_transientPasswordSession_isSkippedWhenHostHasNoRestorableIdentity() {
         let host = makeHost(identity: nil)
         let document = document(snapshots: [snapshot(hostID: host.id)])

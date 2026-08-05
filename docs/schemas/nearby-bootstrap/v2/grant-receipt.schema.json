@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tessera://schemas/nearby-bootstrap/v2/grant-receipt.schema.json",
+  "title": "BootstrapGrantBatchReceipt v2 (grantReceipt payload)",
+  "description": "Payload of encrypted-envelope kind 'grantReceipt'. Exactly one result per manifest host. 'detail' is present if and only if status is 'failed' (max 512 characters). Lenient decoder. Frozen for protocol version 2.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["publicKeyID", "publicKeyFingerprint", "results"],
+  "properties": {
+    "publicKeyID": { "type": "string", "format": "uuid" },
+    "publicKeyFingerprint": { "type": "string" },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["hostID", "hostName", "status"],
+        "properties": {
+          "hostID": { "type": "string", "format": "uuid" },
+          "hostName": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["installed", "failed", "notSelected", "rejectedImport", "excludedAuthentication"]
+          },
+          "detail": { "type": "string", "maxLength": 512 }
+        }
+      }
+    }
+  }
+}

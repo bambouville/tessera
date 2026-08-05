@@ -2,6 +2,7 @@
 // Experimental swipe-pad settings: gesture guide, profiles, and voice input.
 import SwiftUI
 import UserNotifications
+import UIKit
 
 struct ExperimentalSettingsView: View {
     @Environment(AppearancePreferences.self) private var appearance
@@ -32,6 +33,7 @@ struct ExperimentalSettingsView: View {
                 guard enabled, appearance.agentCenterNotificationsEnabled else { return }
                 requestAgentNotificationPermission()
             }
+            .padding(.bottom, 22)
 
             ToggleRow(
                 title: "agent attention notifications",
@@ -78,17 +80,23 @@ struct ExperimentalSettingsView: View {
                         ("bottomLeft", "bottomLeft"),
                         ("bottomRight", "bottomRight")
                     ],
-                    selection: $appearance.swipePadCorner
+                    selection: $appearance.swipePadCorner,
+                    columns: UIDevice.current.userInterfaceIdiom == .phone ? 2 : nil
                 )
             }
 
             Field(label: "puck size") {
                 SegmentedStringPicker(
-                    options: [
-                        ("compact", "compact · 44pt"),
-                        ("standard", "standard · 52pt"),
-                        ("large", "large · 64pt")
-                    ],
+                    options: UIDevice.current.userInterfaceIdiom == .phone
+                        ? [
+                            ("compact", "compact · 44pt"),
+                            ("standard", "standard · 52pt")
+                        ]
+                        : [
+                            ("compact", "compact · 44pt"),
+                            ("standard", "standard · 52pt"),
+                            ("large", "large · 64pt")
+                        ],
                     selection: $appearance.swipePadSize
                 )
             }
@@ -109,11 +117,8 @@ struct ExperimentalSettingsView: View {
                     .padding(.top, 14)
             }
 
-            Text("voice input")
-                .font(Typography.tesseraMono(size: 18, weight: .medium))
-                .foregroundStyle(T.fg)
+            SettingsH("voice input")
                 .padding(.top, 10)
-                .padding(.bottom, 12)
 
             Text("triggered by double tap on the puck. independent of the radial — no swipe required.")
                 .font(Typography.tesseraMono(size: 11))
@@ -127,18 +132,21 @@ struct ExperimentalSettingsView: View {
                 isOn: dictationBinding
             )
             .disabled(!isOnDeviceDictationAvailable)
+            .padding(.bottom, 12)
 
             ToggleRow(
                 title: "commit on silence",
                 subtitle: "auto-send after 1.2s of silence · otherwise double-tap again to send",
                 isOn: $appearance.voiceCommitOnSilence
             )
+            .padding(.bottom, 12)
 
             ToggleRow(
                 title: "append return",
                 subtitle: "send a ↵ after the transcript hits the terminal",
                 isOn: $appearance.voiceAppendReturn
             )
+            .padding(.bottom, 12)
 
             ToggleRow(
                 title: "live waveform on the puck",
@@ -345,22 +353,41 @@ private struct GestureVocabularyRow: View {
 private struct SegmentedStringPicker: View {
     let options: [(value: String, label: String)]
     @Binding var selection: String
+    var columns: Int? = nil
 
     @Environment(\.designTokens) private var T
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(options, id: \.value) { option in
-                segment(option.label, value: option.value)
+        segments
+            .padding(3)
+            .background(T.inputBg)
+            .clipShape(RoundedRectangle(cornerRadius: 9))
+            .overlay(
+                RoundedRectangle(cornerRadius: 9)
+                    .stroke(T.border, lineWidth: 1)
+            )
+    }
+
+    /// With `columns`, options lay out row-major — pass corner options in
+    /// reading order and the grid becomes a spatial map of the corners.
+    @ViewBuilder private var segments: some View {
+        if let columns, options.count > columns {
+            Grid(horizontalSpacing: 2, verticalSpacing: 2) {
+                ForEach(Array(stride(from: 0, to: options.count, by: columns)), id: \.self) { start in
+                    GridRow {
+                        ForEach(options[start..<min(start + columns, options.count)], id: \.value) { option in
+                            segment(option.label, value: option.value)
+                        }
+                    }
+                }
+            }
+        } else {
+            HStack(spacing: 2) {
+                ForEach(options, id: \.value) { option in
+                    segment(option.label, value: option.value)
+                }
             }
         }
-        .padding(3)
-        .background(T.inputBg)
-        .clipShape(RoundedRectangle(cornerRadius: 9))
-        .overlay(
-            RoundedRectangle(cornerRadius: 9)
-                .stroke(T.border, lineWidth: 1)
-        )
     }
 
     private func segment(_ label: String, value: String) -> some View {
@@ -378,6 +405,7 @@ private struct SegmentedStringPicker: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(active ? .isSelected : [])
     }
 }
 
@@ -484,10 +512,15 @@ private struct ProfileRow: View {
 
     @Environment(\.designTokens) private var T
 
-    private let columns = [
-        GridItem(.flexible(), spacing: 1),
-        GridItem(.flexible(), spacing: 1)
-    ]
+    /// Phone cells (~176pt in two columns) can't hold icon + role name +
+    /// key badge without mid-word breaks — and role/macro names are
+    /// user-defined, so no copy fix holds. Full-width rows on phone.
+    private let columns = UIDevice.current.userInterfaceIdiom == .phone
+        ? [GridItem(.flexible(), spacing: 1)]
+        : [
+            GridItem(.flexible(), spacing: 1),
+            GridItem(.flexible(), spacing: 1)
+        ]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -848,7 +881,7 @@ private struct MacroEditorSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("edit macro")
-                .font(Typography.tesseraMono(size: 16, weight: .semibold))
+                .font(Typography.sheetTitle)
                 .foregroundStyle(T.fg)
 
             Text("\(draft.profileName) · drag \(draft.direction.rawValue)")
@@ -902,6 +935,6 @@ private struct MacroEditorSheet: View {
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(T.bg)
+        .background(T.presentationBg)
     }
 }

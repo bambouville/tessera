@@ -23,6 +23,86 @@ final class PaneLayoutMathTests: XCTestCase {
         return f
     }
 
+    func test_compactTmuxClientSizingProjectsFocusedPaneToPhoneViewport() throws {
+        let cell = CGSize(width: 10, height: 20)
+        let viewport = try XCTUnwrap(
+            CompactTmuxClientSizing.viewportCells(
+                for: CGSize(width: 390, height: 300),
+                cellSize: cell
+            )
+        )
+        XCTAssertEqual(viewport.cols, 39)
+        XCTAssertEqual(viewport.rows, 15)
+
+        let single = CompactTmuxClientSizing.clientSize(
+            for: viewport,
+            windowRect: CellRect(width: 80, height: 24, x: 0, y: 0),
+            focusRect: CellRect(width: 80, height: 24, x: 0, y: 0)
+        )
+        XCTAssertEqual(single.cols, 39)
+        XCTAssertEqual(single.rows, 15)
+
+        let leftHalf = CompactTmuxClientSizing.clientSize(
+            for: viewport,
+            windowRect: CellRect(width: 80, height: 24, x: 0, y: 0),
+            focusRect: CellRect(width: 40, height: 24, x: 0, y: 0)
+        )
+        XCTAssertEqual(leftHalf.cols, 78, "a 50/50 split needs two phone widths")
+        XCTAssertEqual(leftHalf.rows, 15)
+
+        let rightHalf = CompactTmuxClientSizing.clientSize(
+            for: viewport,
+            windowRect: CellRect(width: 80, height: 24, x: 0, y: 0),
+            focusRect: CellRect(width: 39, height: 24, x: 41, y: 0)
+        )
+        XCTAssertEqual(rightHalf.cols, 80, "the gutter-adjusted right pane still gets 39 columns")
+        XCTAssertEqual(rightHalf.rows, 15)
+
+        let stackedBottom = CompactTmuxClientSizing.clientSize(
+            for: viewport,
+            windowRect: CellRect(width: 80, height: 24, x: 0, y: 0),
+            focusRect: CellRect(width: 80, height: 11, x: 0, y: 13)
+        )
+        XCTAssertEqual(stackedBottom.cols, 39)
+        XCTAssertEqual(stackedBottom.rows, 33, "a short stacked pane expands the client height")
+
+        XCTAssertTrue(
+            CompactTmuxClientSizing.shouldReprojectLayout(
+                viewport: viewport,
+                lastClientSize: viewport,
+                windowRect: CellRect(width: 80, height: 24, x: 0, y: 0),
+                focusRect: CellRect(width: 40, height: 24, x: 0, y: 0)
+            ),
+            "initial split hydration must expand an unprojected phone viewport"
+        )
+        XCTAssertTrue(
+            CompactTmuxClientSizing.shouldReprojectLayout(
+                viewport: viewport,
+                lastClientSize: (78, 15),
+                windowRect: CellRect(width: 78, height: 15, x: 0, y: 0),
+                focusRect: CellRect(width: 78, height: 15, x: 0, y: 0)
+            ),
+            "a local collapse on the phone-owned canvas must return to one viewport"
+        )
+        XCTAssertFalse(
+            CompactTmuxClientSizing.shouldReprojectLayout(
+                viewport: viewport,
+                lastClientSize: (78, 15),
+                windowRect: CellRect(width: 160, height: 50, x: 0, y: 0),
+                focusRect: CellRect(width: 80, height: 50, x: 0, y: 0)
+            ),
+            "a larger peer layout must not make the phone reclaim tmux sizing"
+        )
+
+        XCTAssertNil(
+            CompactTmuxClientSizing.viewportCells(
+                for: CGSize(width: 5, height: 10),
+                cellSize: cell
+            ),
+            "pre-layout sub-cell viewports must never resize tmux"
+        )
+    }
+
     // MARK: - maxVerticalLeaves (header reserve-rows count)
 
     func test_maxVerticalLeaves_singlePane() {

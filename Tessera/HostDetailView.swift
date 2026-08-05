@@ -1,6 +1,8 @@
 import SwiftUI
 import SwiftData
 import TmuxControl
+import PortForwarding
+import UIKit
 
 private enum Tab: String, CaseIterable {
     case connection
@@ -9,23 +11,44 @@ private enum Tab: String, CaseIterable {
     case snippets
 }
 
+struct HostEditorCredentialDraft: Equatable {
+    private(set) var hostID: UUID?
+    var password = ""
+    var jumpPasswords: [UUID: String] = [:]
+
+    mutating func beginEditing(hostID: UUID) {
+        guard self.hostID != hostID else { return }
+        self.hostID = hostID
+        password = ""
+        jumpPasswords = [:]
+    }
+}
+
 /// Edit form for a single saved host. Replaces the old HostEntryView
 /// with SwiftData binding and identity selection.
 struct HostDetailView: View {
     @Bindable var host: PersistedHost
     @Environment(\.modelContext) private var modelContext
     @Environment(\.designTokens) private var T
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(AppearancePreferences.self) private var appearance
     @Environment(HostTerminalBackgroundStore.self) private var hostBackgrounds
+    @Environment(TunnelsRegistry.self) private var tunnelsRegistry
     @Query(sort: \StoredKey.createdAt, order: .reverse) private var storedKeys: [StoredKey]
     var onConnect: (PersistedHost, String, [UUID: String]) -> Void
     var onCancel: () -> Void
+    var onSave: (() -> Void)? = nil
     var onDelete: () -> Void
+    var continuationSourceLabel: String? = nil
+    var continuationAction: ContinuationAction? = nil
+    var continuationTmuxSessionName: String? = nil
+    var compactPrimaryTitle: String = "save"
+    var onAuthorizeFromPeer: (() -> Void)? = nil
 
-    /// Transient password — entered here, passed to Host DTO on
-    /// connect, never stored in SwiftData. Keychain storage comes
-    /// in a later milestone.
-    @State private var password: String = ""
+    /// Transient password — entered here and never stored in SwiftData.
+    /// Continuation drafts persist it only through the existing
+    /// ThisDeviceOnly Keychain boundary before connecting.
+    @State private var credentials = HostEditorCredentialDraft()
     @State private var selectedTab: Tab = .connection
     @State private var newTag: String = ""
     /// Mirrors `HostOSDetectionState.isManuallySet(hostID:)`, kept in
@@ -38,9 +61,25 @@ struct HostDetailView: View {
     /// Per-hop passwords are session-scoped like the destination password.
     /// They are never persisted; the resulting Host DTO retains them for
     /// reconnecting Mosh/tmux/File side channels during this live session.
-    @State private var jumpPasswords: [UUID: String] = [:]
+    // Keep the cross-shell fields in one staged draft. A single state owner
+    // survives compact/regular transitions, and Cancel has the same semantics
+    // on both layouts instead of SwiftData autosaving only the regular form.
+    @State private var compactName = ""
+    @State private var compactAddress = ""
+    @State private var compactPort = 22
+    @State private var compactUser = ""
+    @State private var compactIdentityKeyID: UUID?
+    @State private var compactIdentityWasChanged = false
+    @State private var compactTransport: HostTransport = .ssh
+    @State private var compactPortForwardRules: [PortForwardRule] = []
+    @State private var compactDraftLoaded = false
+    @State private var credentialPersistenceError: String?
 
     private let osHintOptions = ["macos", "ubuntu", "debian", "alpine", "linux", "raspbian"]
+
+    private var isPhone: Bool {
+        CompactLayout.isPhone(horizontalSizeClass)
+    }
 
     /// A host counts as a draft (just-created via ⌘N / sidebar +) when
     /// both name and address are still empty. Drafts get the "new host"
@@ -51,21 +90,66 @@ struct HostDetailView: View {
             && host.address.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
+    private var isContinuationDraft: Bool {
+        continuationSourceLabel != nil
+    }
+
     var body: some View {
         ZStack {
-            T.bg.ignoresSafeArea()
+            T.presentationBg.ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 0) {
                 PageHeader(
-                    title: isDraft ? "new host" : (host.name.isEmpty ? "host" : host.name),
+                    title: isContinuationDraft
+                        ? "add host & connect"
+                        : (isDraft ? "new host" : (host.name.isEmpty ? "host" : host.name)),
                     onCancel: onCancel,
-                    onDelete: isDraft ? nil : onDelete
+                    onDelete: (isDraft || isContinuationDraft) ? nil : onDelete
                 )
-                SegmentedTabBar(selectedTab: $selectedTab)
+                if let continuationSourceLabel {
+                    HStack(spacing: 7) {
+                        Image(systemName: "rectangle.on.rectangle.angled")
+                        Text("from \(continuationSourceLabel)")
+                    }
+                    .font(Typography.tesseraMono(size: 10.5, weight: .medium))
+                    .foregroundStyle(T.accent)
+                    .padding(.horizontal, isPhone ? 18 : 40)
+                    .padding(.vertical, 9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(T.accentSoft)
+                    .overlay(alignment: .bottom) {
+                        Rectangle().fill(T.border).frame(height: 0.5)
+                    }
+                }
+                if !isPhone {
+                    SegmentedTabBar(selectedTab: $selectedTab)
+                } else if !isContinuationDraft {
+                    CompactHostSectionPicker(selectedTab: $selectedTab)
+                }
                 ScrollView {
-                    tabContent
-                        .padding(.horizontal, 40)
-                        .padding(.top, 28)
+                    VStack(alignment: .leading, spacing: 18) {
+                        if continuationSourceLabel != nil {
+                            Label(
+                                "Sent as a secret-free descriptor. No password, private key, or trust pin was included; authentication happens on this device.",
+                                systemImage: "lock.shield"
+                            )
+                            .font(Typography.tesseraMono(size: 10.5))
+                            .foregroundStyle(T.fgMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(11)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(T.inputBg)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(T.border, lineWidth: 1)
+                            }
+                        }
+
+                        tabContent
+                    }
+                        .padding(.horizontal, isPhone ? 18 : 40)
+                        .padding(.top, isPhone ? 20 : 28)
                         .padding(.bottom, 24)
                         .frame(maxWidth: 560, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .top)
@@ -73,31 +157,51 @@ struct HostDetailView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            connectBar
+            if isPhone {
+                compactEditorBar
+            } else {
+                connectBar
+            }
         }
         .task(id: host.id) {
+            // Secrets are scoped to one explicit host edit. Structural view
+            // reuse must never make one host's password observable or usable
+            // by the next host.
+            credentials.beginEditing(hostID: host.id)
+            credentialPersistenceError = nil
+            compactDraftLoaded = false
             isOSManual = HostOSDetectionState.isManuallySet(hostID: host.id)
             jumpHostID = HostJumpChainResolver.link(for: host.id, in: modelContext)?.jumpHostID
+            loadCompactDraftIfNeeded()
         }
     }
 
     @ViewBuilder
     private var tabContent: some View {
-        switch selectedTab {
-        case .connection:
-            connectionTab
-        case .advanced:
-            advancedTab
-        case .forwarding:
-            forwardingTab
-        case .snippets:
-            snippetsTab
+        if isPhone {
+            switch selectedTab {
+            case .forwarding:
+                forwardingTab
+            default:
+                connectionTab
+            }
+        } else {
+            switch selectedTab {
+            case .connection:
+                connectionTab
+            case .advanced:
+                advancedTab
+            case .forwarding:
+                forwardingTab
+            case .snippets:
+                snippetsTab
+            }
         }
     }
 
     private var connectBar: some View {
         Btn(style: .primary, full: true, action: {
-            onConnect(host, password, jumpPasswords)
+            connectFromEditor()
         }) {
             HStack {
                 Text("connect")
@@ -108,11 +212,30 @@ struct HostDetailView: View {
         }
         .disabled(!connectEnabled)
         .opacity(connectEnabled ? 1 : 0.5)
-        .padding(.horizontal, 36)
+        .padding(.horizontal, isPhone ? 18 : 36)
         .padding(.vertical, 16)
         .frame(maxWidth: 560, alignment: .leading)
         .frame(maxWidth: .infinity)
-        .background(T.bg)
+        .background(T.presentationBg)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(T.border)
+                .frame(height: 0.5)
+        }
+    }
+
+    private var compactEditorBar: some View {
+        HStack(spacing: 10) {
+            Btn("cancel", full: true, action: onCancel)
+            Btn(compactPrimaryTitle, style: .primary, full: true, action: saveCompactDraft)
+                .disabled(!compactSaveEnabled)
+                .opacity(
+                    compactSaveEnabled ? 1 : 0.5
+                )
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .background(T.presentationBg)
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(T.border)
@@ -121,7 +244,16 @@ struct HostDetailView: View {
     }
 
     private var connectEnabled: Bool {
-        !host.address.trimmingCharacters(in: .whitespaces).isEmpty
+        !compactAddress.trimmingCharacters(in: .whitespaces).isEmpty
+            && (!destinationNeedsCredentialInput || !credentials.password.isEmpty)
+            && passwordJumpHosts.allSatisfy { !jumpPasswordRequired(for: $0) }
+    }
+
+    private var compactSaveEnabled: Bool {
+        !compactAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (!isContinuationDraft
+                || !destinationNeedsCredentialInput
+                || !credentials.password.isEmpty)
             && passwordJumpHosts.allSatisfy { !jumpPasswordRequired(for: $0) }
     }
 
@@ -130,36 +262,108 @@ struct HostDetailView: View {
     private var connectionTab: some View {
         VStack(alignment: .leading, spacing: 20) {
             Field(label: "name") {
-                Input(text: $host.name, placeholder: "my-server")
+                Input(text: hostNameBinding, placeholder: "my-server")
             }
 
-            Field(label: "address") {
-                Input(text: $host.address, placeholder: "192.168.1.10")
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .textContentType(.URL)
+            if isPhone {
+                HStack(alignment: .top, spacing: 12) {
+                    addressField
+                    portField
+                        .frame(width: 86)
+                }
+            } else {
+                addressField
+
+                HStack(spacing: 16) {
+                    portField
+                        .frame(width: 120)
+                    Spacer()
+                }
             }
 
-            HStack(spacing: 16) {
-                portField
-                    .frame(width: 120)
-                Spacer()
+            if isPhone {
+                HStack(alignment: .top, spacing: 12) {
+                    userField
+                    identityField
+                }
+            } else {
+                userField
+                identityField
             }
 
-            userField
+            if !isPhone && !isContinuationDraft && !destinationNeedsCredentialInput {
+                Field(label: "password") {
+                    Input(text: $credentials.password, placeholder: "••••••••", secure: true)
+                        .textContentType(.password)
+                }
+            }
 
-            identityField
-
-            Field(label: "password") {
-                Input(text: $password, placeholder: "••••••••", secure: true)
-                    .textContentType(.password)
+            if destinationNeedsCredentialInput {
+                CredentialCardView(
+                    password: $credentials.password,
+                    hostName: hostNameBinding.wrappedValue,
+                    errorMessage: credentialPersistenceError,
+                    onAuthorizeFromPeer: preparedPeerAuthorizationAction
+                )
             }
 
             transportSection
 
-            jumpHostSection
+            if !isPhone {
+                jumpHostSection
+                launchSection
+            } else {
+                compactContinuationRouteSummary
+                if isCredentialSetupContext {
+                    compactContinuationJumpCredentials
+                }
+                Text("jump chains, environment variables, startup snippets, and terminal backgrounds remain editable on iPad.")
+                    .font(Typography.tesseraMono(size: 10))
+                    .foregroundStyle(T.fgDim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
 
-            launchSection
+    @ViewBuilder
+    private var compactContinuationRouteSummary: some View {
+        if let continuationAction {
+            Field(label: "handoff action") {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(
+                        continuationAction == .continueSession
+                            ? "continue tmux session"
+                            : "reconnect with a new shell"
+                    )
+                    .font(Typography.tesseraMono(size: 12.5, weight: .medium))
+                    .foregroundStyle(T.fg)
+
+                    if continuationAction == .continueSession,
+                       let sessionName = continuationTmuxSessionName,
+                       !sessionName.isEmpty {
+                        Text(sessionName)
+                            .font(Typography.tesseraMono(size: 11.5))
+                            .foregroundStyle(T.accent)
+                    }
+
+                    Text(
+                        continuationAction == .continueSession
+                            ? "the same server-side screen remains attached on both devices."
+                            : "plain SSH and mosh open a new remote shell on this device."
+                    )
+                    .font(Typography.tesseraMono(size: 10))
+                    .foregroundStyle(T.fgDim)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(11)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(T.inputBg)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(T.border, lineWidth: 1)
+                }
+            }
         }
     }
 
@@ -249,7 +453,11 @@ struct HostDetailView: View {
     }
 
     private var forwardingTab: some View {
-        ForwardingTabView(host: host)
+        ForwardingTabView(
+            host: host,
+            stagedRules: $compactPortForwardRules,
+            transportOverride: compactTransport
+        )
     }
 
     // MARK: - Terminal background override
@@ -359,9 +567,18 @@ struct HostDetailView: View {
 
     // MARK: - User + identity rows
 
+    private var addressField: some View {
+        Field(label: "address") {
+            Input(text: hostAddressBinding, placeholder: "192.168.1.10")
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textContentType(.URL)
+        }
+    }
+
     private var userField: some View {
         Field(label: "user") {
-            Input(text: $host.user, placeholder: "username")
+            Input(text: hostUserBinding, placeholder: "username")
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .textContentType(.username)
@@ -405,23 +622,33 @@ struct HostDetailView: View {
     }
 
     private var identityDisplayLabel: String {
+        if !compactIdentityWasChanged,
+           compactIdentityKeyID == nil,
+           let identity = host.identity {
+            if !identity.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return identity.name
+            }
+            switch identity.credentialMode {
+            case .password:
+                return "Password"
+            case .legacyDevKey:
+                return "Legacy key"
+            case .none:
+                return "None"
+            case .key:
+                break
+            }
+        }
         guard let id = identityKeyBinding.wrappedValue else { return "None" }
         return storedKeys.first(where: { $0.id == id })?.name ?? "None"
     }
 
     private var identityKeyBinding: Binding<UUID?> {
         Binding(
-            get: {
-                guard let identity = host.identity else { return nil }
-                if case .key(let id) = identity.credentialMode { return id }
-                return nil
-            },
+            get: { compactIdentityKeyID },
             set: { newKeyID in
-                guard let newKeyID else {
-                    host.identity = nil
-                    return
-                }
-                host.identity = identityForKey(newKeyID)
+                compactIdentityKeyID = newKeyID
+                compactIdentityWasChanged = true
             }
         )
     }
@@ -529,9 +756,9 @@ struct HostDetailView: View {
                 transportButton(.ssh, label: "ssh")
                 transportButton(.mosh, label: "mosh")
             }
-            .animation(.easeInOut(duration: 0.15), value: host.transport)
+            .animation(.easeInOut(duration: 0.15), value: selectedTransport)
 
-            Text(host.transport.editorDescription)
+            Text(selectedTransport.editorDescription)
                 .font(Typography.tesseraMono(size: 11))
                 .foregroundStyle(T.fgDim)
         }
@@ -594,18 +821,29 @@ struct HostDetailView: View {
         let resolution = HostJumpChainResolver.resolve(for: host, in: modelContext)
         guard !resolution.isBroken else { return [] }
         return resolution.hops.filter {
-            if case .password = $0.identity?.credentialMode { return true }
-            return false
+            switch $0.identity?.credentialMode {
+            case .some(.password):
+                return true
+            case nil, .some(.none):
+                // A secret-free continuation cannot classify a fresh hop's
+                // credential. Offer an explicit transient password field; a
+                // configured key/legacy-key identity remains authoritative and
+                // must never be weakened into a password fallback.
+                return isCredentialSetupContext
+            case .some(.key), .some(.legacyDevKey):
+                return false
+            }
         }
     }
 
     private func jumpPasswordRequired(for jumpHost: PersistedHost) -> Bool {
         if hasStoredJumpPassword(for: jumpHost) { return false }
-        return (jumpPasswords[jumpHost.id] ?? "").isEmpty
+        return (credentials.jumpPasswords[jumpHost.id] ?? "").isEmpty
     }
 
     private func hasStoredJumpPassword(for jumpHost: PersistedHost) -> Bool {
         guard let identity = jumpHost.identity,
+              case .password = identity.credentialMode,
               let stored = try? KeychainHelper.password(forIdentityID: identity.id) else {
             return false
         }
@@ -618,9 +856,49 @@ struct HostDetailView: View {
 
     private func jumpPasswordBinding(for hostID: UUID) -> Binding<String> {
         Binding(
-            get: { jumpPasswords[hostID] ?? "" },
-            set: { jumpPasswords[hostID] = $0 }
+            get: { credentials.jumpPasswords[hostID] ?? "" },
+            set: { credentials.jumpPasswords[hostID] = $0 }
         )
+    }
+
+    @ViewBuilder
+    private var jumpPasswordInputs: some View {
+        ForEach(jumpHostsNeedingPasswordInput, id: \.id) { jumpHost in
+            Field(label: "password · \(jumpHostDisplayName(jumpHost))") {
+                Input(
+                    text: jumpPasswordBinding(for: jumpHost.id),
+                    placeholder: "••••••••",
+                    secure: true
+                )
+                .textContentType(.password)
+            }
+        }
+
+        if !jumpHostsNeedingPasswordInput.isEmpty {
+            Text(isContinuationDraft
+                 ? "stored only in this device's keychain — never synced"
+                 : "jump-host passwords are kept only for this live session.")
+                .font(Typography.tesseraMono(size: 11))
+                .foregroundStyle(T.fgDim)
+        }
+    }
+
+    private var compactContinuationJumpCredentials: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if !jumpHostsNeedingPasswordInput.isEmpty {
+                Text("jump-host authentication")
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.fgMuted)
+                jumpPasswordInputs
+            }
+
+            if let jumpChainCaption {
+                Text(jumpChainCaption)
+                    .font(Typography.tesseraMono(size: 10))
+                    .foregroundStyle(T.fgDim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     private var jumpHostSection: some View {
@@ -658,22 +936,7 @@ struct HostDetailView: View {
             }
             .buttonStyle(.plain)
 
-            ForEach(jumpHostsNeedingPasswordInput, id: \.id) { jumpHost in
-                Field(label: "password · \(jumpHostDisplayName(jumpHost))") {
-                    Input(
-                        text: jumpPasswordBinding(for: jumpHost.id),
-                        placeholder: "••••••••",
-                        secure: true
-                    )
-                    .textContentType(.password)
-                }
-            }
-
-            if !jumpHostsNeedingPasswordInput.isEmpty {
-                Text("jump-host passwords are kept only for this live session.")
-                    .font(Typography.tesseraMono(size: 11))
-                    .foregroundStyle(T.fgDim)
-            }
+            jumpPasswordInputs
 
             Text(jumpChainCaption
                  ?? "connect through another saved host (SSH bastion / ProxyJump).")
@@ -744,8 +1007,10 @@ struct HostDetailView: View {
     }
 
     private func transportButton(_ transport: HostTransport, label: String) -> some View {
-        let isSelected = host.transport == transport
-        return Btn(style: isSelected ? .primary : .default, full: true, action: { host.transport = transport }) {
+        let isSelected = selectedTransport == transport
+        return Btn(style: isSelected ? .primary : .default, full: true, action: {
+            compactTransport = transport
+        }) {
             Text(label)
                 .font(Typography.tesseraMono(size: 13, weight: isSelected ? .semibold : .regular))
         }
@@ -777,13 +1042,12 @@ struct HostDetailView: View {
     }
 
     private var derivedSessionName: String {
-        let user = host.identity?.user ?? ""
-        let key = "\(user)@\(host.address):\(host.port)"
+        let key = "\(compactUser)@\(compactAddress):\(compactPort)"
         return AutoTmuxScript.defaultSessionName(forHostKey: key)
     }
 
     private var autoTmuxDescription: String {
-        switch host.transport {
+        switch selectedTransport {
         case .ssh:
             return "attach to per-host tmux session `\(derivedSessionName)`."
         case .mosh:
@@ -792,7 +1056,7 @@ struct HostDetailView: View {
     }
 
     private var customLaunchPlaceholder: String {
-        switch host.transport {
+        switch selectedTransport {
         case .ssh:
             return "exec tmux -CC new -s dev"
         case .mosh:
@@ -801,7 +1065,7 @@ struct HostDetailView: View {
     }
 
     private var customLaunchDescription: String {
-        switch host.transport {
+        switch selectedTransport {
         case .ssh:
             return "sent verbatim to the login shell on connect."
         case .mosh:
@@ -815,7 +1079,7 @@ struct HostDetailView: View {
         Field(label: "port") {
             TextField(
                 "22",
-                value: $host.port,
+                value: hostPortBinding,
                 formatter: NumberFormatter.port
             )
             .font(Typography.tesseraMono(size: 13))
@@ -831,6 +1095,280 @@ struct HostDetailView: View {
             )
         }
     }
+
+    private var selectedTransport: HostTransport {
+        compactTransport
+    }
+
+    private var hostNameBinding: Binding<String> {
+        $compactName
+    }
+
+    private var hostAddressBinding: Binding<String> {
+        $compactAddress
+    }
+
+    private var hostUserBinding: Binding<String> {
+        $compactUser
+    }
+
+    private var hostPortBinding: Binding<Int> {
+        $compactPort
+    }
+
+    private func loadCompactDraftIfNeeded() {
+        guard !compactDraftLoaded else { return }
+        compactName = host.name
+        compactAddress = host.address
+        compactPort = host.port
+        compactUser = host.user
+        compactTransport = host.transport
+        compactPortForwardRules = RuleCodec.decode(host.portForwardRulesData)
+        if let identity = host.identity,
+           case .key(let keyID) = identity.credentialMode {
+            compactIdentityKeyID = keyID
+        } else {
+            compactIdentityKeyID = nil
+        }
+        compactIdentityWasChanged = false
+        compactDraftLoaded = true
+    }
+
+    private func saveCompactDraft() {
+        guard compactSaveEnabled else { return }
+
+        commitStagedHostFields()
+        guard persistCredentialPasswordIfNeeded(
+            required: isContinuationDraft
+        ) else { return }
+        guard prepareContinuationJumpPasswordIdentitiesIfNeeded() else { return }
+        try? modelContext.save()
+        let hostID = host.id
+        let savedRules = compactPortForwardRules
+        Task {
+            if let manager = tunnelsRegistry.manager(for: hostID) {
+                await manager.reconcile(newRules: savedRules)
+            }
+        }
+        if isContinuationDraft {
+            onConnect(host, credentials.password, credentials.jumpPasswords)
+        } else {
+            onSave?()
+        }
+    }
+
+    private func commitStagedHostFields() {
+        host.name = compactName.trimmingCharacters(in: .whitespacesAndNewlines)
+        host.address = compactAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        host.port = compactPort
+        host.user = compactUser.trimmingCharacters(in: .whitespacesAndNewlines)
+        host.transport = compactTransport
+        host.setPortForwardRules(compactPortForwardRules)
+        if compactIdentityWasChanged {
+            host.identity = compactIdentityKeyID.flatMap(identityForKey(_:))
+        }
+    }
+
+    private func connectFromEditor() {
+        guard connectEnabled else { return }
+        commitStagedHostFields()
+        guard persistCredentialPasswordIfNeeded(required: true) else { return }
+        guard prepareContinuationJumpPasswordIdentitiesIfNeeded() else { return }
+        onConnect(host, credentials.password, credentials.jumpPasswords)
+    }
+
+    /// Enrollment replaces only the destination credential. A newly imported
+    /// route may still contain password-backed bastions, so prepare those
+    /// local-only credentials before opening the peer stream.
+    private var preparedPeerAuthorizationAction: (() -> Void)? {
+        guard let onAuthorizeFromPeer,
+              peerAuthorizationRouteIsRepairable else { return nil }
+        return {
+            guard prepareContinuationJumpPasswordIdentitiesIfNeeded() else {
+                return
+            }
+            onAuthorizeFromPeer()
+        }
+    }
+
+    /// Enrollment changes only the destination identity. Every bastion must
+    /// therefore already be usable, or be a password/unconfigured hop for
+    /// which this editor provides a local repair field. Missing key material
+    /// and broken routes cannot be repaired by peer authorization.
+    private var peerAuthorizationRouteIsRepairable: Bool {
+        let resolution = HostJumpChainResolver.resolve(for: host, in: modelContext)
+        guard !resolution.isBroken else { return false }
+        return resolution.hops.allSatisfy { hop in
+            switch hop.identity?.credentialMode {
+            case nil, .some(.none), .some(.password):
+                return true
+            case .some(.key), .some(.legacyDevKey):
+                return SessionRestoreEligibility.isRestorable(
+                    host: hop,
+                    storedKey: { keyID in
+                        storedKeys.first(where: { $0.id == keyID })
+                    }
+                )
+            }
+        }
+    }
+
+    private var destinationNeedsCredentialInput: Bool {
+        if compactIdentityWasChanged {
+            return compactIdentityKeyID == nil
+        }
+        guard let identity = host.identity else { return true }
+        switch identity.credentialMode {
+        case .none:
+            return true
+        case .password:
+            guard let stored = try? KeychainHelper.password(
+                forIdentityID: identity.id
+            ) else { return true }
+            return stored.isEmpty
+        case .key(let keyID):
+            return !storedKeys.contains(where: { $0.id == keyID })
+        case .legacyDevKey:
+            return false
+        }
+    }
+
+    private var routeHasUnconfiguredCredential: Bool {
+        let resolution = HostJumpChainResolver.resolve(for: host, in: modelContext)
+        guard !resolution.isBroken else { return false }
+        return resolution.hops.contains { hop in
+            guard let identity = hop.identity else { return true }
+            switch identity.credentialMode {
+            case .none:
+                return true
+            case .password:
+                guard let stored = try? KeychainHelper.password(
+                    forIdentityID: identity.id
+                ) else { return true }
+                return stored.isEmpty
+            case .key(let keyID):
+                return !storedKeys.contains(where: { $0.id == keyID })
+            case .legacyDevKey:
+                return false
+            }
+        }
+    }
+
+    private var isCredentialSetupContext: Bool {
+        isContinuationDraft
+            || destinationNeedsCredentialInput
+            || routeHasUnconfiguredCredential
+    }
+
+    /// A fresh continuation hop has public endpoint data but deliberately no
+    /// credential classification. At the explicit Connect tap, classify only
+    /// unconfigured hops as password-backed and retain the entered password in
+    /// this device's existing ThisDeviceOnly Keychain boundary. That makes the
+    /// one-time continuation setup honest for the complete route; no password
+    /// enters SwiftData or either cross-device payload.
+    private func prepareContinuationJumpPasswordIdentitiesIfNeeded() -> Bool {
+        guard isCredentialSetupContext else { return true }
+
+        for jumpHost in passwordJumpHosts {
+            let identity: Identity
+            switch jumpHost.identity?.credentialMode {
+            case .some(.password):
+                guard let existing = jumpHost.identity else { return false }
+                identity = existing
+            case nil, .some(.none):
+                let created = Identity(
+                    name: jumpHost.name.isEmpty
+                        ? "\(jumpHost.address) password"
+                        : "\(jumpHost.name) password",
+                    user: jumpHost.user,
+                    credentialMode: .password
+                )
+                modelContext.insert(created)
+                jumpHost.identity = created
+                ContinuationDraftRecoveryStore().registerCreatedIdentity(
+                    created.id
+                )
+                identity = created
+            case .some(.key), .some(.legacyDevKey):
+                continue
+            }
+
+            let enteredPassword = credentials.jumpPasswords[jumpHost.id] ?? ""
+            if enteredPassword.isEmpty, hasStoredJumpPassword(for: jumpHost) {
+                continue
+            }
+            guard !enteredPassword.isEmpty else {
+                credentialPersistenceError = "Enter a password for every unconfigured jump host."
+                return false
+            }
+            do {
+                try KeychainHelper.setPassword(
+                    enteredPassword,
+                    forIdentityID: identity.id
+                )
+            } catch {
+                credentialPersistenceError = error.localizedDescription
+                return false
+            }
+        }
+
+        do {
+            try modelContext.save()
+            credentialPersistenceError = nil
+            return true
+        } catch {
+            credentialPersistenceError = error.localizedDescription
+            return false
+        }
+    }
+
+    /// A password entered for a continuation is a one-time setup cost. Keep it
+    /// available for later one-tap continuations on this device, using the
+    /// existing ThisDeviceOnly Keychain boundary. Nothing here is encodable by
+    /// either cross-device descriptor.
+    private func persistCredentialPasswordIfNeeded(required: Bool) -> Bool {
+        guard destinationNeedsCredentialInput else {
+            credentialPersistenceError = nil
+            return true
+        }
+        guard !credentials.password.isEmpty else {
+            if required {
+                credentialPersistenceError = onAuthorizeFromPeer == nil
+                    ? "Enter a password or choose a key before connecting."
+                    : "Enter a password or authorize this device from your other device."
+                return false
+            }
+            credentialPersistenceError = nil
+            return true
+        }
+
+        let identity: Identity
+        if let existing = host.identity,
+           case .password = existing.credentialMode {
+            identity = existing
+        } else {
+            identity = Identity(
+                name: host.name.isEmpty ? "password" : "\(host.name) password",
+                user: host.user,
+                credentialMode: .password
+            )
+            modelContext.insert(identity)
+            host.identity = identity
+            ContinuationDraftRecoveryStore().registerCreatedIdentity(
+                identity.id
+            )
+        }
+
+        do {
+            try KeychainHelper.setPassword(credentials.password, forIdentityID: identity.id)
+            try modelContext.save()
+            credentialPersistenceError = nil
+            return true
+        } catch {
+            credentialPersistenceError = error.localizedDescription
+            return false
+        }
+    }
 }
 
 private struct PageHeader: View {
@@ -839,22 +1377,44 @@ private struct PageHeader: View {
     var onDelete: (() -> Void)?
 
     @Environment(\.designTokens) private var T
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    private var isPhone: Bool {
+        CompactLayout.isPhone(horizontalSizeClass)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 10) {
                 Text(title)
-                    .font(Typography.tesseraMono(size: 28))
+                    .font(Typography.heroTitle)
                     .foregroundStyle(T.fg)
                     .lineLimit(1)
                     .truncationMode(.tail)
 
                 Spacer()
 
-                if let onDelete {
+                if let onDelete, !isPhone {
                     Btn("delete", style: .danger, compact: true, action: onDelete)
                 }
-                Btn("cancel", style: .default, compact: true, action: onCancel)
+                if isPhone {
+                    Button(action: onCancel) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(T.fgMuted)
+                            .frame(width: 44, height: 44)
+                            .background(T.inputBg)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(T.border, lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("cancel")
+                } else {
+                    Btn("cancel", style: .default, compact: true, action: onCancel)
+                }
             }
             .padding(.top, 28)
             .padding(.bottom, 24)
@@ -895,6 +1455,45 @@ private struct SegmentedTabBar: View {
             Rectangle().fill(T.border).frame(height: 0.5)
         }
         .animation(.easeInOut(duration: 0.15), value: selectedTab)
+    }
+}
+
+/// The compact editor intentionally exposes only the phone-supported host
+/// sections. Forwarding uses the same rule editor as iPad; connection fields
+/// and rules are both staged until the bottom Save action.
+private struct CompactHostSectionPicker: View {
+    @Binding var selectedTab: Tab
+    @Environment(\.designTokens) private var T
+
+    var body: some View {
+        HStack(spacing: 8) {
+            sectionButton(.connection, title: "connection")
+            sectionButton(.forwarding, title: "tunnels")
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .background(T.presentationBg)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(T.border).frame(height: 0.5)
+        }
+    }
+
+    private func sectionButton(_ tab: Tab, title: String) -> some View {
+        Button {
+            selectedTab = tab
+        } label: {
+            Text(title)
+                .font(Typography.tesseraMono(size: 12, weight: .medium))
+                .foregroundStyle(selectedTab == tab ? T.fg : T.fgMuted)
+                .frame(maxWidth: .infinity, minHeight: 36)
+                .background(selectedTab == tab ? T.accentSoft : T.inputBg)
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 7)
+                        .stroke(selectedTab == tab ? T.accent.opacity(0.6) : T.border, lineWidth: 1)
+                }
+        }
+        .buttonStyle(.plain)
     }
 }
 

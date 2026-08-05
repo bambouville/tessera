@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SwipePad — iPhone corner fan mock</title>
+<style>
+  :root {
+    --bg: #000000;
+    --panel-bg: #0A0A0A;
+    --input-bg: #141414;
+    --input-bg-soft: #1C1C1E;
+    --fg: #FFFFFF;
+    --fg-muted: rgba(235,235,245,.60);
+    --fg-dim: rgba(235,235,245,.35);
+    --fg-faint: rgba(235,235,245,.18);
+    --accent: #5B9FFF;
+    --green: #30D159;
+    --red: #FF453A;
+    --amber: #FF9F0A;
+    --border: rgba(255,255,255,.08);
+    --border-strong: rgba(255,255,255,.14);
+    --mono: 'JetBrains Mono','JetBrainsMono-Regular','SF Mono',ui-monospace,Menlo,monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font-family: var(--mono); font-size: 13px;
+    min-height: 100vh; padding: 20px 24px 40px;
+  }
+  header { max-width: 1280px; margin: 0 auto 16px; }
+  header h1 { font-size: 16px; font-weight: 500; letter-spacing: .02em; }
+  header p { color: var(--fg-muted); font-size: 11.5px; margin-top: 4px; max-width: 900px; line-height: 1.5; }
+  main { max-width: 1280px; margin: 0 auto; display: flex; gap: 28px; align-items: flex-start; }
+  .stage { flex: 0 0 auto; }
+
+  /* ---- controls ---- */
+  .controls { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+  .crow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .crow .lab { color: var(--fg-dim); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; width: 62px; flex: 0 0 auto; }
+  .btn {
+    font-family: var(--mono); font-size: 11px; color: var(--fg-muted);
+    background: var(--input-bg); border: .5px solid var(--border);
+    border-radius: 7px; padding: 5px 10px; cursor: pointer;
+  }
+  .btn:hover { border-color: var(--border-strong); color: var(--fg); }
+  .btn.on { color: var(--fg); background: var(--input-bg-soft); border-color: var(--border-strong); box-shadow: inset 0 0 0 1px rgba(91,159,255,.35); }
+
+  /* ---- phone frame ---- */
+  .phone {
+    position: relative; border-radius: 54px; padding: 10px;
+    background: #17181a; border: 1px solid #26272b;
+    box-shadow: 0 24px 60px rgba(0,0,0,.6);
+    width: max-content;
+  }
+  .screen {
+    position: relative; overflow: hidden; border-radius: 44px;
+    background: #000;
+  }
+  .statusbar {
+    position: absolute; left: 0; right: 0; top: 0; height: 59px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 30px; font-size: 12px; color: var(--fg); z-index: 5;
+  }
+  .island { position: absolute; top: 11px; left: 50%; transform: translateX(-50%);
+    width: 122px; height: 36px; border-radius: 20px; background: #0c0c0d; border: .5px solid #1a1a1c; }
+  .topbar {
+    position: absolute; left: 0; right: 0; top: 59px; height: 28px; z-index: 5;
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    background: rgba(20,20,22,.72); backdrop-filter: blur(14px);
+    border-bottom: .5px solid var(--border);
+    font-size: 10.5px; color: var(--fg-muted);
+  }
+  .conndot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+  .canvas { position: absolute; left: 0; right: 0; bottom: 0; overflow: hidden; }
+  .homebar { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+    width: 140px; height: 5px; border-radius: 3px; background: rgba(255,255,255,.28); z-index: 6; }
+
+  /* ---- fake terminal ---- */
+  .term { position: absolute; inset: 0; padding: 12px 14px; font-size: 11.5px; line-height: 1.55;
+    color: rgba(235,235,245,.82); white-space: pre; overflow: hidden; }
+  .term .g { color: var(--green); } .term .m { color: var(--fg-dim); }
+  .term .a { color: var(--accent); } .term .am { color: var(--amber); }
+
+  /* ---- pad layer ---- */
+  .padlayer { position: absolute; inset: 0; z-index: 10; }
+  svg.overlay { position: absolute; inset: 0; z-index: 9; pointer-events: none; }
+
+  .glass {
+    background: rgba(255,255,255,.12);
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border: .5px solid var(--border-strong);
+    box-shadow: 0 12px 14px rgba(0,0,0,.45), 0 4px 10px rgba(0,0,0,.25);
+  }
+  .puck {
+    position: absolute; border-radius: 50%; z-index: 14;
+    display: flex; align-items: center; justify-content: center;
+    transform: translate(-50%,-50%); cursor: grab; touch-action: none;
+    color: rgba(255,255,255,.85); font-size: 14px;
+    transition: box-shadow .25s;
+  }
+  .puck .glow { position: absolute; inset: 0; border-radius: 50%; pointer-events: none; }
+  .puck.waiting { border-color: rgba(255,159,10,.72); }
+  .puck.waiting .glow { animation: breathe 2.2s ease-in-out infinite; }
+  @keyframes breathe {
+    0%,100% { background: rgba(255,159,10,.18); box-shadow: 0 0 8px rgba(255,159,10,.28); }
+    50%     { background: rgba(255,159,10,.42); box-shadow: 0 0 18px rgba(255,159,10,.72); }
+  }
+  .petal {
+    position: absolute; border-radius: 50%; z-index: 12;
+    display: flex; align-items: center; justify-content: center;
+    transform: translate(-50%,-50%); font-weight: 600;
+    color: rgba(255,255,255,.92);
+    transition: width .12s ease, height .12s ease, font-size .12s ease,
+                background .12s ease, border-color .12s ease, color .12s ease,
+                opacity .16s ease, scale .16s ease;
+  }
+  .padlayer:not(.open) .petal, .padlayer:not(.open) .plabel,
+  .padlayer:not(.open) .chipstack { opacity: 0; scale: .82; pointer-events: none; }
+  .padlayer.open .petal, .padlayer.open .plabel { opacity: 1; scale: 1; }
+  .plabel {
+    position: absolute; z-index: 12; transform: translate(-50%,-50%);
+    text-align: center; pointer-events: none;
+    transition: opacity .16s ease, color .12s ease;
+    text-shadow: 0 1px 2px rgba(0,0,0,.7);
+  }
+  .plabel .l1 { font-size: 10px; font-weight: 500; color: rgba(255,255,255,.92);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .plabel .l2 { font-size: 9px; color: rgba(255,255,255,.5);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .aura { position: absolute; width: 80px; height: 80px; border-radius: 50%;
+    filter: blur(20px); opacity: .2; z-index: 11; transform: translate(-50%,-50%); pointer-events: none; }
+  .readout {
+    position: absolute; z-index: 15; transform: translate(-50%,-50%);
+    border-radius: 14px; padding: 9px 14px; max-width: 240px;
+    background: rgba(20,20,22,.78); backdrop-filter: blur(16px);
+    border: .5px solid var(--border-strong);
+    box-shadow: 0 12px 20px rgba(0,0,0,.5);
+    text-align: center; pointer-events: none;
+    transition: opacity .12s ease;
+  }
+  .readout .r1 { font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .readout .r2 { font-size: 10px; color: rgba(255,255,255,.5); margin-top: 2px; }
+
+  /* current-design chip stack */
+  .chipstack { position: absolute; z-index: 12; display: flex; flex-direction: column; gap: 6px;
+    transform: translate(-50%,-50%); transition: opacity .16s ease, scale .16s ease; }
+  .chiprow { width: 236px; height: 44px; border-radius: 12px; display: flex; align-items: center; gap: 10px;
+    padding: 0 12px; }
+  .chiprow .arrow { width: 20px; text-align: center; font-size: 14px; font-weight: 600; }
+  .chiprow .ctext { flex: 1; min-width: 0; }
+  .chiprow .cl1 { font-size: 11px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chiprow .cl2 { font-size: 9.5px; color: rgba(255,255,255,.5); }
+  .chiprow .cglyph { font-size: 11px; color: rgba(255,255,255,.6); font-weight: 600; }
+
+  .caption { position: absolute; z-index: 12; width: 148px; transform: translate(-50%,0);
+    text-align: center; pointer-events: none; text-shadow: 0 1px 2px rgba(0,0,0,.7);
+    transition: opacity .16s ease; }
+  .caption .l1 { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .caption .l2 { font-size: 10px; color: rgba(255,255,255,.5); }
+  .padlayer:not(.open) .caption { opacity: 0; }
+
+  .hint { margin-top: 10px; color: var(--fg-dim); font-size: 10.5px; line-height: 1.5; max-width: 460px; }
+
+  /* ---- side panel ---- */
+  .panel { flex: 1 1 380px; min-width: 340px; max-width: 470px;
+    display: flex; flex-direction: column; gap: 14px; }
+  .card { background: var(--panel-bg); border: .5px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .card h2 { font-size: 10.5px; font-weight: 500; text-transform: uppercase; letter-spacing: .1em;
+    color: var(--fg-dim); margin-bottom: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 11px; }
+  td, th { padding: 4px 8px 4px 0; vertical-align: top; text-align: left; }
+  th { color: var(--fg-dim); font-weight: 400; }
+  td.v { color: var(--accent); white-space: nowrap; }
+  td.n, th.n { color: var(--fg-dim); }
+  tr + tr td { border-top: .5px solid var(--border); }
+  .card ul { list-style: none; }
+  .card li { padding: 3px 0; color: var(--fg-muted); font-size: 11px; line-height: 1.5; }
+  .card li::before { content: "— "; color: var(--fg-faint); }
+  .card li b { color: var(--fg); font-weight: 500; }
+  .tag { display: inline-block; font-size: 9px; padding: 1px 6px; border-radius: 4px;
+    border: .5px solid var(--border-strong); color: var(--fg-muted); margin-right: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SwipePad · iPhone corner fan <span style="color:var(--fg-dim)">— geometry mock</span></h1>
+  <p>iPhone-only adaptation: the four cardinal petals become a 90° radial fan so the puck can home at
+     real screen corners. Petal models, option order, tints, drag-to-aim + release-to-fire, the 24 pt
+     fire threshold, and the fire guard are unchanged — only the rendered angles differ. Press and drag
+     the puck to simulate aiming; hover a petal to preview its active state.</p>
+</header>
+<main>
+  <section class="stage">
+    <div class="controls">
+      <div class="crow"><span class="lab">view</span>
+        <button class="btn" data-view="fan">proposed · fan</button>
+        <button class="btn" data-view="current">current · cross</button>
+      </div>
+      <div class="crow"><span class="lab">corner</span>
+        <button class="btn" data-corner="br">bottom right</button>
+        <button class="btn" data-corner="bl">bottom left</button>
+        <button class="btn" data-corner="tr">top right</button>
+        <button class="btn" data-corner="tl">top left</button>
+        <button class="btn" data-corner="home" id="homeBtn" style="display:none">current default</button>
+      </div>
+      <div class="crow"><span class="lab">state</span>
+        <button class="btn" data-state="prompt5">4 petals · 5-option prompt</button>
+        <button class="btn" data-state="prompt3">3 petals · claude prompt</button>
+        <button class="btn" data-state="working">working · interrupt</button>
+      </div>
+      <div class="crow"><span class="lab">density</span>
+        <button class="btn" data-dens="compact">compact · Ø44 R104</button>
+        <button class="btn" data-dens="roomy">roomy · Ø52 R120</button>
+      </div>
+      <div class="crow"><span class="lab">extras</span>
+        <button class="btn" data-toggle="geom">geometry overlay</button>
+        <span class="lab" style="width:auto;margin-left:10px">device</span>
+        <button class="btn" data-dev="393">393×852</button>
+        <button class="btn" data-dev="430">430×932</button>
+        <button class="btn" data-dev="375">375×812</button>
+      </div>
+    </div>
+
+    <div class="phone"><div class="screen" id="screen">
+      <div class="statusbar"><span>9:41</span><span style="color:var(--fg-muted)">5G · 100%</span></div>
+      <div class="island"></div>
+      <div class="topbar"><span class="conndot"></span><span>dev-box · mosh · tmux</span></div>
+      <div class="canvas" id="canvas">
+        <div class="term" id="term"></div>
+        <svg class="overlay" id="ovl"></svg>
+        <div class="padlayer open" id="pad"></div>
+      </div>
+      <div class="homebar"></div>
+    </div></div>
+
+    <p class="hint" id="hint"></p>
+  </section>
+
+  <aside class="panel">
+    <div class="card">
+      <h2 id="spech2">fan geometry (iPhone)</h2>
+      <table id="spectbl"></table>
+    </div>
+    <div class="card">
+      <h2>direction → fan angle</h2>
+      <table>
+        <tr><th></th><th class="n">up</th><th class="n">right</th><th class="n">down</th><th class="n">left</th></tr>
+        <tr><th>bottom right</th><td class="v">90°*</td><td class="v">120°</td><td class="v">150°</td><td class="v">180°*</td></tr>
+        <tr><th>bottom left</th><td class="v">90°*</td><td class="v">0°*</td><td class="v">30°</td><td class="v">60°</td></tr>
+        <tr><th>top right</th><td class="v">210°</td><td class="v">240°</td><td class="v">270°*</td><td class="v">180°*</td></tr>
+        <tr><th>top left</th><td class="v">330°</td><td class="v">0°*</td><td class="v">270°*</td><td class="v">300°</td></tr>
+      </table>
+      <p style="color:var(--fg-dim);font-size:10.5px;margin-top:8px;line-height:1.5">
+        * = true cardinal. Rule: the two on-screen cardinals keep their exact axes at the fan ends;
+        the two off-screen cardinals fill the middle slots in clockwise compass order
+        (up→right→down→left). Corners are mirror images, so aim knowledge transfers.</p>
+    </div>
+    <div class="card">
+      <h2>preserved / changed / open</h2>
+      <ul>
+        <li><span class="tag">kept</span>petal models &amp; option→direction order, tints, glyphs, fire guard, relocate long-press, dictation double-tap</li>
+        <li><span class="tag">kept</span>drag ≥24 pt then release-in-sector fires; petals never translate out of their own sector</li>
+        <li><span class="tag">new</span>corner homes are actual corners; the fan replaces the chip-stack fallback there</li>
+        <li><span class="tag">new</span>aim readout pill shows the active petal's full label (mini-labels truncate)</li>
+        <li><b>open 1</b> — mid-edge / free positions: keep today's rule (cross when it fits, chips otherwise)?</li>
+        <li><b>open 2</b> — mini-labels under petals vs glyph-only + readout?</li>
+        <li><b>open 3</b> — should iPad also get the fan when dragged into a corner?</li>
+      </ul>
+    </div>
+  </aside>
+</main>
+
+<script>
+(() => {
+  const SPEC = {
+    puck: 52, swell: 1.25, slotDeg: 30, minDrag: 24, homeClear: 34,
+    statusBar: 59, topBar: 28,
+  };
+  // density-dependent fan geometry; corner inset = swollen petal radius + 4, rounded
+  const DENS = {
+    compact: { petal: 44, R: 104, side: 32, labelR: 138, labelW: 68, readoutR: 210 },
+    roomy:   { petal: 52, R: 120, side: 38, labelR: 160, labelW: 76, readoutR: 250 },
+  };
+  const D = () => DENS[ui.dens];
+  // current cross design (from SwipePadPetalLayout)
+  const CUR = (() => {
+    const r = SPEC.puck + 28;                         // petalOffset
+    const sw = SPEC.puck * SPEC.swell / 2;            // swollen radius
+    const hm = Math.max(sw, 148 / 2) + 4;
+    return { r, insets: { side: hm + r, top: sw + 4 + r, bottom: sw + 48 + r },
+             chipW: 236, chipH: 44, chipGap: 24, chipSp: 6, chipMargin: 8 };
+  })();
+
+  const TINT = { green: '#30D159', red: '#FF453A', amber: '#FF9F0A', accent: '#5B9FFF' };
+  const STATES = {
+    prompt5: [
+      { dir: 'right', label: 'Yes',            macro: '1 ↵',   tint: 'green',  glyph: '✓' },
+      { dir: 'left',  label: 'Always allow',   macro: '2 ↵',   tint: 'amber',  glyph: '!' },
+      { dir: 'up',    label: 'No',             macro: '3 ↵',   tint: 'red',    glyph: '✕' },
+      { dir: 'down',  label: 'more',           macro: '2 more', tint: 'accent', glyph: '⋯' },
+    ],
+    prompt3: [
+      { dir: 'right', label: 'Yes',                  macro: '1 ↵', tint: 'green', glyph: '✓' },
+      { dir: 'left',  label: "Yes, don't ask again", macro: '2 ↵', tint: 'amber', glyph: '!' },
+      { dir: 'up',    label: 'No, tell Claude',      macro: 'esc', tint: 'red',   glyph: '✕' },
+    ],
+    working: [
+      { dir: 'left', label: 'interrupt', macro: 'esc', tint: 'red', glyph: '✕' },
+    ],
+  };
+  // math angles, y-up. True cardinals at fan ends (*), off-screen dirs in middle slots.
+  const FAN = {
+    br: { up: 90,  right: 120, down: 150, left: 180, bis: 135 },
+    bl: { up: 90,  left: 60,   down: 30,  right: 0,  bis: 45  },
+    tr: { left: 180, up: 210,  right: 240, down: 270, bis: 225 },
+    tl: { down: 270, left: 300, up: 330,  right: 360, bis: 315 },
+  };
+  const DEVICES = { 393: [393, 852], 430: [430, 932], 375: [375, 812] };
+
+  const ui = { view: 'fan', corner: 'br', state: 'prompt5', geom: false, dev: '393', dens: 'compact' };
+  const drag = { on: false, x: 0, y: 0, active: null, hover: null };
+  let petalHits = [];   // rebuilt on every render; drives hover hit-testing
+
+  const $ = (s) => document.querySelector(s);
+  const screen = $('#screen'), canvas = $('#canvas'), pad = $('#pad'), ovl = $('#ovl');
+
+  const dims = () => {
+    const [w, h] = DEVICES[ui.dev];
+    return { w, h, cw: w, ch: h - SPEC.statusBar - SPEC.topBar };
+  };
+  const rad = (d) => d * Math.PI / 180;
+  const pt = (cx, cy, r, aDeg) => [cx + r * Math.cos(rad(aDeg)), cy - r * Math.sin(rad(aDeg))];
+  const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+  const normDeg = (a) => ((a % 360) + 360) % 360;
+  const angDist = (a, b) => { const d = Math.abs(normDeg(a) - normDeg(b)); return Math.min(d, 360 - d); };
+
+  function puckHome() {
+    const { cw, ch } = dims();
+    if (ui.view === 'current' && ui.corner === 'home') {
+      return [cw - CUR.insets.side, ch - CUR.insets.bottom];   // real bottomRight default today
+    }
+    const inset = ui.view === 'fan' ? D().side : SPEC.puck / 2;
+    const x = ui.corner.includes('l') ? inset : cw - inset;
+    const y = ui.corner.startsWith('t') ? inset : ch - (SPEC.homeClear + SPEC.puck / 2);
+    return [x, y];
+  }
+
+  // --- angular aim ---
+  function fanSlotFor(vx, vy) {
+    if (Math.hypot(vx, vy) < SPEC.minDrag) return null;
+    const a = normDeg(Math.atan2(-vy, vx) * 180 / Math.PI);
+    const map = FAN[ui.corner === 'home' ? 'br' : ui.corner];
+    let best = null, bestD = 1e9;
+    for (const [dir, slot] of Object.entries(map)) {
+      if (dir === 'bis') continue;
+      const d = angDist(a, slot);
+      if (d < bestD) { bestD = d; best = dir; }
+    }
+    return bestD <= SPEC.slotDeg / 2 ? best : null;
+  }
+  function crossDirFor(vx, vy) {
+    if (Math.hypot(vx, vy) < SPEC.minDrag) return null;
+    const a = Math.atan2(vy, vx), q = Math.PI / 4;
+    if (a >= -q && a < q) return 'right';
+    if (a >= q && a < 3 * q) return 'down';
+    if (a <= -q && a > -3 * q) return 'up';
+    return 'left';
+  }
+
+  // --- render ---
+  function render() {
+    const { cw, ch } = dims();
+    screen.style.width = cw + 'px';
+    screen.style.height = dims().h + 'px';
+    canvas.style.top = (SPEC.statusBar + SPEC.topBar) + 'px';
+    canvas.style.height = ch + 'px';
+    ovl.setAttribute('viewBox', `0 0 ${cw} ${ch}`);
+    ovl.setAttribute('width', cw); ovl.setAttribute('height', ch);
+
+    document.querySelectorAll('.btn').forEach(b => {
+      const k = b.dataset.view ? ['view', b.dataset.view] :
+                b.dataset.corner ? ['corner', b.dataset.corner] :
+                b.dataset.state ? ['state', b.dataset.state] :
+                b.dataset.dev ? ['dev', b.dataset.dev] :
+                b.dataset.dens ? ['dens', b.dataset.dens] : ['geom', true];
+      b.classList.toggle('on', b.dataset.toggle ? ui.geom : ui[k[0]] === k[1]);
+    });
+    $('#homeBtn').style.display = ui.view === 'current' ? '' : 'none';
+
+    const [px, py] = puckHome();
+    const petals = STATES[ui.state];
+    const active = drag.on ? drag.active : drag.hover;
+    const isWorking = ui.state === 'working';
+    pad.innerHTML = '';
+    petalHits = [];
+
+    if (ui.view === 'fan') renderFan(px, py, petals, active);
+    else renderCurrent(px, py, petals, active);
+    renderPuck(px, py, !isWorking);
+    renderOverlay(px, py, petals);
+    renderSpecTable();
+    $('#hint').textContent = ui.view === 'fan'
+      ? `Puck center (${Math.round(px)}, ${Math.round(py)}) in a ${cw}×${ch} pt canvas — ${fmtInset(px, py, cw, ch)} from the corner. Drag from the puck: ≥24 pt in a slot's ±15° sector highlights it; release fires.`
+      : (ui.corner === 'home'
+        ? `Today's real default: radialCenterInsets forces the puck center ${Math.round(CUR.insets.side)} pt from the side and ${Math.round(CUR.insets.bottom)} pt from the bottom — the "middle of the screen" problem.`
+        : `Today at a real corner the cross cannot fit, so the pad falls back to the chip-stack list — drag directions stated with arrows, positions no longer meaningful.`);
+  }
+  const fmtInset = (px, py, cw, ch) => {
+    const dx = Math.round(Math.min(px, cw - px)), dy = Math.round(Math.min(py, ch - py));
+    return `${dx}×${dy} pt`;
+  };
+
+  function renderPuck(px, py, waiting) {
+    const p = document.createElement('div');
+    p.className = 'puck glass' + (waiting ? ' waiting' : '');
+    p.style.width = p.style.height = SPEC.puck + 'px';
+    p.style.left = px + 'px'; p.style.top = py + 'px';
+    if (waiting) p.style.borderColor = 'rgba(255,159,10,.72)';
+    p.innerHTML = '<div class="glow"></div><span style="position:relative">✦</span>';
+    p.addEventListener('pointerdown', startDrag);
+    pad.appendChild(p);
+  }
+
+  function petalEl(x, y, m, isActive, base) {
+    const size = isActive ? base * SPEC.swell : base;
+    const el = document.createElement('div');
+    el.className = 'petal glass';
+    el.dataset.dir = m.dir;
+    el.style.width = el.style.height = size + 'px';
+    el.style.left = x + 'px'; el.style.top = y + 'px';
+    el.style.fontSize = (isActive ? size * 0.42 : size * 0.36) + 'px';
+    if (isActive) {
+      el.style.background = hexA(TINT[m.tint], .35);
+      el.style.borderColor = hexA(TINT[m.tint], .55);
+      el.style.color = TINT[m.tint];
+      el.style.boxShadow = `0 10px 18px ${hexA(TINT[m.tint], .35)}, 0 4px 10px rgba(0,0,0,.25)`;
+    }
+    el.textContent = m.glyph;
+    petalHits.push({ dir: m.dir, x, y, r: size / 2 });
+    return el;
+  }
+  const hexA = (hex, a) => {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`;
+  };
+
+  function renderFan(px, py, petals, active) {
+    const { cw, ch } = dims();
+    const map = FAN[ui.corner === 'home' ? 'br' : ui.corner];
+    for (const m of petals) {
+      const isActive = active === m.dir;
+      const [x, y] = pt(px, py, D().R, map[m.dir]);
+      pad.appendChild(petalEl(x, y, m, isActive, D().petal));
+      // mini-label, radial, clamped on-canvas
+      let [lx, ly] = pt(px, py, D().labelR, map[m.dir]);
+      lx = clamp(lx, 4 + D().labelW / 2, cw - 4 - D().labelW / 2);
+      ly = clamp(ly, 18, ch - 18);
+      const lab = document.createElement('div');
+      lab.className = 'plabel';
+      lab.style.width = D().labelW + 'px';
+      lab.style.left = lx + 'px'; lab.style.top = ly + 'px';
+      lab.innerHTML = `<div class="l1"${isActive ? ` style="color:${TINT[m.tint]}"` : ''}>${m.label}</div><div class="l2">${m.macro}</div>`;
+      pad.appendChild(lab);
+    }
+    if (active) {
+      const m = petals.find(p => p.dir === active);
+      if (m) {
+        let [rx, ry] = pt(px, py, D().readoutR, map.bis);
+        rx = clamp(rx, 96, cw - 96); ry = clamp(ry, 30, ch - 30);
+        const r = document.createElement('div');
+        r.className = 'readout';
+        r.style.left = rx + 'px'; r.style.top = ry + 'px';
+        r.innerHTML = `<div class="r1" style="color:${TINT[m.tint]}">${m.label}</div><div class="r2">${m.macro} · release to send</div>`;
+        pad.appendChild(r);
+      }
+    }
+    if (drag.on && active) {
+      const m = petals.find(p => p.dir === active);
+      const a = document.createElement('div');
+      a.className = 'aura';
+      a.style.background = m ? TINT[m.tint] : 'rgba(255,255,255,.4)';
+      a.style.left = drag.x + 'px'; a.style.top = drag.y + 'px';
+      pad.appendChild(a);
+    }
+  }
+
+  function renderCurrent(px, py, petals, active) {
+    const { cw, ch } = dims();
+    const OFF = { up: [0, -CUR.r], right: [CUR.r, 0], down: [0, CUR.r], left: [-CUR.r, 0] };
+    const fits = ui.corner === 'home';
+    if (fits) {
+      for (const m of petals) {
+        const isActive = active === m.dir;
+        const size = isActive ? SPEC.puck * SPEC.swell : SPEC.puck;
+        const x = px + OFF[m.dir][0], y = py + OFF[m.dir][1];
+        pad.appendChild(petalEl(x, y, m, isActive, SPEC.puck));
+        const cap = document.createElement('div');
+        cap.className = 'caption';
+        cap.style.left = x + 'px';
+        cap.style.top = (y + size / 2 + (isActive ? 12 : 10)) + 'px';
+        cap.innerHTML = `<div class="l1"${isActive ? ` style="color:${TINT[m.tint]}"` : ''}>${m.label}</div><div class="l2">${m.macro}</div>`;
+        pad.appendChild(cap);
+      }
+    } else {
+      // chip-stack fallback, per chipStackCenterOffset
+      const n = petals.length;
+      const sh = n * CUR.chipH + (n - 1) * CUR.chipSp;
+      const side = px > cw / 2 ? -1 : 1;
+      let cx = px + side * (SPEC.puck / 2 + CUR.chipGap + CUR.chipW / 2);
+      let cy = py;
+      cx = clamp(cx, CUR.chipMargin + CUR.chipW / 2, cw - CUR.chipMargin - CUR.chipW / 2);
+      cy = clamp(cy, CUR.chipMargin + sh / 2, ch - CUR.chipMargin - sh / 2);
+      const st = document.createElement('div');
+      st.className = 'chipstack';
+      st.style.left = cx + 'px'; st.style.top = cy + 'px';
+      const ARROWS = { right: '→', left: '←', up: '↑', down: '↓' };
+      for (const m of petals) {
+        const isActive = active === m.dir;
+        const row = document.createElement('div');
+        row.className = 'chiprow glass';
+        if (isActive) { row.style.borderColor = hexA(TINT[m.tint], .55); }
+        row.innerHTML = `<span class="arrow"${isActive ? ` style="color:${TINT[m.tint]}"` : ''}>${ARROWS[m.dir]}</span>
+          <span class="ctext"><div class="cl1"${isActive ? ` style="color:${TINT[m.tint]}"` : ''}>${m.label}</div><div class="cl2">${m.macro}</div></span>
+          <span class="cglyph">${m.glyph}</span>`;
+        st.appendChild(row);
+      }
+      pad.appendChild(st);
+    }
+  }
+
+  function renderSpecTable() {
+    const d = D();
+    const chord = 2 * d.R * Math.sin(rad(15));
+    const idleGap = chord - d.petal;
+    const swollenGap = chord - (d.petal / 2 + d.petal * SPEC.swell / 2);
+    const foot = Math.round(d.side + d.R + d.petal / 2);
+    $('#spech2').textContent = `fan geometry (iPhone · ${ui.dens})`;
+    $('#spectbl').innerHTML = [
+      ['puck Ø', '52 pt', 'phone clamp, unchanged'],
+      ['petal Ø', `${d.petal} pt`, `${Math.round(d.petal * SPEC.swell)} pt active (×1.25 swell)`],
+      ['fan radius R', `${d.R} pt`, 'puck→petal center (iPad cross: 80)'],
+      ['slot spacing', '30°', '4 slots span the inward 90°'],
+      ['petal edge gap', `${idleGap.toFixed(1)} pt`, `${swollenGap.toFixed(1)} pt vs a swollen neighbor`],
+      ['fire threshold', '24 pt', 'unchanged — aim is angular, R is visual only'],
+      ['aim sector', 'slot ±15°', 'outside the fan arc → no petal, no fire'],
+      ['corner home', `${d.side} pt`, 'from side/top edges (swollen petal radius + margin)'],
+      ['bottom home', '60 pt', '26 radius + 34 home-indicator clearance (existing clamp)'],
+      ['mini-label', `${d.labelW} pt @ R+${d.labelR - d.R}`, 'radial ribbon; full text in the aim readout'],
+      ['footprint', `~${foot} pt sq`, 'current cross needs 158/158/116/160 insets → mid-screen puck'],
+    ].map(r => `<tr><th>${r[0]}</th><td class="v">${r[1]}</td><td class="n">${r[2]}</td></tr>`).join('');
+  }
+
+  // --- geometry overlay ---
+  function renderOverlay(px, py, petals) {
+    ovl.innerHTML = '';
+    if (!ui.geom) return;
+    const { cw, ch } = dims();
+    const S = 'http://www.w3.org/2000/svg';
+    const mk = (tag, attrs) => {
+      const e = document.createElementNS(S, tag);
+      for (const k in attrs) e.setAttribute(k, attrs[k]);
+      ovl.appendChild(e); return e;
+    };
+    const line = (x1, y1, x2, y2, dash, op) =>
+      mk('line', { x1, y1, x2, y2, stroke: `rgba(91,159,255,${op || .5})`, 'stroke-width': .75, 'stroke-dasharray': dash || 'none' });
+    const label = (x, y, t, anchor) => {
+      const e = mk('text', { x, y, fill: 'rgba(235,235,245,.6)', 'font-size': 9,
+        'font-family': 'inherit', 'text-anchor': anchor || 'middle' });
+      e.textContent = t;
+    };
+    mk('circle', { cx: px, cy: py, r: SPEC.minDrag, fill: 'none', stroke: 'rgba(255,255,255,.25)', 'stroke-width': .75, 'stroke-dasharray': '2 3' });
+
+    if (ui.view === 'fan') {
+      const map = FAN[ui.corner === 'home' ? 'br' : ui.corner];
+      const slots = Object.entries(map).filter(([d]) => d !== 'bis')
+        .sort((a, b) => a[1] - b[1]);
+      // arc through petal centers
+      let d = '';
+      for (let a = slots[0][1]; a <= slots[slots.length - 1][1]; a += 2) {
+        const [x, y] = pt(px, py, D().R, a);
+        d += (d ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1);
+      }
+      mk('path', { d, fill: 'none', stroke: 'rgba(91,159,255,.55)', 'stroke-width': .75, 'stroke-dasharray': '3 3' });
+      for (const [dir, a] of slots) {
+        const [x1, y1] = pt(px, py, SPEC.puck / 2, a);
+        const [x2, y2] = pt(px, py, D().R - D().petal / 2, a);
+        line(x1, y1, x2, y2, null, .55);
+        // sector boundaries
+        for (const b of [a - 15, a + 15]) {
+          const [sx1, sy1] = pt(px, py, SPEC.minDrag, b);
+          const [sx2, sy2] = pt(px, py, D().R + 45, b);
+          line(sx1, sy1, sx2, sy2, '1 4', .28);
+        }
+      }
+      const [mx, my] = pt(px, py, D().R / 2, map.bis);
+      label(mx, my - 4, 'R ' + D().R);
+      const midA = (slots[0][1] + slots[1][1]) / 2;
+      const [ax, ay] = pt(px, py, D().R + 16, midA);
+      label(ax, ay, '30°');
+      // inset dimensions to nearest edges
+      const ex = px > cw / 2 ? cw : 0, ey = py > ch / 2 ? ch : 0;
+      line(px, py, ex, py, '2 3', .8); label((px + ex) / 2, py - 5, Math.round(Math.abs(ex - px)) + '');
+      line(px, py, px, ey, '2 3', .8); label(px + (px > cw / 2 ? -14 : 14), (py + ey) / 2, Math.round(Math.abs(ey - py)) + '');
+    } else if (ui.corner === 'home') {
+      const OFF = { up: [0, -CUR.r], right: [CUR.r, 0], down: [0, CUR.r], left: [-CUR.r, 0] };
+      for (const m of petals) {
+        line(px, py, px + OFF[m.dir][0], py + OFF[m.dir][1], null, .55);
+      }
+      label(px + CUR.r / 2, py - 5, '80');
+      line(px, py, cw, py, '2 3', .8); label((px + cw) / 2, py - 5, Math.round(cw - px) + '');
+      line(px, py, px, ch, '2 3', .8); label(px + 14, (py + ch) / 2, Math.round(ch - py) + '');
+    }
+  }
+
+  // --- interaction ---
+  function startDrag(e) {
+    e.preventDefault();
+    drag.on = true; drag.active = null;
+    const move = (ev) => {
+      const r = canvas.getBoundingClientRect();
+      drag.x = ev.clientX - r.left; drag.y = ev.clientY - r.top;
+      const [px, py] = puckHome();
+      const vx = drag.x - px, vy = drag.y - py;
+      drag.active = ui.view === 'fan' ? fanSlotFor(vx, vy) : crossDirFor(vx, vy);
+      render();
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      const fired = drag.active && STATES[ui.state].some(p => p.dir === drag.active);
+      const firedDir = drag.active;
+      drag.on = false; drag.active = null;
+      render();
+      if (fired) flash(firedDir);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+  // hover preview via hit-testing (a full re-render breaks enter/leave pairs)
+  pad.addEventListener('pointermove', (ev) => {
+    if (drag.on) return;
+    const r = canvas.getBoundingClientRect();
+    const mx = ev.clientX - r.left, my = ev.clientY - r.top;
+    const hit = petalHits.find(p => Math.hypot(mx - p.x, my - p.y) <= p.r);
+    const dir = hit ? hit.dir : null;
+    if (dir !== drag.hover) { drag.hover = dir; render(); }
+  });
+  pad.addEventListener('pointerleave', () => {
+    if (!drag.on && drag.hover) { drag.hover = null; render(); }
+  });
+
+  function flash(dir) {
+    const el = pad.querySelector(`.petal[data-dir="${dir}"]`);
+    if (!el) return;
+    el.animate([
+      { boxShadow: '0 0 0 0 rgba(255,255,255,.6)' },
+      { boxShadow: '0 0 0 14px rgba(255,255,255,0)' },
+    ], { duration: 360, easing: 'ease-out' });
+  }
+
+  // --- fake terminal content ---
+  $('#term').innerHTML =
+`<span class="g">●</span> Bash(git push origin main)
+  ⎿  <span class="m">Waiting for approval…</span>
+
+<span class="m">╭─</span> <span class="am">Allow Bash command?</span> <span class="m">───────────────╮</span>
+<span class="m">│</span>  git push origin main             <span class="m">│</span>
+<span class="m">│</span>                                   <span class="m">│</span>
+<span class="m">│</span>  <span class="a">❯ 1. Yes</span>                         <span class="m">│</span>
+<span class="m">│</span>    2. Yes, don't ask again        <span class="m">│</span>
+<span class="m">│</span>    3. No, tell Claude what to     <span class="m">│</span>
+<span class="m">│</span>       do differently (esc)        <span class="m">│</span>
+<span class="m">╰───────────────────────────────────╯</span>`;
+
+  // --- controls wiring ---
+  document.querySelectorAll('.btn').forEach(b => b.addEventListener('click', () => {
+    if (b.dataset.view) {
+      ui.view = b.dataset.view;
+      if (ui.view === 'current' && ui.corner !== 'home') ui.corner = 'home';
+      if (ui.view === 'fan' && ui.corner === 'home') ui.corner = 'br';
+    }
+    if (b.dataset.corner) ui.corner = b.dataset.corner;
+    if (b.dataset.state) ui.state = b.dataset.state;
+    if (b.dataset.dev) ui.dev = b.dataset.dev;
+    if (b.dataset.dens) ui.dens = b.dataset.dens;
+    if (b.dataset.toggle) ui.geom = !ui.geom;
+    render();
+  }));
+
+  render();
+})();
+</script>
+</body>
+</html>

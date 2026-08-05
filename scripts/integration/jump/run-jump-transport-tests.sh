@@ -17,7 +17,7 @@ require_command xcodebuild
 require_command xcrun
 
 REPO_ROOT="$(cd "$INTEGRATION_DIR/../.." && pwd)"
-udid="$("$INTEGRATION_DIR/ensure-test-simulator.sh" | tail -n 1)"
+udid=''
 derived_data="$JUMP_STATE/DerivedData"
 result_bundle="$JUMP_STATE/jump-transports.xcresult"
 mkdir -p "$derived_data"
@@ -44,18 +44,22 @@ config_json="$(
 config_b64="$(printf '%s' "$config_json" | base64 | tr -d '\n')"
 
 cleanup() {
-  xcrun simctl spawn "$udid" launchctl unsetenv TESSERA_JUMP_HOST_CONFIG_B64 \
-    >/dev/null 2>&1 || true
+  if [[ -n "$udid" ]]; then
+    xcrun simctl spawn "$udid" launchctl unsetenv TESSERA_JUMP_HOST_CONFIG_B64 \
+      >/dev/null 2>&1 || true
+  fi
   # The UDP-blocked fallback test necessarily strands a mosh-server per
   # run (bootstrap succeeds, client contact never arrives) — reap them.
   jump_control_ssh "$TESSERA_JUMP_TARGET_HOST" \
     "/usr/local/sbin/tessera-jump-mosh block; pkill -u '$TESSERA_JUMP_PW_USER' mosh-server 2>/dev/null; pkill -u '$TESSERA_JUMP_KEY_USER' mosh-server 2>/dev/null; true" \
     >/dev/null 2>&1 || true
   if [[ "${TESSERA_KEEP_TEST_SIM_BOOTED:-0}" != 1 ]]; then
-    xcrun simctl shutdown "$udid" >/dev/null 2>&1 || true
+    delete_owned_test_simulator "$SIMULATOR_STATE/simulator_udid" || true
   fi
 }
 trap cleanup EXIT
+
+udid="$("$INTEGRATION_DIR/ensure-test-simulator.sh" | tail -n 1)"
 
 xcrun simctl spawn "$udid" launchctl setenv \
   TESSERA_JUMP_HOST_CONFIG_B64 "$config_b64"

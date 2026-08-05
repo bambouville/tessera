@@ -19,6 +19,13 @@ struct SecuritySettingsView: View {
             ?? "\(minutes) min"
     }
 
+    private var backgroundLockBinding: Binding<Bool> {
+        Binding(
+            get: { appearance.effectiveLockWhenBackgrounded },
+            set: { appearance.setBackgroundLockEnabled($0) }
+        )
+    }
+
     var body: some View {
         @Bindable var appearance = appearance
 
@@ -62,7 +69,8 @@ struct SecuritySettingsView: View {
 
             ToggleRow(
                 title: "lock when backgrounded",
-                isOn: $appearance.lockWhenBackgrounded
+                subtitle: "also enables device owner authentication",
+                isOn: backgroundLockBinding
             )
             .padding(.bottom, 18)
 

@@ -2,6 +2,7 @@
 // Mode (system/dark/light), accent, font size slider, top bar height.
 // All wired to AppearancePreferences.
 import SwiftUI
+import UIKit
 
 struct AppearanceSettingsView: View {
     @Environment(AppearancePreferences.self) private var appearance
@@ -9,6 +10,10 @@ struct AppearanceSettingsView: View {
     @Environment(\.colorScheme) private var systemColorScheme
 
     private let modes: [AppearanceModeOption] = [.system, .dark, .light]
+
+    private var isPhone: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+    }
 
     var body: some View {
         @Bindable var appearance = appearance
@@ -67,19 +72,59 @@ struct AppearanceSettingsView: View {
                 }
             }
 
-            Field(
-                label: "top bar height · \(Int(appearance.topBarHeight)) pt",
-                sub: "drives both the absolute strip height and the proportional size of icons, tabs, and labels inside it"
-            ) {
-                VStack(alignment: .leading, spacing: 12) {
-                    TopBarHeightPreview(height: appearance.topBarHeight)
+            if isPhone {
+                Field(
+                    label: "terminal color theme",
+                    sub: "the full theme preview gallery remains available on iPad"
+                ) {
+                    Menu {
+                        ForEach(TerminalTheme.all) { theme in
+                            Button {
+                                appearance.terminalThemeID = theme.id
+                            } label: {
+                                if appearance.terminalThemeID == theme.id {
+                                    Label(theme.name, systemImage: "checkmark")
+                                } else {
+                                    Text(theme.name)
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Text(TerminalTheme.find(id: appearance.terminalThemeID).name)
+                                .font(Typography.tesseraMono(size: 13))
+                                .foregroundStyle(T.fg)
+                            Spacer()
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(T.fgMuted)
+                        }
+                        .frame(minHeight: 44)
+                        .padding(.horizontal, 12)
+                        .background(T.inputBg)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(T.border, lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            } else {
+                Field(
+                    label: "top bar height · \(Int(appearance.topBarHeight)) pt",
+                    sub: "drives both the absolute strip height and the proportional size of icons, tabs, and labels inside it"
+                ) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        TopBarHeightPreview(height: appearance.topBarHeight)
 
-                    Slider(
-                        value: $appearance.topBarHeight,
-                        in: AppearancePreferences.topBarHeightRange,
-                        step: 1
-                    )
-                    .tint(T.accent)
+                        Slider(
+                            value: $appearance.topBarHeight,
+                            in: AppearancePreferences.topBarHeightRange,
+                            step: 1
+                        )
+                        .tint(T.accent)
+                    }
                 }
             }
         }
@@ -114,6 +159,7 @@ struct AppearanceSettingsView: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private func modeCard(
@@ -133,19 +179,9 @@ struct AppearanceSettingsView: View {
                     .background(preview.bg)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
 
-                HStack(spacing: 6) {
-                    Text(mode.rawValue)
-                        .font(Typography.tesseraMono(size: 12))
-                        .foregroundStyle(selected ? T.accent : T.fg)
-
-                    Spacer(minLength: 0)
-
-                    if selected {
-                        Text("active")
-                            .font(Typography.tesseraMono(size: 10))
-                            .foregroundStyle(T.accent)
-                    }
-                }
+                Text(mode.rawValue)
+                    .font(Typography.tesseraMono(size: 12))
+                    .foregroundStyle(selected ? T.accent : T.fg)
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -158,6 +194,7 @@ struct AppearanceSettingsView: View {
             .shadow(color: selected ? T.accentSoft : Color.clear, radius: 10, x: 0, y: 4)
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     /// Each mode card paints its preview with that mode's own bg/fg, regardless
@@ -226,6 +263,7 @@ struct AppearanceSettingsView: View {
                 )
             }
             .buttonStyle(.plain)
+            .accessibilityAddTraits(selected ? .isSelected : [])
         }
     }
 
@@ -272,6 +310,7 @@ struct AppearanceSettingsView: View {
                 .contentShape(Rectangle())
         }
         .simultaneousGesture(TapGesture().onEnded { action() })
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private func swatchColor(for accent: AccentName) -> Color {

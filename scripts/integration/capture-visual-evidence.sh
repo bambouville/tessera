@@ -2,20 +2,30 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$HERE/lib.sh"
 RUN_DIR="${1:-}"
 [[ -n "$RUN_DIR" ]] || { printf 'usage: capture-visual-evidence.sh RUN_DIR\n' >&2; exit 2; }
+if [[ -z "${TESSERA_INTEGRATION_SIMULATOR_RUN_ID:-}" ]]; then
+  export TESSERA_INTEGRATION_SIMULATOR_RUN_ID="visual-$(basename "$RUN_DIR")-$$"
+fi
 
 VISUAL_ROOT="$RUN_DIR/visual"
 CASE_ROOT="$VISUAL_ROOT/cases"
 mkdir -p "$CASE_ROOT"
 
-"$HERE/prepare-visual-simulator.sh" "$RUN_DIR"
-UDID="$(jq -r .udid "$VISUAL_ROOT/runtime.json")"
+UDID=''
 cleanup_visual_environment() {
-  xcrun simctl spawn "$UDID" launchctl unsetenv TESSERA_VISUAL_CAPTURE \
-    >/dev/null 2>&1 || true
+  if [[ -n "$UDID" ]]; then
+    xcrun simctl spawn "$UDID" launchctl unsetenv TESSERA_VISUAL_CAPTURE \
+      >/dev/null 2>&1 || true
+  fi
+  delete_owned_test_simulator "$SIMULATOR_STATE/visual_simulator_udid" || true
 }
 trap cleanup_visual_environment EXIT
+
+"$HERE/prepare-visual-simulator.sh" "$RUN_DIR"
+UDID="$(jq -r .udid "$VISUAL_ROOT/runtime.json")"
 
 shopt -s nullglob
 case_scripts=("$HERE"/visual-cases/*.sh)

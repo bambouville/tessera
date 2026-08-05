@@ -1,7 +1,7 @@
 import XCTest
 import CryptoKit
 import PortForwarding
-import TmuxControl
+@testable import TmuxControl
 @testable import Tessera
 
 #if DEBUG
@@ -112,6 +112,64 @@ final class RealHostTransportIntegrationTests: XCTestCase {
             timeout: 35
         )
         XCTAssertFalse(promptedAgain, "mosh bootstrap must reuse accepted trust")
+    }
+
+    @MainActor
+    func test_liveSSHInformedTOFUMismatchRequiresExplicitUnsafeOverride() async throws {
+        let config = try Config.load()
+        let endpoint = "\(config.stableHost):\(config.port)"
+        await resetConnectionState(endpoint: endpoint)
+
+        var host = makeHost(config: config, transport: .ssh)
+        let stalePeerFingerprint = "SHA256:"
+            + Data(repeating: 0, count: 32).base64EncodedString()
+        host.continuationHostKeyFingerprints[host.id] = stalePeerFingerprint
+        host.continuationPeerLabel = "fixture iPad"
+
+        let rejected = SSHSession(host: host)
+        rejected.connect()
+        let firstRequest = try await waitForHostKeyRequest(
+            { rejected.pendingHostKeyVerification },
+            timeout: 20
+        )
+        XCTAssertEqual(firstRequest.peerFingerprint, stalePeerFingerprint)
+        XCTAssertEqual(firstRequest.peerLabel, "fixture iPad")
+        XCTAssertEqual(firstRequest.peerFingerprintMatches, false)
+        firstRequest.reject()
+        try await waitUntil("informed TOFU rejection", timeout: 10) {
+            if case .failed = rejected.state { return true }
+            return false
+        }
+        rejected.disconnect()
+        let fingerprintAfterRejection = await KnownHostsStore.shared.trustedFingerprint(
+            for: endpoint
+        )
+        XCTAssertNil(
+            fingerprintAfterRejection,
+            "the promoted safe action must not create a local trust pin"
+        )
+
+        let overridden = SSHSession(host: host)
+        defer { overridden.disconnect() }
+        overridden.connect()
+        let secondRequest = try await waitForHostKeyRequest(
+            { overridden.pendingHostKeyVerification },
+            timeout: 20
+        )
+        XCTAssertEqual(secondRequest.peerFingerprintMatches, false)
+        secondRequest.accept()
+        try await waitUntil("explicit informed TOFU override", timeout: 20) {
+            overridden.state == .connected
+        }
+
+        let trusted = await KnownHostsStore.shared.list().first {
+            $0.id == endpoint
+        }
+        XCTAssertNotNil(trusted)
+        XCTAssertNil(
+            trusted?.matchedPeerLabel,
+            "a mismatching peer hint must never be recorded as corroboration"
+        )
     }
 
     @MainActor
@@ -1018,28 +1076,49 @@ final class RealHostTransportIntegrationTests: XCTestCase {
         )
         defer { _ = try? KeyStore.deleteKey(forKeyID: key.id) }
 
-        let installer = SSHSession(host: makeHost(config: config, transport: .ssh))
+        let ledgerSuite = "RealHostTransportIntegrationTests.\(UUID().uuidString)"
+        let ledgerDefaults = try XCTUnwrap(UserDefaults(suiteName: ledgerSuite))
+        defer { ledgerDefaults.removePersistentDomain(forName: ledgerSuite) }
+        let ledger = KeySecurityMetadataStore(
+            defaults: ledgerDefaults,
+            storageKey: "live-self-revoke"
+        )
+        let passwordHost = makeHost(config: config, transport: .ssh)
+        let ledgerContext = RemoteAuthorizedKeysInstaller.LedgerContext(
+            metadata: ledger,
+            keyID: key.id,
+            hostID: passwordHost.id,
+            hostLabel: passwordHost.name,
+            endpoint: "\(passwordHost.user)@\(passwordHost.address):\(passwordHost.port)",
+            routeIdentity: RemoteAccessRouteIdentity.value(for: passwordHost),
+            publicKeyFingerprint: key.canonicalFingerprint,
+            authorizedKeysLine: key.authorizedKeysLine
+        )
+
+        let installer = SSHSession(host: passwordHost)
         defer { installer.disconnect() }
         _ = try await connect(
             session: installer,
             pendingRequest: { installer.pendingHostKeyVerification },
             timeout: 20
         )
+        installer.disconnect()
 
-        let install = RemoteAuthorizedKeysInstaller.makeInstallCommand(
-            line: key.authorizedKeysLine
+        // Exercise the production durable install path, including its remote
+        // verifier, rather than mutating authorized_keys through the fixture
+        // shell directly.
+        try await RemoteAuthorizedKeysInstaller.install(
+            line: key.authorizedKeysLine,
+            keyID: key.id,
+            on: passwordHost,
+            ledgerContext: ledgerContext
         )
-        let verify = RemoteAuthorizedKeysInstaller.makeVerifyCommand(
-            line: key.authorizedKeysLine
-        )
-        installer.send(Array("\(install) && \(install) && \(verify)\n".utf8))
-        _ = try await waitForOutput(
-            installer.outputStream,
-            containing: "TESSERA_KEY_INSTALLED",
-            timeout: 10
+        XCTAssertEqual(
+            ledger.record(for: key.id).remoteInstallations.first?.verificationState,
+            .verified
         )
 
-        var sshKeyHost = makeHost(config: config, transport: .ssh)
+        var sshKeyHost = passwordHost
         sshKeyHost.password = ""
         sshKeyHost.storedKeyID = key.id
         var moshKeyHost = makeHost(config: config, transport: .mosh)
@@ -1087,14 +1166,31 @@ final class RealHostTransportIntegrationTests: XCTestCase {
         )
         mosh.disconnect()
 
-        let revoke = try RemoteAuthorizedKeysInstaller.makeRevokeCommand(
-            line: key.authorizedKeysLine
+        // The target key authenticates this connection, then removes itself
+        // over the already-established client and verifies absence before the
+        // connection closes.
+        try await RemoteAuthorizedKeysInstaller.revokeUsingTargetKey(
+            line: key.authorizedKeysLine,
+            keyID: key.id,
+            on: sshKeyHost,
+            ledgerContext: ledgerContext
         )
-        installer.send(Array("\(revoke)\n".utf8))
-        _ = try await waitForOutput(
-            installer.outputStream,
-            containing: "TESSERA_KEY_REMOVED",
-            timeout: 10
+        XCTAssertTrue(ledger.record(for: key.id).remoteInstallations.isEmpty)
+        XCTAssertNotNil(ledger.record(for: key.id).lastRemoteRevocationAt)
+
+        let revoked = SSHSession(host: sshKeyHost)
+        defer { revoked.disconnect() }
+        revoked.connect()
+        let failure = try await waitForFailure(
+            state: { revoked.state },
+            pendingRequest: { revoked.pendingHostKeyVerification },
+            timeout: 20
+        )
+        XCTAssertTrue(
+            failure.localizedCaseInsensitiveContains("auth")
+                || failure.localizedCaseInsensitiveContains("permission")
+                || failure.localizedCaseInsensitiveContains("credential"),
+            "revoked key unexpectedly produced a non-auth failure: \(failure)"
         )
     }
 
@@ -1281,6 +1377,18 @@ final class RealHostTransportIntegrationTests: XCTestCase {
             useChaosHost: true,
             localPortOffset: 2
         )
+    }
+
+    @MainActor
+    func test_liveSSHtmuxAppliesPhoneViewportThenIPadViewport() async throws {
+        let config = try Config.load()
+        try await assertInlineTmuxViewportHandoff(config: config)
+    }
+
+    @MainActor
+    func test_liveMoshTmuxAppliesPhoneViewportThenIPadViewport() async throws {
+        let config = try Config.load()
+        try await assertMoshTmuxViewportHandoff(config: config)
     }
 
     @MainActor
@@ -1520,6 +1628,370 @@ final class RealHostTransportIntegrationTests: XCTestCase {
         _ = try await waitForOutput(setup.outputStream, containing: cleanupMarker, timeout: 10)
     }
 
+    /// Live acceptance for the cross-device viewport handoff on SSH+tmux.
+    /// A phone must resize an existing large session to its physical viewport;
+    /// a later iPad client on the same session must expand it again.
+    @MainActor
+    private func assertInlineTmuxViewportHandoff(config: Config) async throws {
+        let host = makeHost(config: config, transport: .ssh)
+        await resetConnectionState(endpoint: "\(host.address):\(host.port)")
+        let setup = SSHSession(host: host)
+        defer { setup.disconnect() }
+        _ = try await connect(
+            session: setup,
+            pendingRequest: { setup.pendingHostKeyVerification },
+            timeout: 20
+        )
+
+        let sessionName = "tessera-viewport-ssh-\(UUID().uuidString.prefix(8).lowercased())"
+        do {
+            _ = try await setup.executeConnectedCommand(
+                "tmux new-session -d -x 160 -y 50 -s \(sessionName); "
+                    + "tmux set-option -t \(sessionName) status off"
+            )
+            let initialGeometry = try await tmuxGeometry(
+                sessionName: sessionName,
+                using: setup
+            )
+            XCTAssertEqual(initialGeometry, TmuxGeometry(cols: 160, rows: 50))
+
+            let phone = SSHSession(host: host)
+            let phoneController = TmuxController(
+                controlPath: .inline,
+                clientSizePolicy: .resizeTmux
+            )
+            phone.resize(cols: 50, rows: 20)
+            phoneController.updateClientSize(cols: 50, rows: 20)
+            var phoneOutput = ""
+            phoneController.feedTerminal = { bytes in
+                phoneOutput += String(decoding: bytes, as: UTF8.self)
+            }
+            phoneController.sendBytes = { [weak phone] bytes in phone?.send(bytes) }
+            let phonePump = Task { @MainActor in
+                for await bytes in phone.outputStream {
+                    phoneController.ingest(bytes)
+                }
+            }
+            defer {
+                phonePump.cancel()
+                phone.disconnect()
+            }
+            _ = try await connect(
+                session: phone,
+                pendingRequest: { phone.pendingHostKeyVerification },
+                timeout: 20
+            )
+            phone.send(Array("exec tmux -CC attach -t \(sessionName)\n".utf8))
+            try await waitForTmuxHydration(
+                phoneController,
+                operation: "phone inline viewport hydration"
+            )
+            try await waitForTmuxGeometry(
+                TmuxGeometry(cols: 50, rows: 20),
+                sessionName: sessionName,
+                using: setup,
+                operation: "phone inline attach geometry"
+            )
+
+            phone.resize(cols: 50, rows: 12)
+            phoneController.updateClientSize(cols: 50, rows: 12)
+            try await waitForTmuxGeometry(
+                TmuxGeometry(cols: 50, rows: 12),
+                sessionName: sessionName,
+                using: setup,
+                operation: "phone inline keyboard geometry"
+            )
+            phone.resize(cols: 50, rows: 20)
+            phoneController.updateClientSize(cols: 50, rows: 20)
+            try await waitForTmuxGeometry(
+                TmuxGeometry(cols: 50, rows: 20),
+                sessionName: sessionName,
+                using: setup,
+                operation: "phone inline restored geometry"
+            )
+
+            let ipad = SSHSession(host: host)
+            let ipadController = TmuxController(
+                controlPath: .inline,
+                clientSizePolicy: .resizeTmux
+            )
+            ipad.resize(cols: 132, rows: 44)
+            ipadController.updateClientSize(cols: 132, rows: 44)
+            ipadController.feedTerminal = { _ in }
+            ipadController.sendBytes = { [weak ipad] bytes in ipad?.send(bytes) }
+            let ipadPump = Task { @MainActor in
+                for await bytes in ipad.outputStream {
+                    ipadController.ingest(bytes)
+                }
+            }
+            defer {
+                ipadPump.cancel()
+                ipad.disconnect()
+            }
+            _ = try await connect(
+                session: ipad,
+                pendingRequest: { ipad.pendingHostKeyVerification },
+                timeout: 20
+            )
+            ipad.send(Array("exec tmux -CC attach -t \(sessionName)\n".utf8))
+            try await waitForTmuxHydration(
+                ipadController,
+                operation: "iPad inline viewport hydration"
+            )
+            try await waitForTmuxGeometry(
+                TmuxGeometry(cols: 132, rows: 44),
+                sessionName: sessionName,
+                using: setup,
+                operation: "iPad inline attach geometry"
+            )
+
+            let marker = "TESSERA_SSH_TMUX_VIEWPORT_\(UUID().uuidString.prefix(8))"
+            phoneController.sendInput(Array("printf '\(marker)\\n'\r".utf8))
+            try await waitUntil("phone shell liveness after iPad resize", timeout: 10) {
+                phoneOutput.contains(marker)
+            }
+            _ = try await setup.executeConnectedCommand(
+                "tmux kill-session -t \(sessionName)"
+            )
+        } catch {
+            _ = try? await setup.executeConnectedCommand(
+                "tmux kill-session -t \(sessionName) >/dev/null 2>&1 || true"
+            )
+            throw error
+        }
+    }
+
+    /// The same handoff through the production mosh+tmux split. Each device
+    /// has a real visible mosh client and a normal SSH `-CC` side channel.
+    @MainActor
+    private func assertMoshTmuxViewportHandoff(config: Config) async throws {
+        let baseHost = makeHost(
+            config: config,
+            transport: .mosh,
+            useChaosHost: true
+        )
+        await resetConnectionState(endpoint: "\(baseHost.address):\(baseHost.port)")
+        let setup = SSHSession(host: baseHost)
+        defer { setup.disconnect() }
+        _ = try await connect(
+            session: setup,
+            pendingRequest: { setup.pendingHostKeyVerification },
+            timeout: 20
+        )
+
+        let sessionName = "tessera-viewport-mosh-\(UUID().uuidString.prefix(8).lowercased())"
+        do {
+            _ = try await setup.executeConnectedCommand(
+                "tmux new-session -d -x 160 -y 50 -s \(sessionName); "
+                    + "tmux set-option -t \(sessionName) status off"
+            )
+            let initialGeometry = try await tmuxGeometry(
+                sessionName: sessionName,
+                using: setup
+            )
+            XCTAssertEqual(initialGeometry, TmuxGeometry(cols: 160, rows: 50))
+
+            var pinnedHost = baseHost
+            pinnedHost.autoTmux = true
+            pinnedHost.launchMode = .pinnedTmux
+            pinnedHost.tmuxSessionName = sessionName
+            pinnedHost.launchCommand = nil
+
+            let phoneMosh = MoshSession(host: pinnedHost)
+            defer { phoneMosh.disconnect() }
+            phoneMosh.resize(cols: 50, rows: 20)
+            _ = try await connect(
+                session: phoneMosh,
+                pendingRequest: { phoneMosh.pendingHostKeyVerification },
+                timeout: 35
+            )
+            try await waitForTmuxGeometry(
+                TmuxGeometry(cols: 50, rows: 20),
+                sessionName: sessionName,
+                using: setup,
+                operation: "phone visible mosh attach geometry",
+                timeout: 15
+            )
+
+            let phoneController = TmuxController(
+                controlPath: .sideChannel,
+                clientSizePolicy: .resizeTmux
+            )
+            phoneController.updateClientSize(cols: 50, rows: 20)
+            let phoneChannel = TmuxControlChannel(
+                host: pinnedHost,
+                sessionName: sessionName,
+                initialSize: (50, 20)
+            )
+            phoneController.sendBytes = { [weak phoneChannel] bytes in
+                phoneChannel?.send(bytes)
+            }
+            let phonePump = Task { @MainActor in
+                for await bytes in phoneChannel.outputStream {
+                    phoneController.ingest(bytes)
+                }
+            }
+            defer {
+                phonePump.cancel()
+                phoneChannel.disconnect()
+            }
+            phoneChannel.connect()
+            try await waitForTmuxHydration(
+                phoneController,
+                operation: "phone mosh side-channel hydration"
+            )
+
+            phoneMosh.resize(cols: 50, rows: 12)
+            phoneController.updateClientSize(cols: 50, rows: 12)
+            phoneChannel.resize(cols: 50, rows: 12)
+            try await waitForTmuxGeometry(
+                TmuxGeometry(cols: 50, rows: 12),
+                sessionName: sessionName,
+                using: setup,
+                operation: "phone mosh keyboard geometry"
+            )
+            phoneMosh.resize(cols: 50, rows: 20)
+            phoneController.updateClientSize(cols: 50, rows: 20)
+            phoneChannel.resize(cols: 50, rows: 20)
+            try await waitForTmuxGeometry(
+                TmuxGeometry(cols: 50, rows: 20),
+                sessionName: sessionName,
+                using: setup,
+                operation: "phone mosh restored geometry"
+            )
+
+            let ipadMosh = MoshSession(host: pinnedHost)
+            defer { ipadMosh.disconnect() }
+            ipadMosh.resize(cols: 132, rows: 44)
+            _ = try await connect(
+                session: ipadMosh,
+                pendingRequest: { ipadMosh.pendingHostKeyVerification },
+                timeout: 35
+            )
+
+            let ipadController = TmuxController(
+                controlPath: .sideChannel,
+                clientSizePolicy: .resizeTmux
+            )
+            ipadController.updateClientSize(cols: 132, rows: 44)
+            let ipadChannel = TmuxControlChannel(
+                host: pinnedHost,
+                sessionName: sessionName,
+                initialSize: (132, 44)
+            )
+            ipadController.sendBytes = { [weak ipadChannel] bytes in
+                ipadChannel?.send(bytes)
+            }
+            let ipadPump = Task { @MainActor in
+                for await bytes in ipadChannel.outputStream {
+                    ipadController.ingest(bytes)
+                }
+            }
+            defer {
+                ipadPump.cancel()
+                ipadChannel.disconnect()
+            }
+            ipadChannel.connect()
+            try await waitForTmuxHydration(
+                ipadController,
+                operation: "iPad mosh side-channel hydration"
+            )
+            try await waitForTmuxGeometry(
+                TmuxGeometry(cols: 132, rows: 44),
+                sessionName: sessionName,
+                using: setup,
+                operation: "iPad mosh attach geometry",
+                timeout: 15
+            )
+
+            let marker = "TESSERA_MOSH_TMUX_VIEWPORT_\(UUID().uuidString.prefix(8))"
+            phoneMosh.send(Array("printf '\(marker)\\n'\r".utf8))
+            _ = try await waitForOutput(
+                phoneMosh.outputStream,
+                containing: marker,
+                timeout: 15
+            )
+            try await Task.sleep(nanoseconds: 300_000_000)
+            let geometryAfterPhoneInput = try await tmuxGeometry(
+                sessionName: sessionName,
+                using: setup
+            )
+            XCTAssertEqual(
+                geometryAfterPhoneInput,
+                TmuxGeometry(cols: 132, rows: 44),
+                "visible phone mosh input reclaimed tmux sizing from the iPad side channel"
+            )
+            _ = try await setup.executeConnectedCommand(
+                "tmux kill-session -t \(sessionName)"
+            )
+        } catch {
+            _ = try? await setup.executeConnectedCommand(
+                "tmux kill-session -t \(sessionName) >/dev/null 2>&1 || true"
+            )
+            throw error
+        }
+    }
+
+    private struct TmuxGeometry: Equatable {
+        let cols: Int
+        let rows: Int
+    }
+
+    private func tmuxGeometry(
+        sessionName: String,
+        using session: SSHSession
+    ) async throws -> TmuxGeometry {
+        let output = try await session.executeConnectedCommand(
+            "tmux display-message -p -t \(sessionName):0 '#{window_width}x#{window_height}'"
+        )
+        for token in output.split(whereSeparator: { $0.isWhitespace }).reversed() {
+            let dimensions = token.split(separator: "x", omittingEmptySubsequences: false)
+            if dimensions.count == 2,
+               let cols = Int(dimensions[0]),
+               let rows = Int(dimensions[1]) {
+                return TmuxGeometry(cols: cols, rows: rows)
+            }
+        }
+        throw IntegrationError.failed(
+            "tmux returned an invalid geometry for \(sessionName): \(output.debugDescription)"
+        )
+    }
+
+    private func waitForTmuxGeometry(
+        _ expected: TmuxGeometry,
+        sessionName: String,
+        using session: SSHSession,
+        operation: String,
+        timeout: TimeInterval = 8
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        var lastGeometry: TmuxGeometry?
+        while Date() < deadline {
+            lastGeometry = try await tmuxGeometry(
+                sessionName: sessionName,
+                using: session
+            )
+            if lastGeometry == expected { return }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        throw IntegrationError.failed(
+            "\(operation) expected \(expected.cols)x\(expected.rows), "
+                + "got \(lastGeometry?.cols ?? -1)x\(lastGeometry?.rows ?? -1)"
+        )
+    }
+
+    @MainActor
+    private func waitForTmuxHydration(
+        _ controller: TmuxController,
+        operation: String
+    ) async throws {
+        try await waitUntil(operation, timeout: 15) {
+            controller.mode == .tmuxControl
+                && controller.activeWindowId != nil
+                && controller.activePaneId != nil
+        }
+    }
+
     @MainActor
     private func assertRawPayload<Session: TerminalSession>(
         session: Session,
@@ -1566,6 +2038,19 @@ final class RealHostTransportIntegrationTests: XCTestCase {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         throw IntegrationError.timedOut(operation)
+    }
+
+    @MainActor
+    private func waitForHostKeyRequest(
+        _ request: @escaping @MainActor () -> HostKeyVerificationRequest?,
+        timeout: TimeInterval
+    ) async throws -> HostKeyVerificationRequest {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let request = request() { return request }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        throw IntegrationError.timedOut("host-key verification request")
     }
 
     @MainActor

@@ -41,6 +41,10 @@ struct FindBar: View {
         .padding(.horizontal, horizontalInset)
         .frame(maxWidth: .infinity)
         .frame(height: barHeight)
+        // Fixed-height chrome tied to the top-bar height setting — cap label
+        // scaling like SessionTopBar rather than overflowing the bar.
+        // Container-level is safe here: FindBar presents no sheets/popovers.
+        .chromeBarTextCap()
         .background(T.bg)
         .overlay(alignment: .bottom) {
             Rectangle()
@@ -140,7 +144,6 @@ struct FindBar: View {
             Text("\(controller.currentMatchIndex) of \(controller.matchCount)")
                 .font(Typography.tesseraMono(size: 11 * scale))
                 .foregroundStyle(T.fgDim)
-                .monospacedDigit()
         }
     }
 

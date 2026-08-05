@@ -5,6 +5,7 @@ REPO_ROOT="$(cd "$INTEGRATION_DIR/../.." && pwd)"
 FIXTURE_CONFIG="${TESSERA_FIXTURE_CONFIG:-$INTEGRATION_DIR/fixture.env}"
 FIXTURE_STATE="$INTEGRATION_DIR/.state"
 FIXTURE_OUT="$INTEGRATION_DIR/out"
+SIMULATOR_STATE="${TESSERA_INTEGRATION_SIMULATOR_STATE_DIR:-$FIXTURE_STATE}"
 
 die() {
   printf 'error: %s\n' "$*" >&2
@@ -22,6 +23,40 @@ require_command() {
 require_value() {
   local name="$1"
   [[ -n "${!name:-}" ]] || die "$name is not set in $FIXTURE_CONFIG"
+}
+
+delete_owned_test_simulator() {
+  local udid_file="$1"
+  local owner_file="${udid_file}.owned"
+  local udid owned_udid attempt deleted=0
+  [[ -f "$udid_file" && -f "$owner_file" ]] || return 0
+  IFS= read -r udid <"$udid_file"
+  IFS= read -r owned_udid <"$owner_file"
+  [[ -n "$udid" && "$udid" == "$owned_udid" ]] || {
+    note "refusing to delete simulator with mismatched ownership files: $udid_file"
+    return 1
+  }
+  for attempt in {1..30}; do
+    xcrun simctl shutdown "$udid" >/dev/null 2>&1 || true
+    if xcrun simctl delete "$udid" >/dev/null 2>&1; then
+      deleted=1
+      break
+    fi
+    if ! xcrun simctl list devices -j \
+      | jq -e --arg udid "$udid" \
+        '[.devices[][] | select(.udid == $udid)] | length > 0' \
+        >/dev/null 2>&1; then
+      deleted=1
+      break
+    fi
+    sleep 1
+  done
+  if [[ "$deleted" -eq 1 ]]; then
+    rm -f "$udid_file" "$owner_file" "${udid_file}.run-id"
+  else
+    note "could not delete disposable simulator $udid; retaining ownership record for retry"
+    return 1
+  fi
 }
 
 load_fixture_config() {

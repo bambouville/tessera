@@ -206,6 +206,12 @@ static NSUInteger MoshBridgePerformTick(NSError **error, Fn &&fn) {
     });
 }
 
+- (BOOL)forceFullRepaint:(NSError * _Nullable * _Nullable)error {
+    return MoshBridgePerformBool(error, [&] {
+        _client->force_full_repaint();
+    });
+}
+
 - (void)shutdown {
     if (_client == nullptr) {
         return;

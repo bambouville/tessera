@@ -1,6 +1,12 @@
 import SwiftTerm
 import UIKit
 
+extension Notification.Name {
+    static let tesseraForceRefreshTerminal = Notification.Name(
+        "Tessera.forceRefreshTerminal"
+    )
+}
+
 /// Container view that hosts a SwiftTerm `TerminalView` and claims the
 /// tmux keyboard shortcuts via `UIKeyCommand` through its position in
 /// the responder chain.
@@ -41,11 +47,107 @@ enum TesseraTerminalSelectionPathAction {
     case reveal
 }
 
+/// SwiftTerm calls `becomeFirstResponder()` from its own single-tap handler.
+/// Surface that transition so the phone keyboard-dismissal latch clears only
+/// for a real focus request, not merely because SwiftUI happened to update
+/// while the terminal was still first responder during the hide-button tap.
+final class TesseraResponderAwareTerminalView: TerminalView {
+    var onBecameFirstResponder: (() -> Void)?
+    var agentScrollBlockingActive = false
+    var onAgentScrollBlocked: (() -> Void)?
+
+    /// Tessera's pan owns vertical terminal scrolling. SwiftTerm adds its own
+    /// mouse-reporting pan dynamically when a TUI enables mode 1000/1002/1003;
+    /// make that recognizer yield to ours so a finger swipe becomes wheel or
+    /// arrow semantics instead of a left-button drag. Horizontal drags still
+    /// reach SwiftTerm because Tessera's pan rejects them in its delegate.
+    weak var semanticScrollGesture: UIPanGestureRecognizer? {
+        didSet { wireMousePanPriority() }
+    }
+    /// SwiftTerm installs its mouse-reporting pan dynamically. UIKit does not
+    /// guarantee that failure dependencies are transitive, so that pan must
+    /// yield directly to the agent blocker as well as Tessera's semantic pan.
+    weak var agentScrollBlockGesture: UIPanGestureRecognizer? {
+        didSet {
+            wireExistingPansToAgentBlocker()
+            wireMousePanPriority()
+        }
+    }
+    private weak var swiftTermMousePanGesture: UIPanGestureRecognizer?
+
+    override func becomeFirstResponder() -> Bool {
+        let wasFirstResponder = isFirstResponder
+        let accepted = super.becomeFirstResponder()
+        if accepted, !wasFirstResponder {
+            onBecameFirstResponder?()
+        }
+        return accepted
+    }
+
+    override func accessibilityScroll(
+        _ direction: UIAccessibilityScrollDirection
+    ) -> Bool {
+        guard agentScrollBlockingActive else {
+            return super.accessibilityScroll(direction)
+        }
+        onAgentScrollBlocked?()
+        return true
+    }
+
+    override func addGestureRecognizer(_ gestureRecognizer: UIGestureRecognizer) {
+        super.addGestureRecognizer(gestureRecognizer)
+        guard let pan = gestureRecognizer as? UIPanGestureRecognizer,
+              let agentScrollBlockGesture,
+              pan !== agentScrollBlockGesture
+        else { return }
+        pan.require(toFail: agentScrollBlockGesture)
+    }
+
+    override func mouseModeChanged(source: Terminal) {
+        let existingGestureIDs = Set(
+            (gestureRecognizers ?? []).map(ObjectIdentifier.init)
+        )
+        super.mouseModeChanged(source: source)
+
+        guard source.mouseMode != .off else {
+            swiftTermMousePanGesture = nil
+            return
+        }
+
+        if swiftTermMousePanGesture?.view !== self {
+            swiftTermMousePanGesture = (gestureRecognizers ?? [])
+                .compactMap { $0 as? UIPanGestureRecognizer }
+                .first { !existingGestureIDs.contains(ObjectIdentifier($0)) }
+        }
+        wireMousePanPriority()
+    }
+
+    private func wireMousePanPriority() {
+        guard let swiftTermMousePanGesture else { return }
+        if let agentScrollBlockGesture,
+           swiftTermMousePanGesture !== agentScrollBlockGesture {
+            swiftTermMousePanGesture.require(toFail: agentScrollBlockGesture)
+        }
+        if let semanticScrollGesture,
+           swiftTermMousePanGesture !== semanticScrollGesture {
+            swiftTermMousePanGesture.require(toFail: semanticScrollGesture)
+        }
+    }
+
+    private func wireExistingPansToAgentBlocker() {
+        guard let agentScrollBlockGesture else { return }
+        for pan in (gestureRecognizers ?? []).compactMap({ $0 as? UIPanGestureRecognizer })
+        where pan !== agentScrollBlockGesture {
+            pan.require(toFail: agentScrollBlockGesture)
+        }
+    }
+}
+
 final class TesseraTerminalContainer: UIView {
 
     /// The hosted SwiftTerm view. Pinned to the container's bounds
     /// via Auto Layout so it always fills the container.
-    let terminalView: TerminalView
+    let terminalView: TesseraResponderAwareTerminalView
 
     /// Invoked when one of the tmux shortcut chords fires. The outer
     /// view sets this up to route shortcuts into the `TmuxController`.
@@ -92,6 +194,13 @@ final class TesseraTerminalContainer: UIView {
     /// SwiftTerm owns first responder while a session is active, so the
     /// SwiftUI-level shortcut alone cannot reliably receive the chord.
     var onOpenAgentCenter: (() -> Void)?
+
+    /// While a hook-proven agent is actively working, the terminal surface
+    /// consumes Page Up / Page Down here before SwiftTerm can either move local
+    /// scrollback or forward the keys into an alternate-screen app. Pointer and
+    /// touch scrolling are guarded by `TerminalSurfaceBound`'s pan recognizer.
+    var agentScrollBlockingActive = false
+    var onAgentScrollBlocked: (() -> Void)?
 
     /// Invoked when ⌘⇧E fires — toggles the Remote Files panel. Rides
     /// the same ⌘⇧+letter path as the switcher chords (Shift doesn't
@@ -150,7 +259,7 @@ final class TesseraTerminalContainer: UIView {
     }
 
     override init(frame: CGRect) {
-        self.terminalView = TerminalView(frame: .zero)
+        self.terminalView = TesseraResponderAwareTerminalView(frame: .zero)
         super.init(frame: frame)
         terminalView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(terminalView)
@@ -180,6 +289,33 @@ final class TesseraTerminalContainer: UIView {
 
     override var keyCommands: [UIKeyCommand]? {
         var commands: [UIKeyCommand] = []
+
+        if agentScrollBlockingActive {
+            let pageUp = UIKeyCommand(
+                input: UIKeyCommand.inputPageUp,
+                modifierFlags: [],
+                action: #selector(agentScrollPageKeyBlocked)
+            )
+            let pageDown = UIKeyCommand(
+                input: UIKeyCommand.inputPageDown,
+                modifierFlags: [],
+                action: #selector(agentScrollPageKeyBlocked)
+            )
+            let shiftedPageUp = UIKeyCommand(
+                input: UIKeyCommand.inputPageUp,
+                modifierFlags: .shift,
+                action: #selector(agentScrollPageKeyBlocked)
+            )
+            let shiftedPageDown = UIKeyCommand(
+                input: UIKeyCommand.inputPageDown,
+                modifierFlags: .shift,
+                action: #selector(agentScrollPageKeyBlocked)
+            )
+            for command in [pageUp, pageDown, shiftedPageUp, shiftedPageDown] {
+                command.wantsPriorityOverSystemBehavior = true
+                commands.append(command)
+            }
+        }
 
         // §R4.6 find-in-scrollback. Always on regardless of tmux mode.
         // ⌘F opens the bar; ⌘G / ⇧⌘G navigate matches even when the
@@ -251,6 +387,18 @@ final class TesseraTerminalContainer: UIView {
                          modifierFlags: .command,
                          action: #selector(openSettings))
         )
+
+        // iPad hardware-keyboard refresh. The terminal remains first
+        // responder while a session is active, so this belongs on the
+        // container in the same responder-chain position as the other
+        // terminal commands. iPhone exposes the same action in the bar only.
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            let refreshCommand = UIKeyCommand(input: "r",
+                                              modifierFlags: .command,
+                                              action: #selector(forceRefresh))
+            refreshCommand.wantsPriorityOverSystemBehavior = true
+            commands.append(refreshCommand)
+        }
 
         let agentCenterCommand = UIKeyCommand(
             input: "a",
@@ -370,8 +518,12 @@ final class TesseraTerminalContainer: UIView {
             return onOpenSettings != nil
         case #selector(openAgentCenter):
             return onOpenAgentCenter != nil
+        case #selector(agentScrollPageKeyBlocked):
+            return agentScrollBlockingActive && onAgentScrollBlocked != nil
         case #selector(filesToggle):
             return onFilesShortcut != nil
+        case #selector(forceRefresh):
+            return UIDevice.current.userInterfaceIdiom == .pad
         case #selector(selectionQuickLook(_:)),
              #selector(selectionRevealInFiles(_:)):
             // Only when the selection plausibly IS a path — everyday
@@ -388,6 +540,10 @@ final class TesseraTerminalContainer: UIView {
 
     @objc private func filesToggle() {
         onFilesShortcut?()
+    }
+
+    @objc private func forceRefresh() {
+        NotificationCenter.default.post(name: .tesseraForceRefreshTerminal, object: nil)
     }
 
     @objc private func selectionQuickLook(_ sender: Any?) {
@@ -477,6 +633,10 @@ final class TesseraTerminalContainer: UIView {
 
     @objc private func openAgentCenter() {
         onOpenAgentCenter?()
+    }
+
+    @objc private func agentScrollPageKeyBlocked() {
+        onAgentScrollBlocked?()
     }
 
 }
@@ -968,6 +1128,15 @@ final class TerminalOSCColorQueryResponder {
     private struct StreamState {
         private var pendingControlBytes: [UInt8] = []
 
+        /// Backstop for the carry-over buffer. A pending tail longer than any
+        /// real color query is never going to complete into one — dropping it
+        /// only costs a response to a query no real program sends. Without the
+        /// cap, a falsely detected OSC start poisons the stream: every later
+        /// chunk prepends and rescans an ever-growing pending buffer, which
+        /// measured ~8ms per %output message until a stray terminator byte
+        /// happened to flush it.
+        private static let maximumPendingBytes = 256
+
         mutating func responses(
             for data: ArraySlice<UInt8>,
             defaultForegroundRGB: Int,
@@ -976,6 +1145,11 @@ final class TerminalOSCColorQueryResponder {
             var bytes = pendingControlBytes
             bytes.append(contentsOf: data)
             pendingControlBytes.removeAll(keepingCapacity: true)
+            defer {
+                if pendingControlBytes.count > Self.maximumPendingBytes {
+                    pendingControlBytes.removeAll(keepingCapacity: true)
+                }
+            }
 
             var response: [UInt8] = []
             var index = 0
@@ -985,14 +1159,20 @@ final class TerminalOSCColorQueryResponder {
                     if let oscStart = Self.incompleteOSCStart(in: tail) {
                         pendingControlBytes = Array(bytes[oscStart...])
                     } else if Self.isIncompleteControlTail(tail) {
-                        pendingControlBytes = Array(tail)
+                        // Carry only the trailing control bytes, never the
+                        // prose before them — a long prose tail ending in a
+                        // query's leading ESC would otherwise trip the
+                        // pending cap below and silently drop the query.
+                        pendingControlBytes = Self.controlTailSuffix(of: tail)
                     }
                     break
                 }
 
                 if sequence.start > index,
                    Self.isIncompleteControlTail(bytes[index..<sequence.start]) {
-                    pendingControlBytes = Array(bytes[index..<sequence.start])
+                    pendingControlBytes = Self.controlTailSuffix(
+                        of: bytes[index..<sequence.start]
+                    )
                     break
                 }
 
@@ -1024,22 +1204,31 @@ final class TerminalOSCColorQueryResponder {
         }
 
         private static func oscSequence(in bytes: [UInt8], startingAt start: Int) -> OSCSequence? {
-            var index = start
-            while index < bytes.count {
-                if bytes[index] == 0x9D
-                    || (bytes[index] == 0x1B
-                        && index + 1 < bytes.count
-                        && bytes[index + 1] == 0x5D) {
-                    break
+            // Hot path: this find-start scan covers every byte of every
+            // `%output` payload, so it runs on a raw pointer instead of
+            // bounds-checked subscripts (which are unoptimized calls in
+            // Debug builds).
+            //
+            // Deliberately 7-bit only: the C1 forms 0x9D (OSC) and 0x9C (ST)
+            // are also ordinary UTF-8 continuation bytes — curly quotes are
+            // E2 80 9C / E2 80 9D — so treating them as control bytes opened
+            // phantom OSCs mid-prose and buffered arbitrary text as a
+            // "pending query". Programs that query colors use ESC ] … BEL/ESC\.
+            let index = bytes.withUnsafeBufferPointer { buffer -> Int in
+                var i = start
+                let count = buffer.count
+                while i < count {
+                    if buffer[i] == 0x1B, i + 1 < count, buffer[i + 1] == 0x5D { break }
+                    i += 1
                 }
-                index += 1
+                return i
             }
             guard index < bytes.count else { return nil }
 
-            let payloadStart = bytes[index] == 0x1B ? index + 2 : index + 1
+            let payloadStart = index + 2
             var terminator = payloadStart
             while terminator < bytes.count {
-                if bytes[terminator] == 0x07 || bytes[terminator] == 0x9C {
+                if bytes[terminator] == 0x07 {
                     return OSCSequence(
                         start: index,
                         payload: payloadStart..<terminator,
@@ -1061,19 +1250,21 @@ final class TerminalOSCColorQueryResponder {
         }
 
         private static func incompleteOSCStart(in bytes: ArraySlice<UInt8>) -> Int? {
-            var index = bytes.startIndex
-            while index < bytes.endIndex {
-                if bytes[index] == 0x9D {
-                    return index
+            // Hot path companion to `oscSequence` — raw-pointer scan, with
+            // positions mapped back to the slice's index space. 7-bit ESC ]
+            // only, for the same reason as `oscSequence`.
+            let base = bytes.startIndex
+            return bytes.withUnsafeBufferPointer { buffer -> Int? in
+                var i = 0
+                let count = buffer.count
+                while i < count {
+                    if buffer[i] == 0x1B, i + 1 < count, buffer[i + 1] == 0x5D {
+                        return base + i
+                    }
+                    i += 1
                 }
-                if bytes[index] == 0x1B,
-                   index + 1 < bytes.endIndex,
-                   bytes[index + 1] == 0x5D {
-                    return index
-                }
-                index += 1
+                return nil
             }
-            return nil
         }
 
         private static func isIncompleteControlTail(_ bytes: ArraySlice<UInt8>) -> Bool {
@@ -1084,6 +1275,14 @@ final class TerminalOSCColorQueryResponder {
                 return tail[0] == 0x1B && tail[1] == 0x5D
             }
             return false
+        }
+
+        /// The 1–2 control bytes that make `isIncompleteControlTail` true —
+        /// the only part of the tail that can combine with the next chunk
+        /// into an OSC start. Anything before them is prose that provably
+        /// contains no `ESC ]` and must not count against the pending cap.
+        private static func controlTailSuffix(of bytes: ArraySlice<UInt8>) -> [UInt8] {
+            Array(bytes.suffix(bytes.last == 0x1B ? 1 : 2))
         }
 
         private static func oscResponse(code: Int, rgb: Int) -> [UInt8] {

@@ -1,0 +1,1572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tessera — sync &amp; continuity (iPad ↔ iPhone)</title>
+<style>
+/* ============================================================
+   Tessera sync & continuity — storyboard mock (P8 follow-up)
+   Companion to index.html (iPhone companion mock).
+   Real design tokens (DesignTokens.swift), blue accent.
+   Static frames; page chrome dark-only per house style.
+   ============================================================ */
+:root{
+  --accent:#5B9FFF; --accentSoft:rgba(91,159,255,.14); --accentHi:rgba(91,159,255,.32);
+  --border:rgba(255,255,255,.08); --borderStrong:rgba(255,255,255,.14);
+  --fg:#fff; --fgMuted:rgba(235,235,245,.60); --fgDim:rgba(235,235,245,.35); --fgFaint:rgba(235,235,245,.18);
+  --green:#30D158; --red:#FF453A; --amber:#FF9F0A;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html{background:#181818}
+body{background:#181818;color:var(--fg);font:13px/1.5 var(--sans);padding:48px 28px 120px;-webkit-font-smoothing:antialiased}
+.page{max-width:1300px;margin:0 auto}
+.m{font-family:var(--mono)}
+
+/* ---------- doc chrome (house style) ---------- */
+.doc-h1{font:500 28px/1.2 var(--mono);letter-spacing:-.01em}
+.doc-sub{color:var(--fgMuted);font-size:13px;margin-top:8px;max-width:880px}
+.doc-meta{color:var(--fgDim);font-size:12px;margin-top:10px;font-family:var(--mono)}
+.toc{display:flex;gap:8px;flex-wrap:wrap;margin-top:22px}
+.toc a{font:11.5px/1 var(--mono);color:var(--accent);text-decoration:none;border:1px solid var(--border);border-radius:100px;padding:5px 12px}
+.toc a:hover{background:var(--accentSoft)}
+h2{font:600 19px/1.3 var(--sans);letter-spacing:-.01em;margin:78px 0 4px;padding-top:26px;border-top:1px solid var(--border)}
+h2 .n{font:500 12px/1 var(--mono);color:var(--fgDim);margin-right:10px}
+p.sub{color:var(--fgMuted);font-size:13.5px;margin:6px 0 0;max-width:880px}
+p.note{color:var(--fgDim);font-size:12px;margin:14px 0 0;max-width:880px}
+p.note b{color:var(--fgMuted);font-weight:500}
+code{font-family:var(--mono);font-size:.87em;background:#101010;border:1px solid var(--border);border-radius:4px;padding:1px 5px;color:var(--fgMuted)}
+section{scroll-margin-top:24px}
+
+/* principles strip */
+.prin{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:24px}
+.prin .p{border:1px solid var(--border);border-radius:12px;padding:14px 15px;background:#101012}
+.prin .p .t{font:500 12px/1.3 var(--mono);color:var(--fg)}
+.prin .p .s{font:11.5px/1.5 var(--sans);color:var(--fgDim);margin-top:6px}
+.prin .p .t .ic{color:var(--accent);margin-right:6px}
+
+/* ---------- stage / captions ---------- */
+.stage{display:flex;gap:30px;align-items:flex-start;flex-wrap:wrap;margin-top:26px}
+.stagecol{flex:none}
+.stagecap{font:11.5px/1.5 var(--mono);color:var(--fgDim);margin-top:12px;max-width:393px}
+.stagecap b{color:var(--fgMuted);font-weight:500}
+.arrowcol{align-self:center;color:var(--fgFaint);font:400 22px/1 var(--mono);padding:0 2px;margin-top:-40px}
+
+/* ---------- generic glyph kit ---------- */
+.g{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.g.fill{fill:currentColor;stroke:none}
+
+/* ============================================================
+   iPhone frame (393×852, static; dark device theme tokens)
+   ============================================================ */
+.phone{
+  --dw:393px; --dh:852px; width:var(--dw);height:var(--dh);
+  border-radius:56px;border:1px solid var(--borderStrong);background:#000;position:relative;flex:none;
+  box-shadow:0 30px 60px -30px rgba(0,0,0,.65), inset 0 0 0 2px #2a2a2c;
+  --t-bg:#000; --t-panel:#0A0A0A; --t-input:#141414; --t-inputSoft:#1C1C1E; --t-solid:#1C1C1E;
+  --t-fg:#fff; --t-fgMuted:rgba(235,235,245,.60); --t-fgDim:rgba(235,235,245,.35); --t-fgFaint:rgba(235,235,245,.18);
+  --t-border:rgba(255,255,255,.08); --t-borderStrong:rgba(255,255,255,.14);
+  --t-accent:#5B9FFF; --t-accentSoft:rgba(91,159,255,.14); --t-accentHi:rgba(91,159,255,.32);
+  --t-green:#30D158; --t-red:#FF453A; --t-amber:#FF9F0A;
+  --t-glassBg:rgba(255,255,255,.12); --t-glassRing:rgba(255,255,255,.18);
+  --t-shadow:0 12px 28px -8px rgba(0,0,0,.45), 0 4px 10px rgba(0,0,0,.25);
+  --sa-t:59px; --sa-b:34px;
+}
+.phone .screen{position:absolute;inset:0;border-radius:inherit;overflow:hidden;background:var(--t-bg);color:var(--t-fg)}
+.island{position:absolute;top:12px;left:50%;transform:translateX(-50%);width:118px;height:34px;border-radius:20px;background:#000;z-index:60;box-shadow:inset 0 0 0 1px #1a1a1c}
+.statusbar{position:absolute;top:0;left:0;right:0;height:var(--sa-t);z-index:55;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 6px;font:600 14px/1 var(--sans);color:var(--t-fg);pointer-events:none}
+.sb-icons{display:flex;align-items:center;gap:6px}
+.sb-icons .g{width:16px;height:16px;stroke-width:1.7}
+.home-ind{position:absolute;left:50%;bottom:9px;transform:translateX(-50%);width:134px;height:5px;border-radius:3px;background:rgba(255,255,255,.85);z-index:90;pointer-events:none}
+.glass{background:var(--t-glassBg);backdrop-filter:blur(28px) saturate(180%);-webkit-backdrop-filter:blur(28px) saturate(180%);box-shadow:var(--t-shadow), inset 0 .5px 0 rgba(255,255,255,.16)}
+
+/* chips / tags / dots (in-device kit) */
+.chip{font:500 11px/1 var(--mono);padding:3px 8px;border-radius:4px;border:1px solid var(--t-border,var(--border));background:var(--t-inputSoft,#1C1C1E);color:var(--t-fgMuted,var(--fgMuted))}
+.tag{font:10px/1 var(--mono);padding:2.5px 7px;border-radius:4px;border:1px solid var(--t-border,var(--border));color:var(--t-fgDim,var(--fgDim))}
+.tag.acc{background:var(--t-accentSoft,var(--accentSoft));color:var(--t-accent,var(--accent));border-color:transparent}
+.tag.warn{color:var(--amber);border-color:transparent;background:rgba(255,159,10,.14)}
+.tag.ok{color:var(--green);border-color:transparent;background:rgba(48,209,88,.12)}
+.dot{width:7px;height:7px;border-radius:4px;background:var(--t-fgDim,var(--fgDim));flex:none}
+.dot.g{background:var(--green);animation:pulse 1.6s ease-in-out infinite}
+.dot.a{background:var(--amber);animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.4}}
+
+/* terminal */
+.term{position:absolute;inset:0;background:#000;color:rgba(255,255,255,.88);font:13px/1.45 var(--mono);padding:calc(var(--sa-t) + 62px) 14px 20px 14px;overflow:hidden}
+.term .ln{white-space:pre-wrap;word-break:break-all}
+.term .dim{color:rgba(235,235,245,.45)}
+.term .ok{color:#30D158}.term .cmd{color:#FFD479}.term .dir{color:#b794f4}
+.cur{display:inline-block;width:7px;height:14px;background:#fff;vertical-align:-2px;animation:blink 1.05s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.screen.dimmed .term{opacity:.28;filter:blur(1px)}
+
+/* top pill */
+.toppill{position:absolute;top:calc(var(--sa-t) + 8px);left:12px;right:12px;z-index:45;height:44px;border-radius:14px;display:flex;align-items:center;padding:0 4px 0 6px;border:.5px solid var(--t-glassRing);color:var(--t-fg)}
+.toppill .ib{width:36px;height:36px;display:grid;place-items:center;color:var(--t-fgMuted);border-radius:8px}
+.toppill .st{display:flex;align-items:center;gap:8px;min-width:0;padding:0 6px}
+.toppill .host{font:500 12.5px/1 var(--mono);white-space:nowrap}
+.toppill .sp{flex:1}
+.toppill .ib.red{color:var(--t-red)}
+
+/* accessory bar */
+.accbar{position:absolute;left:0;right:0;bottom:0;z-index:44;height:52px;display:flex;align-items:center;gap:6px;padding:0 8px;border-top:.5px solid rgba(128,128,128,.25);background:var(--t-glassBg);backdrop-filter:blur(28px) saturate(180%);-webkit-backdrop-filter:blur(28px) saturate(180%)}
+.acckey{flex:none;min-width:42px;height:36px;padding:0 11px;border-radius:7px;background:rgba(120,120,128,.24);color:var(--t-fg);font:500 14px/1 var(--mono);display:grid;place-items:center}
+.acckey.lbl{font-size:12px}
+.accbar .vsep{width:.5px;height:26px;background:var(--t-border);flex:none;margin:0 2px}
+
+/* toast */
+.toast{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(var(--sa-b) + 70px);z-index:50;display:flex;align-items:center;gap:9px;padding:10px 16px;border-radius:22px;border:.5px solid var(--t-glassRing);font:500 11.5px/1.3 var(--mono);color:var(--t-fg);white-space:nowrap}
+.toast .g{width:15px;height:15px;color:var(--t-fgMuted)}
+
+/* centered modal card */
+.modalveil{position:absolute;inset:0;z-index:52;background:rgba(0,0,0,.45);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);display:flex;align-items:center;justify-content:center;padding:26px}
+.modalcard{width:100%;border-radius:22px;border:.5px solid var(--t-glassRing);padding:22px 20px 18px;color:var(--t-fg);background:color-mix(in srgb,var(--t-solid) 86%,transparent);backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);box-shadow:0 18px 44px -12px rgba(0,0,0,.55)}
+.modalcard .ic{width:44px;height:44px;border-radius:22px;background:var(--t-accentSoft);color:var(--t-accent);display:grid;place-items:center;margin:0 auto 12px}
+.modalcard .ic .g{width:20px;height:20px}
+.modalcard .ic.warn{background:rgba(255,159,10,.14);color:var(--amber)}
+.modalcard h4{font:600 15px/1.3 var(--sans);text-align:center}
+.modalcard .sub{font:11.5px/1.5 var(--sans);color:var(--t-fgMuted);text-align:center;margin-top:5px}
+.modalcard .body{margin-top:14px}
+.btnrow{display:flex;gap:9px;margin-top:16px}
+.btn{flex:1;appearance:none;border:1px solid var(--t-border);background:var(--t-input);color:var(--t-fg);border-radius:11px;padding:12px 10px;font:500 12.5px/1 var(--mono);cursor:pointer;text-align:center}
+.btn.primary{background:var(--t-accent);border-color:var(--t-accent);color:#fff}
+.btn.neutral{background:var(--t-fg);border-color:var(--t-fg);color:var(--t-bg)}
+.btn.ghost{background:transparent}
+.btn.ghostred{background:transparent;color:var(--t-red);border-color:transparent}
+.btn[disabled]{opacity:.5}
+
+/* fingerprint block */
+.fpblock{background:var(--t-input);border:1px solid var(--t-border);border-radius:10px;padding:11px 12px;font:11px/1.6 var(--mono);color:var(--t-fgMuted);word-break:break-all}
+.fpblock .k{color:var(--t-fgDim)}
+.matchline{display:flex;align-items:flex-start;gap:8px;margin-top:11px;font:11.5px/1.45 var(--mono)}
+.matchline.ok{color:var(--green)}
+.matchline.warn{color:var(--amber)}
+.matchline .g{width:14px;height:14px;margin-top:1px}
+
+/* descriptor / spec table */
+.spec{border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-top:18px;max-width:880px}
+.spec table{border-collapse:collapse;width:100%;font:11.5px/1.5 var(--mono)}
+.spec th{font:500 10px/1 var(--mono);text-transform:uppercase;letter-spacing:.07em;color:var(--fgDim);text-align:left;padding:10px 14px;border-bottom:1px solid var(--border);background:#101012}
+.spec td{padding:8px 14px;border-bottom:1px solid var(--border);color:var(--fgMuted);vertical-align:top}
+.spec tr:last-child td{border-bottom:0}
+.spec td:first-child{color:var(--fg);white-space:nowrap}
+.spec .new{color:var(--accent)}
+.spec .newtag{font-size:9px;color:var(--accent);border:1px solid var(--accentHi);border-radius:4px;padding:1px 5px;margin-left:7px;vertical-align:1px}
+
+/* steps card */
+.steps{margin-top:14px;display:flex;flex-direction:column;gap:0}
+.step{display:flex;align-items:flex-start;gap:11px;padding:9px 2px;font:12px/1.45 var(--mono);color:var(--t-fgMuted)}
+.step .bullet{width:20px;height:20px;border-radius:10px;flex:none;display:grid;place-items:center;border:1.5px solid var(--t-fgFaint);color:transparent;margin-top:1px}
+.step.done{color:var(--t-fg)}
+.step.done .bullet{border-color:var(--green);color:var(--green)}
+.step.active{color:var(--t-fg)}
+.step.active .bullet{border-color:var(--t-accent);position:relative}
+.step.active .bullet::after{content:"";position:absolute;inset:4px;border-radius:50%;background:var(--t-accent);animation:pulse 1.2s ease-in-out infinite}
+.step .bullet .g{width:11px;height:11px;stroke-width:2.2}
+.step .sd{font-size:10px;color:var(--t-fgDim);margin-top:2px}
+
+/* spinner */
+.spin{width:26px;height:26px;border-radius:50%;border:2.5px solid var(--t-fgFaint);border-top-color:var(--t-accent);margin:0 auto 14px;animation:rot 1s linear infinite}
+@keyframes rot{to{transform:rotate(360deg)}}
+
+/* sheet (add host) */
+.sheet{position:absolute;left:8px;right:8px;bottom:8px;top:15%;z-index:47;border-radius:26px;border:.5px solid var(--t-glassRing);color:var(--t-fg);display:flex;flex-direction:column;overflow:hidden;background:color-mix(in srgb,var(--t-solid) 88%,transparent);backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);box-shadow:0 18px 44px -12px rgba(0,0,0,.55)}
+.grab{width:36px;height:5px;border-radius:3px;background:var(--t-fgFaint);margin:8px auto 2px;flex:none}
+.sheet .sh-h{display:flex;align-items:center;gap:8px;padding:8px 16px 12px}
+.sheet .sh-h .t{font:600 13.5px/1 var(--sans)}
+.sheet .sh-body{flex:1;overflow:hidden;padding:0 14px}
+.srcchip{margin-left:auto;display:flex;align-items:center;gap:6px;border:.5px solid var(--t-border);border-radius:9px;padding:4px 9px;font:10px/1.3 var(--mono);color:var(--t-fgMuted)}
+.srcchip .g{width:12px;height:12px;color:var(--t-accent)}
+
+/* field rows */
+.fgroup{background:var(--t-panel);border:1px solid var(--t-border);border-radius:12px;overflow:hidden;margin-bottom:14px}
+.frow{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--t-border);min-height:46px}
+.frow:last-child{border-bottom:0}
+.frow .lb{font:11px/1 var(--mono);color:var(--t-fgDim);width:76px;flex:none}
+.frow .vl{font:12.5px/1.3 var(--mono);color:var(--t-fg)}
+.frow .end{margin-left:auto;display:flex;align-items:center;gap:7px}
+.vchip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--t-border);background:var(--t-input);border-radius:7px;padding:5px 9px;font:11px/1.3 var(--mono);color:var(--t-fgMuted)}
+.vchip .g{width:12px;height:12px;color:var(--t-fgDim)}
+.formnote{font:10.5px/1.55 var(--mono);color:var(--t-fgDim);padding:2px 4px 12px;display:flex;gap:8px;align-items:flex-start}
+.formnote .g{width:13px;height:13px;margin-top:1px;color:var(--t-fgMuted)}
+.cta{display:block;width:100%;appearance:none;border:0;background:var(--t-accent);color:#fff;border-radius:12px;padding:14px;font:500 13px/1 var(--mono);cursor:pointer;text-align:center}
+
+/* password field */
+.pwfield{display:flex;align-items:center;gap:9px;background:var(--t-input);border:1px solid var(--t-border);border-radius:10px;padding:12px 12px;font:13px/1 var(--mono);color:var(--t-fg)}
+.pwfield .g{width:14px;height:14px;color:var(--t-fgMuted)}
+.pwfield .dots{letter-spacing:3px;color:var(--t-fgDim)}
+.fieldnote{font:10px/1.5 var(--mono);color:var(--t-fgDim);margin:7px 2px 0}
+.ordiv{display:flex;align-items:center;gap:10px;margin:15px 0;color:var(--t-fgFaint);font:10px/1 var(--mono);text-transform:uppercase;letter-spacing:.08em}
+.ordiv::before,.ordiv::after{content:"";flex:1;height:1px;background:var(--t-border)}
+.optbtn{display:flex;align-items:center;gap:11px;width:100%;border:1px solid var(--t-accentHi);background:var(--t-accentSoft);border-radius:12px;padding:13px 13px;cursor:pointer;text-align:left;color:var(--t-fg)}
+.optbtn .g{width:17px;height:17px;color:var(--t-accent)}
+.optbtn .tt{font:500 12.5px/1.3 var(--mono);color:var(--t-accent)}
+.optbtn .ss{font:10px/1.45 var(--mono);color:var(--t-fgMuted);margin-top:3px}
+
+/* first-open welcome / bootstrap */
+.welcome{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;padding:34px 26px calc(var(--sa-b) + 30px);z-index:40}
+.welcome .appmark{width:64px;height:64px;border-radius:16px;background:#0f1420;border:.5px solid rgba(255,255,255,.16);display:grid;place-items:center;font:600 30px/1 var(--mono);color:var(--t-accent);margin:0 auto}
+.welcome h3{font:600 21px/1.3 var(--sans);text-align:center;margin-top:18px}
+.welcome .ws{font:12px/1.5 var(--mono);color:var(--t-fgMuted);text-align:center;margin-top:5px}
+.optstack{display:flex;flex-direction:column;gap:10px;margin-top:30px}
+.optbtn.plain{border-color:var(--t-border);background:var(--t-input)}
+.optbtn.plain .g{color:var(--t-fgMuted)}
+.optbtn.plain .tt{color:var(--t-fg)}
+.wfoot{font:10px/1.6 var(--mono);color:var(--t-fgDim);text-align:center;margin-top:26px;display:flex;gap:8px;align-items:flex-start;text-align:left}
+.wfoot .g{width:13px;height:13px;margin-top:1px;flex:none;color:var(--t-fgMuted)}
+.ipad .welcome{padding:30px 150px}
+/* direction label inside a section */
+.dirlabel{font:500 11px/1 var(--mono);color:var(--fgDim);letter-spacing:.08em;text-transform:uppercase;
+  margin:30px 0 -10px;display:flex;align-items:center;gap:12px}
+.dirlabel::after{content:"";flex:1;height:1px;background:var(--border)}
+/* checklist (per-host authorization) */
+.cklist{background:var(--t-input);border:1px solid var(--t-border);border-radius:12px;overflow:hidden;margin-top:12px}
+.ckrow{display:flex;align-items:center;gap:11px;padding:11px 12px;border-bottom:1px solid var(--t-border)}
+.ckrow:last-child{border-bottom:0}
+.ckrow .nm{font:12.5px/1.2 var(--mono);color:var(--t-fg)}
+.ckrow .ss{font:10px/1.4 var(--mono);color:var(--t-fgDim);margin-top:2px}
+.ckrow.dis .nm{color:var(--t-fgDim)}
+.ckbox{width:21px;height:21px;border-radius:7px;border:1.5px solid var(--t-fgFaint);display:grid;place-items:center;color:transparent;flex:none}
+.ckbox.on{background:var(--t-accent);border-color:var(--t-accent);color:#fff}
+.ckbox .g{width:12px;height:12px;stroke-width:2.4}
+.btn .g{width:14px;height:14px;vertical-align:-3px;margin-right:6px;display:inline-block}
+/* dimmed non-terminal backdrop layer */
+.dimlayer{opacity:.3;filter:blur(1px)}
+/* SAS verification code (nearby peer binding) */
+.sascode{font:500 36px/1 var(--mono);letter-spacing:.16em;text-align:center;color:var(--t-fg);margin:22px 0 6px}
+.sasstrip{display:flex;align-items:center;gap:12px;margin-top:12px;background:var(--t-input);
+  border:1px dashed var(--t-borderStrong);border-radius:10px;padding:10px 13px}
+.sasstrip .code{font:500 19px/1 var(--mono);letter-spacing:.12em;flex:none}
+.sasstrip .lbl{font:10px/1.5 var(--mono);color:var(--t-fgDim)}
+
+/* lock overlay */
+.lockveil{position:absolute;inset:0;z-index:53;background:rgba(0,0,0,.62);backdrop-filter:blur(22px) saturate(140%);-webkit-backdrop-filter:blur(22px) saturate(140%);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;padding:30px}
+.lockveil .lic{width:58px;height:58px;border-radius:29px;background:rgba(255,255,255,.08);display:grid;place-items:center;color:var(--t-fg)}
+.lockveil .lic .g{width:24px;height:24px}
+.lockveil h4{font:600 16px/1.3 var(--sans);margin-top:16px}
+.lockveil .s{font:11.5px/1.5 var(--sans);color:var(--t-fgMuted);margin-top:5px;text-align:center}
+.stash{margin-top:26px;display:flex;align-items:center;gap:10px;border:.5px solid var(--t-glassRing);border-radius:14px;padding:11px 14px;font:11px/1.45 var(--mono);color:var(--t-fg)}
+.stash .g{width:15px;height:15px;color:var(--t-accent)}
+.stash .s2{color:var(--t-fgDim);font-size:10px;margin-top:2px}
+.unlockbtn{margin-top:30px;border:0;background:rgba(255,255,255,.14);color:var(--t-fg);border-radius:20px;padding:11px 26px;font:500 12.5px/1 var(--mono);cursor:pointer}
+
+/* app switcher */
+.aswitch{position:absolute;inset:0;background:
+  radial-gradient(120% 90% at 20% 0%, #1c2233 0%, #101018 55%, #0a0a0e 100%)}
+.appcard{position:absolute;border-radius:22px;overflow:hidden;border:.5px solid rgba(255,255,255,.14);box-shadow:0 24px 50px -18px rgba(0,0,0,.7)}
+.appcard.back{width:250px;height:540px;right:-120px;top:170px;background:linear-gradient(#26262b,#1a1a1e)}
+.appcard.front{width:280px;height:604px;left:36px;top:138px;background:#000}
+.appcard .thumb{position:absolute;inset:0;padding:40px 14px;font:8.5px/1.5 var(--mono);color:rgba(255,255,255,.75)}
+.appcard .thumb .pill{height:18px;border-radius:7px;background:rgba(255,255,255,.1);margin-bottom:10px}
+.appcard .thumb .ok{color:#30D158}.appcard .thumb .dim{color:rgba(235,235,245,.4)}.appcard .thumb .cmd{color:#FFD479}
+.applabel{position:absolute;left:36px;top:100px;display:flex;align-items:center;gap:8px;font:500 12px/1 var(--sans);color:rgba(255,255,255,.85)}
+.appicon{width:22px;height:22px;border-radius:6px;background:#0f1420;border:.5px solid rgba(255,255,255,.2);display:grid;place-items:center;font:600 11px/1 var(--mono);color:var(--accent)}
+.hoffbanner{position:absolute;left:24px;right:24px;bottom:64px;display:flex;align-items:center;gap:12px;border-radius:18px;padding:12px 14px;border:.5px solid rgba(255,255,255,.2);background:rgba(255,255,255,.1);backdrop-filter:blur(28px) saturate(180%);-webkit-backdrop-filter:blur(28px) saturate(180%);box-shadow:0 14px 34px -10px rgba(0,0,0,.5)}
+.hoffbanner .appicon{width:34px;height:34px;border-radius:9px;font-size:15px}
+.hoffbanner .tt{font:600 12.5px/1.3 var(--sans);color:#fff}
+.hoffbanner .ss{font:11px/1.4 var(--sans);color:rgba(235,235,245,.65);display:flex;align-items:center;gap:5px}
+.hoffbanner .ss .g{width:12px;height:12px}
+.hoffbanner .chev{margin-left:auto;color:rgba(235,235,245,.4)}
+
+/* tab pages (keys / settings) */
+.tabpage{position:absolute;inset:0;overflow:hidden;padding:calc(var(--sa-t) + 14px) 18px 130px}
+.pg-h{display:flex;align-items:baseline;justify-content:space-between;margin:6px 2px 16px}
+.pg-h .t{font:500 28px/1 var(--mono)}
+.sec-h{font:11px/1 var(--mono);color:var(--t-fgMuted);letter-spacing:.06em;margin:22px 2px 10px}
+.krow{display:flex;align-items:center;gap:10px;padding:13px 2px;border-bottom:1px solid var(--t-border)}
+.krow .nm{font:13px/1.2 var(--mono)}
+.krow .sub{font:10px/1.3 var(--mono);color:var(--t-fgDim);margin-top:3px}
+.krow .tags{margin-left:auto;display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;max-width:48%}
+.krow .g{width:16px;height:16px;color:var(--t-fgMuted)}
+.revoke{appearance:none;border:1px solid var(--t-border);background:transparent;color:var(--t-red);border-radius:7px;padding:6px 10px;font:500 10.5px/1 var(--mono);cursor:pointer;flex:none}
+.sgroup{background:var(--t-panel);border:1px solid var(--t-border);border-radius:12px;overflow:hidden;margin-bottom:18px}
+.srowline{display:flex;align-items:center;gap:12px;padding:13px 14px;border-bottom:1px solid var(--t-border);min-height:48px}
+.srowline:last-child{border-bottom:0}
+.srowline .t{font:13px/1.2 var(--mono)}
+.srowline .s{font:10px/1.4 var(--mono);color:var(--t-fgDim);margin-top:3px;max-width:250px}
+.srowline .end{margin-left:auto;display:flex;align-items:center;gap:8px;color:var(--t-fgDim);font:11px/1 var(--mono);flex:none}
+.switch{width:44px;height:27px;border-radius:14px;background:var(--t-inputSoft);border:1px solid var(--t-borderStrong);position:relative;flex:none}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:21px;height:21px;border-radius:11px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.switch.on{background:var(--t-accent);border-color:var(--t-accent)}
+.switch.on::after{transform:translateX(17px)}
+.gfoot{font:10px/1.55 var(--mono);color:var(--t-fgDim);margin:-8px 4px 18px}
+.chev{width:12px;height:12px;color:var(--t-fgFaint)}
+
+/* variant card (outside frame) */
+.varcard{width:340px;border-radius:18px;border:.5px solid var(--borderStrong);padding:20px 18px 16px;background:#131316;box-shadow:0 14px 34px -14px rgba(0,0,0,.6);
+  --t-solid:#1C1C1E;--t-input:#141414;--t-inputSoft:#1C1C1E;--t-fg:#fff;--t-fgMuted:rgba(235,235,245,.6);--t-fgDim:rgba(235,235,245,.35);--t-fgFaint:rgba(235,235,245,.18);
+  --t-border:rgba(255,255,255,.08);--t-borderStrong:rgba(255,255,255,.14);--t-accent:#5B9FFF;--t-accentSoft:rgba(91,159,255,.14);--t-accentHi:rgba(91,159,255,.32);--t-red:#FF453A;--t-bg:#000;color:#fff}
+.varcard h4{font:600 14px/1.3 var(--sans);text-align:center}
+.varcard .sub{font:11px/1.5 var(--sans);color:var(--fgMuted);text-align:center;margin-top:4px}
+.varcard .ic{width:40px;height:40px;border-radius:20px;display:grid;place-items:center;margin:0 auto 11px}
+.varcard .ic.warn{background:rgba(255,159,10,.14);color:var(--amber)}
+.varcard .ic .g{width:18px;height:18px}
+
+/* ============================================================
+   iPad frame (13" landscape, scaled ≈ 0.5)
+   ============================================================ */
+.ipad{width:688px;height:516px;border-radius:26px;border:1px solid var(--borderStrong);background:#000;position:relative;flex:none;
+  box-shadow:0 30px 60px -30px rgba(0,0,0,.65), inset 0 0 0 2px #2a2a2c;
+  --t-solid:#1C1C1E;--t-input:#141414;--t-inputSoft:#1C1C1E;--t-panel:#0A0A0A;--t-bg:#000;--t-fg:#fff;
+  --t-fgMuted:rgba(235,235,245,.6);--t-fgDim:rgba(235,235,245,.35);--t-fgFaint:rgba(235,235,245,.18);
+  --t-border:rgba(255,255,255,.08);--t-borderStrong:rgba(255,255,255,.14);
+  --t-accent:#5B9FFF;--t-accentSoft:rgba(91,159,255,.14);--t-accentHi:rgba(91,159,255,.32);--t-red:#FF453A;
+  --t-glassBg:rgba(255,255,255,.12);--t-glassRing:rgba(255,255,255,.18);
+  --t-shadow:0 12px 28px -8px rgba(0,0,0,.45), 0 4px 10px rgba(0,0,0,.25)}
+.ipad .screen{position:absolute;inset:0;border-radius:inherit;overflow:hidden;background:#000;color:#fff}
+.ipad .cam{position:absolute;top:50%;left:7px;transform:translateY(-50%);width:5px;height:5px;border-radius:3px;background:#1a1a1c;z-index:60}
+.ipad .term{padding:52px 18px 16px;font-size:11px}
+.ipad .toppill{top:10px;height:32px;border-radius:11px}
+.ipad .toppill .host{font-size:11.5px}
+.ipad .toppill .ib{width:28px;height:28px}
+.ipad .toppill .ib .g{width:14px;height:14px}
+.ipad .modalveil{padding:0}
+.ipad .modalcard{width:372px}
+
+/* iPad dock (handoff receiving affordance) */
+.dock{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);display:flex;align-items:center;gap:11px;
+  padding:9px 13px;border-radius:22px;border:.5px solid var(--t-glassRing);z-index:50}
+.dock .ai{width:42px;height:42px;border-radius:12px;background:linear-gradient(#2a2a2e,#1c1c20);border:.5px solid rgba(255,255,255,.1);flex:none}
+.dock .dsep{width:1px;height:38px;background:var(--t-borderStrong);flex:none;margin:0 2px}
+.dock .ai.tess{background:#0f1420;display:grid;place-items:center;font:600 19px/1 var(--mono);color:var(--t-accent);position:relative;overflow:visible}
+.dock .badge{position:absolute;left:-7px;bottom:-7px;width:21px;height:21px;border-radius:11px;background:#2c2c30;
+  border:1px solid rgba(255,255,255,.28);display:grid;place-items:center;color:#fff}
+.dock .badge .g{width:11px;height:11px}
+
+/* guarantees strip */
+.guar{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:10px;margin-top:24px}
+.guar .gcard{border:1px solid var(--border);border-radius:12px;padding:14px 15px;background:#101012}
+.guar .gcard .t{display:flex;align-items:center;gap:8px;font:500 12px/1.3 var(--mono);color:var(--fg)}
+.guar .gcard .t .g{width:14px;height:14px;color:var(--red)}
+.guar .gcard .s{font:11.5px/1.5 var(--sans);color:var(--fgDim);margin-top:6px}
+
+/* footer */
+.foot{margin-top:80px;padding-top:24px;border-top:1px solid var(--border);color:var(--fgDim);font:11.5px/1.7 var(--mono);max-width:880px}
+.foot b{color:var(--fgMuted);font-weight:500}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="doc-h1">tessera — sync &amp; continuity</div>
+  <p class="doc-sub">iPad ↔ iPhone. The server is the sync layer — tmux already holds the session; Apple Continuity carries only a
+    secret-free pointer to it. No vendor cloud, no accounts. Companion to <code>index.html</code> (iPhone mock);
+    design source: P8 in <code>docs/iphone-adaptation-plan.html</code>.</p>
+  <div class="doc-meta">2026-07-19 · storyboard, static frames · tokens verbatim from DesignTokens.swift · decisions: informed TOFU ✓ · first-open bootstrap + auto key & biometric grant ✓ · bidirectional (ipad↔iphone) ✓ · iCloud layer = design-ahead only</div>
+
+  <div class="toc">
+    <a href="#s1">1 first open — bootstrap</a>
+    <a href="#s2">2 continue: ipad → iphone</a>
+    <a href="#s3">3 continue: iphone → ipad</a>
+    <a href="#s4">4 locked device</a>
+    <a href="#s5">5 never-seen host</a>
+    <a href="#s6">6 credentials, once</a>
+    <a href="#s7">7 one-tap enrollment</a>
+    <a href="#s8">8 ledger &amp; revocation</a>
+    <a href="#s9">9 settings &amp; icloud</a>
+    <a href="#s10">10 guarantees</a>
+  </div>
+
+  <div class="prin">
+    <div class="p"><div class="t"><span class="ic">◆</span>server is the sync layer</div><div class="s">tmux holds the session; Handoff hands over a pointer, iCloud is never in the session path.</div></div>
+    <div class="p"><div class="t"><span class="ic">◆</span>invisible until needed</div><div class="s">No sync dashboard, no pairing screens. Surfaces: one first-open bootstrap, the system banner, the moment of continuation, one credential step, two Settings groups.</div></div>
+    <div class="p"><div class="t"><span class="ic">◆</span>attach, don't steal</div><div class="s">Continuation joins the same tmux session; the iPad stays attached. Geometry stays server-side (ignore-size).</div></div>
+    <div class="p"><div class="t"><span class="ic">◆</span>honest labels</div><div class="s">"Continue" only when tmux makes it true. Plain SSH / mosh get "reconnect" — same host, fresh shell.</div></div>
+    <div class="p"><div class="t"><span class="ic">◆</span>secrets never move</div><div class="s">No password, no private key, ever — in the descriptor, the stream, or iCloud. Only public data travels.</div></div>
+  </div>
+
+  <!-- ============================================================ S1 -->
+  <section id="s1">
+  <h2><span class="n">S1</span>First open — bootstrap from your existing setup</h2>
+  <p class="sub">A fresh install of either app offers to inherit the other device's setup: host configs, jump chains,
+    settings &amp; appearance — nearby and device-to-device, or from the user's own iCloud. During setup the new device
+    also creates a default Secure Enclave key, and the origin device can authorize it on existing hosts with one
+    biometric confirm. Both directions below: new iPhone from an existing iPad, then new iPad from an existing iPhone —
+    the surfaces swap devices, the rules don't change.</p>
+
+  <div class="dirlabel">direction 1 · new iphone ← existing ipad</div>
+  <div class="stage">
+
+    <!-- B1 · welcome / choice -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen">
+        <div class="welcome">
+          <div class="appmark">t</div>
+          <h3>welcome to tessera</h3>
+          <div class="ws">ssh · mosh · tmux</div>
+          <div class="optstack">
+            <button class="optbtn">
+              <svg class="g" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8"/></svg>
+              <span><span class="tt">bootstrap from your iPad</span><br>
+              <span class="ss">nearby · encrypted, device-to-device — hosts, jump chains, settings</span></span>
+            </button>
+            <button class="optbtn plain">
+              <svg class="g" viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-.42-8.98 6 6 0 1 0-11.5 2.2A3.5 3.5 0 0 0 6.5 19z"/></svg>
+              <span><span class="tt">restore from icloud</span><br>
+              <span class="ss">available when icloud sync is on on your other device</span></span>
+            </button>
+            <button class="optbtn plain">
+              <svg class="g" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+              <span><span class="tt">start fresh</span><br>
+              <span class="ss">add your first host manually</span></span>
+            </button>
+          </div>
+          <div class="wfoot"><svg class="g" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+            passwords, private keys, and trust pins never transfer — each device keeps its own.</div>
+        </div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>one choice, first open.</b> The nearby path needs both apps in the foreground — no
+        cloud, no persistent pairing; each transfer binds with the one-glance code, next. The iCloud row is the
+        layer-3 design-ahead path and appears grayed until the other device has sync on. Declining is never a dead
+        end (hand-off self-carries its descriptor, S5).</div>
+    </div>
+
+    <div class="arrowcol">→</div>
+
+    <!-- B1b · SAS code on the new device -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen">
+        <div class="welcome">
+          <div class="appmark">t</div>
+          <h3>check your iPad</h3>
+          <div class="ws">approve there when the codes match</div>
+          <div class="sascode">391 574</div>
+          <div class="ws">ephemeral — derived from this transfer's key exchange</div>
+          <button class="btn ghost" style="flex:none;width:130px;margin:34px auto 0">cancel</button>
+        </div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>the artifact.</b> Face ID authenticates you to your own device; this code
+        authenticates the two devices to each other. It's a short authentication string derived from the session's
+        key exchange — a LAN impostor can't display the right digits. Nothing transfers until the origin confirms
+        it.</div>
+    </div>
+  </div>
+
+  <div class="stage">
+
+    <!-- B2 · iPad approves transfer (Face ID) -->
+    <div class="stagecol">
+      <div class="ipad"><div class="screen">
+        <div class="tabpage dimlayer" style="padding:28px 24px">
+          <div class="pg-h"><div class="t">hosts</div></div>
+          <div class="krow"><span class="dot g"></span><div><div class="nm">zeus</div><div class="sub">alice@zeus.lan:22 · mosh · tmux</div></div></div>
+          <div class="krow"><span class="dot g"></span><div><div class="nm">atlas</div><div class="sub">deploy@atlas.internal:22 · ssh</div></div></div>
+          <div class="krow" style="border-bottom:0"><span class="dot"></span><div><div class="nm">helios</div><div class="sub">deploy@helios.internal:22 · ssh · via atlas</div></div></div>
+        </div>
+        <div class="modalveil"><div class="modalcard">
+          <div class="ic"><svg class="g" viewBox="0 0 24 24"><rect x="3" y="2" width="18" height="20" rx="2"/><path d="M12 19h.01"/></svg></div>
+          <h4>bootstrap »Dev One's iPhone«?</h4>
+          <div class="sub">sends your setup to the new iPhone — nearby, encrypted</div>
+          <div class="body">
+            <div class="fpblock" style="line-height:1.9;word-break:normal">
+              <span style="color:var(--green)">✓</span> 12 hosts · jump chains · settings &amp; appearance<br>
+              <span style="color:var(--red)">✗</span> passwords &nbsp;·&nbsp; <span style="color:var(--red)">✗</span> private keys &nbsp;·&nbsp; <span style="color:var(--red)">✗</span> trust pins
+            </div>
+            <div class="sasstrip"><span class="code">391 574</span>
+              <span class="lbl">confirm this code is on the new iPhone's screen — it proves you're sending to that device, not to the network</span></div>
+          </div>
+          <div class="btnrow">
+            <button class="btn ghost">cancel</button>
+            <button class="btn primary"><svg class="g" viewBox="0 0 24 24"><path d="M7 3H5a2 2 0 0 0-2 2v2M17 3h2a2 2 0 0 1 2 2v2M7 21H5a2 2 0 0 1-2-2v-2M17 21h2a2 2 0 0 0 2-2v-2M9 9v1M15 9v1M9 15a4 4 0 0 0 6 0"/></svg>approve with Face ID</button>
+          </div>
+        </div></div>
+        <div class="cam"></div>
+      </div></div>
+      <div class="stagecap" style="max-width:688px"><b>the origin device grants — code first, then biometrics.</b>
+        The dashed strip is the peer binding: the user checks the digits against the new iPhone's screen, then
+        Face ID confirms. A device name alone is never trusted — names are self-asserted on a LAN. Transfer is
+        peer-to-peer, end-to-end encrypted; nothing touches a server.</div>
+    </div>
+  </div>
+
+  <div class="stage">
+
+    <!-- B3 · iPad authorizes the new key per host -->
+    <div class="stagecol">
+      <div class="ipad"><div class="screen">
+        <div class="tabpage dimlayer" style="padding:28px 24px">
+          <div class="pg-h"><div class="t">hosts</div></div>
+          <div class="krow"><span class="dot g"></span><div><div class="nm">zeus</div><div class="sub">alice@zeus.lan:22 · mosh · tmux</div></div></div>
+          <div class="krow"><span class="dot g"></span><div><div class="nm">atlas</div><div class="sub">deploy@atlas.internal:22 · ssh</div></div></div>
+          <div class="krow" style="border-bottom:0"><span class="dot"></span><div><div class="nm">helios</div><div class="sub">deploy@helios.internal:22 · ssh · via atlas</div></div></div>
+        </div>
+        <div class="modalveil"><div class="modalcard">
+          <div class="ic"><svg class="g" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></div>
+          <h4>authorize its new key?</h4>
+          <div class="sub">the iPhone created a Secure Enclave key during setup</div>
+          <div class="body">
+            <div class="fpblock"><span class="k">key</span> Tessera device key · P-256 · secure enclave<br>
+              <span class="k">fp</span> SHA256:Uv7pW3sKfLd94RqXcE2hYtB8mZjN5aG1oiCnM6xTQwo</div>
+            <div class="cklist">
+              <div class="ckrow"><span class="ckbox on"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+                <div><div class="nm">zeus</div><div class="ss">key auth · alice@zeus.lan</div></div></div>
+              <div class="ckrow"><span class="ckbox on"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+                <div><div class="nm">helios</div><div class="ss">key auth · via atlas</div></div></div>
+              <div class="ckrow dis"><span class="ckbox"></span>
+                <div><div class="nm">atlas</div><div class="ss">password host — will ask on the iPhone instead</div></div></div>
+            </div>
+          </div>
+          <div class="btnrow">
+            <button class="btn ghost">skip</button>
+            <button class="btn primary"><svg class="g" viewBox="0 0 24 24"><path d="M7 3H5a2 2 0 0 0-2 2v2M17 3h2a2 2 0 0 1 2 2v2M7 21H5a2 2 0 0 1-2-2v-2M17 21h2a2 2 0 0 0 2-2v-2M9 9v1M15 9v1M9 15a4 4 0 0 0 6 0"/></svg>authorize on 2 hosts</button>
+          </div>
+        </div></div>
+        <div class="cam"></div>
+      </div></div>
+      <div class="stagecap" style="max-width:688px"><b>per-host consent, one Face ID.</b> Only key-auth hosts are
+        offered; password hosts are shown excluded, not hidden. Installs run over the iPad's authenticated connections
+        (same idempotent installer as S7) and every grant lands in the ledger (S8).</div>
+    </div>
+
+    <div class="arrowcol">→</div>
+
+    <!-- B4 · phone done -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen dimmed">
+        <div class="term"><div class="ln dim">&nbsp;</div></div>
+        <div class="modalveil"><div class="modalcard">
+          <div class="ic"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></div>
+          <h4>bootstrap complete</h4>
+          <div class="sub m">from Dev One's iPad · 0:41</div>
+          <div class="steps">
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>found Dev One's iPad nearby</span></div>
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>codes matched<div class="sd">391 574 · verified on iPad</div></span></div>
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>approved on iPad<div class="sd">Face ID</div></span></div>
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>received 12 hosts · jump chains · settings</span></div>
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>created default key<div class="sd">Tessera device key · P-256 · secure enclave — private key never leaves this iPhone</div></span></div>
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>key authorized on zeus, helios<div class="sd">atlas will ask its password on first connect</div></span></div>
+          </div>
+          <button class="cta" style="margin-top:16px">open hosts</button>
+        </div></div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>ready in under a minute.</b> The receipt names everything that moved and everything
+        that didn't. Password hosts fall through to the S6 credential card on first connect — same card, no special
+        case.</div>
+    </div>
+  </div>
+
+  <div class="dirlabel">direction 2 · new ipad ← existing iphone</div>
+  <div class="stage">
+
+    <!-- RB1 · iPad welcome / choice -->
+    <div class="stagecol">
+      <div class="ipad"><div class="screen">
+        <div class="welcome">
+          <div class="appmark">t</div>
+          <h3>welcome to tessera</h3>
+          <div class="ws">ssh · mosh · tmux</div>
+          <div class="optstack">
+            <button class="optbtn">
+              <svg class="g" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M12 18h.01"/></svg>
+              <span><span class="tt">bootstrap from your iPhone</span><br>
+              <span class="ss">nearby · encrypted, device-to-device — hosts, jump chains, settings</span></span>
+            </button>
+            <button class="optbtn plain">
+              <svg class="g" viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-.42-8.98 6 6 0 1 0-11.5 2.2A3.5 3.5 0 0 0 6.5 19z"/></svg>
+              <span><span class="tt">restore from icloud</span><br>
+              <span class="ss">available when icloud sync is on on your other device</span></span>
+            </button>
+            <button class="optbtn plain">
+              <svg class="g" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+              <span><span class="tt">start fresh</span><br>
+              <span class="ss">add your first host manually</span></span>
+            </button>
+          </div>
+        </div>
+        <div class="cam"></div>
+      </div></div>
+      <div class="stagecap" style="max-width:688px"><b>same choice, regular width.</b> The welcome screen is universal;
+        only the nearby row's label swaps. A wiped or replaced iPad inherits the field setup that until now lived only
+        on the phone.</div>
+    </div>
+
+    <div class="arrowcol">→</div>
+
+    <!-- RB2 · iPhone approves transfer -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen">
+        <div class="tabpage dimlayer">
+          <div class="pg-h"><div class="t">hosts</div></div>
+          <div class="krow"><span class="dot g"></span><div><div class="nm">zeus</div><div class="sub">alice@zeus.lan:22 · mosh · tmux</div></div></div>
+          <div class="krow"><span class="dot"></span><div><div class="nm">helios</div><div class="sub">deploy@helios.internal:22 · ssh · via atlas</div></div></div>
+          <div class="krow" style="border-bottom:0"><span class="dot"></span><div><div class="nm">mercury</div><div class="sub">alice@192.168.7.44:22 · ssh</div></div></div>
+        </div>
+        <div class="modalveil"><div class="modalcard">
+          <div class="ic"><svg class="g" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8"/></svg></div>
+          <h4>bootstrap »Dev One's iPad«?</h4>
+          <div class="sub">sends your setup to the new iPad — nearby, encrypted</div>
+          <div class="body">
+            <div class="fpblock" style="line-height:1.9;word-break:normal">
+              <span style="color:var(--green)">✓</span> 12 hosts · jump chains · settings &amp; appearance<br>
+              <span style="color:var(--red)">✗</span> passwords &nbsp;·&nbsp; <span style="color:var(--red)">✗</span> private keys &nbsp;·&nbsp; <span style="color:var(--red)">✗</span> trust pins
+            </div>
+            <div class="sasstrip"><span class="code">728 016</span>
+              <span class="lbl">confirm this code is on the new iPad's screen — a fresh code every transfer</span></div>
+          </div>
+          <div class="btnrow">
+            <button class="btn ghost">cancel</button>
+            <button class="btn primary"><svg class="g" viewBox="0 0 24 24"><path d="M7 3H5a2 2 0 0 0-2 2v2M17 3h2a2 2 0 0 1 2 2v2M7 21H5a2 2 0 0 1-2-2v-2M17 21h2a2 2 0 0 0 2-2v-2M9 9v1M15 9v1M9 15a4 4 0 0 0 6 0"/></svg>approve with Face ID</button>
+          </div>
+        </div></div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>the phone is the origin now.</b> Same Face ID gate, same ✓/✗ receipt, same code
+        compare — the new iPad shows these digits full-screen exactly like the phone did in direction 1. Approval
+        always lives with the device that owns the data, whichever one that is.</div>
+    </div>
+  </div>
+
+  <div class="stage">
+
+    <!-- RB3 · iPhone authorizes the iPad's new key -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen">
+        <div class="tabpage dimlayer">
+          <div class="pg-h"><div class="t">hosts</div></div>
+          <div class="krow"><span class="dot g"></span><div><div class="nm">zeus</div><div class="sub">alice@zeus.lan:22 · mosh · tmux</div></div></div>
+          <div class="krow"><span class="dot"></span><div><div class="nm">helios</div><div class="sub">deploy@helios.internal:22 · ssh · via atlas</div></div></div>
+          <div class="krow" style="border-bottom:0"><span class="dot"></span><div><div class="nm">mercury</div><div class="sub">alice@192.168.7.44:22 · ssh</div></div></div>
+        </div>
+        <div class="modalveil"><div class="modalcard">
+          <div class="ic"><svg class="g" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></div>
+          <h4>authorize its new key?</h4>
+          <div class="sub">the iPad created a Secure Enclave key during setup</div>
+          <div class="body">
+            <div class="fpblock" style="word-break:normal;overflow-wrap:anywhere"><span class="k">key</span> Tessera device key · P-256 · secure enclave<br>
+              <span class="k">fp</span> SHA256:Jk2mR8vXeQw5tZpN4cY7fAaU1oGdL0sBhH6nEiC3xMg</div>
+            <div class="cklist">
+              <div class="ckrow"><span class="ckbox on"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+                <div><div class="nm">zeus</div><div class="ss">key auth · alice@zeus.lan</div></div></div>
+              <div class="ckrow"><span class="ckbox on"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+                <div><div class="nm">helios</div><div class="ss">key auth · via atlas</div></div></div>
+              <div class="ckrow dis"><span class="ckbox"></span>
+                <div><div class="nm">mercury</div><div class="ss">password host — will ask on the iPad instead</div></div></div>
+            </div>
+          </div>
+          <div class="btnrow">
+            <button class="btn ghost">skip</button>
+            <button class="btn primary"><svg class="g" viewBox="0 0 24 24"><path d="M7 3H5a2 2 0 0 0-2 2v2M17 3h2a2 2 0 0 1 2 2v2M7 21H5a2 2 0 0 1-2-2v-2M17 21h2a2 2 0 0 0 2-2v-2M9 9v1M15 9v1M9 15a4 4 0 0 0 6 0"/></svg>authorize on 2 hosts</button>
+          </div>
+        </div></div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>per-host consent in phone idiom.</b> The iPhone can grant only where it can
+        authenticate — same rule as S3: the grantor is whoever holds an authenticated path to the host. mercury is
+        password-only here, so it's excluded and the iPad will ask on first connect.</div>
+    </div>
+
+    <div class="arrowcol">→</div>
+
+    <!-- RB4 · iPad receipt -->
+    <div class="stagecol">
+      <div class="ipad"><div class="screen">
+        <div class="tabpage dimlayer" style="padding:28px 24px">
+          <div class="pg-h"><div class="t">hosts</div></div>
+          <div class="krow"><span class="dot"></span><div><div class="nm">zeus</div><div class="sub">alice@zeus.lan:22 · mosh · tmux</div></div></div>
+          <div class="krow"><span class="dot"></span><div><div class="nm">helios</div><div class="sub">deploy@helios.internal:22 · ssh · via atlas</div></div></div>
+          <div class="krow" style="border-bottom:0"><span class="dot"></span><div><div class="nm">mercury</div><div class="sub">alice@192.168.7.44:22 · ssh</div></div></div>
+        </div>
+        <div class="modalveil"><div class="modalcard">
+          <div class="ic"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></div>
+          <h4>bootstrap complete</h4>
+          <div class="sub m">from Dev One's iPhone · 0:37</div>
+          <div class="steps">
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>found Dev One's iPhone nearby</span></div>
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>codes matched<div class="sd">728 016 · verified on iPhone</div></span></div>
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>approved on iPhone<div class="sd">Face ID</div></span></div>
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>received 12 hosts · jump chains · settings</span></div>
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>created default key<div class="sd">Tessera device key · P-256 · secure enclave — private key never leaves this iPad</div></span></div>
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>key authorized on zeus, helios<div class="sd">mercury will ask its password on first connect</div></span></div>
+          </div>
+          <button class="cta" style="margin-top:16px">open hosts</button>
+        </div></div>
+        <div class="cam"></div>
+      </div></div>
+      <div class="stagecap" style="max-width:688px"><b>same receipt, bigger screen.</b> Identical steps card in
+        regular width. From here the iPad is a full peer: it can hand off (S2), receive (S3), grant (S7), and be
+        bootstrapped <b>from</b> next time.</div>
+    </div>
+  </div>
+
+  <p class="note"><b>Transport honesty:</b> the nearby path is a foreground, peer-to-peer transfer over the local
+    network — not Handoff (which only ever carries a session pointer, S2) and not iCloud. Because a bare local-network
+    channel authenticates nobody, the order is mandatory: discover → encrypted channel → <b>code compare (SAS)</b> →
+    Face ID on the origin → transfer. The manifest never moves before the code is confirmed — device names are
+    display-only and are never a trust input. The iCloud row reuses the layer-3 container when that ships; until then
+    it is a grayed option. Trust pins deliberately don't transfer — first connect on the new device still runs
+    informed TOFU (S5) against each descriptor's <code>hostKeyFP</code>, which is also why manifest integrity (the
+    code compare) matters: a poisoned manifest could pre-seed false pins.</p>
+  </section>
+
+  <!-- ============================================================ S2 -->
+  <section id="s2">
+  <h2><span class="n">S2</span>Continue a session — iPad → iPhone</h2>
+  <p class="sub">The focused, connected session broadcasts one <code>NSUserActivity</code>
+    (<code>com.bambouville.tessera.session</code>). The iPhone shows it in the App Switcher; one tap attaches to the same
+    tmux session. The tap <b>is</b> the user opening the connection — never-auto-connect holds. Both devices broadcast;
+    this section shows the walk-away direction, S3 shows the walk-back.</p>
+
+  <div class="stage">
+
+    <!-- F1 · app switcher -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen">
+        <div class="aswitch"></div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><path d="M5 12.55a11 11 0 0 1 14.08 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="applabel"><span class="appicon">t</span> Tessera</div>
+        <div class="appcard front">
+          <div class="thumb">
+            <div class="pill"></div>
+            <div class="dim">Last login: Sun Jul 19 09:12:44 2026</div>
+            <div><span class="ok">alice@zeus</span> ~ % <span class="cmd">tail</span> -f build.log</div>
+            <div>[09:38:41] compiling MoshBridge (arm64)…</div>
+            <div>[09:39:02] link Tessera.app</div>
+            <div class="ok">[09:39:18] ✓ build succeeded</div>
+          </div>
+        </div>
+        <div class="appcard back"></div>
+        <div class="hoffbanner">
+          <span class="appicon">t</span>
+          <div>
+            <div class="tt">zeus — continue session</div>
+            <div class="ss"><svg class="g" viewBox="0 0 24 24"><rect x="3" y="2" width="18" height="20" rx="2"/><path d="M12 19h.01"/></svg> From »Dev One's iPad«</div>
+          </div>
+          <span class="chev">›</span>
+        </div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>app switcher — the only discovery surface.</b> Apple gives no API to list nearby
+        activities in-app, so there is deliberately no "sessions on your iPad" list. A non-tmux session would read
+        <span class="m">"atlas — reconnect"</span> instead.</div>
+    </div>
+
+    <div class="arrowcol">→</div>
+
+    <!-- F2 · continuation overlay -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen dimmed">
+        <div class="term">
+          <div class="ln dim">Last login: Sun Jul 19 09:12:44 2026</div>
+          <div class="ln dim">alice@zeus ~ % tail -f build.log</div>
+          <div class="ln dim">[09:39:18] ✓ build succeeded</div>
+        </div>
+        <div class="modalveil"><div class="modalcard">
+          <div class="spin"></div>
+          <h4>continuing from iPad</h4>
+          <div class="sub m">zeus · alice@zeus.lan:22</div>
+          <div class="body">
+            <div class="fpblock"><span class="k">tmux attach →</span> main <span class="k">· 2 windows</span><br>
+              <span class="k">transport</span> mosh · udp 60001<br>
+              <span class="k">geometry</span> preserved (ignore-size)</div>
+          </div>
+          <div class="sub" style="margin-top:12px">iPad stays attached</div>
+        </div></div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>resolve, fast path.</b> Three-step resolve: <span class="m">hostID</span> match →
+        <span class="m">connectionKey</span> match → prefilled editor (S5). This frame: hostID hit — zero questions,
+        straight to attach. Mosh continuation starts its own mosh-server into the same tmux session.</div>
+    </div>
+
+    <div class="arrowcol">→</div>
+
+    <!-- F3 · attached -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen">
+        <div class="term">
+          <div class="ln dim">Last login: Sun Jul 19 09:12:44 2026 from 100.64.0.7</div>
+          <div class="ln">&nbsp;</div>
+          <div class="ln"><span class="ok">alice@zeus</span> <span class="dir">~</span> % <span class="cmd">tail</span> -f build.log</div>
+          <div class="ln">[09:38:41] compiling MoshBridge (arm64)…</div>
+          <div class="ln">[09:39:02] link Tessera.app</div>
+          <div class="ln"><span class="ok">[09:39:18] ✓ build succeeded</span></div>
+          <div class="ln">[09:41:07] staging sim install…<span class="cur"></span></div>
+        </div>
+        <div class="toppill glass">
+          <div class="ib"><svg class="g" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></div>
+          <div class="st"><span class="dot g"></span><span class="host">zeus</span>
+            <svg class="g" style="width:12px;height:12px;color:var(--t-fgMuted)" viewBox="0 0 24 24"><path d="M7 9l5-5 5 5M7 15l5 5 5-5"/></svg></div>
+          <div class="sp"></div>
+          <div class="ib"><svg class="g" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></div>
+          <div class="ib"><svg class="g" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
+          <div class="ib red"><svg class="g" viewBox="0 0 24 24"><path d="M18.36 6.64a9 9 0 1 1-12.72 0M12 2v10"/></svg></div>
+        </div>
+        <div class="toast glass"><svg class="g" viewBox="0 0 24 24"><rect x="3" y="2" width="18" height="20" rx="2"/><path d="M12 19h.01"/></svg>
+          attached · iPad still attached <span class="dot g"></span></div>
+        <div class="accbar">
+          <span class="acckey lbl">esc</span><span class="acckey">⌃</span><span class="acckey">⌥</span><span class="acckey">⇥</span>
+          <span class="vsep"></span>
+          <span class="acckey">←</span><span class="acckey">↓</span><span class="acckey">↑</span><span class="acckey">→</span>
+        </div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind" style="background:rgba(255,255,255,.85)"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>same screen, both devices.</b> The build you were watching on the iPad is mid-scroll on
+        the phone. Transient toast announces presence, then gets out of the way; no persistent banner.</div>
+    </div>
+  </div>
+
+  <p class="note"><b>All four transports, honestly labeled:</b> ssh+tmux and mosh+tmux → <b>continue</b> (same screen,
+    both attached) · plain ssh → <b>reconnect</b> (same host, fresh shell) · plain mosh → <b>reconnect</b> (new
+    mosh session). The banner label and overlay copy switch on <code>launchMode</code>; nothing pretends a screen
+    exists that the server doesn't hold.</p>
+
+  <div class="spec"><table>
+    <tr><th>descriptor field</th><th>source</th><th>why</th></tr>
+    <tr><td>v</td><td>schema version</td><td>forward compatibility between app versions</td></tr>
+    <tr><td>hostID</td><td>PersistedHost.id</td><td>fast path when the peer already has this host</td></tr>
+    <tr><td>connectionKey</td><td>transport:user@address:port (+&amp;via=…)</td><td>endpoint match when UUIDs differ</td></tr>
+    <tr><td>name · user · address · port · transport · launchMode</td><td>PersistedHost</td><td>enough to prefill the editor on a never-seen host — no secrets</td></tr>
+    <tr><td>tmux</td><td>resolved session name</td><td>the rendezvous — join this session, not a new one</td></tr>
+    <tr><td>via[]</td><td>jump-chain endpoint descriptors</td><td>bastioned hosts stay reachable; per-hop passwords re-entered on the peer</td></tr>
+    <tr><td class="new">hostKeyFP<span class="newtag">new — informed TOFU</span></td><td class="new">KnownHostsStore pin (fingerprint only)</td><td class="new">lets the peer's trust card say "matches the key your iPad trusts" — public data, still an explicit confirm</td></tr>
+  </table></div>
+  </section>
+
+  <!-- ============================================================ S3 -->
+  <section id="s3">
+  <h2><span class="n">S3</span>Continue a session — iPhone → iPad</h2>
+  <p class="sub">Same activity, opposite flow: the session you opened on the phone in the field, picked up at the desk.
+    The iPad's receiving surface is the <b>Dock</b> (iPadOS puts Handoff at its right end — there is no App Switcher
+    banner). Resolve steps, informed TOFU, lock replay, and the credential card are the same components in regular-width
+    idiom; what genuinely differs is the entry point and the geometry rule below.</p>
+
+  <div class="stage">
+
+    <!-- R1 · iPad dock affordance -->
+    <div class="stagecol">
+      <div class="ipad"><div class="screen">
+        <div class="tabpage" style="padding:28px 24px 90px">
+          <div class="pg-h"><div class="t">hosts</div></div>
+          <div class="krow"><span class="dot g"></span><div><div class="nm">zeus</div><div class="sub">alice@zeus.lan:22 · mosh · tmux</div></div></div>
+          <div class="krow"><span class="dot"></span><div><div class="nm">atlas</div><div class="sub">deploy@atlas.internal:22 · ssh</div></div></div>
+          <div class="krow" style="border-bottom:0"><span class="dot"></span><div><div class="nm">helios</div><div class="sub">deploy@helios.internal:22 · ssh · via atlas</div></div></div>
+        </div>
+        <div class="dock glass">
+          <span class="ai"></span><span class="ai"></span><span class="ai"></span><span class="ai"></span>
+          <span class="dsep"></span>
+          <span class="ai tess">t
+            <span class="badge"><svg class="g" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M12 18h.01"/></svg></span>
+          </span>
+        </div>
+        <div class="cam"></div>
+      </div></div>
+      <div class="stagecap" style="max-width:688px"><b>the Dock is the banner.</b> Tessera appears at the right end of
+        the Dock with an iPhone badge — the system's only continuation affordance on iPadOS. One tap continues; if
+        Tessera is already open (as here), the same tap just lands in the session.</div>
+    </div>
+
+    <div class="arrowcol">→</div>
+
+    <!-- R2 · iPad landed -->
+    <div class="stagecol">
+      <div class="ipad"><div class="screen">
+        <div class="term">
+          <div class="ln dim">Last login: Sun Jul 19 10:02:33 2026 from 100.64.0.12</div>
+          <div class="ln">&nbsp;</div>
+          <div class="ln"><span class="ok">alice@zeus</span> <span class="dir">~</span> % <span class="cmd">tail</span> -f build.log</div>
+          <div class="ln">[09:41:07] staging sim install…</div>
+          <div class="ln">[10:02:51] running TesseraTests (arm64)…</div>
+          <div class="ln"><span class="ok">[10:03:24] ✓ 214 tests passed</span></div>
+          <div class="ln"><span class="ok">alice@zeus</span> <span class="dir">~</span> % <span class="cur"></span></div>
+        </div>
+        <div class="toppill glass">
+          <div class="ib"><svg class="g" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></div>
+          <div class="st"><span class="dot g"></span><span class="host">zeus</span></div>
+          <div class="sp"></div>
+          <div class="ib"><svg class="g" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></div>
+          <div class="ib red"><svg class="g" viewBox="0 0 24 24"><path d="M18.36 6.64a9 9 0 1 1-12.72 0M12 2v10"/></svg></div>
+        </div>
+        <div class="toast glass" style="bottom:24px"><svg class="g" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M12 18h.01"/></svg>
+          attached · iPhone still attached <span class="dot g"></span></div>
+        <div class="cam"></div>
+      </div></div>
+      <div class="stagecap" style="max-width:688px"><b>the walk-back.</b> The tail you were watching on the phone,
+        continued at the desk — mirror of S2's toast. Fast path resolves instantly (the iPad already owns this host);
+        never-seen and credential states reuse the S5/S6 cards in regular width.</div>
+    </div>
+  </div>
+
+  <div class="stage">
+
+    <!-- R3 · iPad credential card, reverse authorize -->
+    <div class="stagecol">
+      <div class="ipad"><div class="screen dimmed">
+        <div class="term"><div class="ln dim">host key pinned · authenticating…</div></div>
+        <div class="modalveil"><div class="modalcard">
+          <div class="ic"><svg class="g" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></div>
+          <h4>authenticate to mercury</h4>
+          <div class="sub">first time on this iPad</div>
+          <div class="body">
+            <div class="pwfield"><svg class="g" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+              <span class="dots">••••••••</span></div>
+            <div class="fieldnote">stored only in this iPad's keychain — never synced, never sent to the iPhone</div>
+            <div class="ordiv">or</div>
+            <button class="optbtn">
+              <svg class="g" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M12 18h.01"/></svg>
+              <span><span class="tt">authorize this iPad from your iPhone</span><br>
+              <span class="ss">the iPhone installs this iPad's public key over its current session — no password to type</span></span>
+            </button>
+          </div>
+        </div></div>
+        <div class="cam"></div>
+      </div></div>
+      <div class="stagecap" style="max-width:688px"><b>the grantor is whoever holds the session.</b> mercury was added
+        on the phone in the field; the iPad has never authenticated to it. Same S6 card, roles swapped — the accent
+        option appears because the iPhone currently has an authenticated session to offer.</div>
+    </div>
+
+    <div class="arrowcol">→</div>
+
+    <!-- R4 · iPhone approves -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen dimmed">
+        <div class="term">
+          <div class="ln dim">alice@mercury ~ % journalctl -f</div>
+          <div class="ln dim">Jul 19 10:07:02 mercury sshd[812]: Accepted…</div>
+        </div>
+        <div class="modalveil"><div class="modalcard">
+          <div class="ic"><svg class="g" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8"/></svg></div>
+          <h4>authorize »Dev One's iPad«?</h4>
+          <div class="sub">installs its public key on mercury over your current session</div>
+          <div class="body">
+            <div class="fpblock" style="word-break:normal;overflow-wrap:anywhere"><span class="k">key</span> Tessera device key · P-256 · secure enclave<br>
+              <span class="k">fp</span> SHA256:Jk2mR8vXeQw5tZpN4cY7fAaU1oGdL0sBhH6nEiC3xMg<br>
+              <span class="k">→</span> ~/.ssh/authorized_keys</div>
+          </div>
+          <div class="sub" style="margin-top:11px">revocable anytime in keys</div>
+          <div class="btnrow">
+            <button class="btn ghost">cancel</button>
+            <button class="btn primary"><svg class="g" viewBox="0 0 24 24"><path d="M7 3H5a2 2 0 0 0-2 2v2M17 3h2a2 2 0 0 1 2 2v2M7 21H5a2 2 0 0 1-2-2v-2M17 21h2a2 2 0 0 0 2-2v-2M9 9v1M15 9v1M9 15a4 4 0 0 0 6 0"/></svg>approve with Face ID</button>
+          </div>
+        </div></div>
+        <div class="statusbar"><span>10:07</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>mirror of S7's iPad dialog.</b> Same content, same biometric gate, phone idiom. The
+        grant lands in both ledgers — the iPad (key owner) and the iPhone (grantor) can each revoke from their side
+        (S8).</div>
+    </div>
+  </div>
+
+  <p class="note"><b>Geometry on the reverse attach (the one real asymmetry):</b> a session born on the iPhone has
+    phone geometry. When an iPad attaches, the iPhone client <b>cedes</b> — it flips its own tmux client to
+    <code>ignore-size</code> and the grid follows the iPad; the larger screen wins, and the phone presents
+    pane-at-a-time regardless, so nobody loses content. iPad sizing behavior itself is unchanged, iPad-born sessions
+    behave exactly as in S2, and no <code>window-size latest</code> / <code>aggressive-resize</code> is ever set.
+    When the iPad detaches the grid simply stays — no thrash.</p>
+  </section>
+
+  <!-- ============================================================ S4 -->
+  <section id="s4">
+  <h2><span class="n">S4</span>Locked device — stash &amp; replay</h2>
+  <p class="sub">Continuation handlers fire while the lock overlay is up. The continuation stashes, Face ID runs,
+    and the attach replays after unlock — nothing acts behind the lock screen. While Tessera itself is locked it also
+    stops broadcasting (<code>invalidate()</code> on lock), matching the key-use-grant posture. Shown on iPhone;
+    the iPad's lock overlay behaves identically in both directions.</p>
+
+  <div class="stage">
+    <div class="stagecol">
+      <div class="phone"><div class="screen dimmed">
+        <div class="term">
+          <div class="ln dim">alice@zeus ~ % tail -f build.log</div>
+          <div class="ln dim">[09:39:18] ✓ build succeeded</div>
+        </div>
+        <div class="lockveil">
+          <div class="lic"><svg class="g" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+          <h4>Tessera locked</h4>
+          <div class="s">Face ID to unlock</div>
+          <div class="stash glass">
+            <svg class="g" viewBox="0 0 24 24"><rect x="3" y="2" width="18" height="20" rx="2"/><path d="M12 19h.01"/></svg>
+            <div>waiting to continue · <b>zeus</b><div class="s2">from Dev One's iPad — runs after unlock</div></div>
+          </div>
+          <button class="unlockbtn">unlock</button>
+        </div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>the lock always wins.</b> Same stash-and-replay pattern every external-input path
+        already uses (<span class="m">ContentView</span> guards on <span class="m">isLocked</span>, replays from the
+        unlock <span class="m">onChange</span>). The stashed chip tells the user why unlock leads somewhere.</div>
+    </div>
+  </div>
+  </section>
+
+  <!-- ============================================================ S5 -->
+  <section id="s5">
+  <h2><span class="n">S5</span>Never-seen host — prefilled editor + informed TOFU</h2>
+  <p class="sub">Resolve step 3: the receiving device has no matching host, so the descriptor prefills "add host &amp;
+    connect" — including the jump chain. Then first-connect trust runs as always, but the card can now <b>verify</b> the
+    fingerprint against the one the sender pinned. Shown phone-side (descriptor from the iPad); the iPad renders the
+    same sheet and trust card in regular width when the descriptor comes from the phone (S3).</p>
+
+  <div class="stage">
+
+    <!-- F5 · prefilled editor -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen dimmed">
+        <div class="term"><div class="ln dim">&nbsp;</div></div>
+        <div class="sheet">
+          <div class="grab"></div>
+          <div class="sh-h">
+            <div class="t">add host &amp; connect</div>
+            <div class="srcchip"><svg class="g" viewBox="0 0 24 24"><rect x="3" y="2" width="18" height="20" rx="2"/><path d="M12 19h.01"/></svg> from Dev One's iPad</div>
+          </div>
+          <div class="sh-body">
+            <div class="fgroup">
+              <div class="frow"><span class="lb">name</span><span class="vl">helios</span></div>
+              <div class="frow"><span class="lb">user</span><span class="vl">deploy</span></div>
+              <div class="frow"><span class="lb">address</span><span class="vl">helios.internal</span></div>
+              <div class="frow"><span class="lb">port</span><span class="vl">22</span></div>
+              <div class="frow"><span class="lb">transport</span><span class="vl">ssh</span><span class="end"><span class="tag acc">auto-tmux</span></span></div>
+              <div class="frow"><span class="lb">via</span>
+                <span class="vchip"><svg class="g" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                  atlas · deploy@atlas.internal:22</span></div>
+              <div class="frow"><span class="lb">session</span><span class="vl">tessera-9f3c2a1d</span><span class="end"><span class="tag">tmux</span></span></div>
+            </div>
+            <div class="formnote"><svg class="g" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+              sent as a secret-free descriptor — no password or key was included. authentication happens next, on this iPhone.</div>
+            <button class="cta">add &amp; connect</button>
+          </div>
+        </div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>prefilled, not auto-added.</b> The user reviews and confirms; editing any field is one
+        tap away. UUIDs travel with created-from-handoff hosts, so the <span class="m">hostID</span> fast path works
+        on every later continuation.</div>
+    </div>
+
+    <div class="arrowcol">→</div>
+
+    <!-- F6 · trust card -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen dimmed">
+        <div class="term"><div class="ln dim">connecting to helios via atlas…</div></div>
+        <div class="modalveil"><div class="modalcard">
+          <div class="ic"><svg class="g" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+          <h4>first connection to helios</h4>
+          <div class="sub">verify the host key before trusting it</div>
+          <div class="body">
+            <div class="fpblock"><span class="k">ed25519</span><br>SHA256:Qm4kL92xVtR8pJ3nYw6Ee1sBhU0aZcD5fXoI7NqKsTA</div>
+            <div class="matchline ok"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
+              matches the key your iPad trusts</div>
+          </div>
+          <div class="btnrow">
+            <button class="btn ghost">cancel</button>
+            <button class="btn primary">trust &amp; connect</button>
+          </div>
+        </div></div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>informed TOFU.</b> The descriptor's <span class="m">hostKeyFP</span> (public data)
+        turns a blind fingerprint prompt into a verifiable match. Still an explicit, per-device confirm — the pin
+        this tap creates belongs to this iPhone.</div>
+    </div>
+
+    <div class="arrowcol">≠</div>
+
+    <!-- mismatch variant -->
+    <div class="stagecol">
+      <div class="varcard">
+        <div class="ic warn"><svg class="g" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.29 3.86l-8.2 14.14A2 2 0 0 0 3.82 21h16.36a2 2 0 0 0 1.73-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg></div>
+        <h4>mismatch variant</h4>
+        <div class="sub">same card, hostile network day</div>
+        <div class="body" style="margin-top:13px">
+          <div class="fpblock"><span class="k">ed25519</span><br>SHA256:xT81vRq5nWc0KpZjYhD3aG6eBs2LfM9oQiU4wEyHrNk</div>
+          <div class="matchline warn"><svg class="g" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.29 3.86l-8.2 14.14A2 2 0 0 0 3.82 21h16.36a2 2 0 0 0 1.73-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+            differs from the key your iPad trusts — verify out of band before connecting</div>
+        </div>
+        <div class="btnrow">
+          <button class="btn neutral">don't connect</button>
+          <button class="btn ghostred">trust anyway</button>
+        </div>
+      </div>
+      <div class="stagecap" style="max-width:340px"><b>the demotion matters.</b> On mismatch the safe action becomes
+        the filled default and "trust anyway" is demoted to a plain red text button. This is the state blind TOFU
+        can't express.</div>
+    </div>
+  </div>
+  </section>
+
+  <!-- ============================================================ S6 -->
+  <section id="s6">
+  <h2><span class="n">S6</span>Credentials — once, stated plainly</h2>
+  <p class="sub">The first continuation to a host this device has never authenticated against needs a credential once.
+    Two paths, one card. After this, hand-off is one tap forever. Shown on iPhone; the iPad variant — roles swapped —
+    is in S3.</p>
+
+  <div class="stage">
+    <div class="stagecol">
+      <div class="phone"><div class="screen dimmed">
+        <div class="term"><div class="ln dim">host key pinned · authenticating…</div></div>
+        <div class="modalveil"><div class="modalcard">
+          <div class="ic"><svg class="g" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></div>
+          <h4>authenticate to helios</h4>
+          <div class="sub">first time on this iPhone</div>
+          <div class="body">
+            <div class="pwfield"><svg class="g" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+              <span class="dots">••••••••</span></div>
+            <div class="fieldnote">stored only in this iPhone's keychain — never synced, never sent to the iPad</div>
+            <div class="ordiv">or</div>
+            <button class="optbtn">
+              <svg class="g" viewBox="0 0 24 24"><rect x="3" y="2" width="18" height="20" rx="2"/><path d="M12 19h.01"/></svg>
+              <span><span class="tt">authorize this iPhone from your iPad</span><br>
+              <span class="ss">the iPad installs this phone's public key over its current session — no password to type</span></span>
+            </button>
+          </div>
+          <div class="sub" style="margin-top:14px">after this, continuing is one tap</div>
+        </div></div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>honesty beats magic.</b> The card names the one-time cost and both ways out. Password
+        path is self-serve; the accent path leads to S7 — and if this iPhone has no key yet, a default Secure Enclave
+        key is created automatically on tap, no key-management detour. For a password-only host the accent option is
+        absent — no dead-end buttons.</div>
+    </div>
+  </div>
+  </section>
+
+  <!-- ============================================================ S7 -->
+  <section id="s7">
+  <h2><span class="n">S7</span>One-tap enrollment — authorize this iPhone</h2>
+  <p class="sub">Zero-touch key enrollment over Handoff continuation streams: the iPhone sends its <b>public</b> key back
+    to the originating iPad; the iPad — already authenticated — confirms with Face ID and installs it over its live
+    connection (<code>RemoteAuthorizedKeysInstaller</code>, idempotent). If the phone has no key yet, a default
+    Secure Enclave key is generated first, silently. The private key never leaves the Secure Enclave.
+    Direction-agnostic: whichever device holds the authenticated session grants — S3 shows the mirrored pair.
+    <b>Peer binding here is Apple's, not ours:</b> continuation streams only open between devices signed into the
+    same Apple Account (the S9 footnote requirement), mutually authenticated by Apple's identity service — a LAN
+    device outside the account can't be an endpoint. Unlike S1's self-built channel, no code compare is needed; the
+    key fingerprint in the dialog is the end-to-end artifact. This property is transport-load-bearing: if enrollment
+    ever moves off continuation streams, it inherits S1's SAS requirement.</p>
+
+  <div class="stage">
+
+    <!-- F8 · phone waiting -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen dimmed">
+        <div class="term"><div class="ln dim">&nbsp;</div></div>
+        <div class="modalveil"><div class="modalcard">
+          <div class="ic"><svg class="g" viewBox="0 0 24 24"><rect x="3" y="2" width="18" height="20" rx="2"/><path d="M12 19h.01"/></svg></div>
+          <h4>authorizing via iPad</h4>
+          <div class="sub m">helios · deploy@helios.internal</div>
+          <div class="steps">
+            <div class="step done"><span class="bullet"><svg class="g" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>public key sent to iPad<div class="sd">Tessera device key · P-256 · over the continuation stream</div></span></div>
+            <div class="step active"><span class="bullet"></span>
+              <span>confirm on iPad…<div class="sd">waiting for Dev One's iPad</div></span></div>
+            <div class="step"><span class="bullet"></span>
+              <span>install on helios<div class="sd">→ ~/.ssh/authorized_keys</div></span></div>
+            <div class="step"><span class="bullet"></span>
+              <span>connect with this iPhone's key</span></div>
+          </div>
+          <div class="sub" style="margin-top:12px">the private key never leaves the Secure Enclave</div>
+          <div class="btnrow"><button class="btn ghost">cancel</button></div>
+        </div></div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>the phone asks, the iPad grants.</b> Manual fallback stays Apple-native: copy public
+        key on the phone → Universal Clipboard / AirDrop → install on the iPad. Same installer, zero new crypto.</div>
+    </div>
+
+    <div class="arrowcol">→</div>
+
+    <!-- F9 · iPad approval -->
+    <div class="stagecol">
+      <div class="ipad"><div class="screen dimmed">
+        <div class="term">
+          <div class="ln dim">deploy@helios ~ % systemctl status caddy</div>
+          <div class="ln dim">● caddy.service — active (running) since Sat 2026-07-18</div>
+          <div class="ln dim">deploy@helios ~ %</div>
+        </div>
+        <div class="toppill glass">
+          <div class="ib"><svg class="g" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></div>
+          <div class="st"><span class="dot g"></span><span class="host">helios</span></div>
+          <div class="sp"></div>
+          <div class="ib red"><svg class="g" viewBox="0 0 24 24"><path d="M18.36 6.64a9 9 0 1 1-12.72 0M12 2v10"/></svg></div>
+        </div>
+        <div class="modalveil"><div class="modalcard">
+          <div class="ic"><svg class="g" viewBox="0 0 24 24"><rect x="3" y="2" width="18" height="20" rx="2"/><path d="M12 19h.01"/></svg></div>
+          <h4>authorize »Dev One's iPhone«?</h4>
+          <div class="sub">installs its public key on helios over your current session</div>
+          <div class="body">
+            <div class="fpblock"><span class="k">key</span> Tessera device key · P-256 · secure enclave<br>
+              <span class="k">fp</span> SHA256:Uv7pW3sKfLd94RqXcE2hYtB8mZjN5aG1oiCnM6xTQwo<br>
+              <span class="k">→</span> ~/.ssh/authorized_keys</div>
+          </div>
+          <div class="sub" style="margin-top:11px">revocable anytime in keys</div>
+          <div class="btnrow">
+            <button class="btn ghost">cancel</button>
+            <button class="btn primary"><svg class="g" viewBox="0 0 24 24"><path d="M7 3H5a2 2 0 0 0-2 2v2M17 3h2a2 2 0 0 1 2 2v2M7 21H5a2 2 0 0 1-2-2v-2M17 21h2a2 2 0 0 0 2-2v-2M9 9v1M15 9v1M9 15a4 4 0 0 0 6 0"/></svg>approve with Face ID</button>
+          </div>
+        </div></div>
+        <div class="cam"></div>
+      </div></div>
+      <div class="stagecap" style="max-width:688px"><b>the approving side is the authenticated device.</b> The dialog
+        shows exactly what lands where, in mono, and granting is a biometric confirm — same posture as the bootstrap
+        approval (S1). The install is the existing idempotent <span class="m">grep -qxF … || echo &gt;&gt;</span> flow.</div>
+    </div>
+
+    <div class="arrowcol">→</div>
+
+    <!-- F10 · connected with own key -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen">
+        <div class="term">
+          <div class="ln dim">Linux helios 6.8.0-41-generic aarch64</div>
+          <div class="ln">&nbsp;</div>
+          <div class="ln"><span class="ok">deploy@helios</span> <span class="dir">~</span> % <span class="cur"></span></div>
+        </div>
+        <div class="toppill glass">
+          <div class="ib"><svg class="g" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></div>
+          <div class="st"><span class="dot g"></span><span class="host">helios</span>
+            <svg class="g" style="width:12px;height:12px;color:var(--t-fgMuted)" viewBox="0 0 24 24"><path d="M7 9l5-5 5 5M7 15l5 5 5-5"/></svg></div>
+          <div class="sp"></div>
+          <div class="ib"><svg class="g" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></div>
+          <div class="ib red"><svg class="g" viewBox="0 0 24 24"><path d="M18.36 6.64a9 9 0 1 1-12.72 0M12 2v10"/></svg></div>
+        </div>
+        <div class="toast glass"><svg class="g" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+          authorized — connected with this iPhone's key</div>
+        <div class="accbar">
+          <span class="acckey lbl">esc</span><span class="acckey">⌃</span><span class="acckey">⌥</span><span class="acckey">⇥</span>
+          <span class="vsep"></span>
+          <span class="acckey">←</span><span class="acckey">↓</span><span class="acckey">↑</span><span class="acckey">→</span>
+        </div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>landed.</b> Attached to <span class="m">tessera-9f3c2a1d</span> with the phone's own
+        key. Every future continuation to helios is now the S2 fast path.</div>
+    </div>
+  </div>
+  </section>
+
+  <!-- ============================================================ S8 -->
+  <section id="s8">
+  <h2><span class="n">S8</span>Ledger &amp; revocation — one screen</h2>
+  <p class="sub">Enrollments land in the existing installation ledger (<code>KeySecurityMetadataStore.remoteInstallations</code>).
+    The keys tab gains a "device access" section; revoke runs the same installer in reverse, over the next
+    authenticated connection. Symmetric: the grantor keeps the mirror record — a grant made from the iPad (or the
+    iPhone, S3) is listed and revocable on <b>both</b> devices; either end can cut access.</p>
+
+  <div class="stage">
+    <div class="stagecol">
+      <div class="phone"><div class="screen" style="background:var(--t-bg)">
+        <div class="tabpage">
+          <div class="pg-h"><div class="t">keys</div></div>
+          <div class="krow">
+            <svg class="g" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+            <div><div class="nm">Tessera device key</div><div class="sub">P-256 · used 2m ago</div></div>
+            <div class="tags"><span class="tag acc">secure enclave</span><span class="tag">user presence</span></div>
+          </div>
+          <div class="krow">
+            <svg class="g" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+            <div><div class="nm">deploy-ci</div><div class="sub">Ed25519 · 1w ago</div></div>
+            <div class="tags"><span class="tag"> </span></div>
+          </div>
+
+          <div class="sec-h">device access — Tessera device key</div>
+          <div class="krow">
+            <svg class="g" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8"/></svg>
+            <div><div class="nm">helios</div><div class="sub">authorized via iPad · jul 19 2026</div></div>
+            <div class="tags"><button class="revoke">revoke</button></div>
+          </div>
+          <div class="krow">
+            <svg class="g" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8"/></svg>
+            <div><div class="nm">zeus</div><div class="sub">authorized during bootstrap · jul 19 2026</div></div>
+            <div class="tags"><button class="revoke">revoke</button></div>
+          </div>
+
+          <div class="sec-h">known hosts</div>
+          <div class="krow">
+            <svg class="g" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <div><div class="nm">helios</div><div class="sub">ed25519 · pinned today</div></div>
+            <div class="tags"><span class="tag ok">matched iPad</span></div>
+          </div>
+          <div class="krow" style="border-bottom:0">
+            <svg class="g" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <div><div class="nm">zeus.lan</div><div class="sub">ed25519 · pinned jul 4</div></div>
+            <div class="tags"><span class="tag"> </span></div>
+          </div>
+        </div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>nothing new to learn.</b> Same keys tab as the companion mock; enrollment just adds
+        rows. The <span class="m">matched iPad</span> tag records that the pin was verified against the iPad's at
+        trust time — an audit trail, not a shared trust store.</div>
+    </div>
+  </div>
+  </section>
+
+  <!-- ============================================================ S9 -->
+  <section id="s9">
+  <h2><span class="n">S9</span>Settings — the entire footprint</h2>
+  <p class="sub">Two groups. Continuity defaults on (it's inert without the user's Apple account + Handoff enabled
+    system-wide); iCloud sync defaults off and is a design-ahead surface — P8 layer 3 remains a separate build.
+    Shown on iPhone; the identical two groups land in the iPad app's existing Settings page, and the first-run
+    iCloud card appears on whichever device opens first after the update.</p>
+
+  <div class="stage">
+    <div class="stagecol">
+      <div class="phone"><div class="screen" style="background:var(--t-bg)">
+        <div class="tabpage">
+          <div class="pg-h"><div class="t">settings</div></div>
+
+          <div class="sec-h">continuity</div>
+          <div class="sgroup">
+            <div class="srowline">
+              <div><div class="t">hand off sessions</div><div class="s">focused session appears in the app switcher / dock of your other devices</div></div>
+              <div class="end"><span class="switch on"></span></div>
+            </div>
+            <div class="srowline">
+              <div><div class="t">while locked</div><div class="s">broadcast stops; incoming continuations wait for Face ID</div></div>
+              <div class="end">suppressed</div>
+            </div>
+          </div>
+          <div class="gfoot">requires the same Apple account on both devices, Bluetooth + Wi-Fi, and Handoff enabled in iOS settings. carries a pointer to the session — never a password or key.</div>
+
+          <div class="sec-h">icloud sync <span class="tag warn" style="margin-left:6px;vertical-align:1px">design-ahead</span></div>
+          <div class="sgroup">
+            <div class="srowline">
+              <div><div class="t">sync hosts via icloud</div><div class="s">host configs &amp; jump chains — never passwords, keys, or trust pins</div></div>
+              <div class="end"><span class="switch"></span></div>
+            </div>
+          </div>
+          <div class="gfoot">your own icloud container — no vendor servers, no account with us. off by default.</div>
+        </div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>no sync dashboard.</b> Continuity is one toggle plus one truth row; the lock behavior
+        is stated, not configurable. iCloud stays a single row until it earns more.</div>
+    </div>
+
+    <div class="arrowcol">·</div>
+
+    <!-- F13 · first-run choice -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen dimmed">
+        <div class="term"><div class="ln dim">&nbsp;</div></div>
+        <div class="modalveil"><div class="modalcard">
+          <div class="ic"><svg class="g" viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-.42-8.98 6 6 0 1 0-11.5 2.2A3.5 3.5 0 0 0 6.5 19z"/></svg></div>
+          <h4>your hosts, on every device?</h4>
+          <div class="sub">sync host configs and jump chains through your own iCloud</div>
+          <div class="body">
+            <div class="fpblock" style="line-height:1.9;word-break:normal">
+              <span style="color:var(--green)">✓</span> host configs &nbsp;·&nbsp; <span style="color:var(--green)">✓</span> jump chains<br>
+              <span style="color:var(--red)">✗</span> passwords &nbsp;·&nbsp; <span style="color:var(--red)">✗</span> private keys &nbsp;·&nbsp; <span style="color:var(--red)">✗</span> trust pins
+            </div>
+          </div>
+          <div class="btnrow">
+            <button class="btn neutral">keep on-device</button>
+            <button class="btn ghost" style="color:var(--t-accent)">use my icloud</button>
+          </div>
+          <div class="sub" style="margin-top:12px">change anytime in settings — default is off</div>
+        </div></div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>the HIG choice, once.</b> "Show a simple option the first time your app opens" — the
+        safe answer is the filled default, the what-never-syncs list is on the card itself, and declining is not a
+        dead end (hand-off self-carries the descriptor). Shown to <b>existing</b> installs when the feature arrives
+        in an update; fresh installs make this choice on the S1 welcome screen instead.</div>
+    </div>
+
+    <div class="arrowcol">·</div>
+
+    <!-- F14 · icloud on -->
+    <div class="stagecol">
+      <div class="phone"><div class="screen" style="background:var(--t-bg)">
+        <div class="tabpage">
+          <div class="pg-h"><div class="t">settings</div></div>
+          <div class="sec-h">icloud sync</div>
+          <div class="sgroup">
+            <div class="srowline">
+              <div><div class="t">sync hosts via icloud</div><div class="s">host configs &amp; jump chains — never passwords, keys, or trust pins</div></div>
+              <div class="end"><span class="switch on"></span></div>
+            </div>
+            <div class="srowline">
+              <div><div class="t">status</div></div>
+              <div class="end">synced 2 min ago · 12 hosts</div>
+            </div>
+            <div class="srowline">
+              <div><div class="t">devices</div></div>
+              <div class="end">this iPhone · Dev One's iPad</div>
+            </div>
+            <div class="srowline">
+              <div><div class="t">what syncs</div></div>
+              <div class="end"><svg class="chev g" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></div>
+            </div>
+          </div>
+          <div class="gfoot">hosts created here appear on your ipad within seconds. a host that arrives without its password or key simply asks on first connect — same as a hand-off.</div>
+        </div>
+        <div class="statusbar"><span>9:41</span><span class="sb-icons">
+          <svg class="g" viewBox="0 0 24 24"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>
+          <svg class="g" viewBox="0 0 24 24"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>
+        </span></div>
+        <div class="home-ind"></div>
+        <div class="island"></div>
+      </div></div>
+      <div class="stagecap"><b>status is a row, not a screen.</b> On-state adds three read-only rows. Credential-less
+        arrivals reuse the S6 card, so iCloud sync introduces zero new concepts.</div>
+    </div>
+  </div>
+
+  <p class="note"><b>Why iCloud stays design-ahead:</b> CloudKit can't enforce <code>@Attribute(.unique)</code> on
+    <code>PersistedHost.id</code>, relationships must become optional, schema changes require custom migration stages,
+    and the app's current posture (<code>cloudKitDatabase: .none</code>, no <code>kSecAttrSynchronizable</code>) is
+    test-asserted. Real project, separate proposal — these two frames fix the UX contract so that project has a target.</p>
+  </section>
+
+  <!-- ============================================================ S10 -->
+  <section id="s10">
+  <h2><span class="n">S10</span>Guarantees — what sync will never do</h2>
+  <p class="sub">The "never" list is part of the design, not a caveat. Each one is load-bearing for the app's privacy stance.</p>
+
+  <div class="guar">
+    <div class="gcard"><div class="t"><svg class="g" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>private keys never move</div>
+      <div class="s">Secure Enclave keys are non-exportable by construction. Enrollment ships public keys only.</div></div>
+    <div class="gcard"><div class="t"><svg class="g" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>passwords never sync</div>
+      <div class="s">Stored ThisDeviceOnly by design. Each device asks once, keeps its own copy.</div></div>
+    <div class="gcard"><div class="t"><svg class="g" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>no vendor cloud, no accounts</div>
+      <div class="s">Handoff is device-to-device; the only cloud ever on the table is the user's own iCloud, opt-in.</div></div>
+    <div class="gcard"><div class="t"><svg class="g" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>no silent connections or grants</div>
+      <div class="s">Every continuation starts with a user tap; every cross-device grant is a biometric confirm on the origin device; the lock screen always wins.</div></div>
+    <div class="gcard"><div class="t"><svg class="g" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>no in-app nearby list</div>
+      <div class="s">Discovery is the system surface only. No API exists to enumerate nearby activities — and faking one would need a server.</div></div>
+    <div class="gcard"><div class="t"><svg class="g" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>no geometry theft</div>
+      <div class="s">Attaching from the phone never resizes the server-side grid, splits, or zoom (ignore-size; no window-size latest).</div></div>
+    <div class="gcard"><div class="t"><svg class="g" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>no unverified peers</div>
+      <div class="s">Nearby transfers bind with a code compare before anything moves; Handoff streams are Apple-Account-authenticated; a device name is never a trust input.</div></div>
+  </div>
+  </section>
+
+  <div class="foot">
+    <b>build order (matches P8):</b> layer 1 — broadcast + continue both directions + informed TOFU (S2–S6) ·
+    layer 2 — enrollment, first-open bootstrap (nearby path), ledger (S1, S7, S8) · layer 3 — iCloud
+    (S1 restore row + S9 frames 2–3, separate proposal).<br>
+    <b>decisions recorded 2026-07-19:</b> feature list confirmed (all three layers mocked; iCloud design-ahead only) ·
+    informed TOFU approved — descriptor gains <span class="m">hostKeyFP</span>, fingerprint-only, explicit confirm kept ·
+    "continue" label reserved for tmux modes, plain ssh/mosh say "reconnect" ·
+    first-open bootstrap added — hosts/jump-chains/settings via nearby device-to-device or user's iCloud, never secrets ·
+    new device auto-creates a default Secure Enclave key; origin device approves per-host authorization with Face ID ·
+    direction audit — every flow covered both ways: continue iPad→iPhone (S2, App Switcher) and iPhone→iPad (S3, Dock);
+    bootstrap new-iPhone←iPad and new-iPad←iPhone (S1, directions 1 and 2); grants direction-agnostic (S3, S7);
+    reverse-attach geometry rule: phone-born sessions cede the grid to a joining iPad (phone client flips to
+    ignore-size) ·
+    security review — nearby bootstrap binds peers with an ephemeral SAS code compare (shown on the new device,
+    confirmed inside the origin's Face ID card) before any manifest moves; S7 enrollment needs no code because
+    continuation streams are Apple-Account-authenticated, and that property is documented as transport-load-bearing.<br>
+    <b>files:</b> this mock <span class="m">docs/mockups/iphone-companion/sync.html</span> · companion mock
+    <span class="m">index.html</span> · brief <span class="m">docs/iphone-adaptation-plan.html</span> (P8) ·
+    notes <span class="m">design-notes.md</span>.<br>
+    <b>layer 3 follow-up (2026-07-26):</b> iCloud sync is now fully designed —
+    <span class="m">icloud-sync.html</span> (I1–I9) resolves the design-ahead frames (S1 restore row, S9 frames
+    2–3); its decisions supersede them where they differ (the S9 "devices" row is dropped — CloudKit discloses no
+    peer list).
+  </div>
+
+</div>
+</body>
+</html>

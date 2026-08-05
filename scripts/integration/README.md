@@ -1,7 +1,7 @@
 # Tessera integration regression suite
 
 This is the opt-in suite derived from `docs/manual-testing-matrix.md`. It uses
-two disposable Linux VPS fixtures plus a dedicated iPad simulator; it never
+two disposable Linux VPS fixtures plus run-scoped disposable simulators; it never
 connects through UI automation and never touches the user's existing simulator
 or local Mac SSH/tmux setup.
 
@@ -25,8 +25,10 @@ Tessera tests use the isolated app endpoint.
 ./scripts/integration/verify-fixtures.sh
 ```
 
-Generated client keys, passwords, known-host databases, simulator identifiers,
-DerivedData, captures, and reports stay under ignored `.state/` and `out/`.
+Generated client keys, passwords, known-host databases, DerivedData, captures,
+and reports stay under ignored `.state/` and `out/`. Simulator identifiers are
+stored in the run output while active; every run-created simulator is shut down
+and deleted by an exit trap after verification, including failed runs.
 
 ## Jump-host lane (opt-in)
 
@@ -73,13 +75,13 @@ TESSERA_RUN_REAL_AGENT_E2E=1 ./scripts/integration/run-real-agent-e2e.sh
 
 The normal execution order is an invariant:
 
-1. Build/install only on dedicated test simulators: `Tessera Visual Integration Tests` for recordings and `Tessera Integration Tests` for deterministic lanes. Separating them prevents unrelated unit-test installs from terminating the app mid-capture.
+1. Create uniquely named, run-scoped test simulators for visual and deterministic lanes. Separating them prevents unrelated unit-test installs from terminating the app mid-capture.
 2. Capture every visual case and finalize one evidence manifest.
 3. Start exactly one ephemeral, read-only `codex exec` process with every image
    attached and the complete manifest in the same prompt.
 4. Run deterministic host, app, migration, terminal-cell, SFTP, forwarding,
    tmux, and scroll checks while that one review runs in the background.
-5. Join both lanes into `report.json`, then shut down the dedicated simulator.
+5. Join both lanes into `report.json`, then shut down and delete every run-scoped simulator from disk.
 
 The evaluator has no write permission, uses a strict JSON schema, and must
 return exactly one verdict per captured case. A missing, duplicate, or extra
@@ -92,16 +94,20 @@ case fails review validation.
 | C1, C2, HK1, KS1/KS5 | substantial | Live password and generated Ed25519 auth over SSH and mosh; TOFU fingerprint/type; accepted-key persistence; wrong-password classification; idempotent install and revoke. Biometric/Secure Enclave remain device-only. |
 | C4, C5, W1, W3, W4 | substantial | Real SSH+tmux inline control and mosh+tmux side-channel control hydrate against tmux 3.4 and 3.6a; real window names/renames; two control clients on one server remain session-isolated; SSH and mosh env/startup prologues execute remotely. |
 | C6 | fixture boundary | A restricted app user on each host has no tmux executable, providing the deterministic fallback endpoint. Banner presentation remains a UI/manual assertion. |
+| R1 | visual + deterministic | A host-free production-controller capture proves that an impossible zero-row inline viewport preserves the established terminal and visibly recovers on retry. Package tests apply the same required-grid policy to inline shared, inline split-pane, and mosh+tmux side-channel captures while preserving optional alternate saved-primary semantics. |
 | K1, K5 | transport boundary | SSH and mosh PTYs preserve an exact multi-KiB payload containing bracketed-paste, SGR mouse, alternate-screen, newline, and printable-byte sequences; the remote SHA-256 oracle verifies every byte. |
 | S1 | live visual + wiring | One continuous recording per transport drives real primary scrollback on SSH, SSH+tmux, mosh, and mosh+tmux; external Metal-aware screenshots prove tail → older numbered history → tail. The host-free surface remains a fast offset/wiring assertion. Physical trackpad feel remains manual. |
-| S6 | live visual | The same four live sessions grade htop mouse-wheel scrolling in both directions. SSH, SSH+tmux, and mosh+tmux also grade Vim `mouse=a` wheel forwarding; plain-mosh Vim is diagnostic-only because the fixture cannot reliably advance real htop while it owns that PTY. A 3x3 evidence sheet per transport is evaluated in the one aggregate review. Plain-mosh Vim and physical feel remain manual. |
+| S6 | live visual + touch wiring | The same four live sessions grade htop mouse-wheel scrolling in both directions. SSH, SSH+tmux, and mosh+tmux also grade Vim `mouse=a` wheel forwarding; plain-mosh Vim is diagnostic-only because the fixture cannot reliably advance real htop while it owns that PTY. A host-free iPhone harness separately synthesizes a direct finger swipe in alternate-screen + SGR mouse mode and requires a terminal wheel event, covering the touch recognizer path that indirect-pointer tests cannot exercise. A 3x3 evidence sheet per transport is evaluated in the one aggregate review. Plain-mosh Vim and physical feel remain manual. |
 | S9 | correctness oracle | Real `RepaintAssembly` bytes feed a headless SwiftTerm with 36 deep colored row pairs at two widths; every retained short row must end in default background, not a BCE-colored tail. |
 | F1, F7 | backend + visual | Tessera's real `FileBridge` lists hidden/extension-less fixtures and performs mkdir/upload/rename/download/exec/delete with byte equality; the Files-card capture checks visible geometry and content. Quick Look/share sheets remain manual. |
 | F12 | visual/timing | A complete context-menu recording, event markers, frame contact sheet, stills, and per-frame signal statistics are evaluated in the aggregate visual review. |
 | PF1 | substantial | Real HTTP traffic and byte counters are verified on SSH/SSH+tmux's primary client and mosh+tmux's long-lived SSH side channel. |
 | MO4 | host oracle | Both hosts enforce a bounded post-test `mosh-server` process count. Real device lifecycle/roaming remains manual. |
 | A1, A5, G3 | visual | A normalized landscape terminal-canvas capture checks full bleed, top chrome, fullscreen geometry, and stale-width seams. |
-| O1 | visual | All eight forced onboarding steps are captured together and reviewed for step identity, clipping, footer layout, spotlights, and illustration integrity. |
+| S2-S6 continuity descriptors | programmatic UI, iPad + iPhone | A DEBUG-only, host-free descriptor injection runs the production receiver/editor flow on dedicated iPad and iPhone simulators. It checks SSH/mosh x tmux/plain routing, exact named-tmux preservation, compact/regular credential gates and cancel behavior. It never initiates a host connection. Real Apple Handoff discovery/transport and continuation streams remain physical-device coverage. |
+| Compact navigation transition | programmatic UI | A DEBUG-only, host-free wrapper retains one real `ContentView` while changing its injected iPad size class. In-memory host and inert-session fixtures cover Hosts, host editing, live session, Keys, Known Hosts, Settings, and Agent Center across regular -> compact -> regular, plus compact-first startup; a session-task start oracle proves width changes do not remount the live session view, while intercepted connect calls ensure no fixture opens a socket or persists presentation state. |
+| S1 nearby bootstrap | programmatic two-simulator | A run-scoped disposable iPad/iPhone pair exercises production Bonjour discovery, TCP framing, X25519/HKDF/SAS, encrypted manifest transfer, grant receipts, and acknowledgements. The lane requires matching six-digit SAS values and `installed=1` completion on both roles, then deletes only its two explicit simulator UDIDs. SwiftData, Keychain, Secure Enclave, biometrics, SSH, and physical Local Network permission UI remain separate coverage. |
+| O1 | visual | All nine regular-iPad forced onboarding steps are captured together and reviewed for identity, clipping, footer layout, spotlights, and illustration integrity. Run `scripts/uitest/run-onboarding-layout-matrix.sh` for exhaustive iPhone/iPad screen-size × orientation coverage (welcome + nine steps). |
 | AG1 | visual + deterministic + live host + credentialed providers | A connection-free Agent Center capture reviews plan approval, just-finished, working, idle, and unavailable groups; separate needs-input/finished/total sidebar counters; off-screen top-bar aggregation; current-window suppression; provider-session/task identity; meaningful viewport excerpts; parsed buttons; address attribution; and inline controls. Focused tests cover the five-minute completion transition, attention acknowledgement and exact jump routing, split-window visibility, foreground/background transitions, bounded new-shell detection convergence, automatic-classifier false-positive rejection, strict shell versus inherited-child proof, lifecycle/subagent-first submission verification, background refresh budgets, separate Return failures, routing, and tmux acknowledgments. The ordinary programmatic lane compiles the production installer source, syntax-checks every generated script, executes fresh bash and ZDOTDIR-zsh installs, proves idempotent persistent activation, validates the legacy explicit-Claude-settings compatibility file, and drives configured/untrusted, trusted, and disabled handler states through a deterministic Codex app-server contract double. A disposable SSH/tmux fixture separately verifies exact v7 artifacts, executable shims/launcher/hook status, lossless Codex hook merging through a preserved symlink, no-newline rc repair, bash-login/ZDOTDIR startup, generic bash/zsh aliases/functions, post-source PATH changes, symlinked shim aliases, concurrent identity probes, arbitrary preserved WINCH traps, bounded Python-free hook parsing, and inherited runtime markers. The opt-in local gate launches the actually installed Codex and Claude Code in isolated tmux servers and requires PID-bound provider `SessionStart`, `idle → working → idle`, plus `working → waitingForInput → working → idle` around a real safe permission request. Codex additionally exercises its exact enabled-but-not-yet-trusted configured bootstrap before the first prompt, fresh hook review, active hook tables before and after relaunch, its machine-readable trusted+enabled `hooks/list` proof for the pre-thread empty composer, and the real `/plan` flow whose `Stop(idle)` boundary is correlated with the subsequently painted three-option plan-approval dialog. The gate covers every state on Tessera's immediate OSC path, retained state while blocked, the visible approval UI, a production-equivalent staged text/semantic-Return boundary, final completion, and a content-free host diagnostic summary. Raw terminal capture is deleted after producing a content-free state trace; the plan-approval screen is retained as provider-contract evidence. |
 | MG1 | partial, high value | A disposable on-disk SwiftData store containing all three models and the `[String]` field is closed, reopened through the migration plan, and value-checked. Archived previous-release stores and physical upgrades remain release gates. |
 

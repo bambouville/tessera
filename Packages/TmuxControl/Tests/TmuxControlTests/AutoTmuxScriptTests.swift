@@ -27,6 +27,37 @@ final class AutoTmuxScriptTests: XCTestCase {
                       "the create branch must use -CC and -s with the session name")
     }
 
+    func test_command_geometryNeutralClientIgnoresSizeOnlyForExistingSession() {
+        let cmd = AutoTmuxScript.command(
+            sessionName: "tessera-12345678",
+            preserveExistingGeometry: true
+        )
+        XCTAssertTrue(
+            cmd.contains("exec tmux -CC attach -f ignore-size -t tessera-12345678")
+        )
+        XCTAssertTrue(cmd.contains("tmux -V 2>/dev/null"))
+        XCTAssertTrue(cmd.contains("else exec tmux -CC attach -t tessera-12345678"))
+        XCTAssertTrue(
+            cmd.contains("exec tmux -CC new -s tessera-12345678")
+        )
+        XCTAssertFalse(
+            cmd.contains("exec tmux -CC new -f ignore-size")
+        )
+    }
+
+    func test_geometryPreservingClientCommand_requiresTmuxThreeTwo() {
+        let cmd = AutoTmuxScript.geometryPreservingClientCommand(
+            tmuxCommand: "tmux -u attach-session",
+            arguments: "-t target"
+        )
+
+        XCTAssertTrue(cmd.contains("[ \"$tessera_tmux_major\" -gt 3 ]"))
+        XCTAssertTrue(cmd.contains("[ \"$tessera_tmux_major\" -eq 3 ]"))
+        XCTAssertTrue(cmd.contains("[ \"$tessera_tmux_minor\" -ge 2 ]"))
+        XCTAssertTrue(cmd.contains("exec tmux -u attach-session -f ignore-size -t target"))
+        XCTAssertTrue(cmd.contains("else exec tmux -u attach-session -t target"))
+    }
+
     func test_command_emitsSentinelViaOctalEscapesNotLiterals() {
         // The interpreted printf output is what matches the scanner —
         // the source command must NOT contain the literal sentinel

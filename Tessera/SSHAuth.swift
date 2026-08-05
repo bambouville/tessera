@@ -700,6 +700,30 @@ struct HostKeyVerificationChallenge: Sendable {
     let keyType: String
     let isChanged: Bool
     let oldFingerprint: String?
+    let peerFingerprint: String?
+    let peerLabel: String?
+
+    init(
+        endpoint: String,
+        fingerprint: String,
+        keyType: String,
+        isChanged: Bool,
+        oldFingerprint: String?,
+        peerFingerprint: String? = nil,
+        peerLabel: String? = nil
+    ) {
+        self.endpoint = endpoint
+        self.fingerprint = fingerprint
+        self.keyType = keyType
+        self.isChanged = isChanged
+        self.oldFingerprint = oldFingerprint
+        self.peerFingerprint = peerFingerprint
+        self.peerLabel = peerLabel
+    }
+
+    var peerFingerprintMatches: Bool? {
+        peerFingerprint.map { $0 == fingerprint }
+    }
 }
 
 typealias HostKeyVerificationPrompt = @MainActor @Sendable (HostKeyVerificationChallenge) async -> Bool
@@ -716,10 +740,19 @@ typealias HostKeyVerificationPrompt = @MainActor @Sendable (HostKeyVerificationC
 final class TesseraHostKeyValidator: NIOSSHClientServerAuthenticationDelegate, @unchecked Sendable {
     let endpoint: String
     let prompt: HostKeyVerificationPrompt?
+    let peerFingerprint: String?
+    let peerLabel: String?
 
-    init(endpoint: String, prompt: HostKeyVerificationPrompt?) {
+    init(
+        endpoint: String,
+        prompt: HostKeyVerificationPrompt?,
+        peerFingerprint: String? = nil,
+        peerLabel: String? = nil
+    ) {
         self.endpoint = endpoint
         self.prompt = prompt
+        self.peerFingerprint = peerFingerprint
+        self.peerLabel = peerLabel
     }
 
     func validateHostKey(hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>) {
@@ -745,21 +778,20 @@ final class TesseraHostKeyValidator: NIOSSHClientServerAuthenticationDelegate, @
                     fingerprint: fingerprint,
                     keyType: keyType,
                     isChanged: false,
-                    oldFingerprint: nil
+                    oldFingerprint: nil,
+                    peerFingerprint: peerFingerprint,
+                    peerLabel: peerLabel
                 )
-                let userAccepted = await HostKeyVerificationCoordinator.shared.resolve(
+                // Citadel starts a fixed ten-second login timer before asking
+                // its host-key delegate. Human approval must not run inside
+                // that timer. Abort this transport attempt immediately; the
+                // shared chain layer awaits approval and retries from hop zero.
+                validationCompletePromise.fail(HostKeyApprovalRequired(
                     hostKey: hostKey,
                     endpoint: endpoint,
                     prompt: prompt,
                     challenge: challenge
-                )
-                if userAccepted {
-                    DiagnosticLogStore.appendSSH("hostkey validation userResult=accepted status=unknown keyType=\(keyType)")
-                    validationCompletePromise.succeed(())
-                } else {
-                    DiagnosticLogStore.appendSSH("hostkey validation userResult=rejected status=unknown keyType=\(keyType)")
-                    validationCompletePromise.fail(HostKeyRejectedError())
-                }
+                ))
 
             case .changed(let oldFP, let newFP, _):
                 DiagnosticLogStore.appendSSH("hostkey validation result=changed keyType=\(keyType) promptAvailable=\(prompt != nil)")
@@ -768,28 +800,71 @@ final class TesseraHostKeyValidator: NIOSSHClientServerAuthenticationDelegate, @
                     fingerprint: newFP,
                     keyType: keyType,
                     isChanged: true,
-                    oldFingerprint: oldFP
+                    oldFingerprint: oldFP,
+                    peerFingerprint: peerFingerprint,
+                    peerLabel: peerLabel
                 )
-                let userAccepted = await HostKeyVerificationCoordinator.shared.resolve(
+                validationCompletePromise.fail(HostKeyApprovalRequired(
                     hostKey: hostKey,
                     endpoint: endpoint,
                     prompt: prompt,
                     challenge: challenge
-                )
-                if userAccepted {
-                    DiagnosticLogStore.appendSSH("hostkey validation userResult=accepted status=changed keyType=\(keyType)")
-                    validationCompletePromise.succeed(())
-                } else {
-                    DiagnosticLogStore.appendSSH("hostkey validation userResult=rejected status=changed keyType=\(keyType)")
-                    validationCompletePromise.fail(HostKeyRejectedError())
-                }
+                ))
             }
         }
     }
 }
 
+/// Typed handoff from NIO's timed SSH handshake to Tessera's untimed human
+/// approval flow. It contains immutable challenge data only; no unstructured
+/// task survives the failed transport attempt.
+final class HostKeyApprovalRequired: Error, @unchecked Sendable {
+    let hostKey: NIOSSHPublicKey
+    let endpoint: String
+    let prompt: HostKeyVerificationPrompt?
+    let challenge: HostKeyVerificationChallenge
+
+    init(
+        hostKey: NIOSSHPublicKey,
+        endpoint: String,
+        prompt: HostKeyVerificationPrompt?,
+        challenge: HostKeyVerificationChallenge
+    ) {
+        self.hostKey = hostKey
+        self.endpoint = endpoint
+        self.prompt = prompt
+        self.challenge = challenge
+    }
+}
+
 actor HostKeyVerificationCoordinator {
     static let shared = HostKeyVerificationCoordinator()
+
+    /// Cancellation handlers cannot synchronously hop back to this actor.
+    /// Keep a lock-backed bit beside each waiter so `Task.cancel()` becomes
+    /// visible to the trust path before the asynchronous actor cleanup runs.
+    private final class WaiterCancellation: @unchecked Sendable {
+        private let lock = NSLock()
+        private var cancelled = false
+
+        func cancel() {
+            lock.lock()
+            cancelled = true
+            lock.unlock()
+        }
+
+        var isCancelled: Bool {
+            lock.lock()
+            let value = cancelled
+            lock.unlock()
+            return value
+        }
+    }
+
+    private struct PendingWaiter {
+        let continuation: CheckedContinuation<Bool, Never>
+        let cancellation: WaiterCancellation
+    }
 
     private struct ChallengeKey: Hashable {
         let endpoint: String
@@ -797,6 +872,8 @@ actor HostKeyVerificationCoordinator {
         let keyType: String
         let isChanged: Bool
         let oldFingerprint: String?
+        let peerFingerprint: String?
+        let peerLabel: String?
 
         init(_ challenge: HostKeyVerificationChallenge) {
             endpoint = challenge.endpoint
@@ -804,10 +881,32 @@ actor HostKeyVerificationCoordinator {
             keyType = challenge.keyType
             isChanged = challenge.isChanged
             oldFingerprint = challenge.oldFingerprint
+            peerFingerprint = challenge.peerFingerprint
+            peerLabel = challenge.peerLabel
         }
     }
 
-    private var waiters: [ChallengeKey: [CheckedContinuation<Bool, Never>]] = [:]
+    private struct PendingDecision {
+        let hostKey: NIOSSHPublicKey
+        let endpoint: String
+        let challenge: HostKeyVerificationChallenge
+        var prompt: HostKeyVerificationPrompt?
+        var waiters: [UUID: PendingWaiter]
+        var promptlessTimeout: Task<Void, Never>?
+        var resolutionTask: Task<Void, Never>?
+        var resolutionStarted: Bool
+    }
+
+    private let promptUpgradeGrace: @Sendable () async -> Void
+    private var pendingDecisions: [ChallengeKey: PendingDecision] = [:]
+
+    init(
+        promptUpgradeGrace: @escaping @Sendable () async -> Void = {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+    ) {
+        self.promptUpgradeGrace = promptUpgradeGrace
+    }
 
     func resolve(
         hostKey: NIOSSHPublicKey,
@@ -816,30 +915,174 @@ actor HostKeyVerificationCoordinator {
         challenge: HostKeyVerificationChallenge
     ) async -> Bool {
         let key = ChallengeKey(challenge)
-        if waiters[key] != nil {
-            DiagnosticLogStore.appendSSH(
-                "hostkey validation coalesced duplicate endpoint=\(endpoint) keyType=\(challenge.keyType)"
-            )
-            return await withCheckedContinuation { continuation in
-                waiters[key, default: []].append(continuation)
+        let waiterID = UUID()
+        let cancellation = WaiterCancellation()
+        guard !Task.isCancelled else { return false }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard !cancellation.isCancelled else {
+                    continuation.resume(returning: false)
+                    return
+                }
+                if var pending = pendingDecisions[key] {
+                    DiagnosticLogStore.appendSSH(
+                        "hostkey validation coalesced duplicate endpoint=\(endpoint) keyType=\(challenge.keyType)"
+                    )
+                    pending.waiters[waiterID] = PendingWaiter(
+                        continuation: continuation,
+                        cancellation: cancellation
+                    )
+
+                    // A promptless side channel can wait for, but never supply,
+                    // an authorization decision. Upgrade the shared decision
+                    // as soon as an equivalent user-facing request arrives.
+                    if pending.prompt == nil, let prompt {
+                        pending.prompt = prompt
+                        pending.promptlessTimeout?.cancel()
+                        pending.promptlessTimeout = nil
+                        pending.resolutionStarted = true
+                        pendingDecisions[key] = pending
+                        startResolution(for: key, pending: pending, prompt: prompt)
+                    } else {
+                        pendingDecisions[key] = pending
+                    }
+                    return
+                }
+
+                var pending = PendingDecision(
+                    hostKey: hostKey,
+                    endpoint: endpoint,
+                    challenge: challenge,
+                    prompt: prompt,
+                    waiters: [
+                        waiterID: PendingWaiter(
+                            continuation: continuation,
+                            cancellation: cancellation
+                        )
+                    ],
+                    promptlessTimeout: nil,
+                    resolutionTask: nil,
+                    resolutionStarted: prompt != nil
+                )
+
+                if let prompt {
+                    pendingDecisions[key] = pending
+                    startResolution(for: key, pending: pending, prompt: prompt)
+                } else {
+                    let timeout = Task { [promptUpgradeGrace] in
+                        await promptUpgradeGrace()
+                        guard !Task.isCancelled else { return }
+                        await self.expirePromptlessDecision(for: key)
+                    }
+                    pending.promptlessTimeout = timeout
+                    pendingDecisions[key] = pending
+                }
+            }
+        } onCancel: {
+            cancellation.cancel()
+            Task {
+                await self.cancelWaiter(waiterID, for: key)
             }
         }
-
-        waiters[key] = []
-        let accepted = await resolveFirst(
-            hostKey: hostKey,
-            endpoint: endpoint,
-            prompt: prompt,
-            challenge: challenge
-        )
-        let pendingWaiters = waiters.removeValue(forKey: key) ?? []
-        for continuation in pendingWaiters {
-            continuation.resume(returning: accepted)
-        }
-        return accepted
     }
 
+    private func startResolution(
+        for key: ChallengeKey,
+        pending: PendingDecision,
+        prompt: @escaping HostKeyVerificationPrompt
+    ) {
+        let task = Task {
+            let accepted = await resolveFirst(
+                for: key,
+                hostKey: pending.hostKey,
+                endpoint: pending.endpoint,
+                prompt: prompt,
+                challenge: pending.challenge
+            )
+            finishDecision(for: key, accepted: accepted)
+        }
+        guard var current = pendingDecisions[key] else {
+            task.cancel()
+            return
+        }
+        current.resolutionTask = task
+        pendingDecisions[key] = current
+    }
+
+    private func cancelWaiter(_ waiterID: UUID, for key: ChallengeKey) {
+        guard var pending = pendingDecisions[key],
+              let waiter = pending.waiters.removeValue(forKey: waiterID)
+        else { return }
+        waiter.continuation.resume(returning: false)
+        guard pending.waiters.isEmpty else {
+            pendingDecisions[key] = pending
+            return
+        }
+        pending.promptlessTimeout?.cancel()
+        pending.resolutionTask?.cancel()
+        pendingDecisions.removeValue(forKey: key)
+    }
+
+    private func expirePromptlessDecision(for key: ChallengeKey) async {
+        guard let pending = pendingDecisions[key],
+              pending.prompt == nil,
+              !pending.resolutionStarted else { return }
+
+        // The validator may have observed this key as unknown before another
+        // equivalent, prompted handshake trusted it. Re-check at the end of
+        // the bounded grace instead of rejecting that stale observation.
+        let isNowTrusted: Bool
+        switch await KnownHostsStore.shared.check(pending.hostKey, for: pending.endpoint) {
+        case .trusted:
+            isNowTrusted = true
+        case .unknown, .changed:
+            isNowTrusted = false
+        }
+
+        // The store lookup is an actor hop. If a prompted duplicate arrived
+        // while it was in flight, that explicit decision owns completion.
+        guard let current = pendingDecisions[key],
+              current.prompt == nil,
+              !current.resolutionStarted else { return }
+
+        if isNowTrusted {
+            await KnownHostsStore.shared.touch(for: current.endpoint)
+            guard let latest = pendingDecisions[key],
+                  latest.prompt == nil,
+                  !latest.resolutionStarted else { return }
+            DiagnosticLogStore.appendSSH(
+                "hostkey validation promptless staleChallengeNowTrusted endpoint=\(latest.endpoint) keyType=\(latest.challenge.keyType)"
+            )
+            finishDecision(for: key, accepted: true)
+            return
+        }
+
+        DiagnosticLogStore.appendSSH(
+            "hostkey validation promptless grace expired endpoint=\(current.endpoint) keyType=\(current.challenge.keyType)"
+        )
+        finishDecision(for: key, accepted: false)
+    }
+
+    private func finishDecision(for key: ChallengeKey, accepted: Bool) {
+        guard let pending = pendingDecisions.removeValue(forKey: key) else { return }
+        pending.promptlessTimeout?.cancel()
+        for waiter in pending.waiters.values {
+            waiter.continuation.resume(
+                returning: accepted && !waiter.cancellation.isCancelled
+            )
+        }
+    }
+
+    #if DEBUG
+    func pendingWaiterCount(for challenge: HostKeyVerificationChallenge) -> Int {
+        pendingDecisions[ChallengeKey(challenge)]?.waiters.values.filter {
+            !$0.cancellation.isCancelled
+        }.count ?? 0
+    }
+    #endif
+
     private func resolveFirst(
+        for key: ChallengeKey,
         hostKey: NIOSSHPublicKey,
         endpoint: String,
         prompt: HostKeyVerificationPrompt?,
@@ -859,7 +1102,9 @@ actor HostKeyVerificationCoordinator {
                 fingerprint: fingerprint,
                 keyType: challenge.keyType,
                 isChanged: false,
-                oldFingerprint: nil
+                oldFingerprint: nil,
+                peerFingerprint: challenge.peerFingerprint,
+                peerLabel: challenge.peerLabel
             )
         case .changed(let oldFingerprint, let newFingerprint, _):
             refreshedChallenge = HostKeyVerificationChallenge(
@@ -867,17 +1112,36 @@ actor HostKeyVerificationCoordinator {
                 fingerprint: newFingerprint,
                 keyType: challenge.keyType,
                 isChanged: true,
-                oldFingerprint: oldFingerprint
+                oldFingerprint: oldFingerprint,
+                peerFingerprint: challenge.peerFingerprint,
+                peerLabel: challenge.peerLabel
             )
         }
 
         guard let prompt else { return false }
         let accepted = await prompt(refreshedChallenge)
+        guard accepted,
+              !Task.isCancelled,
+              let pending = pendingDecisions[key],
+              pending.waiters.values.contains(where: {
+                  !$0.cancellation.isCancelled
+              }) else { return false }
         if accepted {
-            await KnownHostsStore.shared.trust(hostKey, for: endpoint)
+            let matchedPeerLabel = refreshedChallenge.peerFingerprintMatches == true
+                ? refreshedChallenge.peerLabel
+                : nil
+            await KnownHostsStore.shared.trust(
+                hostKey,
+                for: endpoint,
+                matchedPeerLabel: matchedPeerLabel
+            )
         }
         return accepted
     }
 }
 
-struct HostKeyRejectedError: Error {}
+struct HostKeyRejectedError: LocalizedError {
+    var errorDescription: String? {
+        "Connection cancelled because the server's host key was not trusted."
+    }
+}

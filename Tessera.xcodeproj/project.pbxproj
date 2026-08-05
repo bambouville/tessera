@@ -7,6 +7,19 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		5B1100000000000000000010 /* HostAccessProduct.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B10000000000000000010 /* HostAccessProduct.swift */; };
+		5B1100000000000000000011 /* StoreKitClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B10000000000000000011 /* StoreKitClient.swift */; };
+		5B1100000000000000000012 /* HostAccessStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B10000000000000000012 /* HostAccessStore.swift */; };
+		5B1100000000000000000013 /* SavedHostAdmissionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B10000000000000000013 /* SavedHostAdmissionPolicy.swift */; };
+		5B1100000000000000000014 /* UnlimitedHostsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B10000000000000000014 /* UnlimitedHostsSheet.swift */; };
+		5B1100000000000000000015 /* UnlimitedHostsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B10000000000000000015 /* UnlimitedHostsSettingsView.swift */; };
+		5B1100000000000000000016 /* Tessera.storekit in Resources */ = {isa = PBXBuildFile; fileRef = 5B10000000000000000016 /* Tessera.storekit */; };
+		5B1100000000000000000017 /* SavedHostAdmissionPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B10000000000000000017 /* SavedHostAdmissionPolicyTests.swift */; };
+		5B1100000000000000000018 /* HostAccessStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B10000000000000000018 /* HostAccessStoreTests.swift */; };
+		5B1100000000000000000019 /* StoreKitPurchaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B10000000000000000019 /* StoreKitPurchaseTests.swift */; };
+		5B1100000000000000000020 /* StoreKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5B10000000000000000020 /* StoreKit.framework */; };
+		5B1100000000000000000021 /* StoreKitTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5B10000000000000000021 /* StoreKitTest.framework */; };
+		5B1100000000000000000022 /* StoreKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5B10000000000000000020 /* StoreKit.framework */; };
 		0852B22FF60AF0B5F713D29B /* TerminalScrollHarnessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F258CE6A611C425C97F1A49C /* TerminalScrollHarnessTests.swift */; };
 		1A0004000000000000000001 /* TesseraApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000001 /* TesseraApp.swift */; };
 		1A0004000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000002 /* ContentView.swift */; };
@@ -142,11 +155,15 @@
 		1A002C000000000000000007 /* SwipePadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B000000000000000007 /* SwipePadView.swift */; };
 		1A002C000000000000000008 /* MacroEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B000000000000000008 /* MacroEncoderTests.swift */; };
 		1A002C000000000000000009 /* SwipePadProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B000000000000000009 /* SwipePadProfileTests.swift */; };
+		1A002C00000000000000000C /* SwipePadPetalLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B00000000000000000C /* SwipePadPetalLayoutTests.swift */; };
 		1A002C00000000000000000A /* ExperimentalSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B00000000000000000A /* ExperimentalSettingsView.swift */; };
+		1A002C00000000000000000B /* SwipePadPetalLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B00000000000000000B /* SwipePadPetalLayout.swift */; };
 		1A00B1000000000000000001 /* AgentCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00B0000000000000000001 /* AgentCenter.swift */; };
 		1A00B1000000000000000002 /* AgentSessionSourceFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00B0000000000000000002 /* AgentSessionSourceFactory.swift */; };
 		1A00B1000000000000000003 /* AgentCenterPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00B0000000000000000003 /* AgentCenterPage.swift */; };
 		1A00B1000000000000000004 /* RemoteAgentLifecycleIntegrationInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00B0000000000000000004 /* RemoteAgentLifecycleIntegrationInstaller.swift */; };
+		1A00B1000000000000000005 /* SwipePadAgentContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00B0000000000000000005 /* SwipePadAgentContext.swift */; };
+		1A00B1000000000000000006 /* AgentRegexCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00B0000000000000000006 /* AgentRegexCache.swift */; };
 		1A0034000000000000000001 /* SessionRestoreStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0033000000000000000001 /* SessionRestoreStore.swift */; };
 		1A0034000000000000000002 /* SessionRestoreSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0033000000000000000002 /* SessionRestoreSheet.swift */; };
 		1A0034000000000000000003 /* SessionRestoreStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0033000000000000000003 /* SessionRestoreStoreTests.swift */; };
@@ -157,6 +174,7 @@
 		1A0061000000000000000005 /* TransferTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000005 /* TransferTask.swift */; };
 		1A0061000000000000000006 /* RemoteShellIntegrationInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000006 /* RemoteShellIntegrationInstaller.swift */; };
 		1A0061000000000000000007 /* QuickLookPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000007 /* QuickLookPresenter.swift */; };
+		F4D2A2000000000000000001 /* QuickLookPresenterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4D2A1000000000000000001 /* QuickLookPresenterTests.swift */; };
 		1A0061000000000000000099 /* RemotePathResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000099 /* RemotePathResolver.swift */; };
 		1A0061000000000000000008 /* RemoteFileItemProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000008 /* RemoteFileItemProvider.swift */; };
 		1A0061000000000000000009 /* FilesPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000009 /* FilesPanelController.swift */; };
@@ -184,6 +202,41 @@
 		D7A500000000000000000006 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A500000000000000000002 /* ShareViewController.swift */; };
 		D7A500000000000000000007 /* TesseraShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = D7A500000000000000000005 /* TesseraShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		4E85A5F67DAFF1329C6E2D52 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5930AA51D944F5C5F0C84F3C /* Foundation.framework */; };
+		C10000000000000000000001 /* SessionActivityDescriptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000001 /* SessionActivityDescriptor.swift */; };
+		C10000000000000000000002 /* ContinuationResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000002 /* ContinuationResolver.swift */; };
+		C10000000000000000000003 /* ActivityBroadcaster.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003 /* ActivityBroadcaster.swift */; };
+		C10000000000000000000004 /* ContinuationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000004 /* ContinuationCoordinator.swift */; };
+		C10000000000000000000005 /* ContinuationOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000005 /* ContinuationOverlayView.swift */; };
+		C10000000000000000000006 /* BootstrapManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000006 /* BootstrapManifest.swift */; };
+		C10000000000000000000007 /* NearbyHandshake.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000007 /* NearbyHandshake.swift */; };
+		C10000000000000000000008 /* NearbyTransferService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000008 /* NearbyTransferService.swift */; };
+		C10000000000000000000009 /* ContinuitySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000009 /* ContinuitySettingsView.swift */; };
+		C1000000000000000000000A /* ContinuityFoundationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000A /* ContinuityFoundationTests.swift */; };
+		C1000000000000000000000B /* SyncClassificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000B /* SyncClassificationTests.swift */; };
+		C1000000000000000000000C /* BootstrapManifestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000C /* BootstrapManifestTests.swift */; };
+		C1000000000000000000000D /* BootstrapNearbyHandshakeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000D /* BootstrapNearbyHandshakeTests.swift */; };
+		C1000000000000000000000E /* BootstrapNearbyTransferServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000E /* BootstrapNearbyTransferServiceTests.swift */; };
+		C1000000000000000000000F /* CredentialCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000F /* CredentialCardView.swift */; };
+		C10000000000000000000010 /* RemoteInstallationLedgerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000010 /* RemoteInstallationLedgerTests.swift */; };
+		C10000000000000000000011 /* BootstrapManifestAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000011 /* BootstrapManifestAdapter.swift */; };
+		C10000000000000000000012 /* EnrollmentMessages.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000012 /* EnrollmentMessages.swift */; };
+		C10000000000000000000013 /* EnrollmentService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000013 /* EnrollmentService.swift */; };
+		C10000000000000000000014 /* EnrollmentMessagesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000014 /* EnrollmentMessagesTests.swift */; };
+		C10000000000000000000015 /* EnrollmentServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000015 /* EnrollmentServiceTests.swift */; };
+		C10000000000000000000016 /* ContinuityLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000016 /* ContinuityLifecycleTests.swift */; };
+		C10000000000000000000017 /* BootstrapManifestAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000017 /* BootstrapManifestAdapterTests.swift */; };
+		C10000000000000000000018 /* BootstrapCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000018 /* BootstrapCoordinator.swift */; };
+		C10000000000000000000019 /* BootstrapFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000019 /* BootstrapFlowView.swift */; };
+		C1000000000000000000001A /* BootstrapCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000001A /* BootstrapCoordinatorTests.swift */; };
+		C1000000000000000000001B /* EnrollmentContinuationStreamTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000001B /* EnrollmentContinuationStreamTransport.swift */; };
+		C1000000000000000000001C /* EnrollmentCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000001C /* EnrollmentCoordinator.swift */; };
+		C1000000000000000000001D /* EnrollmentApprovalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000001D /* EnrollmentApprovalView.swift */; };
+		C1000000000000000000001E /* EnrollmentContinuationStreamTransportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000001E /* EnrollmentContinuationStreamTransportTests.swift */; };
+		C1000000000000000000001F /* BootstrapNetworkHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000001F /* BootstrapNetworkHarness.swift */; };
+		C10000000000000000000020 /* EnrollmentCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000020 /* EnrollmentCoordinatorTests.swift */; };
+		C10000000000000000000021 /* NearbyBootstrapCompatibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000021 /* NearbyBootstrapCompatibility.swift */; };
+		C10000000000000000000022 /* AppVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000022 /* AppVersion.swift */; };
+		C10000000000000000000023 /* BootstrapWireSchemaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000023 /* BootstrapWireSchemaTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -225,6 +278,18 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		5B10000000000000000010 /* HostAccessProduct.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostAccessProduct.swift; sourceTree = "<group>"; };
+		5B10000000000000000011 /* StoreKitClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreKitClient.swift; sourceTree = "<group>"; };
+		5B10000000000000000012 /* HostAccessStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostAccessStore.swift; sourceTree = "<group>"; };
+		5B10000000000000000013 /* SavedHostAdmissionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedHostAdmissionPolicy.swift; sourceTree = "<group>"; };
+		5B10000000000000000014 /* UnlimitedHostsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnlimitedHostsSheet.swift; sourceTree = "<group>"; };
+		5B10000000000000000015 /* UnlimitedHostsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnlimitedHostsSettingsView.swift; sourceTree = "<group>"; };
+		5B10000000000000000016 /* Tessera.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = Tessera.storekit; sourceTree = "<group>"; };
+		5B10000000000000000017 /* SavedHostAdmissionPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedHostAdmissionPolicyTests.swift; sourceTree = "<group>"; };
+		5B10000000000000000018 /* HostAccessStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostAccessStoreTests.swift; sourceTree = "<group>"; };
+		5B10000000000000000019 /* StoreKitPurchaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreKitPurchaseTests.swift; sourceTree = "<group>"; };
+		5B10000000000000000020 /* StoreKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKit.framework; path = System/Library/Frameworks/StoreKit.framework; sourceTree = SDKROOT; };
+		5B10000000000000000021 /* StoreKitTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKitTest.framework; path = Developer/Library/Frameworks/StoreKitTest.framework; sourceTree = PLATFORM_DIR; };
 		1A0003000000000000000001 /* TesseraApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TesseraApp.swift; sourceTree = "<group>"; };
 		1A0003000000000000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		1A0003000000000000000003 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -325,6 +390,7 @@
 		1A006000000000000000000D /* FilesSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesSettingsView.swift; sourceTree = "<group>"; };
 		1A006000000000000000000E /* FileBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileBridgeTests.swift; sourceTree = "<group>"; };
 		1A00600000000000000000A0 /* RemotePathResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePathResolverTests.swift; sourceTree = "<group>"; };
+		F4D2A1000000000000000001 /* QuickLookPresenterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickLookPresenterTests.swift; sourceTree = "<group>"; };
 		1A006000000000000000000F /* TransferQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferQueueTests.swift; sourceTree = "<group>"; };
 		1A0060000000000000000010 /* RemoteShellIntegrationInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteShellIntegrationInstallerTests.swift; sourceTree = "<group>"; };
 		1A0060000000000000000011 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -376,7 +442,9 @@
 		1A002B000000000000000007 /* SwipePadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipePadView.swift; sourceTree = "<group>"; };
 		1A002B000000000000000008 /* MacroEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroEncoderTests.swift; sourceTree = "<group>"; };
 		1A002B000000000000000009 /* SwipePadProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipePadProfileTests.swift; sourceTree = "<group>"; };
+		1A002B00000000000000000C /* SwipePadPetalLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipePadPetalLayoutTests.swift; sourceTree = "<group>"; };
 		1A002B00000000000000000A /* ExperimentalSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExperimentalSettingsView.swift; sourceTree = "<group>"; };
+		1A002B00000000000000000B /* SwipePadPetalLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipePadPetalLayout.swift; sourceTree = "<group>"; };
 		1A0033000000000000000001 /* SessionRestoreStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRestoreStore.swift; sourceTree = "<group>"; };
 		1A0033000000000000000002 /* SessionRestoreSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRestoreSheet.swift; sourceTree = "<group>"; };
 		1A0033000000000000000003 /* SessionRestoreStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRestoreStoreTests.swift; sourceTree = "<group>"; };
@@ -395,6 +463,8 @@
 		1A00B0000000000000000002 /* AgentSessionSourceFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionSourceFactory.swift; sourceTree = "<group>"; };
 		1A00B0000000000000000003 /* AgentCenterPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCenterPage.swift; sourceTree = "<group>"; };
 		1A00B0000000000000000004 /* RemoteAgentLifecycleIntegrationInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAgentLifecycleIntegrationInstaller.swift; sourceTree = "<group>"; };
+		1A00B0000000000000000005 /* SwipePadAgentContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipePadAgentContext.swift; sourceTree = "<group>"; };
+		1A00B0000000000000000006 /* AgentRegexCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRegexCache.swift; sourceTree = "<group>"; };
 		5930AA51D944F5C5F0C84F3C /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		D6F0936D127F28EC4A75489D /* TesseraUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TesseraUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D7A500000000000000000002 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
@@ -403,6 +473,41 @@
 		D7A500000000000000000005 /* TesseraShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TesseraShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		D7A500000000000000000012 /* Tessera.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Tessera.entitlements; sourceTree = "<group>"; };
 		F258CE6A611C425C97F1A49C /* TerminalScrollHarnessTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalScrollHarnessTests.swift; sourceTree = "<group>"; };
+		C20000000000000000000001 /* SessionActivityDescriptor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionActivityDescriptor.swift; sourceTree = "<group>"; };
+		C20000000000000000000002 /* ContinuationResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinuationResolver.swift; sourceTree = "<group>"; };
+		C20000000000000000000003 /* ActivityBroadcaster.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityBroadcaster.swift; sourceTree = "<group>"; };
+		C20000000000000000000004 /* ContinuationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinuationCoordinator.swift; sourceTree = "<group>"; };
+		C20000000000000000000005 /* ContinuationOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinuationOverlayView.swift; sourceTree = "<group>"; };
+		C20000000000000000000006 /* BootstrapManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapManifest.swift; sourceTree = "<group>"; };
+		C20000000000000000000007 /* NearbyHandshake.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyHandshake.swift; sourceTree = "<group>"; };
+		C20000000000000000000008 /* NearbyTransferService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyTransferService.swift; sourceTree = "<group>"; };
+		C20000000000000000000009 /* ContinuitySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinuitySettingsView.swift; sourceTree = "<group>"; };
+		C2000000000000000000000A /* ContinuityFoundationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinuityFoundationTests.swift; sourceTree = "<group>"; };
+		C2000000000000000000000B /* SyncClassificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncClassificationTests.swift; sourceTree = "<group>"; };
+		C2000000000000000000000C /* BootstrapManifestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapManifestTests.swift; sourceTree = "<group>"; };
+		C2000000000000000000000D /* BootstrapNearbyHandshakeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapNearbyHandshakeTests.swift; sourceTree = "<group>"; };
+		C2000000000000000000000E /* BootstrapNearbyTransferServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapNearbyTransferServiceTests.swift; sourceTree = "<group>"; };
+		C2000000000000000000000F /* CredentialCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialCardView.swift; sourceTree = "<group>"; };
+		C20000000000000000000010 /* RemoteInstallationLedgerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteInstallationLedgerTests.swift; sourceTree = "<group>"; };
+		C20000000000000000000011 /* BootstrapManifestAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapManifestAdapter.swift; sourceTree = "<group>"; };
+		C20000000000000000000012 /* EnrollmentMessages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrollmentMessages.swift; sourceTree = "<group>"; };
+		C20000000000000000000013 /* EnrollmentService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrollmentService.swift; sourceTree = "<group>"; };
+		C20000000000000000000014 /* EnrollmentMessagesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrollmentMessagesTests.swift; sourceTree = "<group>"; };
+		C20000000000000000000015 /* EnrollmentServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrollmentServiceTests.swift; sourceTree = "<group>"; };
+		C20000000000000000000016 /* ContinuityLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinuityLifecycleTests.swift; sourceTree = "<group>"; };
+		C20000000000000000000017 /* BootstrapManifestAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapManifestAdapterTests.swift; sourceTree = "<group>"; };
+		C20000000000000000000018 /* BootstrapCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapCoordinator.swift; sourceTree = "<group>"; };
+		C20000000000000000000019 /* BootstrapFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapFlowView.swift; sourceTree = "<group>"; };
+		C2000000000000000000001A /* BootstrapCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapCoordinatorTests.swift; sourceTree = "<group>"; };
+		C2000000000000000000001B /* EnrollmentContinuationStreamTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrollmentContinuationStreamTransport.swift; sourceTree = "<group>"; };
+		C2000000000000000000001C /* EnrollmentCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrollmentCoordinator.swift; sourceTree = "<group>"; };
+		C2000000000000000000001D /* EnrollmentApprovalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrollmentApprovalView.swift; sourceTree = "<group>"; };
+		C2000000000000000000001E /* EnrollmentContinuationStreamTransportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrollmentContinuationStreamTransportTests.swift; sourceTree = "<group>"; };
+		C2000000000000000000001F /* BootstrapNetworkHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapNetworkHarness.swift; sourceTree = "<group>"; };
+		C20000000000000000000020 /* EnrollmentCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrollmentCoordinatorTests.swift; sourceTree = "<group>"; };
+		C20000000000000000000021 /* NearbyBootstrapCompatibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyBootstrapCompatibility.swift; sourceTree = "<group>"; };
+		C20000000000000000000022 /* AppVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppVersion.swift; sourceTree = "<group>"; };
+		C20000000000000000000023 /* BootstrapWireSchemaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapWireSchemaTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -410,6 +515,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5B1100000000000000000022 /* StoreKit.framework in Frameworks */,
 				1A0004000000000000000005 /* SwiftTerm in Frameworks */,
 				1A0004000000000000000006 /* ScrollDispatcher in Frameworks */,
 				1A0004000000000000000007 /* TmuxControl in Frameworks */,
@@ -423,6 +529,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5B1100000000000000000020 /* StoreKit.framework in Frameworks */,
+				5B1100000000000000000021 /* StoreKitTest.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -461,6 +569,9 @@
 			children = (
 				1A0003000000000000000001 /* TesseraApp.swift */,
 				1A0003000000000000000002 /* ContentView.swift */,
+				C30000000000000000000001 /* Continuity */,
+				C30000000000000000000002 /* Bootstrap */,
+				C30000000000000000000003 /* Enrollment */,
 				1A0003000000000000000006 /* Host.swift */,
 				1A0013000000000000000025 /* HostLaunchPrologue.swift */,
 				1A0003000000000000000007 /* SSHSession.swift */,
@@ -485,6 +596,7 @@
 				1A000300000000000000000F /* SessionSidebar.swift */,
 				1A0003000000000000000010 /* HostDetailView.swift */,
 				1A0003000000000000000012 /* KeychainHelper.swift */,
+				C20000000000000000000022 /* AppVersion.swift */,
 				1A0003000000000000000013 /* StoredKey.swift */,
 				1A0003000000000000000014 /* KeyStore.swift */,
 				1A0003000000000000000016 /* KnownHostsStore.swift */,
@@ -509,6 +621,8 @@
 				1A0060000000000000000100 /* Files */,
 				1A0012000000000000000006 /* KnownHosts */,
 				1A0012000000000000000007 /* Settings */,
+				5B10000000000000000001 /* Purchases */,
+				5B10000000000000000002 /* StoreKit */,
 				1A0012000000000000000008 /* Terminal */,
 				1A0012000000000000000003 /* Resources */,
 				1A0003000000000000000003 /* Assets.xcassets */,
@@ -535,6 +649,20 @@
 		1A0002000000000000000004 /* TesseraTests */ = {
 			isa = PBXGroup;
 			children = (
+				C2000000000000000000000A /* ContinuityFoundationTests.swift */,
+				C2000000000000000000000B /* SyncClassificationTests.swift */,
+				C2000000000000000000000C /* BootstrapManifestTests.swift */,
+				C2000000000000000000000D /* BootstrapNearbyHandshakeTests.swift */,
+				C2000000000000000000000E /* BootstrapNearbyTransferServiceTests.swift */,
+				C20000000000000000000010 /* RemoteInstallationLedgerTests.swift */,
+				C20000000000000000000014 /* EnrollmentMessagesTests.swift */,
+				C20000000000000000000015 /* EnrollmentServiceTests.swift */,
+				C20000000000000000000016 /* ContinuityLifecycleTests.swift */,
+				C20000000000000000000017 /* BootstrapManifestAdapterTests.swift */,
+				C2000000000000000000001A /* BootstrapCoordinatorTests.swift */,
+				C20000000000000000000023 /* BootstrapWireSchemaTests.swift */,
+				C2000000000000000000001E /* EnrollmentContinuationStreamTransportTests.swift */,
+				C20000000000000000000020 /* EnrollmentCoordinatorTests.swift */,
 				1A00A0000000000000000001 /* RealHostTransportIntegrationTests.swift */,
 				1A00A0000000000000000005 /* TerminalScrollbackOracleTests.swift */,
 				1A000300000000000000001E /* MoshBootstrapTests.swift */,
@@ -549,6 +677,7 @@
 				1A0023000000000000000005 /* ModifierStateTests.swift */,
 				1A002B000000000000000008 /* MacroEncoderTests.swift */,
 				1A002B000000000000000009 /* SwipePadProfileTests.swift */,
+				1A002B00000000000000000C /* SwipePadPetalLayoutTests.swift */,
 				1A0023000000000000000009 /* SessionRegistryTests.swift */,
 				1A002300000000000000000A /* CommandPaletteTests.swift */,
 				1A002300000000000000000B /* SessionSwitcherTests.swift */,
@@ -559,6 +688,7 @@
 				1A0050000000000000000003 /* PaneLayoutMathTests.swift */,
 				1A006000000000000000000E /* FileBridgeTests.swift */,
 				1A00600000000000000000A0 /* RemotePathResolverTests.swift */,
+				F4D2A1000000000000000001 /* QuickLookPresenterTests.swift */,
 				1A006000000000000000000F /* TransferQueueTests.swift */,
 				1A0060000000000000000010 /* RemoteShellIntegrationInstallerTests.swift */,
 				1A0060000000000000000013 /* RemoteCwdPollerTests.swift */,
@@ -567,6 +697,9 @@
 				1A0090000000000000000001 /* KeyStoreSecurityTests.swift */,
 				1A0090000000000000000002 /* BiometricRevocationRaceTests.swift */,
 				1A0090000000000000000003 /* SSHAuthenticationPolicyRaceTests.swift */,
+				5B10000000000000000017 /* SavedHostAdmissionPolicyTests.swift */,
+				5B10000000000000000018 /* HostAccessStoreTests.swift */,
+				5B10000000000000000019 /* StoreKitPurchaseTests.swift */,
 			);
 			path = TesseraTests;
 			sourceTree = "<group>";
@@ -671,6 +804,7 @@
 			isa = PBXGroup;
 			children = (
 				1A0013000000000000000014 /* SettingsPageView.swift */,
+				C20000000000000000000009 /* ContinuitySettingsView.swift */,
 				1A0013000000000000000015 /* AppearanceSettingsView.swift */,
 				1A0013000000000000000016 /* TerminalSettingsView.swift */,
 				1A0013000000000000000017 /* ThemeSettingsView.swift */,
@@ -680,8 +814,69 @@
 				1A002B00000000000000000A /* ExperimentalSettingsView.swift */,
 				1A001300000000000000001B /* AboutSettingsView.swift */,
 				1A006000000000000000000D /* FilesSettingsView.swift */,
+				5B10000000000000000015 /* UnlimitedHostsSettingsView.swift */,
 			);
 			path = Settings;
+			sourceTree = "<group>";
+		};
+		5B10000000000000000001 /* Purchases */ = {
+			isa = PBXGroup;
+			children = (
+				5B10000000000000000010 /* HostAccessProduct.swift */,
+				5B10000000000000000011 /* StoreKitClient.swift */,
+				5B10000000000000000012 /* HostAccessStore.swift */,
+				5B10000000000000000013 /* SavedHostAdmissionPolicy.swift */,
+				5B10000000000000000014 /* UnlimitedHostsSheet.swift */,
+			);
+			path = Purchases;
+			sourceTree = "<group>";
+		};
+		5B10000000000000000002 /* StoreKit */ = {
+			isa = PBXGroup;
+			children = (
+				5B10000000000000000016 /* Tessera.storekit */,
+			);
+			path = StoreKit;
+			sourceTree = "<group>";
+		};
+		C30000000000000000000001 /* Continuity */ = {
+			isa = PBXGroup;
+			children = (
+				C20000000000000000000001 /* SessionActivityDescriptor.swift */,
+				C20000000000000000000002 /* ContinuationResolver.swift */,
+				C20000000000000000000003 /* ActivityBroadcaster.swift */,
+				C20000000000000000000004 /* ContinuationCoordinator.swift */,
+				C20000000000000000000005 /* ContinuationOverlayView.swift */,
+				C2000000000000000000000F /* CredentialCardView.swift */,
+			);
+			path = Continuity;
+			sourceTree = "<group>";
+		};
+		C30000000000000000000002 /* Bootstrap */ = {
+			isa = PBXGroup;
+			children = (
+				C20000000000000000000006 /* BootstrapManifest.swift */,
+				C20000000000000000000007 /* NearbyHandshake.swift */,
+				C20000000000000000000008 /* NearbyTransferService.swift */,
+				C20000000000000000000011 /* BootstrapManifestAdapter.swift */,
+				C20000000000000000000018 /* BootstrapCoordinator.swift */,
+				C20000000000000000000019 /* BootstrapFlowView.swift */,
+				C2000000000000000000001F /* BootstrapNetworkHarness.swift */,
+				C20000000000000000000021 /* NearbyBootstrapCompatibility.swift */,
+			);
+			path = Bootstrap;
+			sourceTree = "<group>";
+		};
+		C30000000000000000000003 /* Enrollment */ = {
+			isa = PBXGroup;
+			children = (
+				C20000000000000000000012 /* EnrollmentMessages.swift */,
+				C20000000000000000000013 /* EnrollmentService.swift */,
+				C2000000000000000000001B /* EnrollmentContinuationStreamTransport.swift */,
+				C2000000000000000000001C /* EnrollmentCoordinator.swift */,
+				C2000000000000000000001D /* EnrollmentApprovalView.swift */,
+			);
+			path = Enrollment;
 			sourceTree = "<group>";
 		};
 		1A0012000000000000000008 /* Terminal */ = {
@@ -753,6 +948,8 @@
 				1A00B0000000000000000002 /* AgentSessionSourceFactory.swift */,
 				1A00B0000000000000000003 /* AgentCenterPage.swift */,
 				1A00B0000000000000000004 /* RemoteAgentLifecycleIntegrationInstaller.swift */,
+				1A00B0000000000000000005 /* SwipePadAgentContext.swift */,
+				1A00B0000000000000000006 /* AgentRegexCache.swift */,
 			);
 			path = AgentCenter;
 			sourceTree = "<group>";
@@ -795,6 +992,7 @@
 				1A002B000000000000000005 /* SpeechDictationController.swift */,
 				1A002B000000000000000006 /* SwipePadOverlay.swift */,
 				1A002B000000000000000007 /* SwipePadView.swift */,
+				1A002B00000000000000000B /* SwipePadPetalLayout.swift */,
 			);
 			path = SwipePad;
 			sourceTree = "<group>";
@@ -822,6 +1020,8 @@
 			isa = PBXGroup;
 			children = (
 				5930AA51D944F5C5F0C84F3C /* Foundation.framework */,
+				5B10000000000000000020 /* StoreKit.framework */,
+				5B10000000000000000021 /* StoreKitTest.framework */,
 			);
 			name = iOS;
 			sourceTree = "<group>";
@@ -892,6 +1092,7 @@
 			buildPhases = (
 				1A0006000000000000000004 /* Sources */,
 				1A0006000000000000000005 /* Frameworks */,
+				5B1200000000000000000001 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -954,11 +1155,11 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				1A0009000000000000000001 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
-				1A0009000000000000000002 /* XCRemoteSwiftPackageReference "Citadel" */,
 				1A000B000000000000000001 /* XCLocalSwiftPackageReference "ScrollDispatcher" */,
 				1A000B000000000000000002 /* XCLocalSwiftPackageReference "TmuxControl" */,
 				1A000B000000000000000003 /* XCLocalSwiftPackageReference "MoshBridge" */,
 				1A000B000000000000000004 /* XCLocalSwiftPackageReference "PortForwarding" */,
+				1A000B000000000000000005 /* XCLocalSwiftPackageReference "Citadel" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1A0002000000000000000003 /* Products */;
@@ -974,6 +1175,14 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		5B1200000000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5B1100000000000000000016 /* Tessera.storekit in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		1A0006000000000000000003 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -1010,10 +1219,33 @@
 			files = (
 				1A0004000000000000000001 /* TesseraApp.swift in Sources */,
 				1A0004000000000000000002 /* ContentView.swift in Sources */,
+				C10000000000000000000001 /* SessionActivityDescriptor.swift in Sources */,
+				C10000000000000000000002 /* ContinuationResolver.swift in Sources */,
+				C10000000000000000000003 /* ActivityBroadcaster.swift in Sources */,
+				C10000000000000000000004 /* ContinuationCoordinator.swift in Sources */,
+				C10000000000000000000005 /* ContinuationOverlayView.swift in Sources */,
+				C10000000000000000000006 /* BootstrapManifest.swift in Sources */,
+				C10000000000000000000007 /* NearbyHandshake.swift in Sources */,
+				C10000000000000000000008 /* NearbyTransferService.swift in Sources */,
+				C10000000000000000000009 /* ContinuitySettingsView.swift in Sources */,
+				C1000000000000000000000F /* CredentialCardView.swift in Sources */,
+				C10000000000000000000011 /* BootstrapManifestAdapter.swift in Sources */,
+				C10000000000000000000012 /* EnrollmentMessages.swift in Sources */,
+				C10000000000000000000013 /* EnrollmentService.swift in Sources */,
+				C10000000000000000000018 /* BootstrapCoordinator.swift in Sources */,
+				C10000000000000000000019 /* BootstrapFlowView.swift in Sources */,
+				C1000000000000000000001F /* BootstrapNetworkHarness.swift in Sources */,
+				C10000000000000000000021 /* NearbyBootstrapCompatibility.swift in Sources */,
+				C10000000000000000000022 /* AppVersion.swift in Sources */,
+				C1000000000000000000001B /* EnrollmentContinuationStreamTransport.swift in Sources */,
+				C1000000000000000000001C /* EnrollmentCoordinator.swift in Sources */,
+				C1000000000000000000001D /* EnrollmentApprovalView.swift in Sources */,
 				1A00B1000000000000000001 /* AgentCenter.swift in Sources */,
 				1A00B1000000000000000002 /* AgentSessionSourceFactory.swift in Sources */,
 				1A00B1000000000000000003 /* AgentCenterPage.swift in Sources */,
 				1A00B1000000000000000004 /* RemoteAgentLifecycleIntegrationInstaller.swift in Sources */,
+				1A00B1000000000000000005 /* SwipePadAgentContext.swift in Sources */,
+				1A00B1000000000000000006 /* AgentRegexCache.swift in Sources */,
 				1A0004000000000000000009 /* Host.swift in Sources */,
 				1A000400000000000000000A /* SSHSession.swift in Sources */,
 				1A000400000000000000000B /* HostEntryView.swift in Sources */,
@@ -1115,6 +1347,7 @@
 				1A002C000000000000000005 /* SpeechDictationController.swift in Sources */,
 				1A002C000000000000000006 /* SwipePadOverlay.swift in Sources */,
 				1A002C000000000000000007 /* SwipePadView.swift in Sources */,
+				1A002C00000000000000000B /* SwipePadPetalLayout.swift in Sources */,
 				1A002C00000000000000000A /* ExperimentalSettingsView.swift in Sources */,
 				1A001400000000000000002C /* SessionRegistry.swift in Sources */,
 				1A001400000000000000002D /* CommandPalette.swift in Sources */,
@@ -1135,6 +1368,12 @@
 				1A006100000000000000000C /* UploadSheetView.swift in Sources */,
 				1A006100000000000000000D /* FilesSettingsView.swift in Sources */,
 				1A0061000000000000000012 /* RemoteCwdPoller.swift in Sources */,
+				5B1100000000000000000010 /* HostAccessProduct.swift in Sources */,
+				5B1100000000000000000011 /* StoreKitClient.swift in Sources */,
+				5B1100000000000000000012 /* HostAccessStore.swift in Sources */,
+				5B1100000000000000000013 /* SavedHostAdmissionPolicy.swift in Sources */,
+				5B1100000000000000000014 /* UnlimitedHostsSheet.swift in Sources */,
+				5B1100000000000000000015 /* UnlimitedHostsSettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1142,6 +1381,20 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C1000000000000000000000A /* ContinuityFoundationTests.swift in Sources */,
+				C1000000000000000000000B /* SyncClassificationTests.swift in Sources */,
+				C1000000000000000000000C /* BootstrapManifestTests.swift in Sources */,
+				C1000000000000000000000D /* BootstrapNearbyHandshakeTests.swift in Sources */,
+				C1000000000000000000000E /* BootstrapNearbyTransferServiceTests.swift in Sources */,
+				C10000000000000000000010 /* RemoteInstallationLedgerTests.swift in Sources */,
+				C10000000000000000000014 /* EnrollmentMessagesTests.swift in Sources */,
+				C10000000000000000000015 /* EnrollmentServiceTests.swift in Sources */,
+				C10000000000000000000016 /* ContinuityLifecycleTests.swift in Sources */,
+				C10000000000000000000017 /* BootstrapManifestAdapterTests.swift in Sources */,
+				C1000000000000000000001A /* BootstrapCoordinatorTests.swift in Sources */,
+				C10000000000000000000023 /* BootstrapWireSchemaTests.swift in Sources */,
+				C1000000000000000000001E /* EnrollmentContinuationStreamTransportTests.swift in Sources */,
+				C10000000000000000000020 /* EnrollmentCoordinatorTests.swift in Sources */,
 				1A00A0000000000000000002 /* RealHostTransportIntegrationTests.swift in Sources */,
 				1A00A0000000000000000006 /* TerminalScrollbackOracleTests.swift in Sources */,
 				1A0004000000000000000023 /* MoshBootstrapTests.swift in Sources */,
@@ -1156,6 +1409,7 @@
 				1A0024000000000000000005 /* ModifierStateTests.swift in Sources */,
 				1A002C000000000000000008 /* MacroEncoderTests.swift in Sources */,
 				1A002C000000000000000009 /* SwipePadProfileTests.swift in Sources */,
+				1A002C00000000000000000C /* SwipePadPetalLayoutTests.swift in Sources */,
 				1A0024000000000000000009 /* SessionRegistryTests.swift in Sources */,
 				1A002400000000000000000A /* CommandPaletteTests.swift in Sources */,
 				1A002400000000000000000B /* SessionSwitcherTests.swift in Sources */,
@@ -1166,6 +1420,7 @@
 				1A0050000000000000000004 /* PaneLayoutMathTests.swift in Sources */,
 				1A006100000000000000000E /* FileBridgeTests.swift in Sources */,
 				1A00610000000000000000A0 /* RemotePathResolverTests.swift in Sources */,
+				F4D2A2000000000000000001 /* QuickLookPresenterTests.swift in Sources */,
 				1A006100000000000000000F /* TransferQueueTests.swift in Sources */,
 				1A0061000000000000000010 /* RemoteShellIntegrationInstallerTests.swift in Sources */,
 				1A0061000000000000000013 /* RemoteCwdPollerTests.swift in Sources */,
@@ -1174,6 +1429,9 @@
 				1A0091000000000000000001 /* KeyStoreSecurityTests.swift in Sources */,
 				1A0091000000000000000002 /* BiometricRevocationRaceTests.swift in Sources */,
 				1A0091000000000000000003 /* SSHAuthenticationPolicyRaceTests.swift in Sources */,
+				5B1100000000000000000017 /* SavedHostAdmissionPolicyTests.swift in Sources */,
+				5B1100000000000000000018 /* HostAccessStoreTests.swift in Sources */,
+				5B1100000000000000000019 /* StoreKitPurchaseTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1350,23 +1608,24 @@
 				INFOPLIST_FILE = Tessera/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Tessera;
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Tessera unlocks SSH keys protected by biometric authentication.";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Tessera connects to SSH and Mosh servers on your local network and forwards local ports to them.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Tessera connects to SSH and Mosh servers on your local network, forwards local ports, and can bootstrap a new device directly from a nearby Tessera device.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Tessera uses the microphone for on-device dictation into terminal sessions.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Tessera uses on-device speech recognition to dictate text into terminal sessions.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.2.0;
+				MARKETING_VERSION = 0.3.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 2;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
@@ -1384,23 +1643,24 @@
 				INFOPLIST_FILE = Tessera/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Tessera;
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Tessera unlocks SSH keys protected by biometric authentication.";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Tessera connects to SSH and Mosh servers on your local network and forwards local ports to them.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Tessera connects to SSH and Mosh servers on your local network, forwards local ports, and can bootstrap a new device directly from a nearby Tessera device.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Tessera uses the microphone for on-device dictation into terminal sessions.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Tessera uses on-device speech recognition to dictate text into terminal sessions.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.2.0;
+				MARKETING_VERSION = 0.3.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 2;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
@@ -1417,12 +1677,12 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.2.0;
+				MARKETING_VERSION = 0.3.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 2;
+				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Tessera.app/Tessera";
 				TEST_TARGET_NAME = Tessera;
 			};
@@ -1441,12 +1701,12 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.2.0;
+				MARKETING_VERSION = 0.3.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 2;
+				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Tessera.app/Tessera";
 				TEST_TARGET_NAME = Tessera;
 			};
@@ -1464,7 +1724,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 2;
+				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_TARGET_NAME = Tessera;
 				VALIDATE_PRODUCT = YES;
 			};
@@ -1482,7 +1742,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 2;
+				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_TARGET_NAME = Tessera;
 			};
 			name = Debug;
@@ -1505,13 +1765,13 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.0;
+				MARKETING_VERSION = 0.3.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraApp.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 2;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
@@ -1533,13 +1793,13 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.0;
+				MARKETING_VERSION = 0.3.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraApp.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 2;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
@@ -1610,6 +1870,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/PortForwarding;
 		};
+		1A000B000000000000000005 /* XCLocalSwiftPackageReference "Citadel" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Citadel;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -1619,14 +1883,6 @@
 			requirement = {
 				kind = revision;
 				revision = d135aeb10108a3c11fb897aad656ea345545184c;
-			};
-		};
-		1A0009000000000000000002 /* XCRemoteSwiftPackageReference "Citadel" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/orlandos-nl/Citadel";
-			requirement = {
-				kind = upToNextMinorVersion;
-				minimumVersion = 0.12.1;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -1647,7 +1903,6 @@
 		};
 		1A000A000000000000000004 /* Citadel */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 1A0009000000000000000002 /* XCRemoteSwiftPackageReference "Citadel" */;
 			productName = Citadel;
 		};
 		1A000A000000000000000005 /* MoshBridge */ = {

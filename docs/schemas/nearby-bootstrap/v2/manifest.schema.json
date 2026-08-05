@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tessera://schemas/nearby-bootstrap/v2/manifest.schema.json",
+  "title": "BootstrapManifest v2",
+  "description": "Nearby-bootstrap payload. Strict: unknown fields are rejected by BootstrapManifestSchema. Frozen for protocol version 2 - never edit; bump the protocol version and add a new folder instead.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "identities", "hosts", "jumpChains", "appearance", "settings"],
+  "properties": {
+    "version": { "type": "integer", "const": 2 },
+    "identities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "user"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "user": { "type": "string" }
+        }
+      }
+    },
+    "hosts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id", "name", "address", "port", "user", "transport", "launchMode",
+          "tags", "osHint", "sortOrder", "authenticationHint", "portForwards"
+        ],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "address": { "type": "string" },
+          "port": { "type": "integer", "minimum": 0, "maximum": 65535 },
+          "user": { "type": "string" },
+          "transport": { "type": "string", "enum": ["ssh", "mosh"] },
+          "launchMode": { "type": "string", "enum": ["autoTmux", "pinnedTmux", "customCommand"] },
+          "tmuxSessionName": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "osHint": { "type": "string" },
+          "sortOrder": { "type": "integer" },
+          "authenticationHint": { "type": "string", "enum": ["none", "password", "publicKey"] },
+          "identityID": { "type": "string", "format": "uuid" },
+          "hostKeyFingerprint": { "type": "string" },
+          "launchCommand": { "type": "string" },
+          "notes": { "type": "string" },
+          "envVars": { "type": "string" },
+          "startupSnippet": { "type": "string" },
+          "portForwards": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "enabled", "autoStart", "localPort", "remoteHost", "remotePort", "label"],
+              "properties": {
+                "id": { "type": "string", "format": "uuid" },
+                "enabled": { "type": "boolean" },
+                "autoStart": { "type": "boolean" },
+                "localPort": { "type": "integer", "minimum": 0, "maximum": 65535 },
+                "remoteHost": { "type": "string" },
+                "remotePort": { "type": "integer", "minimum": 0, "maximum": 65535 },
+                "label": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "jumpChains": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["hostID", "jumpHostID"],
+        "properties": {
+          "hostID": { "type": "string", "format": "uuid" },
+          "jumpHostID": { "type": "string", "format": "uuid" }
+        }
+      }
+    },
+    "knownHosts": {
+      "type": "array",
+      "description": "Optional on the wire so an older v1 payload decodes far enough to report its unsupported version.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["hostID", "fingerprint", "keyString", "firstSeen", "lastSeen"],
+        "properties": {
+          "hostID": { "type": "string", "format": "uuid" },
+          "fingerprint": { "type": "string" },
+          "keyString": { "type": "string" },
+          "firstSeen": { "type": "number", "description": "Seconds since 2001-01-01 (Swift Date reference)" },
+          "lastSeen": { "type": "number", "description": "Seconds since 2001-01-01 (Swift Date reference)" }
+        }
+      }
+    },
+    "appearance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "colorScheme", "accent", "customAccentRGB", "monospacedFontName",
+        "terminalFontSize", "chromeMaterial", "cursorStyle", "cursorBlink", "terminalThemeID"
+      ],
+      "properties": {
+        "colorScheme": { "type": "string" },
+        "accent": { "type": "string" },
+        "customAccentRGB": { "type": "integer" },
+        "monospacedFontName": { "type": "string" },
+        "terminalFontSize": { "type": "number" },
+        "chromeMaterial": { "type": "string" },
+        "cursorStyle": { "type": "string" },
+        "cursorBlink": { "type": "boolean" },
+        "terminalThemeID": { "type": "string" }
+      }
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scrollbackLines", "modifierBehavior", "bellSoundEnabled",
+        "bellVisualEnabled", "bellNotificationEnabled", "accessoryBarKeys",
+        "filesReaperDays", "filesDefaultDestination"
+      ],
+      "properties": {
+        "scrollbackLines": { "type": "integer" },
+        "modifierBehavior": { "type": "string" },
+        "bellSoundEnabled": { "type": "boolean" },
+        "bellVisualEnabled": { "type": "boolean" },
+        "bellNotificationEnabled": { "type": "boolean" },
+        "accessoryBarKeys": { "type": "array", "items": { "type": "string" } },
+        "filesReaperDays": { "type": "integer" },
+        "filesDefaultDestination": { "type": "string" }
+      }
+    }
+  }
+}

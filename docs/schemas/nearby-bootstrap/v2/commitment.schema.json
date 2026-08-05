@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tessera://schemas/nearby-bootstrap/v2/commitment.schema.json",
+  "title": "NearbyHandshakeCommitment v2",
+  "description": "First message on the wire (recipient to origin). Lenient decoder; unknown keys ignored. helloDigest commits to the projection {version, role, ephemeralPublicKey} of the recipient hello - advisory fields stay out of the projection. Frozen for protocol version 2.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["version", "role", "helloDigest"],
+  "properties": {
+    "version": { "type": "integer", "const": 2 },
+    "role": { "type": "string", "const": "recipient" },
+    "helloDigest": { "type": "string", "description": "base64, SHA-256 over the committed hello projection" },
+    "appVersion": { "type": "string", "description": "Advisory: sender's CFBundleShortVersionString; sanitize before display" },
+    "supportedVersions": { "type": "array", "items": { "type": "integer" }, "description": "Advisory: lets a future origin downgrade to an old recipient before disclosing anything" }
+  }
+}

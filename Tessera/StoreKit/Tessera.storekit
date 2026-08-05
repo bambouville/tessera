@@ -1,0 +1,38 @@
+{
+  "identifier" : "5F3A8C1E9B2D4E6F8A0B1C2D3E4F5A6B",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "9.99",
+      "familyShareable" : false,
+      "internalID" : "6C4A2E91",
+      "localizations" : [
+        {
+          "description" : "Save and manage as many hosts as you need.",
+          "displayName" : "Unlimited Saved Hosts",
+          "locale" : "en_US"
+        },
+        {
+          "description" : "Speichere und verwalte beliebig viele Hosts.",
+          "displayName" : "Unbegrenzt gespeicherte Hosts",
+          "locale" : "de_DE"
+        }
+      ],
+      "productID" : "com.bambouville.TesseraApp.unlimited_hosts",
+      "referenceName" : "Unlimited Saved Hosts",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+
+  },
+  "subscriptionGroups" : [
+
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

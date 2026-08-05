@@ -137,6 +137,24 @@ final class PaneCommandTests: XCTestCase {
         expectSent(sent, "split-window -v -t %5 -e COLORTERM=truecolor\n")
     }
 
+    func test_splitExplicitPaneSendsTargetedCommand() {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeWithTwoPaneFixture(controller, sent: sent)
+
+        controller.splitPane(PaneId(6), axis: .horizontal)
+
+        expectSent(sent, "split-window -h -t %6 -e COLORTERM=truecolor\n")
+    }
+
+    func test_splitUnknownPaneIsNoOp() {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeWithTwoPaneFixture(controller, sent: sent)
+
+        controller.splitPane(PaneId(99), axis: .vertical)
+
+        expectSent(sent, "")
+    }
+
     func test_sideChannelSplitSinglePaneTurnsOnPaneBorderBeforeSplit() {
         let (controller, _, sent) = makeController(controlPath: .sideChannel)
         enterTmuxModeWithSinglePaneFixture(controller, sent: sent)
@@ -167,6 +185,41 @@ final class PaneCommandTests: XCTestCase {
         controller.selectPane(PaneId(6))
 
         expectSent(sent, "select-pane -t %6\n")
+    }
+
+    func test_selectPanePreservingWindowZoomSelectsDifferentPaneAtomically() {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeWithTwoPaneFixture(controller, sent: sent)
+        controller.ingest(Array(
+            "%layout-change @1 8205,80x24,0,0{40x24,0,0,5,39x24,41,0,6} b25d,80x24,0,0,5 *Z\r\n".utf8
+        ))
+        sent.clear()
+
+        controller.selectPanePreservingWindowZoom(PaneId(6))
+
+        expectSent(sent, "select-pane -Z -t %6\n")
+    }
+
+    func test_selectPanePreservingWindowZoomUsesSafeFlagWhenCachedWindowIsUnzoomed() {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeWithTwoPaneFixture(controller, sent: sent)
+
+        controller.selectPanePreservingWindowZoom(PaneId(6))
+
+        expectSent(sent, "select-pane -Z -t %6\n")
+    }
+
+    func test_selectPanePreservingWindowZoomDoesNotToggleCurrentZoomedPane() {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeWithTwoPaneFixture(controller, sent: sent)
+        controller.ingest(Array(
+            "%layout-change @1 8205,80x24,0,0{40x24,0,0,5,39x24,41,0,6} b25d,80x24,0,0,5 *Z\r\n".utf8
+        ))
+        sent.clear()
+
+        controller.selectPanePreservingWindowZoom(PaneId(5))
+
+        expectSent(sent, "select-pane -Z -t %5\n")
     }
 
     func test_killActivePaneSendsCommand() {

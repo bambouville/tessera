@@ -92,15 +92,39 @@ public final class SwipePadProfileStore {
     /// a ghost user profile behind. `fallback` is always present and last.
     private static func merge(defaults: [SwipePadProfile], stored: [SwipePadProfile]) -> [SwipePadProfile] {
         let retired = SwipePadProfile.retiredBuiltInIDs
-        let storedByID = Dictionary(uniqueKeysWithValues: stored.map { ($0.id, $0) })
+        // Duplicate IDs in corrupted storage must not trap into a launch
+        // crash loop — first occurrence wins.
+        let storedByID = Dictionary(
+            stored.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         var out: [SwipePadProfile] = []
         var seen = Set<UUID>()
         for d in defaults where d.id != SwipePadProfile.fallbackID {
             if let user = storedByID[d.id] {
                 // Take the default's name + matchProcess + isBuiltIn;
-                // overlay the user's stored bindings on top.
+                // overlay the user's stored bindings on top, then upgrade
+                // superseded factory macros *per direction*: a stored macro
+                // that still equals the old factory macro for its direction
+                // was never customized there and adopts the current factory
+                // binding (this is how the 2026-08 Claude deny/always macro
+                // correction reaches existing installs). Per-direction, not
+                // whole-map: a user who only customized an unrelated
+                // direction (say `.down`) must still receive the deny/always
+                // correction on the untouched ones — otherwise their trained
+                // deny gesture keeps sending what is now sticky consent.
+                // A direction whose macro differs from the old factory value
+                // is a real customization and is kept verbatim.
                 var merged = d
                 merged.bindings = user.bindings
+                if let legacyMacros = Self.supersededFactoryMacros[d.id] {
+                    for (direction, legacyMacro) in legacyMacros
+                    where merged.bindings[direction]?.macro == legacyMacro {
+                        merged.bindings[direction] = d.bindings[direction]
+                            ?? SwipePadBinding(macro: "")
+                    }
+                }
+                Self.backfillFactoryLabels(&merged, factory: d)
                 out.append(merged)
             } else {
                 out.append(d)
@@ -110,6 +134,10 @@ public final class SwipePadProfileStore {
         for s in stored where !seen.contains(s.id)
             && s.id != SwipePadProfile.fallbackID
             && !retired.contains(s.id) {
+            // First occurrence wins here too: without marking the ID seen,
+            // duplicated custom IDs in corrupted storage would survive as
+            // ghost entries with ambiguous selection/editing behavior.
+            seen.insert(s.id)
             var copy = s
             copy.isBuiltIn = false
             out.append(copy)
@@ -118,6 +146,7 @@ public final class SwipePadProfileStore {
         if let storedFallback = storedByID[SwipePadProfile.fallbackID] {
             var merged = SwipePadProfile.fallback
             merged.bindings = storedFallback.bindings
+            Self.backfillFactoryLabels(&merged, factory: SwipePadProfile.fallback)
             out.append(merged)
         } else {
             out.append(SwipePadProfile.fallback)
@@ -125,8 +154,50 @@ public final class SwipePadProfileStore {
         return out
     }
 
-    /// Keep `fallback` last; built-ins keep their canonical isBuiltIn flag.
+    /// Retired factory macro sets, keyed by built-in ID. A stored bindings
+    /// dictionary that matches one of these byte-for-byte (macros only) was
+    /// never customized and is silently upgraded to the current factory set.
+    /// Pre-2026-08 Claude bound left=2↵/up=3↵ against a menu Claude later
+    /// reordered — leaving "deny" sending "Yes, and always allow…".
+    private static let supersededFactoryMacros: [UUID: [SwipeDirection: String]] = [
+        SwipePadProfile.builtInClaudeCodeID: [
+            .right: "1↵",
+            .left: "2↵",
+            .up: "3↵",
+        ],
+    ]
+
+    /// Factory labels are code-owned metadata for factory macros: a binding
+    /// whose macro matches the factory macro for its direction always
+    /// carries the *current* factory label (renames propagate, and the
+    /// editor's label-less saves self-heal immediately); a customized macro
+    /// carries none and reads as its macro text.
+    static func backfillFactoryLabels(
+        _ profile: inout SwipePadProfile,
+        factory: SwipePadProfile
+    ) {
+        for (direction, binding) in profile.bindings {
+            guard let factoryBinding = factory.bindings[direction] else { continue }
+            let label = factoryBinding.macro == binding.macro
+                ? factoryBinding.label
+                : nil
+            if profile.bindings[direction]?.label != label {
+                profile.bindings[direction]?.label = label
+            }
+        }
+    }
+
+    /// Keep `fallback` last; built-ins keep their canonical isBuiltIn flag
+    /// and factory labels (the profile editor saves bindings label-less, so
+    /// every mutation re-attaches labels before persisting instead of
+    /// leaving raw macro text on the petals until the next launch).
     private func normalize() {
+        for idx in profiles.indices where profiles[idx].isBuiltIn {
+            if let factory = SwipePadProfile.allBuiltIns
+                .first(where: { $0.id == profiles[idx].id }) {
+                Self.backfillFactoryLabels(&profiles[idx], factory: factory)
+            }
+        }
         if let idx = profiles.firstIndex(where: { $0.id == SwipePadProfile.fallbackID }),
            idx != profiles.count - 1 {
             let fallback = profiles.remove(at: idx)

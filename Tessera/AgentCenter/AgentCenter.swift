@@ -426,16 +426,33 @@ struct AgentLifecycleEvent: Equatable, Sendable {
 /// `OSC 1337;TesseraAgentState=<base64-json> BEL` to the owning terminal. The
 /// scanner is intentionally transport-blind: raw SSH/mosh bytes and tmux pane
 /// output both enter through AgentCenter.noteOutput.
+/// Hot path: runs over every `%output` payload of an integrated pane. The
+/// normal-state scan is a raw-pointer skip loop, OSC accumulation lives in a
+/// stored buffer (an enum payload would copy-on-rewrap per byte — measured
+/// microseconds per byte in Debug builds), and an OSC whose payload diverges
+/// from the Tessera prefix stops buffering immediately: terminal-title OSCs
+/// (which chatty TUIs emit constantly) diverge on their first byte, so they
+/// skip straight to the terminator instead of accumulating.
+/// Recognition is deliberately 7-bit only (`ESC ]`, never C1 0x9D): 0x9D is
+/// also the trailing byte of a curly quote (E2 80 9D), so treating it as an
+/// OSC opener let ordinary prose park the scanner in skip mode and swallow
+/// the next genuine agent-state OSC. Skip mode is byte-capped for the same
+/// reason — an unterminated opener (e.g. cat-ing a binary) must not disable
+/// lifecycle events for the rest of the session.
 struct AgentLifecycleOSCScanner: Sendable {
     private enum State: Sendable {
         case normal
         case escape
-        case osc([UInt8])
-        case oscEscape([UInt8])
+        case osc
+        case oscSkip
+        case oscEscape
+        case oscSkipEscape
     }
 
     private static let prefix = Array("1337;TesseraAgentState=".utf8)
     private var state: State = .normal
+    private var oscBuffer: [UInt8] = []
+    private var skippedOSCBytes = 0
     private let maximumOSCBytes = 16 * 1024
     private(set) var candidateChunkCount = 0
 
@@ -446,56 +463,153 @@ struct AgentLifecycleOSCScanner: Sendable {
         }
         candidateChunkCount &+= 1
         var events: [AgentLifecycleEvent] = []
-        for byte in bytes {
-            switch state {
-            case .normal:
-                if byte == 0x1B { state = .escape }
-                else if byte == 0x9D { state = .osc([]) }
-            case .escape:
-                if byte == 0x5D { state = .osc([]) }
-                else { state = byte == 0x1B ? .escape : .normal }
-            case .osc(var buffer):
-                if byte == 0x07 {
-                    finish(buffer, into: &events)
-                    state = .normal
-                } else if byte == 0x1B {
-                    state = .oscEscape(buffer)
-                } else {
-                    buffer.append(byte)
-                    state = buffer.count <= maximumOSCBytes ? .osc(buffer) : .normal
-                }
-            case .oscEscape(var buffer):
-                if byte == 0x5C {
-                    finish(buffer, into: &events)
-                    state = .normal
-                } else {
-                    buffer.append(0x1B)
-                    buffer.append(byte)
-                    state = buffer.count <= maximumOSCBytes ? .osc(buffer) : .normal
+        bytes.withUnsafeBufferPointer { buffer in
+            var i = 0
+            let count = buffer.count
+            while i < count {
+                let byte = buffer[i]
+                switch state {
+                case .normal:
+                    if byte == 0x1B {
+                        state = .escape
+                        i += 1
+                    } else {
+                        i += 1
+                        while i < count {
+                            let b = buffer[i]
+                            if b == 0x1B { break }
+                            i += 1
+                        }
+                    }
+
+                case .escape:
+                    if byte == 0x5D { beginOSC() }
+                    else { state = byte == 0x1B ? .escape : .normal }
+                    i += 1
+
+                case .osc:
+                    if byte == 0x07 {
+                        finishOSC(into: &events)
+                        i += 1
+                    } else if byte == 0x1B {
+                        state = .oscEscape
+                        i += 1
+                    } else {
+                        let runStart = i
+                        i += 1
+                        while i < count {
+                            let b = buffer[i]
+                            if b == 0x07 || b == 0x1B { break }
+                            i += 1
+                        }
+                        oscBuffer.append(
+                            contentsOf: UnsafeBufferPointer(rebasing: buffer[runStart..<i])
+                        )
+                        if !payloadCouldMatchPrefix() {
+                            enterSkip()
+                        } else if oscBuffer.count > maximumOSCBytes {
+                            state = .normal
+                            oscBuffer.removeAll(keepingCapacity: true)
+                        }
+                    }
+
+                case .oscSkip:
+                    if byte == 0x07 {
+                        state = .normal
+                        i += 1
+                    } else if byte == 0x1B {
+                        state = .oscSkipEscape
+                        i += 1
+                    } else {
+                        let runStart = i
+                        i += 1
+                        while i < count {
+                            let b = buffer[i]
+                            if b == 0x07 || b == 0x1B { break }
+                            i += 1
+                        }
+                        skippedOSCBytes += i - runStart
+                        if skippedOSCBytes > maximumOSCBytes {
+                            state = .normal
+                        }
+                    }
+
+                case .oscEscape:
+                    if byte == 0x5C {
+                        finishOSC(into: &events)
+                    } else {
+                        oscBuffer.append(0x1B)
+                        oscBuffer.append(byte)
+                        if !payloadCouldMatchPrefix() {
+                            enterSkip()
+                        } else if oscBuffer.count > maximumOSCBytes {
+                            state = .normal
+                            oscBuffer.removeAll(keepingCapacity: true)
+                        } else {
+                            state = .osc
+                        }
+                    }
+                    i += 1
+
+                case .oscSkipEscape:
+                    if byte == 0x5C {
+                        state = .normal
+                    } else {
+                        skippedOSCBytes += 2
+                        state = skippedOSCBytes > maximumOSCBytes ? .normal : .oscSkip
+                    }
+                    i += 1
                 }
             }
         }
         return events
     }
 
-    private func containsOSCCandidate(_ bytes: ArraySlice<UInt8>) -> Bool {
-        if bytes.contains(0x9D) { return true }
-        var searchStart = bytes.startIndex
-        while searchStart < bytes.endIndex,
-              let escape = bytes[searchStart...].firstIndex(of: 0x1B) {
-            let next = bytes.index(after: escape)
-            if next == bytes.endIndex || bytes[next] == 0x5D { return true }
-            searchStart = next
-        }
-        return false
+    private mutating func beginOSC() {
+        state = .osc
+        oscBuffer.removeAll(keepingCapacity: true)
     }
 
-    private func finish(
-        _ buffer: [UInt8],
-        into events: inout [AgentLifecycleEvent]
-    ) {
-        guard buffer.starts(with: Self.prefix) else { return }
-        let encoded = String(decoding: buffer.dropFirst(Self.prefix.count), as: UTF8.self)
+    private mutating func enterSkip() {
+        state = .oscSkip
+        oscBuffer.removeAll(keepingCapacity: true)
+        skippedOSCBytes = 0
+    }
+
+    /// True while the buffered payload is still a viable prefix of
+    /// `1337;TesseraAgentState=`. Bounded — never compares more than the
+    /// prefix length regardless of payload size.
+    private func payloadCouldMatchPrefix() -> Bool {
+        let checkCount = min(oscBuffer.count, Self.prefix.count)
+        for index in 0..<checkCount where oscBuffer[index] != Self.prefix[index] {
+            return false
+        }
+        return true
+    }
+
+    private func containsOSCCandidate(_ bytes: ArraySlice<UInt8>) -> Bool {
+        bytes.withUnsafeBufferPointer { buffer in
+            var i = 0
+            let count = buffer.count
+            while i < count {
+                let byte = buffer[i]
+                if byte == 0x1B {
+                    if i + 1 == count { return true }
+                    if buffer[i + 1] == 0x5D { return true }
+                }
+                i += 1
+            }
+            return false
+        }
+    }
+
+    private mutating func finishOSC(into events: inout [AgentLifecycleEvent]) {
+        defer {
+            state = .normal
+            oscBuffer.removeAll(keepingCapacity: true)
+        }
+        guard oscBuffer.starts(with: Self.prefix) else { return }
+        let encoded = String(decoding: oscBuffer.dropFirst(Self.prefix.count), as: UTF8.self)
         guard let data = Data(base64Encoded: encoded),
               let json = String(data: data, encoding: .utf8),
               let event = AgentLifecycleEvent.decode(json: json)
@@ -560,6 +674,30 @@ struct AgentPromptOption: Identifiable, Equatable, Sendable {
     let isDefault: Bool
 }
 
+extension AgentPromptOption {
+    /// Shared negative-intent heuristic: input attribution uses it to decide
+    /// idle-vs-working after an answered prompt, and SwipePad uses it to tint
+    /// petals. One definition so the two features can never disagree. The
+    /// static form exists for label strings that aren't parsed options
+    /// (SwipePad binding labels).
+    var isNegativeLabel: Bool { Self.isNegativeLabel(label) }
+
+    static func isNegativeLabel(_ label: String) -> Bool {
+        let lowered = label.lowercased().trimmingCharacters(in: .whitespaces)
+        // "No, and tell Codex what to do differently" / "No, quit" style
+        // labels are refusals too — match "no" as a leading word, not just
+        // the exact label, but never as a prefix of another word ("note…").
+        // English-only by scope: both supported agents render English menus;
+        // revisit if a localized provider ships.
+        return lowered == "no"
+            || lowered.hasPrefix("no,")
+            || lowered.hasPrefix("no ")
+            || lowered.contains("deny")
+            || lowered.contains("cancel")
+            || lowered.contains("reject")
+    }
+}
+
 struct AgentPrompt: Equatable, Sendable {
     /// The normalized visible prompt segment. Kept verbatim so stale-prompt
     /// checking does not depend on process-randomized `Hasher` output.
@@ -605,6 +743,15 @@ struct AgentInstance: Identifiable, Equatable, Sendable {
               !providerSessionID.isEmpty else { return nil }
         return String(providerSessionID.prefix(8))
     }
+}
+
+/// Exact hook-proven agent allowed to suppress terminal scrolling. Keeping the
+/// identity with the display name lets presentation revalidate the same pane
+/// before showing feedback; a stale gesture callback can never blame an agent
+/// that has already stopped or moved.
+struct AgentScrollPrevention: Equatable, Sendable {
+    let agentID: AgentInstanceID
+    let agentName: String
 }
 
 /// Transport-owned observation returned to the shared detector. A tmux source
@@ -766,9 +913,8 @@ enum AgentPromptParser {
             if latestMatch(patterns: rules.blockingPromptPatterns, text: line) != nil {
                 return true
             }
-            if let optionRegex = try? NSRegularExpression(
-                pattern: rules.menuOptionPattern,
-                options: [.caseInsensitive]
+            if let optionRegex = AgentRegexCache.regex(
+                rules.menuOptionPattern
             ), optionRegex.firstMatch(
                 in: line,
                 range: NSRange(line.startIndex..., in: line)
@@ -834,10 +980,8 @@ enum AgentPromptParser {
         in segment: String,
         rules: AgentDetectionRules
     ) -> [AgentPromptOption] {
-        guard let regex = try? NSRegularExpression(
-            pattern: rules.menuOptionPattern,
-            options: [.caseInsensitive]
-        ) else { return [] }
+        guard let regex = AgentRegexCache.regex(rules.menuOptionPattern)
+        else { return [] }
         let range = NSRange(segment.startIndex..., in: segment)
         return regex.matches(in: segment, range: range).prefix(9).compactMap { match in
             guard match.numberOfRanges >= 4,
@@ -888,10 +1032,7 @@ enum AgentPromptParser {
     ) -> NSTextCheckingResult? {
         let fullRange = NSRange(text.startIndex..., in: text)
         return patterns.compactMap { pattern -> NSTextCheckingResult? in
-            guard let regex = try? NSRegularExpression(
-                pattern: pattern,
-                options: [.caseInsensitive]
-            ) else { return nil }
+            guard let regex = AgentRegexCache.regex(pattern) else { return nil }
             return regex.matches(in: text, range: fullRange).last
         }.max { lhs, rhs in lhs.range.location < rhs.range.location }
     }
@@ -921,10 +1062,7 @@ enum AgentPromptParser {
             .suffix(8)
 
         var stableSegment = segment
-        if let regex = try? NSRegularExpression(
-            pattern: rules.menuOptionPattern,
-            options: [.caseInsensitive]
-        ),
+        if let regex = AgentRegexCache.regex(rules.menuOptionPattern),
            let finalOption = regex.matches(
                 in: segment,
                 range: NSRange(segment.startIndex..., in: segment)
@@ -945,10 +1083,7 @@ enum AgentPromptParser {
         _ line: String,
         rules: AgentDetectionRules
     ) -> String {
-        guard let regex = try? NSRegularExpression(
-            pattern: rules.menuOptionPattern,
-            options: [.caseInsensitive]
-        ),
+        guard let regex = AgentRegexCache.regex(rules.menuOptionPattern),
         let match = regex.firstMatch(
             in: line,
             range: NSRange(line.startIndex..., in: line)
@@ -1075,6 +1210,54 @@ final class AgentCenter {
     private struct DiscardedLifecycleEvent {
         let timestampNanoseconds: UInt64
         let agentPID: Int?
+    }
+
+    /// Newest accepted provider-conversation identity, tracked separately
+    /// from `lifecycleEvents` because a status-neutral event (SubagentStop)
+    /// can be the first proof of a new conversation without ever becoming
+    /// the root-status event. Rebuilds select the root-status event by
+    /// semantics, not recency — without this record they would republish
+    /// that older event's session, and the SwipePad fire-guard key could go
+    /// A→B→A while the real conversation stays B.
+    private struct ProviderSessionIncarnation {
+        let providerSessionID: String
+        let timestampNanoseconds: UInt64
+    }
+
+    /// Identity of a turn the user explicitly interrupted with Escape.
+    /// Provider tool hooks can still arrive after Stop while the cancelled
+    /// turn unwinds. They are liveness evidence, but must not resurrect the
+    /// Swipe Pad's interrupt action until a new prompt/session begins.
+    private struct InterruptBoundary {
+        let provider: String
+        let providerSessionID: String
+        let turnID: String
+        let agentPID: Int?
+
+        init(event: AgentLifecycleEvent) {
+            provider = event.provider
+            providerSessionID = event.providerSessionID
+            turnID = event.turnID
+            agentPID = event.agentPID
+        }
+
+        func matches(_ event: AgentLifecycleEvent) -> Bool {
+            guard provider == event.provider else { return false }
+            if let agentPID, let eventPID = event.agentPID,
+               agentPID != eventPID {
+                return false
+            }
+            if !providerSessionID.isEmpty,
+               !event.providerSessionID.isEmpty,
+               providerSessionID != event.providerSessionID {
+                return false
+            }
+            if !turnID.isEmpty, !event.turnID.isEmpty,
+               turnID != event.turnID {
+                return false
+            }
+            return true
+        }
     }
 
     /// First observation of one cursor-owned blocking prompt within the
@@ -1213,6 +1396,8 @@ final class AgentCenter {
     ] = [:]
     @ObservationIgnored private var processIDs: [AgentInstanceID: Set<Int>] = [:]
     @ObservationIgnored private var discardedLifecycleEvents: [AgentInstanceID: DiscardedLifecycleEvent] = [:]
+    @ObservationIgnored private var providerSessionIncarnations: [AgentInstanceID: ProviderSessionIncarnation] = [:]
+    @ObservationIgnored private var interruptBoundaries: [AgentInstanceID: InterruptBoundary] = [:]
     @ObservationIgnored private var inputStatusOverrides: [AgentInstanceID: AgentStatus] = [:]
     @ObservationIgnored private var bracketedPasteModes: [AgentInstanceID: Bool] = [:]
     @ObservationIgnored private var terminalModeTails: [AgentInstanceID: [UInt8]] = [:]
@@ -1271,6 +1456,12 @@ final class AgentCenter {
     @ObservationIgnored private var hostIntegrationAutomaticRetryCounts: [String: Int] = [:]
     @ObservationIgnored private var sendGenerations: [AgentInstanceID: UInt64] = [:]
     @ObservationIgnored private var pendingJump: AgentInstanceID?
+    /// SwipePad projection bookkeeping. Contexts are handed to session views
+    /// and mutated only through their equality gate; the dictionaries stay
+    /// observation-ignored so republishing can run on every card change
+    /// without invalidating UI that doesn't read the snapshots.
+    @ObservationIgnored private var swipePadContexts: [UUID: SwipePadAgentContext] = [:]
+    @ObservationIgnored private var swipePadFocus: [UUID: AgentInstanceID] = [:]
     @ObservationIgnored private let sendVerificationDelayNanoseconds: UInt64
     @ObservationIgnored private let justFinishedDuration: TimeInterval
     @ObservationIgnored private let completionAttentionDelayNanoseconds: UInt64
@@ -1497,6 +1688,8 @@ final class AgentCenter {
         outputActivity.removeAll()
         lifecycleScanners.removeAll()
         lifecycleEvents.removeAll()
+        providerSessionIncarnations.removeAll()
+        interruptBoundaries.removeAll()
         lifecycleArrivalRevisions.removeAll()
         lifecyclePromptSubmitRevisions.removeAll()
         permissionPromptConfirmations.removeAll()
@@ -1525,7 +1718,7 @@ final class AgentCenter {
         pendingJump = nil
         visibleTarget = nil
         agentCenterSurfaceIsVisible = false
-        activityRevision &+= 1
+        noteAgentActivity()
     }
 
     func register(_ source: AgentSessionSource) {
@@ -1580,6 +1773,10 @@ final class AgentCenter {
         currentIntegrationForegrounds.removeValue(forKey: sessionID)
         inactiveAgentDiagnosticIdentities.removeValue(forKey: sessionID)
         shellStartupConvergenceIdentities.removeValue(forKey: sessionID)
+        swipePadFocus.removeValue(forKey: sessionID)
+        if let context = swipePadContexts.removeValue(forKey: sessionID) {
+            context.publish(nil)
+        }
         clearSessionState(sessionID: sessionID)
     }
 
@@ -1611,6 +1808,12 @@ final class AgentCenter {
         outputActivity = outputActivity.filter { $0.key.sessionID != sessionID }
         lifecycleScanners = lifecycleScanners.filter { $0.key.sessionID != sessionID }
         lifecycleEvents = lifecycleEvents.filter { $0.key.sessionID != sessionID }
+        providerSessionIncarnations = providerSessionIncarnations.filter {
+            $0.key.sessionID != sessionID
+        }
+        interruptBoundaries = interruptBoundaries.filter {
+            $0.key.sessionID != sessionID
+        }
         lifecycleArrivalRevisions = lifecycleArrivalRevisions.filter {
             $0.key.sessionID != sessionID
         }
@@ -1644,7 +1847,7 @@ final class AgentCenter {
             sendTasks.removeValue(forKey: id)?.cancel()
             sendGenerations[id] = (sendGenerations[id] ?? 0) &+ 1
         }
-        if removedAgents { activityRevision &+= 1 }
+        if removedAgents { noteAgentActivity() }
     }
 
     private static func isRootCompletion(_ event: AgentLifecycleEvent) -> Bool {
@@ -1742,6 +1945,7 @@ final class AgentCenter {
         agents[index].status = .idle
         agents[index].statusChangedAt = completedAt.addingTimeInterval(justFinishedDuration)
         agents[index].finishedAt = nil
+        agents[index].prompt = nil
         let updated = agents[index]
         handleStatusTransition(
             from: previous,
@@ -1751,7 +1955,7 @@ final class AgentCenter {
         DiagnosticLogStore.appendAgentCenter(
             "status-transition sid=\(Self.diagnosticSessionID(agentID.sessionID)) pane=\(Self.diagnosticPaneID(agentID.paneID)) source=finished-expiry previous=justFinished next=idle elapsed=\(Int(now.timeIntervalSince(completedAt)))"
         )
-        activityRevision &+= 1
+        noteAgentActivity()
     }
 
     private func reconcileCompletionExpiries(now: Date) {
@@ -2183,6 +2387,30 @@ final class AgentCenter {
             return
         }
         let id = AgentInstanceID(sessionID: sessionID, paneID: paneID)
+        // Only a literal Escape is an interruption. Arrow/function keys also
+        // begin with ESC, but arrive as multi-byte terminal sequences and
+        // must not quarantine the active turn.
+        if bytes.count == 1, bytes.first == 0x1B,
+           let index = agents.firstIndex(where: { $0.id == id }),
+           agents[index].status == .working,
+           let lifecycleEvent = lifecycleEvents[id] {
+            let previous = agents[index]
+            interruptBoundaries[id] = InterruptBoundary(event: lifecycleEvent)
+            inputStatusOverrides[id] = .idle
+            agents[index].status = .idle
+            agents[index].statusChangedAt = .now
+            agents[index].finishedAt = nil
+            agents[index].prompt = nil
+            handleStatusTransition(
+                from: previous,
+                to: agents[index],
+                source: "interrupt-input"
+            )
+            noteAgentActivity()
+            DiagnosticLogStore.appendAgentCenter(
+                "interrupt-boundary sid=\(Self.diagnosticSessionID(sessionID)) pane=\(Self.diagnosticPaneID(paneID)) provider=\(Self.diagnosticProvider(lifecycleEvent.provider)) action=hide-working-until-new-turn"
+            )
+        }
         let includesLineBreak = bytes.contains(0x0D) || bytes.contains(0x0A)
         if includesLineBreak {
             let state = currentIntegrationStates[sessionID]
@@ -2224,13 +2452,7 @@ final class AgentCenter {
             // distinguish an accepted request from a rejected one.
             selectedOption = agents[index].prompt?.options.first(where: \.isDefault)
         }
-        let negativeSelection = selectedOption.map {
-            let label = $0.label.lowercased()
-            return label == "no"
-                || label.contains("deny")
-                || label.contains("cancel")
-                || label.contains("reject")
-        } ?? false
+        let negativeSelection = selectedOption?.isNegativeLabel ?? false
         let nextStatus: AgentStatus
         if lifecycleEvents[id] != nil {
             nextStatus = negativeSelection ? .idle : .working
@@ -2260,7 +2482,7 @@ final class AgentCenter {
             to: agents[index],
             source: "approval-input"
         )
-        activityRevision &+= 1
+        noteAgentActivity()
     }
 
     @discardableResult
@@ -2310,6 +2532,8 @@ final class AgentCenter {
                 )
             } else {
                 lifecycleEvents.removeValue(forKey: id)
+                providerSessionIncarnations.removeValue(forKey: id)
+                interruptBoundaries.removeValue(forKey: id)
                 inputStatusOverrides.removeValue(forKey: id)
                 permissionPromptConfirmations.removeValue(forKey: id)
                 permissionPromptPendingSince.removeValue(forKey: id)
@@ -2328,7 +2552,7 @@ final class AgentCenter {
                         to: agents[index],
                         source: "lifecycle-pid-rejected"
                     )
-                    activityRevision &+= 1
+                    noteAgentActivity()
                 }
                 DiagnosticLogStore.appendAgentCenter(
                     "lifecycle-rejected sid=\(sid) pane=\(pane) delivery=\(delivery) provider=\(provider) event=\(eventName) reason=pid-not-in-snapshot snapshotCount=\(currentProcessIDs.count) action=unavailable-and-rediscover"
@@ -2352,7 +2576,7 @@ final class AgentCenter {
             }
             discardedLifecycleEvents.removeValue(forKey: id)
         }
-        let wasActive = lifecycleEvents[id] != nil
+        let wasActive = lifecycleEvents[id]?.provesRunningAgentIntegration == true
         if let previous = lifecycleEvents[id] {
             if event.timestampNanoseconds < previous.timestampNanoseconds {
                 DiagnosticLogStore.appendAgentCenter(
@@ -2368,6 +2592,18 @@ final class AgentCenter {
                 return false
             }
         }
+        if event.event == "UserPromptSubmit" || event.event == "SessionStart" {
+            interruptBoundaries.removeValue(forKey: id)
+        } else if let boundary = interruptBoundaries[id] {
+            if !boundary.matches(event) {
+                interruptBoundaries.removeValue(forKey: id)
+            } else if event.state == .working {
+                DiagnosticLogStore.appendAgentCenter(
+                    "lifecycle-rejected sid=\(sid) pane=\(pane) delivery=\(delivery) provider=\(provider) event=\(eventName) reason=interrupted-turn"
+                )
+                return false
+            }
+        }
         let acceptedAt = Date.now
         recordCompletionBoundary(
             event,
@@ -2375,6 +2611,7 @@ final class AgentCenter {
             isStreamed: isStreamed,
             now: acceptedAt
         )
+        recordProviderSessionIncarnation(event, agentID: id)
         if event.isStatusNeutral {
             var currentCheck = "not-applicable"
             if let source = sources[id.sessionID] {
@@ -2395,7 +2632,14 @@ final class AgentCenter {
             if let index = agents.firstIndex(where: { $0.id == id }),
                agents[index].lastLifecycleEventAt.map({ event.timestamp > $0 }) ?? true {
                 agents[index].lastLifecycleEventAt = event.timestamp
-                activityRevision &+= 1
+                if !event.providerSessionID.isEmpty,
+                   agents[index].providerSessionID != event.providerSessionID {
+                    // Status-neutral events carry the session too — adopt it
+                    // so a conversation swap first observed via SubagentStop
+                    // still rotates the fire-guard incarnation.
+                    agents[index].providerSessionID = event.providerSessionID
+                }
+                noteAgentActivity()
             }
             DiagnosticLogStore.appendAgentCenter(
                 "lifecycle-observed sid=\(sid) pane=\(pane) delivery=\(delivery) provider=\(provider) event=\(eventName) semantic=status-neutral action=preserve-authoritative-state previousEvent=\(Self.diagnosticLifecycleEvent(lifecycleEvents[id]?.event ?? "")) currentCheck=\(currentCheck)"
@@ -2532,6 +2776,26 @@ final class AgentCenter {
         )
     }
 
+    /// Remember the newest accepted non-empty provider session for this
+    /// agent. Every event that survives the acceptance gates lands here —
+    /// including status-neutral ones that never become the root-status
+    /// event — so card rebuilds can always prefer the newest conversation
+    /// identity over the (possibly older) event they selected for status.
+    private func recordProviderSessionIncarnation(
+        _ event: AgentLifecycleEvent,
+        agentID: AgentInstanceID
+    ) {
+        guard !event.providerSessionID.isEmpty else { return }
+        if let existing = providerSessionIncarnations[agentID],
+           existing.timestampNanoseconds > event.timestampNanoseconds {
+            return
+        }
+        providerSessionIncarnations[agentID] = ProviderSessionIncarnation(
+            providerSessionID: event.providerSessionID,
+            timestampNanoseconds: event.timestampNanoseconds
+        )
+    }
+
     @discardableResult
     private func finishApplyingLifecycleEvent(
         _ event: AgentLifecycleEvent,
@@ -2563,12 +2827,31 @@ final class AgentCenter {
             var cardChanged = false
             if agents[index].lastLifecycleEventAt.map({ event.timestamp > $0 }) ?? true {
                 agents[index].lastLifecycleEventAt = event.timestamp
+                if !event.providerSessionID.isEmpty,
+                   agents[index].providerSessionID != event.providerSessionID {
+                    // A provider can start a new conversation in the same
+                    // process (resume, new thread). The card must adopt the
+                    // newest accepted event's session HERE — SwipePad's
+                    // fire-guard incarnation reads it from the card, and
+                    // waiting for the next discovery rebuild would leave a
+                    // same-status, same-PID conversation swap with an
+                    // unchanged guard key.
+                    agents[index].providerSessionID = event.providerSessionID
+                }
                 cardChanged = true
             }
             if previousStatus != displayedState {
                 agents[index].status = displayedState
                 agents[index].statusChangedAt = displayedState == .justFinished
                     ? (completedAt ?? .now) : event.timestamp
+                if displayedState != .waitingForInput {
+                    // A prompt answered outside Tessera (mouse click, second
+                    // tmux client, auto-approval) bypasses noteInput; this
+                    // lifecycle event is the only signal the menu is gone.
+                    // Match every other status writer: prompt lives only
+                    // while waiting.
+                    agents[index].prompt = nil
+                }
                 cardChanged = true
             } else if !wasActive {
                 // The visible status may remain unavailable, but the UI still
@@ -2586,7 +2869,7 @@ final class AgentCenter {
                 source: "lifecycle-\(delivery)"
             )
             if cardChanged {
-                activityRevision &+= 1
+                noteAgentActivity()
             }
             DiagnosticLogStore.appendAgentCenter(
                 "lifecycle-accepted sid=\(sid) pane=\(pane) delivery=\(delivery) provider=\(provider) event=\(eventName) reportedState=\(String(describing: event.state)) previousState=\(String(describing: previousStatus)) nextState=\(String(describing: displayedState)) permissionPrompt=\(requiresPromptConfirmation ? (promptConfirmed ? "confirmed" : "awaiting-visible") : "not-required") currentCheck=\(currentCheck) revision=\(lifecycleRevision) card=present"
@@ -2732,6 +3015,89 @@ final class AgentCenter {
               })
         else { return nil }
         return event.processName
+    }
+
+    /// Returns a blocker only for the exact pane whose supported agent has
+    /// both reported a trusted lifecycle event and is currently `.working`.
+    /// Process detection or an installed-but-inactive hook is deliberately
+    /// insufficient: those states cannot prove that the apparent working UI
+    /// is current, so ordinary terminal scrolling must remain untouched.
+    func scrollPrevention(
+        sessionID: UUID,
+        paneID: Int?
+    ) -> AgentScrollPrevention? {
+        guard isEnabled else { return nil }
+        let id = AgentInstanceID(sessionID: sessionID, paneID: paneID)
+        guard let agent = agent(id),
+              agent.status == .working,
+              lifecycleIntegrationState(agentID: id) == .active
+        else { return nil }
+        return AgentScrollPrevention(agentID: id, agentName: agent.name)
+    }
+
+    // MARK: SwipePad projection
+
+    /// SwipePad's window onto this engine. Created lazily per live session
+    /// and kept until `unregister`; the pad observes only the context's
+    /// equality-gated snapshot, never `agents`.
+    func swipePadContext(sessionID: UUID) -> SwipePadAgentContext {
+        if let context = swipePadContexts[sessionID] { return context }
+        let context = SwipePadAgentContext()
+        swipePadContexts[sessionID] = context
+        context.publish(swipePadSnapshot(sessionID: sessionID))
+        return context
+    }
+
+    /// Session views report the terminal surface the user is looking at:
+    /// the focused tmux pane, or a nil pane for a raw SSH/mosh screen.
+    func setSwipePadFocus(sessionID: UUID, paneID: Int?) {
+        let id = AgentInstanceID(sessionID: sessionID, paneID: paneID)
+        guard swipePadFocus[sessionID] != id else { return }
+        swipePadFocus[sessionID] = id
+        swipePadContexts[sessionID]?.publish(swipePadSnapshot(sessionID: sessionID))
+    }
+
+    /// tmux mode with no active pane (window teardown, mid-hydration
+    /// invalidation) means there is no surface to aim at. Distinct from
+    /// `setSwipePadFocus(paneID: nil)`, which registers a raw non-tmux
+    /// screen: this removes the focus so the departed pane's agent cannot
+    /// keep a fireable snapshot published.
+    func clearSwipePadFocus(sessionID: UUID) {
+        guard swipePadFocus.removeValue(forKey: sessionID) != nil else { return }
+        swipePadContexts[sessionID]?.publish(nil)
+    }
+
+    /// Hook-proof gate: only a card whose running agent is lifecycle-proven
+    /// (`.active`) projects into SwipePad. Installation status alone never
+    /// qualifies, so the pad falls back to its resolver without flicker while
+    /// probes are still `.checking`.
+    private func swipePadSnapshot(sessionID: UUID) -> SwipePadAgentSnapshot? {
+        guard isEnabled,
+              let id = swipePadFocus[sessionID],
+              let agent = agent(id),
+              lifecycleIntegrationState(agentID: id) == .active
+        else { return nil }
+        return SwipePadAgentSnapshot(
+            agentID: id,
+            profileID: agent.profileID,
+            profileName: agent.name,
+            status: agent.status,
+            prompt: agent.prompt,
+            statusChangedAt: agent.statusChangedAt,
+            detectedAt: agent.detectedAt,
+            providerSessionID: agent.providerSessionID,
+            agentPID: lifecycleEvents[id]?.agentPID
+        )
+    }
+
+    /// Single choke point for "cards changed in a way UI must see": bumps the
+    /// coarse revision Agent Center's own surfaces key off, then republishes
+    /// each session's focused-pane snapshot through its equality gate.
+    private func noteAgentActivity() {
+        activityRevision &+= 1
+        for (sessionID, context) in swipePadContexts {
+            context.publish(swipePadSnapshot(sessionID: sessionID))
+        }
     }
 
     /// Checks only the visible terminal target. Session top bars call this on
@@ -3572,7 +3938,7 @@ final class AgentCenter {
             "host-probe sid=\(Self.diagnosticSessionID(agentID.sessionID)) reason=user-retry result=scheduled"
         )
         scheduleLifecycleIntegrationProbe(sessionID: agentID.sessionID)
-        activityRevision &+= 1
+        noteAgentActivity()
     }
 
     func installLifecycleIntegration(agentID: AgentInstanceID) {
@@ -3655,7 +4021,7 @@ final class AgentCenter {
                     "host-install sid=\(Self.diagnosticSessionID(sessionID)) result=failed generation=\(generation) entry=agent-card failureType=\(String(describing: type(of: error)))"
                 )
             }
-            self.activityRevision &+= 1
+            self.noteAgentActivity()
         }
     }
 
@@ -3721,7 +4087,7 @@ final class AgentCenter {
                     DiagnosticLogStore.appendAgentCenter(
                         "host-probe sid=\(Self.diagnosticSessionID(candidate.sessionID)) result=resolved generation=\(generation) installation=\(Self.diagnosticInstallation(installation)) carrierAttempts=\(attemptedRegistrations.count)"
                     )
-                    self.activityRevision &+= 1
+                    self.noteAgentActivity()
                     return
                 } catch {
                     guard self.isEnabled,
@@ -3762,7 +4128,7 @@ final class AgentCenter {
                     DiagnosticLogStore.appendAgentCenter(
                         "host-probe sid=\(Self.diagnosticSessionID(sessionID)) result=failed generation=\(generation) carrierAttempts=\(attemptedRegistrations.count) failureType=\(String(describing: type(of: error)))"
                     )
-                    self.activityRevision &+= 1
+                    self.noteAgentActivity()
                     return
                 }
             }
@@ -3843,7 +4209,7 @@ final class AgentCenter {
     /// harness. Production discovery still enters exclusively through sources.
     func installHarnessAgents(_ agents: [AgentInstance]) {
         self.agents = agents
-        activityRevision &+= 1
+        noteAgentActivity()
     }
 
     func installHarnessAttention(
@@ -3860,7 +4226,7 @@ final class AgentCenter {
         )
         unreadAttentions.removeAll { $0.agentID == agentID }
         unreadAttentions.append(attention)
-        activityRevision &+= 1
+        noteAgentActivity()
     }
 
     func installHarnessLifecycleIntegrationState(
@@ -3868,7 +4234,7 @@ final class AgentCenter {
         for agentID: AgentInstanceID
     ) {
         harnessIntegrationStates[agentID] = state
-        activityRevision &+= 1
+        noteAgentActivity()
     }
 
     func installHarnessCurrentIntegrationState(
@@ -3877,44 +4243,90 @@ final class AgentCenter {
     ) {
         currentIntegrationStates[sessionID] = state
     }
+
+    /// Drives the REAL lifecycle acceptance path (profile match, PID
+    /// validation, ordering, card update, snapshot republish) from tests.
+    /// Production events still enter only through the OSC scanner and the
+    /// retained-variable replay.
+    @discardableResult
+    func harnessApplyLifecycleEvent(
+        _ event: AgentLifecycleEvent,
+        to id: AgentInstanceID,
+        isStreamed: Bool = true
+    ) -> Bool {
+        applyLifecycleEvent(event, to: id, isStreamed: isStreamed)
+    }
+
+    /// Drives the REAL discovery rebuild (candidate lifecycle-event
+    /// selection, provider-session/PID incarnation checks, card
+    /// replacement, snapshot republish) from tests. Production probes
+    /// still enter only through sources.
+    func harnessReplaceAgents(
+        sessionID: UUID,
+        probes: [AgentProbeTarget],
+        now: Date = .now
+    ) {
+        replaceAgents(for: sessionID, probes: probes, now: now)
+    }
     #endif
 
     private func agent(_ id: AgentInstanceID) -> AgentInstance? {
         agents.first(where: { $0.id == id })
     }
 
+    /// Hot path: runs on every `%output` payload of a known agent. One
+    /// forward raw-pointer pass tracks the LAST `ESC[?2004h/l` occurrence;
+    /// the prior shape (per-call needle allocation plus up to four backward
+    /// brute-force scans with per-position slicing) measured microseconds
+    /// per byte in Debug builds and starved the render loop during TUI
+    /// redraw storms.
     private func trackTerminalModes(
         agentID: AgentInstanceID,
         data: ArraySlice<UInt8>
     ) {
-        let enabled = Array("\u{1B}[?2004h".utf8)
-        let disabled = Array("\u{1B}[?2004l".utf8)
+        // ESC [ ? 2 0 0 4 h|l — 8 bytes; carry a 7-byte tail across chunks.
+        let needleLength = 8
         var bytes = terminalModeTails[agentID, default: []]
         bytes.append(contentsOf: data)
-        if let enabledAt = lastIndex(of: enabled, in: bytes),
-           let disabledAt = lastIndex(of: disabled, in: bytes) {
-            bracketedPasteModes[agentID] = enabledAt > disabledAt
-        } else if lastIndex(of: enabled, in: bytes) != nil {
-            bracketedPasteModes[agentID] = true
-        } else if lastIndex(of: disabled, in: bytes) != nil {
-            bracketedPasteModes[agentID] = false
+        var lastMode: Bool?
+        bytes.withUnsafeBufferPointer { buffer in
+            let count = buffer.count
+            var i = 0
+            while i + needleLength <= count {
+                if buffer[i] != 0x1B {
+                    i += 1
+                    continue
+                }
+                if buffer[i + 1] == 0x5B, // [
+                   buffer[i + 2] == 0x3F, // ?
+                   buffer[i + 3] == 0x32, // 2
+                   buffer[i + 4] == 0x30, // 0
+                   buffer[i + 5] == 0x30, // 0
+                   buffer[i + 6] == 0x34 { // 4
+                    let terminator = buffer[i + 7]
+                    if terminator == 0x68 { // h
+                        lastMode = true
+                        i += needleLength
+                        continue
+                    }
+                    if terminator == 0x6C { // l
+                        lastMode = false
+                        i += needleLength
+                        continue
+                    }
+                }
+                i += 1
+            }
+        }
+        if let lastMode {
+            bracketedPasteModes[agentID] = lastMode
         }
         if let modeEnabled = bracketedPasteModes[agentID],
            let index = agents.firstIndex(where: { $0.id == agentID }),
            agents[index].bracketedPasteEnabled != modeEnabled {
             agents[index].bracketedPasteEnabled = modeEnabled
         }
-        terminalModeTails[agentID] = Array(bytes.suffix(max(enabled.count, disabled.count) - 1))
-    }
-
-    private func lastIndex(of needle: [UInt8], in bytes: [UInt8]) -> Int? {
-        guard !needle.isEmpty, bytes.count >= needle.count else { return nil }
-        for start in stride(from: bytes.count - needle.count, through: 0, by: -1) {
-            if bytes[start..<(start + needle.count)].elementsEqual(needle) {
-                return start
-            }
-        }
-        return nil
+        terminalModeTails[agentID] = Array(bytes.suffix(needleLength - 1))
     }
 
     private func scheduleRefresh(sessionID: UUID, delayNanoseconds: UInt64) {
@@ -4049,7 +4461,7 @@ final class AgentCenter {
                     to: updated,
                     source: "terminal-observation"
                 )
-                activityRevision &+= 1
+                noteAgentActivity()
             }
         }
         observationTasks.removeValue(forKey: agentID)
@@ -4119,6 +4531,8 @@ final class AgentCenter {
                 }
             }
             lifecycleEvents.removeValue(forKey: id)
+            providerSessionIncarnations.removeValue(forKey: id)
+            interruptBoundaries.removeValue(forKey: id)
             processIDs.removeValue(forKey: id)
             inputStatusOverrides.removeValue(forKey: id)
             permissionPromptConfirmations.removeValue(forKey: id)
@@ -4142,7 +4556,7 @@ final class AgentCenter {
                 source: "discovery"
             )
         }
-        activityRevision &+= 1
+        noteAgentActivity()
         if surfaceDemand,
            sources[sessionID]?.automaticallyProbeLifecycleIntegration == true,
            replacements.contains(where: {
@@ -4182,6 +4596,13 @@ final class AgentCenter {
                     && event.agentPID != discarded.agentPID
                     && probe.processIDs.contains(event.agentPID!)
                 return verifiedDifferentProcessAtSameTime ? event : nil
+            }.flatMap { event in
+                guard event.state == .working,
+                      let boundary = interruptBoundaries[id],
+                      boundary.matches(event) else {
+                    return event
+                }
+                return nil
             }
             let streamed = lifecycleEvents[id]
             switch (retained, streamed) {
@@ -4219,12 +4640,41 @@ final class AgentCenter {
             }
             return event
         }
+        if let lifecycleEvent {
+            // A retained event can carry a conversation the streamed dict
+            // never saw (session restore); make it durable before selection.
+            recordProviderSessionIncarnation(lifecycleEvent, agentID: id)
+        } else if candidateLifecycleEvent != nil {
+            // Proof invalidated (profile or PID mismatch): the recorded
+            // conversation belonged to that proof. Forget it BEFORE the
+            // selection below, or this very rebuild would still publish a
+            // dead process's session onto the replacement card.
+            providerSessionIncarnations.removeValue(forKey: id)
+        }
+        // The event selected above is chosen for root-STATUS semantics
+        // (non-neutral preferred), so it can be older than the newest
+        // accepted conversation identity — a SubagentStop that was the
+        // first proof of a new session. The card must carry the newest
+        // conversation, or a rebuild would revert a direct-path adoption
+        // and reopen the A→B→A fire-guard hole.
+        let newestAcceptedProviderSession: String? = {
+            let recorded = providerSessionIncarnations[id]
+            guard let lifecycleEvent,
+                  !lifecycleEvent.providerSessionID.isEmpty else {
+                return recorded?.providerSessionID
+            }
+            guard let recorded,
+                  recorded.timestampNanoseconds
+                      >= lifecycleEvent.timestampNanoseconds else {
+                return lifecycleEvent.providerSessionID
+            }
+            return recorded.providerSessionID
+        }()
         let providerSessionChanged: Bool = {
             guard let oldSession = previous?.providerSessionID,
                   !oldSession.isEmpty,
-                  let lifecycleEvent,
-                  !lifecycleEvent.providerSessionID.isEmpty else { return false }
-            return oldSession != lifecycleEvent.providerSessionID
+                  let newSession = newestAcceptedProviderSession else { return false }
+            return oldSession != newSession
         }()
         let processIncarnationChanged = !previousProcessIDs.isEmpty
             && !probe.processIDs.isEmpty
@@ -4234,6 +4684,7 @@ final class AgentCenter {
             : previous
         if retainedPrevious == nil, previous != nil {
             completionObservedAt.removeValue(forKey: id)
+            interruptBoundaries.removeValue(forKey: id)
             cancelCompletionExpiry(agentID: id)
             cancelPendingAttention(agentID: id)
             markAttentionRead(agentID: id, reason: "agent-incarnation-changed")
@@ -4241,6 +4692,7 @@ final class AgentCenter {
         processIDs[id] = probe.processIDs.isEmpty ? (processIDs[id] ?? []) : probe.processIDs
         if candidateLifecycleEvent != nil, lifecycleEvent == nil {
             lifecycleEvents.removeValue(forKey: id)
+            interruptBoundaries.removeValue(forKey: id)
             inputStatusOverrides.removeValue(forKey: id)
             permissionPromptConfirmations.removeValue(forKey: id)
             permissionPromptPendingSince.removeValue(forKey: id)
@@ -4335,12 +4787,8 @@ final class AgentCenter {
             )
         }
             ?? retainedPrevious?.taskSummary
-        let providerSessionID: String? = {
-            if let lifecycleEvent, !lifecycleEvent.providerSessionID.isEmpty {
-                return lifecycleEvent.providerSessionID
-            }
-            return retainedPrevious?.providerSessionID
-        }()
+        let providerSessionID: String? = newestAcceptedProviderSession
+            ?? retainedPrevious?.providerSessionID
         let lastLifecycleEventAt: Date? = {
             switch (retainedPrevious?.lastLifecycleEventAt, lifecycleEvent?.timestamp) {
             case (.some(let previous), .some(let current)): max(previous, current)

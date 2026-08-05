@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tessera://schemas/nearby-bootstrap/v2/encrypted-envelope.schema.json",
+  "title": "NearbyEncryptedEnvelope v2",
+  "description": "Plaintext of each ChaChaPoly frame. The binary frame around it is: magic 'TBCH' | version u8 = 1 | direction u8 (1 origin->recipient, 2 recipient->origin) | sequence u64 BE | AEAD ciphertext, AAD = header + transcript hash. The frame version bumps only together with the protocol version. DEBUG builds add a 'test' kind that never ships. Frozen for protocol version 2.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["kind", "payload"],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "sasDecision",
+        "recipientPublicKey",
+        "originAuthorization",
+        "manifest",
+        "importAcceptance",
+        "grantReceipt",
+        "completionAcknowledgement"
+      ]
+    },
+    "payload": { "type": "string", "description": "base64; per-kind payload, e.g. the encoded BootstrapManifest for kind 'manifest'" }
+  }
+}

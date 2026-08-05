@@ -4,9 +4,219 @@ import Security
 import LocalAuthentication
 import NIOEmbedded
 import NIOSSH
+import SwiftData
 @testable import Tessera
 
 final class KeyStoreSecurityTests: XCTestCase {
+    private enum ProvisioningTestError: Error {
+        case denied
+    }
+
+    @MainActor
+    func test_deviceEnrollmentProvisioningAuthorizesBeforePublishingProtectedKey() async throws {
+        let key = StoredKey(name: "device key", requiresBiometric: true)
+        var events: [String] = []
+
+        let provisioned = try await DeviceEnrollmentKeyProvisioner.provision(
+            requiresOwnerAuthentication: true,
+            authorize: { reason in
+                XCTAssertEqual(reason, DeviceEnrollmentKeyProvisioner.authorizationReason)
+                events.append("authorize")
+            },
+            makeKey: {
+                events.append("make-key")
+                return key
+            }
+        )
+
+        XCTAssertTrue(provisioned === key)
+        XCTAssertEqual(events, ["authorize", "make-key"])
+    }
+
+    @MainActor
+    func test_deviceEnrollmentProvisioningFailureDoesNotCreateProtectedKey() async {
+        var madeKey = false
+
+        do {
+            _ = try await DeviceEnrollmentKeyProvisioner.provision(
+                requiresOwnerAuthentication: true,
+                authorize: { _ in throw ProvisioningTestError.denied },
+                makeKey: {
+                    madeKey = true
+                    return StoredKey(name: "should not exist")
+                }
+            )
+            XCTFail("Expected authorization failure")
+        } catch ProvisioningTestError.denied {
+            XCTAssertFalse(madeKey)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    @MainActor
+    func test_deviceEnrollmentProvisioningSkipsAuthenticationWhenPreferenceIsOff() async throws {
+        let key = StoredKey(name: "simulator device key")
+        var authorizationCount = 0
+
+        let provisioned = try await DeviceEnrollmentKeyProvisioner.provision(
+            requiresOwnerAuthentication: false,
+            authorize: { _ in authorizationCount += 1 },
+            makeKey: { key }
+        )
+
+        XCTAssertTrue(provisioned === key)
+        XCTAssertEqual(authorizationCount, 0)
+    }
+
+    @MainActor
+    func test_deviceEnrollmentFreshAuthorizationRequiresBothUserDefaultsOn() {
+        XCTAssertFalse(DeviceEnrollmentKeyProvisioner.requiresFreshAuthorization(
+            globalPreference: false,
+            keyPreference: false
+        ))
+        XCTAssertFalse(DeviceEnrollmentKeyProvisioner.requiresFreshAuthorization(
+            globalPreference: false,
+            keyPreference: true
+        ))
+        XCTAssertFalse(DeviceEnrollmentKeyProvisioner.requiresFreshAuthorization(
+            globalPreference: true,
+            keyPreference: false
+        ))
+        XCTAssertTrue(DeviceEnrollmentKeyProvisioner.requiresFreshAuthorization(
+            globalPreference: true,
+            keyPreference: true
+        ))
+    }
+
+    @MainActor
+    func test_liveBootstrapRecipientKeyUsesAndReusesRecoverableSimulatorEd25519Material() async throws {
+#if targetEnvironment(simulator)
+        XCTAssertFalse(DeviceEnrollmentKeyPolicy.usesSecureEnclave)
+        XCTAssertEqual(DeviceEnrollmentKeyPolicy.publicProtection, .software)
+        XCTAssertEqual(DeviceEnrollmentKeyPolicy.keyAlgorithm, .ed25519)
+        XCTAssertEqual(DeviceEnrollmentKeyPolicy.enrollmentAlgorithm, .ed25519)
+        XCTAssertEqual(DeviceEnrollmentKeyPolicy.keyStoreProtection, .deviceUnlocked)
+
+        let suiteName = "KeyStoreSecurityTests.liveBootstrapKey.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let metadata = KeySecurityMetadataStore(
+            defaults: defaults,
+            storageKey: "device-enrollment-key"
+        )
+        let container = try TesseraModelContainer.make(inMemory: true)
+        let context = ModelContext(container)
+        let first = try BootstrapCoordinator.liveRecipientKey(
+            in: context,
+            metadata: metadata
+        )
+        defer {
+            _ = try? KeyStore.deleteKey(forKeyID: first.storedKeyID)
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let stored = try XCTUnwrap(
+            context.fetch(FetchDescriptor<StoredKey>()).first {
+                $0.id == first.storedKeyID
+            }
+        )
+
+        XCTAssertEqual(first.publicKey.protection, .software)
+        XCTAssertEqual(first.publicKey.algorithm, .ed25519)
+        XCTAssertEqual(first.publicKey.id, stored.id)
+        XCTAssertEqual(stored.algorithm, .ed25519)
+        XCTAssertFalse(stored.isSecureEnclave)
+        XCTAssertFalse(stored.requiresBiometric)
+        XCTAssertEqual(
+            try KeyStore.materialProtection(forKeyID: stored.id),
+            .deviceUnlocked(deviceOnly: false)
+        )
+        XCTAssertEqual(
+            KeyStore.privateMaterialIntegrity(
+                forKeyID: stored.id,
+                algorithm: stored.algorithm,
+                isSecureEnclave: stored.isSecureEnclave,
+                expectedAuthorizedKeysLine: stored.authorizedKeysLine
+            ),
+            .valid
+        )
+        let authenticationMethod = try await KeyStore.authMethod(
+            forKeyID: stored.id,
+            algorithm: stored.algorithm,
+            username: "simulator",
+            isSecureEnclave: stored.isSecureEnclave
+        )
+        XCTAssertNotNil(authenticationMethod)
+        let recovery = try KeyStore.exportEncryptedEd25519PrivateKey(
+            forKeyID: stored.id,
+            passphrase: "bootstrap recovery passphrase",
+            comment: stored.name
+        )
+        XCTAssertTrue(
+            String(decoding: recovery, as: UTF8.self)
+                .contains("BEGIN OPENSSH PRIVATE KEY")
+        )
+
+        let reused = try BootstrapCoordinator.liveRecipientKey(
+            in: context,
+            metadata: metadata
+        )
+        XCTAssertEqual(reused, first)
+        XCTAssertEqual(
+            try context.fetch(FetchDescriptor<StoredKey>()).filter {
+                $0.name == "Tessera device key"
+            }.count,
+            1
+        )
+#endif
+    }
+
+    @MainActor
+    func test_deviceEnrollmentKeyCreationFollowsDefaultAndReusePreservesToggle() throws {
+#if targetEnvironment(simulator)
+        let suiteName = "KeyStoreSecurityTests.deviceKeyPreference.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let metadata = KeySecurityMetadataStore(
+            defaults: defaults,
+            storageKey: "device-enrollment-key"
+        )
+        let container = try TesseraModelContainer.make(inMemory: true)
+        let context = ModelContext(container)
+        let first = try DeviceEnrollmentKeyFactory.storedKey(
+            in: context,
+            initialOwnerAuthentication: true,
+            metadata: metadata
+        )
+        defer {
+            _ = try? KeyStore.deleteKey(forKeyID: first.id)
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        XCTAssertTrue(first.requiresBiometric)
+        XCTAssertTrue(DeviceEnrollmentKeyFactory.ownerAuthenticationPreference(
+            in: context,
+            defaultPreference: false,
+            metadata: metadata
+        ))
+
+        first.requiresBiometric = false
+        try context.save()
+        let reused = try DeviceEnrollmentKeyFactory.storedKey(
+            in: context,
+            initialOwnerAuthentication: true,
+            metadata: metadata
+        )
+
+        XCTAssertTrue(reused === first)
+        XCTAssertFalse(reused.requiresBiometric)
+        XCTAssertFalse(DeviceEnrollmentKeyFactory.ownerAuthenticationPreference(
+            in: context,
+            defaultPreference: true,
+            metadata: metadata
+        ))
+#endif
+    }
+
     func test_newKeyProtectionDefaultsFollowExplicitGlobalPreference() {
         XCTAssertFalse(
             KeyOwnerPresencePolicy.initialKeyPreference(globalPreference: false)
@@ -35,6 +245,52 @@ final class KeyStoreSecurityTests: XCTestCase {
                 enabling: false
             )
         )
+    }
+
+    @MainActor
+    func test_secureEnclaveOwnerAuthenticationPreferenceChangesWithoutKeyRotation() throws {
+        let key = StoredKey(
+            name: "mutable enclave key",
+            algorithm: .ecdsaP256,
+            requiresBiometric: true
+        )
+        key.isSecureEnclave = true
+        let harness = LifecyclePersistenceHarness(keys: [key])
+
+        try StoredKeyLifecycle.updateOwnerAuthenticationPreference(
+            for: key,
+            enabled: false,
+            persistence: harness.persistence
+        )
+
+        XCTAssertFalse(key.requiresBiometric)
+        XCTAssertEqual(harness.saveAttempts, [.protection])
+        XCTAssertEqual(harness.rollbackCount, 0)
+        XCTAssertTrue(harness.keys.first === key)
+    }
+
+    @MainActor
+    func test_secureEnclaveOwnerAuthenticationPreferenceRollsBackOnSaveFailure() {
+        let key = StoredKey(
+            name: "mutable enclave key",
+            algorithm: .ecdsaP256,
+            requiresBiometric: true
+        )
+        key.isSecureEnclave = true
+        let harness = LifecyclePersistenceHarness(keys: [key])
+        harness.failingBoundary = .protection
+
+        XCTAssertThrowsError(
+            try StoredKeyLifecycle.updateOwnerAuthenticationPreference(
+                for: key,
+                enabled: false,
+                persistence: harness.persistence
+            )
+        )
+
+        XCTAssertTrue(key.requiresBiometric)
+        XCTAssertEqual(harness.saveAttempts, [.protection])
+        XCTAssertEqual(harness.rollbackCount, 1)
     }
 
     // On physical devices a user-presence ACL can gate even the non-secret

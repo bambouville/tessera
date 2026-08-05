@@ -1,6 +1,7 @@
 // Tessera/Settings/SettingsPageView.swift
 import Foundation
 import SwiftUI
+import UIKit
 
 struct SettingsPageView: View {
     @Environment(\.designTokens) private var T
@@ -10,20 +11,120 @@ struct SettingsPageView: View {
 
     @State private var selectedSection: SettingsSection = .appearance
 
-    var body: some View {
-        HStack(spacing: 0) {
-            leftPane
+    private var isPhone: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+    }
 
-            rightPane
+    @ViewBuilder
+    var body: some View {
+        if isPhone {
+            phoneBody
+        } else {
+            HStack(spacing: 0) {
+                leftPane
+
+                rightPane
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(T.bg)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(T.bg)
+    }
+
+    private var phoneBody: some View {
+        NavigationStack {
+            ScrollView {
+                // Custom mono header instead of the system large title so the
+                // settings tab matches the hosts/sessions/keys header voice.
+                Text("settings")
+                    .font(Typography.pageTitle)
+                    .foregroundStyle(T.fg)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 16)
+                    .padding(.bottom, 14)
+
+                LazyVStack(spacing: 0) {
+                    ForEach(phoneSections, id: \.self) { section in
+                        NavigationLink {
+                            ScrollView {
+                                sectionContent(section)
+                                    .padding(.horizontal, 18)
+                                    .padding(.top, 22)
+                                    .padding(.bottom, 32)
+                            }
+                            .background(T.bg.ignoresSafeArea())
+                            // No nav-bar title: each section's content opens
+                            // with its own mono SettingsH heading of the same
+                            // name, so a principal title would duplicate it
+                            // verbatim. The root's hidden-bar navigationTitle
+                            // supplies the "settings" back label.
+                            .navigationBarTitleDisplayMode(.inline)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: settingsIcon(for: section))
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundStyle(T.fgMuted)
+                                    .frame(width: 24)
+
+                                Text(section.rawValue)
+                                    .font(Typography.tesseraMono(size: 13))
+                                    .foregroundStyle(T.fg)
+
+                                Spacer(minLength: 8)
+
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(T.fgDim)
+                            }
+                            .frame(minHeight: 52)
+                            .contentShape(Rectangle())
+                            .overlay(alignment: .bottom) {
+                                Rectangle()
+                                    .fill(T.border)
+                                    .frame(height: 1)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.bottom, 28)
+            }
+            .background(T.bg.ignoresSafeArea())
+            // Bar hidden (the custom mono header above replaces it), but the
+            // title still feeds pushed sections' back-button label.
+            .navigationTitle("settings")
+            .toolbar(.hidden, for: .navigationBar)
+        }
+        .tint(T.accent)
+    }
+
+    /// The phone keeps terminal-theme selection as a compact menu inside
+    /// Appearance. The full preview gallery is an iPad setup surface.
+    private var phoneSections: [SettingsSection] {
+        SettingsSection.allCases.filter { $0 != .themes }
+    }
+
+    private func settingsIcon(for section: SettingsSection) -> String {
+        switch section {
+        case .appearance: return "circle.lefthalf.filled"
+        case .continuity: return "rectangle.on.rectangle.angled"
+        case .terminal: return "terminal"
+        case .files: return "folder"
+        case .themes: return "paintpalette"
+        case .keyboard: return "keyboard"
+        case .security: return "lock.shield"
+        case .experimental: return "flask"
+        case .diagnostics: return "stethoscope"
+        case .unlimited: return "infinity"
+        case .about: return "info.circle"
+        }
     }
 
     private var leftPane: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("settings")
-                .font(Typography.tesseraMono(size: 20, weight: .medium))
+                .font(Typography.pageTitle)
                 .foregroundStyle(T.fg)
                 .padding(.top, 28)
                 .padding(.horizontal, 20)
@@ -71,16 +172,9 @@ struct SettingsPageView: View {
             selectedSection = section
         } label: {
             HStack(spacing: 8) {
-                if section == .experimental {
-                    Image(systemName: "flask")
-                        .font(Typography.tesseraMono(size: 12))
-                        .foregroundStyle(isSelected ? T.accent : T.fgMuted)
-                }
-                if section == .files {
-                    Image(systemName: "folder")
-                        .font(Typography.tesseraMono(size: 12))
-                        .foregroundStyle(isSelected ? T.accent : T.fgMuted)
-                }
+                Image(systemName: settingsIcon(for: section))
+                    .font(Typography.tesseraMono(size: 12))
+                    .foregroundStyle(isSelected ? T.accent : T.fgMuted)
 
                 Text(section.rawValue)
                     .font(Typography.tesseraMono(size: 13))
@@ -100,9 +194,16 @@ struct SettingsPageView: View {
 
     @ViewBuilder
     private var sectionContent: some View {
-        switch selectedSection {
+        sectionContent(selectedSection)
+    }
+
+    @ViewBuilder
+    private func sectionContent(_ section: SettingsSection) -> some View {
+        switch section {
         case .appearance:
             AppearanceSettingsView()
+        case .continuity:
+            ContinuitySettingsView()
         case .terminal:
             TerminalSettingsView()
         case .files:
@@ -117,6 +218,8 @@ struct SettingsPageView: View {
             ExperimentalSettingsView(store: swipePadStore)
         case .diagnostics:
             DiagnosticsSettingsView(onUploadLog: onUploadDiagnosticLog)
+        case .unlimited:
+            UnlimitedHostsSettingsView()
         case .about:
             AboutSettingsView()
         }
@@ -142,6 +245,7 @@ struct SettingsH: View {
 
 private enum SettingsSection: String, CaseIterable {
     case appearance
+    case continuity = "sync & continuity"
     case terminal
     case files
     case themes
@@ -149,6 +253,7 @@ private enum SettingsSection: String, CaseIterable {
     case security
     case experimental
     case diagnostics
+    case unlimited = "unlimited hosts"
     case about
 }
 
@@ -184,6 +289,7 @@ enum DiagnosticLogCategory: String {
     case ssh = "SSHDiag"
     case speech = "SpeechDiag"
     case swipePad = "SwipePadDiag"
+    case terminalPerformance = "TerminalPerfDiag"
     case tmux = "TmuxControlDiag"
 }
 
@@ -267,6 +373,10 @@ enum DiagnosticLogStore {
 
     static func appendSwipePad(_ message: @autoclosure () -> String) {
         append(.swipePad, message())
+    }
+
+    static func appendTerminalPerformance(_ message: @autoclosure () -> String) {
+        append(.terminalPerformance, message())
     }
 
     static func appendTmux(_ message: @autoclosure () -> String) {
@@ -455,6 +565,11 @@ enum DiagnosticLogStore {
             return shouldEmitStandardMosh(message)
         case .swipePad:
             return shouldEmitStandardSwipePad(message)
+        case .terminalPerformance:
+            // The producer is itself gated by verbose diagnostics and emits
+            // one bounded aggregate per output burst. Never add this sampling
+            // path to standard diagnostics implicitly.
+            return false
         case .tmux:
             return shouldEmitStandardTmux(message)
         }
@@ -509,6 +624,7 @@ enum DiagnosticLogStore {
             || message.hasPrefix("resolve fallback ")
             || message.hasPrefix("plain-ssh detect failed ")
             || message.hasPrefix("tmux-response failure ")
+            || message.hasPrefix("provider mosh source=ssh-sidecar transition=recovered ")
     }
 
     private static func shouldEmitStandardTmux(_ message: String) -> Bool {
@@ -645,49 +761,16 @@ private struct DiagnosticsSettingsView: View {
 
             Field(
                 label: "debug log",
-                sub: "\(logInfo.displaySize) - updated \(logInfo.displayUpdatedAt)"
+                sub: "\(logInfo.displaySize) · updated \(logInfo.displayUpdatedAt)"
             ) {
-                HStack(spacing: 8) {
-                    ShareLink(
-                        item: DiagnosticLogStore.logFileURL,
-                        preview: SharePreview(
-                            "tessera-diagnostics.log",
-                            icon: Image(systemName: "doc.text")
-                        )
-                    ) {
-                        Label("export log", systemImage: "square.and.arrow.up")
-                            .font(Typography.tesseraMono(size: 13))
-                            .foregroundStyle(T.fg)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .background(T.inputBg)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(T.border, lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(logInfo.isEmpty)
-                    .opacity(logInfo.isEmpty ? 0.45 : 1)
-
-                    Btn("upload log", compact: true) {
-                        onUploadLog()
-                        refresh()
-                    }
-                    .disabled(logInfo.isEmpty)
-                    .opacity(logInfo.isEmpty ? 0.45 : 1)
-
-                    Btn("refresh", compact: true) {
-                        refresh()
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        logActions
                     }
 
-                    Btn("clear", style: .danger, compact: true) {
-                        DiagnosticLogStore.clear()
-                        refresh()
+                    VStack(alignment: .leading, spacing: 8) {
+                        logActions
                     }
-                    .disabled(logInfo.isEmpty)
-                    .opacity(logInfo.isEmpty ? 0.45 : 1)
                 }
             }
         }
@@ -703,6 +786,51 @@ private struct DiagnosticsSettingsView: View {
             DiagnosticLogStore.appendApp("diagnostics scroll changed enabled=\(enabled)")
             refresh()
         }
+    }
+
+    @ViewBuilder private var logActions: some View {
+        ShareLink(
+            item: DiagnosticLogStore.logFileURL,
+            preview: SharePreview(
+                "tessera-diagnostics.log",
+                icon: Image(systemName: "doc.text")
+            )
+        ) {
+            Label("export log", systemImage: "square.and.arrow.up")
+                .font(Typography.tesseraMono(size: 13))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .foregroundStyle(T.fg)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(T.inputBg)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(T.border, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(logInfo.isEmpty)
+        .opacity(logInfo.isEmpty ? 0.45 : 1)
+
+        Btn("upload log", compact: true) {
+            onUploadLog()
+            refresh()
+        }
+        .disabled(logInfo.isEmpty)
+        .opacity(logInfo.isEmpty ? 0.45 : 1)
+
+        Btn("refresh", compact: true) {
+            refresh()
+        }
+
+        Btn("clear", style: .danger, compact: true) {
+            DiagnosticLogStore.clear()
+            refresh()
+        }
+        .disabled(logInfo.isEmpty)
+        .opacity(logInfo.isEmpty ? 0.45 : 1)
     }
 
     private func refresh() {

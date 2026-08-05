@@ -14,8 +14,23 @@ struct LockScreenView: View {
         TerminalTheme.find(id: appearance.terminalThemeID)
     }
 
+    /// Lock-screen chrome keeps the theme's bg/fg but always carries the
+    /// user's app accent, bypassing `respectsUserAccent`: the only accented
+    /// element here is the brand mark's cursor square, which must match the
+    /// configured accent — not the terminal theme's signature color.
     private var tokens: DesignTokens {
-        activeTheme.chromeTokens(applying: appearance)
+        let theme = activeTheme
+        let userTokens = DesignTokens.make(
+            mode: theme.isLight ? .light : .dark,
+            accent: appearance.accent,
+            customColor: appearance.accent == .custom
+                ? Color(rgbInt: appearance.customAccentRGB)
+                : nil
+        )
+        return theme.chromeTokens(
+            accentOverride: userTokens.accent,
+            accentSoftOverride: userTokens.accentSoft
+        )
     }
 
     var body: some View {

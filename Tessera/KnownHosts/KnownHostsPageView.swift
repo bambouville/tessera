@@ -4,10 +4,30 @@ import UIKit
 
 struct KnownHostsPageView: View {
     @Environment(\.designTokens) private var T
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var rows: [KnownHostsStore.DisplayRow] = []
     @State private var filter: Filter = .all
     @State private var expandedIDs: Set<String> = []
+
+    // The table cells render Dynamic-Type-scaling mono text; scale the fixed
+    // column widths with it so larger text sizes don't wrap or collide.
+    @ScaledMetric(relativeTo: .body) private var algoColumnWidth: CGFloat = 90
+    @ScaledMetric(relativeTo: .body) private var addedColumnWidth: CGFloat = 140
+    @ScaledMetric(relativeTo: .body) private var statusColumnWidth: CGFloat = 110
+
+    private var isPhone: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+    }
+
+    /// The desktop table's fixed columns total 340pt at default text size and
+    /// scale with Dynamic Type (@ScaledMetric below) — at accessibility sizes
+    /// they would consume the whole viewport on iPad portrait / Split View,
+    /// collapsing the flexible host column. Fall back to the stacked compact
+    /// row there; it has no fixed columns.
+    private var usesCompactRows: Bool {
+        isPhone || dynamicTypeSize.isAccessibilitySize
+    }
 
     private enum Filter {
         case all
@@ -35,26 +55,29 @@ struct KnownHostsPageView: View {
                 .padding(.bottom, 40)
             }
         }
+        .accessibilityIdentifier("known-hosts-page")
         .task { await reload() }
     }
 
     private var header: some View {
         HStack(alignment: .center, spacing: 10) {
             Text("known hosts")
-                .font(Typography.tesseraMono(size: 24, weight: .medium))
+                .font(Typography.pageTitle)
                 .foregroundStyle(T.fg)
                 .lineLimit(1)
 
             Spacer()
 
-            Btn("export", compact: true) {
-            }
+            if !isPhone {
+                Btn("export", compact: true) {
+                }
 
-            Btn("import", compact: true) {
+                Btn("import", compact: true) {
+                }
             }
         }
-        .padding(.top, 28)
-        .padding(.horizontal, 40)
+        .padding(.top, isPhone ? 14 : 28)
+        .padding(.horizontal, isPhone ? 18 : 40)
     }
 
     private var mismatchBanner: some View {
@@ -74,32 +97,37 @@ struct KnownHostsPageView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(T.red.opacity(0.3), lineWidth: 1)
         )
-        .padding(.vertical, 20)
-        .padding(.horizontal, 40)
+        .padding(.vertical, isPhone ? 14 : 20)
+        .padding(.horizontal, isPhone ? 18 : 40)
     }
 
     private var filterChips: some View {
-        HStack(spacing: 6) {
-            Chip(text: "all · \(rows.count)", selected: filter == .all) {
-                filter = .all
-            }
-            Chip(text: "verified", selected: filter == .ok) {
-                filter = .ok
-            }
-            Chip(text: "stale", selected: filter == .stale) {
-                filter = .stale
-            }
-            Chip(text: "changed", selected: filter == .changed) {
-                filter = .changed
+        ScrollView(.horizontal) {
+            HStack(spacing: 6) {
+                Chip(text: "all · \(rows.count)", selected: filter == .all) {
+                    filter = .all
+                }
+                Chip(text: "verified", selected: filter == .ok) {
+                    filter = .ok
+                }
+                Chip(text: "stale", selected: filter == .stale) {
+                    filter = .stale
+                }
+                Chip(text: "changed", selected: filter == .changed) {
+                    filter = .changed
+                }
             }
         }
-        .padding(.vertical, 20)
-        .padding(.horizontal, 40)
+        .scrollIndicators(.hidden)
+        .padding(.vertical, isPhone ? 14 : 20)
+        .padding(.horizontal, isPhone ? 18 : 40)
     }
 
     private var table: some View {
         VStack(spacing: 0) {
-            tableHeader
+            if !usesCompactRows {
+                tableHeader
+            }
 
             ForEach(filteredRows) { row in
                 Button {
@@ -111,7 +139,11 @@ struct KnownHostsPageView: View {
                         }
                     }
                 } label: {
-                    tableRow(row)
+                    if usesCompactRows {
+                        compactTableRow(row)
+                    } else {
+                        tableRow(row)
+                    }
                 }
                 .buttonStyle(.plain)
 
@@ -124,7 +156,7 @@ struct KnownHostsPageView: View {
                 }
             }
         }
-        .padding(.horizontal, 40)
+        .padding(.horizontal, isPhone ? 18 : 40)
     }
 
     private var tableHeader: some View {
@@ -136,13 +168,13 @@ struct KnownHostsPageView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             Text("algo")
-                .frame(width: 90, alignment: .leading)
+                .frame(width: algoColumnWidth, alignment: .leading)
 
             Text("added")
-                .frame(width: 140, alignment: .leading)
+                .frame(width: addedColumnWidth, alignment: .leading)
 
             Text("status")
-                .frame(width: 110, alignment: .leading)
+                .frame(width: statusColumnWidth, alignment: .leading)
 
             Color.clear
                 .frame(width: 28)
@@ -170,18 +202,23 @@ struct KnownHostsPageView: View {
                 .truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+            if row.matchedPeerLabel != nil {
+                Tag(text: "matched peer", color: T.green.opacity(0.12))
+                    .padding(.trailing, 8)
+            }
+
             Tag(text: row.algorithm)
-                .frame(width: 90, alignment: .leading)
+                .frame(width: algoColumnWidth, alignment: .leading)
 
             Text(formatDate(row.firstSeen))
                 .font(Typography.tesseraMono(size: 12))
                 .foregroundStyle(T.fgDim)
-                .frame(width: 140, alignment: .leading)
+                .frame(width: addedColumnWidth, alignment: .leading)
 
             Text(statusLabel(row.status))
                 .font(Typography.tesseraMono(size: 11))
                 .foregroundStyle(statusColor(row.status))
-                .frame(width: 110, alignment: .leading)
+                .frame(width: statusColumnWidth, alignment: .leading)
 
             Image(systemName: "chevron.right")
                 .font(.system(size: 14, weight: .semibold))
@@ -193,6 +230,52 @@ struct KnownHostsPageView: View {
         .padding(.horizontal, 14)
         .background(row.status == .changed ? T.red.opacity(0.04) : Color.clear)
         .contentShape(Rectangle())
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(T.border)
+                .frame(height: 1)
+        }
+    }
+
+    private func compactTableRow(_ row: KnownHostsStore.DisplayRow) -> some View {
+        HStack(spacing: 10) {
+            StatusDot(color: statusColor(row.status))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(row.host)
+                    .font(Typography.tesseraMono(size: 12, weight: .medium))
+                    .foregroundStyle(T.fg)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                HStack(spacing: 7) {
+                    Tag(text: row.algorithm)
+
+                    if row.matchedPeerLabel != nil {
+                        Tag(text: "matched peer", color: T.green.opacity(0.12))
+                    }
+
+                    Text("added \(formatDate(row.firstSeen))")
+                        .font(Typography.tesseraMono(size: 10))
+                        .foregroundStyle(T.fgDim)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            Text(statusLabel(row.status))
+                .font(Typography.tesseraMono(size: 10, weight: .medium))
+                .foregroundStyle(statusColor(row.status))
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(T.fgMuted)
+                .rotationEffect(.degrees(expandedIDs.contains(row.id) ? 90 : 0))
+        }
+        .frame(minHeight: 58)
+        .contentShape(Rectangle())
+        .background(row.status == .changed ? T.red.opacity(0.04) : Color.clear)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(T.border)
@@ -220,6 +303,12 @@ struct KnownHostsPageView: View {
                 valueColor: T.fg
             )
 
+            if let peer = row.matchedPeerLabel {
+                Text("matched \(peer) at trust time")
+                    .font(Typography.tesseraMono(size: 10.5, weight: .medium))
+                    .foregroundStyle(T.green)
+            }
+
             if let previousFingerprint = row.previousFingerprint {
                 fingerprintLine(
                     label: "previous fingerprint: ",
@@ -236,33 +325,44 @@ struct KnownHostsPageView: View {
                 )
             }
 
-            HStack(spacing: 8) {
-                Btn("copy fingerprint", compact: true) {
-                    UIPasteboard.general.string = row.fingerprint
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    expandedActions(row)
                 }
 
-                if row.status == .changed {
-                    Btn("accept new key", style: .primary, compact: true) {
-                        Task { await acceptNewKey(row) }
-                    }
-                }
-
-                Btn("remove", style: .danger, compact: true) {
-                    Task { await remove(row) }
+                VStack(alignment: .leading, spacing: 8) {
+                    expandedActions(row)
                 }
             }
             .padding(.top, 4)
         }
         .padding(.top, 16)
-        .padding(.trailing, 20)
+        .padding(.trailing, isPhone ? 12 : 20)
         .padding(.bottom, 20)
-        .padding(.leading, 40)
+        .padding(.leading, isPhone ? 12 : 40)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(T.inputBgSoft)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(T.border)
                 .frame(height: 1)
+        }
+    }
+
+    @ViewBuilder
+    private func expandedActions(_ row: KnownHostsStore.DisplayRow) -> some View {
+        Btn("copy fingerprint", compact: true) {
+            UIPasteboard.general.string = row.fingerprint
+        }
+
+        if row.status == .changed {
+            Btn("accept new key", style: .primary, compact: true) {
+                Task { await acceptNewKey(row) }
+            }
+        }
+
+        Btn("remove", style: .danger, compact: true) {
+            Task { await remove(row) }
         }
     }
 

@@ -183,7 +183,6 @@ struct TerminalBackgroundImageControls: View {
                 Text("\(Int((dim * 100).rounded()))%")
                     .font(Typography.tesseraMono(size: 11))
                     .foregroundStyle(T.fgMuted)
-                    .monospacedDigit()
             }
             Slider(
                 value: Binding(get: { dim }, set: onDimChanged),
@@ -207,7 +206,6 @@ struct TerminalBackgroundImageControls: View {
                 Text("\(Int((draggingBlur ?? blur).rounded())) pt")
                     .font(Typography.tesseraMono(size: 11))
                     .foregroundStyle(T.fgMuted)
-                    .monospacedDigit()
             }
             Slider(
                 value: Binding(

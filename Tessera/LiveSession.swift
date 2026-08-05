@@ -23,15 +23,18 @@ struct LiveSession: Identifiable {
     /// tmux without conflating SSH and mosh sessions.
     let hostKey: String
     let launchMode: HostLaunchMode
-    /// Pinned tmux session name when `launchMode == .pinnedTmux`.
-    /// Surfaces in the sidebar label so multiple pinned sessions to
-    /// the same host are distinguishable at a glance.
+    /// The mode the running session actually reached. Auto-tmux can degrade
+    /// to a plain shell without changing the saved host preference.
+    var effectiveLaunchMode: HostLaunchMode
+    /// Exact tmux rendezvous for auto and pinned modes. Pinned sessions expose
+    /// it in the sidebar; auto sessions retain it so repeated Handoff activity
+    /// can select the existing connection instead of opening a parallel one.
     let pinnedSessionName: String?
     let createdAt: Date
 
     /// Backwards-compat shim — "anything except a custom command" is
     /// treated as auto-tmux by the rest of the app.
-    var autoTmux: Bool { launchMode != .customCommand }
+    var autoTmux: Bool { effectiveLaunchMode != .customCommand }
 
     init(
         id: UUID = UUID(),
@@ -40,6 +43,7 @@ struct LiveSession: Identifiable {
         persistedHostID: UUID? = nil,
         hostKey: String,
         launchMode: HostLaunchMode,
+        effectiveLaunchMode: HostLaunchMode? = nil,
         pinnedSessionName: String? = nil,
         createdAt: Date = Date()
     ) {
@@ -49,6 +53,7 @@ struct LiveSession: Identifiable {
         self.persistedHostID = persistedHostID
         self.hostKey = hostKey
         self.launchMode = launchMode
+        self.effectiveLaunchMode = effectiveLaunchMode ?? launchMode
         self.pinnedSessionName = pinnedSessionName
         self.createdAt = createdAt
     }
@@ -59,7 +64,7 @@ struct LiveSession: Identifiable {
     ///   - custom command, single to host: "name"
     ///   - custom command, Nth to same host: "name #N"
     func displayLabel(in sessions: [LiveSession]) -> String {
-        switch launchMode {
+        switch effectiveLaunchMode {
         case .autoTmux:
             return "\(hostName) (tmux)"
         case .pinnedTmux:
@@ -69,7 +74,7 @@ struct LiveSession: Identifiable {
             return "\(hostName) (\(tag))"
         case .customCommand:
             let siblings = sessions.filter {
-                $0.hostKey == hostKey && $0.launchMode == .customCommand
+                $0.hostKey == hostKey && $0.effectiveLaunchMode == .customCommand
             }
             if siblings.count <= 1 {
                 return hostName

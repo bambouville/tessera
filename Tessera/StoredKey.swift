@@ -12,9 +12,9 @@ final class StoredKey {
     /// The full `authorized_keys` line: "ssh-ed25519 AAAA... name"
     var authorizedKeysLine: String
     var createdAt: Date
-    /// The user's requested per-key owner-presence policy. The actual
-    /// Keychain/Secure Enclave ACL is recorded separately and remains
-    /// authoritative for effective authentication.
+    /// The user's requested per-key owner-presence policy. Tessera applies it
+    /// before key use; the actual Keychain/Secure Enclave ACL is recorded
+    /// separately and can still make key material unavailable.
     /// Literal default is load-bearing for SwiftData migration.
     var requiresBiometric: Bool = false
     /// True when the P-256 private key is backed by this device's
@@ -109,13 +109,116 @@ extension StoredKey {
 /// The private material remains exclusively in Keychain; this record contains
 /// only dates, public fingerprints, acknowledgements, and host labels.
 struct KeySecurityRecord: Codable, Equatable {
+    enum RemoteAccessDirection: String, Codable, Equatable {
+        /// A pre-continuity or same-device install.
+        case localInstallation
+        /// This device held the authenticated session and granted a peer key.
+        case grantedToPeer
+        /// This device owns the key which a peer installed remotely.
+        case receivedFromPeer
+    }
+
+    enum RemoteAccessFlow: String, Codable, Equatable {
+        case manual
+        case enrollment
+        case bootstrap
+    }
+
+    /// `.uncertain` is written durably immediately before a remote
+    /// authorized_keys mutation. Only command-level verification promotes an
+    /// install to `.verified`; a crash, cancellation, or verification failure
+    /// therefore cannot leave the ledger claiming access was proven.
+    enum RemoteInstallationVerificationState: String, Codable, Equatable {
+        case uncertain
+        case verified
+    }
+
     struct RemoteInstallation: Codable, Equatable, Identifiable {
         let hostID: UUID
         var hostLabel: String
         var endpoint: String
+        /// Exact, secret-free route that was used when access was installed.
+        /// Revocation must match this value before dialing: a host UUID can be
+        /// repointed to a different server or jump chain after the grant.
+        var routeIdentity: String?
         var installedAt: Date
+        var peerDeviceName: String?
+        var direction: RemoteAccessDirection
+        var flow: RemoteAccessFlow
+        var verificationState: RemoteInstallationVerificationState
+        /// Public material retained so the granting side can revoke a peer key
+        /// even though it never possesses that peer's private key.
+        var publicKeyFingerprint: String?
+        var authorizedKeysLine: String?
 
         var id: UUID { hostID }
+
+        init(
+            hostID: UUID,
+            hostLabel: String,
+            endpoint: String,
+            routeIdentity: String? = nil,
+            installedAt: Date,
+            peerDeviceName: String? = nil,
+            direction: RemoteAccessDirection = .localInstallation,
+            flow: RemoteAccessFlow = .manual,
+            verificationState: RemoteInstallationVerificationState = .verified,
+            publicKeyFingerprint: String? = nil,
+            authorizedKeysLine: String? = nil
+        ) {
+            self.hostID = hostID
+            self.hostLabel = hostLabel
+            self.endpoint = endpoint
+            self.routeIdentity = routeIdentity
+            self.installedAt = installedAt
+            self.peerDeviceName = peerDeviceName
+            self.direction = direction
+            self.flow = flow
+            self.verificationState = verificationState
+            self.publicKeyFingerprint = publicKeyFingerprint
+            self.authorizedKeysLine = authorizedKeysLine
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case hostID, hostLabel, endpoint, routeIdentity, installedAt
+            case peerDeviceName, direction, flow
+            case verificationState
+            case publicKeyFingerprint, authorizedKeysLine
+        }
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            hostID = try values.decode(UUID.self, forKey: .hostID)
+            hostLabel = try values.decode(String.self, forKey: .hostLabel)
+            endpoint = try values.decode(String.self, forKey: .endpoint)
+            routeIdentity = try values.decodeIfPresent(
+                String.self,
+                forKey: .routeIdentity
+            )
+            installedAt = try values.decode(Date.self, forKey: .installedAt)
+            peerDeviceName = try values.decodeIfPresent(String.self, forKey: .peerDeviceName)
+            direction = try values.decodeIfPresent(
+                RemoteAccessDirection.self,
+                forKey: .direction
+            ) ?? .localInstallation
+            flow = try values.decodeIfPresent(RemoteAccessFlow.self, forKey: .flow)
+                ?? .manual
+            // Historical entries were created only after the remote verifier
+            // returned its success marker, so their safe compatible meaning is
+            // verified rather than uncertain.
+            verificationState = try values.decodeIfPresent(
+                RemoteInstallationVerificationState.self,
+                forKey: .verificationState
+            ) ?? .verified
+            publicKeyFingerprint = try values.decodeIfPresent(
+                String.self,
+                forKey: .publicKeyFingerprint
+            )
+            authorizedKeysLine = try values.decodeIfPresent(
+                String.self,
+                forKey: .authorizedKeysLine
+            )
+        }
     }
 
     var backupExportedAt: Date?
@@ -144,6 +247,32 @@ struct KeySecurityRecord: Codable, Equatable {
     )
 }
 
+/// Stable, secret-free identity for the complete route that an SSH mutation
+/// will traverse. Length-prefixing every field makes the representation
+/// unambiguous even when a username/address contains punctuation. Credentials,
+/// key handles, display names, and launch commands are intentionally absent.
+enum RemoteAccessRouteIdentity {
+    static func value(for host: Host) -> String {
+        guard host.jumpChainBrokenReason == nil else {
+            return encode(["v1", "broken", host.id.uuidString])
+        }
+        let route = host.jumpChain + [host]
+        var fields = ["v1", "route", String(route.count)]
+        for endpoint in route {
+            fields.append(endpoint.id.uuidString)
+            fields.append(endpoint.transport.rawValue)
+            fields.append(endpoint.user)
+            fields.append(endpoint.address)
+            fields.append(String(endpoint.port))
+        }
+        return encode(fields)
+    }
+
+    private static func encode(_ fields: [String]) -> String {
+        fields.map { "\($0.utf8.count):\($0)" }.joined()
+    }
+}
+
 enum KeyRecoveryState: Equatable {
     case notBackedUp
     case backupExported(date: Date, fingerprint: String)
@@ -156,6 +285,13 @@ enum KeyRecoveryState: Equatable {
 }
 
 struct KeySecurityMetadataStore {
+    struct TrackedRemoteInstallation: Identifiable, Equatable {
+        let keyID: UUID
+        let installation: KeySecurityRecord.RemoteInstallation
+
+        var id: String { "\(keyID.uuidString):\(installation.hostID.uuidString)" }
+    }
+
     static let defaultKey = "tessera.keySecurityMetadata.v1"
 
     private let defaults: UserDefaults
@@ -248,6 +384,13 @@ struct KeySecurityMetadataStore {
         hostID: UUID,
         hostLabel: String,
         endpoint: String,
+        routeIdentity: String? = nil,
+        peerDeviceName: String? = nil,
+        direction: KeySecurityRecord.RemoteAccessDirection = .localInstallation,
+        flow: KeySecurityRecord.RemoteAccessFlow = .manual,
+        verificationState: KeySecurityRecord.RemoteInstallationVerificationState = .verified,
+        publicKeyFingerprint: String? = nil,
+        authorizedKeysLine: String? = nil,
         at date: Date = Date()
     ) {
         update(keyID) { record in
@@ -256,9 +399,111 @@ struct KeySecurityMetadataStore {
                 hostID: hostID,
                 hostLabel: hostLabel,
                 endpoint: endpoint,
-                installedAt: date
+                routeIdentity: routeIdentity,
+                installedAt: date,
+                peerDeviceName: peerDeviceName,
+                direction: direction,
+                flow: flow,
+                verificationState: verificationState,
+                publicKeyFingerprint: publicKeyFingerprint,
+                authorizedKeysLine: authorizedKeysLine
             ))
             record.remoteInstallations.sort { $0.hostLabel < $1.hostLabel }
+        }
+    }
+
+    /// Downgrades an existing placement without destroying its peer/public-key
+    /// audit fields. If no placement exists yet, creates a public-only generic
+    /// entry so an interrupted first mutation is still recoverable in the UI.
+    func markRemoteInstallationUncertain(
+        keyID: UUID,
+        hostID: UUID,
+        hostLabel: String,
+        endpoint: String,
+        routeIdentity: String? = nil,
+        publicKeyFingerprint: String? = nil,
+        authorizedKeysLine: String? = nil,
+        at date: Date = Date()
+    ) {
+        markRemoteInstallationVerificationState(
+            .uncertain,
+            keyID: keyID,
+            hostID: hostID,
+            hostLabel: hostLabel,
+            endpoint: endpoint,
+            routeIdentity: routeIdentity,
+            publicKeyFingerprint: publicKeyFingerprint,
+            authorizedKeysLine: authorizedKeysLine,
+            at: date
+        )
+    }
+
+    func markRemoteInstallationVerificationState(
+        _ state: KeySecurityRecord.RemoteInstallationVerificationState,
+        keyID: UUID,
+        hostID: UUID,
+        hostLabel: String,
+        endpoint: String,
+        routeIdentity: String? = nil,
+        publicKeyFingerprint: String? = nil,
+        authorizedKeysLine: String? = nil,
+        at date: Date = Date()
+    ) {
+        update(keyID) { record in
+            if let index = record.remoteInstallations.firstIndex(where: {
+                $0.hostID == hostID
+            }) {
+                record.remoteInstallations[index].verificationState = state
+                if let routeIdentity {
+                    record.remoteInstallations[index].routeIdentity = routeIdentity
+                }
+                return
+            }
+            record.remoteInstallations.append(.init(
+                hostID: hostID,
+                hostLabel: hostLabel,
+                endpoint: endpoint,
+                routeIdentity: routeIdentity,
+                installedAt: date,
+                verificationState: state,
+                publicKeyFingerprint: publicKeyFingerprint,
+                authorizedKeysLine: authorizedKeysLine
+            ))
+            record.remoteInstallations.sort { $0.hostLabel < $1.hostLabel }
+        }
+    }
+
+    func allRemoteInstallations() -> [TrackedRemoteInstallation] {
+        records().flatMap { keyID, record in
+            record.remoteInstallations.map {
+                TrackedRemoteInstallation(keyID: keyID, installation: $0)
+            }
+        }
+        .sorted {
+            if $0.installation.installedAt == $1.installation.installedAt {
+                return $0.installation.hostLabel < $1.installation.hostLabel
+            }
+            return $0.installation.installedAt > $1.installation.installedAt
+        }
+    }
+
+    /// A host UUID is editable and therefore is not enough to identify a
+    /// remote authorization. Callers must refuse to replace an existing row
+    /// whose route, public key, or direction describes a different placement.
+    func hasConflictingRemoteInstallation(
+        keyID: UUID,
+        hostID: UUID,
+        routeIdentity: String?,
+        publicKeyFingerprint: String?,
+        authorizedKeysLine: String,
+        direction: KeySecurityRecord.RemoteAccessDirection
+    ) -> Bool {
+        record(for: keyID).remoteInstallations.contains {
+            $0.hostID == hostID
+                && ($0.routeIdentity != routeIdentity
+                    || $0.publicKeyFingerprint != publicKeyFingerprint
+                    || $0.authorizedKeysLine != authorizedKeysLine
+                    || $0.direction != direction)
         }
     }
 
@@ -272,6 +517,34 @@ struct KeySecurityMetadataStore {
                 record.lastRemoteRevocationAt = date
             }
             record.remoteInstallations.removeAll { $0.hostID == hostID }
+        }
+    }
+
+    /// Drops a pre-mutation uncertain intent after the protocol reports that
+    /// no grant was installed. This is cleanup, not a remote revocation, so it
+    /// deliberately leaves `lastRemoteRevocationAt` untouched.
+    /// Removes only the still-uncertain row created for an exact protocol
+    /// attempt. A delayed rejection must never erase a verified or replacement
+    /// record written by a newer operation sharing the same host UUID.
+    func discardRemoteInstallationIntent(
+        keyID: UUID,
+        hostID: UUID,
+        routeIdentity: String,
+        publicKeyFingerprint: String,
+        authorizedKeysLine: String,
+        direction: KeySecurityRecord.RemoteAccessDirection,
+        flow: KeySecurityRecord.RemoteAccessFlow
+    ) {
+        update(keyID) { record in
+            record.remoteInstallations.removeAll {
+                $0.hostID == hostID
+                    && $0.routeIdentity == routeIdentity
+                    && $0.publicKeyFingerprint == publicKeyFingerprint
+                    && $0.authorizedKeysLine == authorizedKeysLine
+                    && $0.direction == direction
+                    && $0.flow == flow
+                    && $0.verificationState == .uncertain
+            }
         }
     }
 
@@ -398,10 +671,9 @@ enum KeyOwnerPresencePolicy {
         isSecureEnclave: Bool,
         boundaryProtection: KeyBoundaryProtection
     ) -> Bool {
-        // Boundary truth never rewrites durable user intent. A legacy Secure
-        // Enclave key with a weaker hardware ACL still honors an ON preference
-        // through Tessera's app gate while the UI requires rotation to move the
-        // enforcement into hardware.
+        // Boundary truth never rewrites durable user intent. A device-unlocked
+        // Secure Enclave key honors an ON preference through Tessera's app gate,
+        // allowing the preference to change without rotating the SSH key.
         _ = isSecureEnclave
         _ = boundaryProtection
         return currentPreference
@@ -635,6 +907,26 @@ enum StoredKeyLifecycle {
                     actual: actual
                 )
             }
+            throw KeyLifecycleError.protectionPersistenceFailed(primary: primary)
+        }
+    }
+
+    /// Updates only Tessera's key-use authorization policy. This is used for
+    /// device-unlocked Secure Enclave keys whose hardware ACL cannot be edited
+    /// after creation. The key remains non-exportable and hardware-bound.
+    static func updateOwnerAuthenticationPreference(
+        for key: StoredKey,
+        enabled: Bool,
+        persistence: KeyLifecyclePersistence
+    ) throws {
+        let oldEnabled = key.requiresBiometric
+        key.requiresBiometric = enabled
+        do {
+            try persistence.save(.protection)
+        } catch {
+            let primary = error
+            persistence.rollback()
+            key.requiresBiometric = oldEnabled
             throw KeyLifecycleError.protectionPersistenceFailed(primary: primary)
         }
     }

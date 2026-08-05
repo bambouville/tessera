@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct Input: View {
     @Binding var text: String
@@ -8,7 +9,23 @@ struct Input: View {
     var disabled: Bool = false
 
     @Environment(\.designTokens) private var T
+    // Read so the sans branch's UIFontMetrics size recomputes when the user's
+    // text size changes — keeps both branches scaling with Dynamic Type.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FocusState private var focused: Bool
+
+    private var inputFont: Font {
+        mono
+            ? Typography.tesseraMono(size: 13)
+            : Typography.tesseraSans(
+                size: UIFontMetrics(forTextStyle: .body).scaledValue(
+                    for: 13,
+                    compatibleWith: UITraitCollection(
+                        preferredContentSizeCategory: UIContentSizeCategory(dynamicTypeSize)
+                    )
+                )
+            )
+    }
 
     var body: some View {
         Group {
@@ -19,7 +36,7 @@ struct Input: View {
             }
         }
         .focused($focused)
-        .font(mono ? Typography.tesseraMono(size: 13) : Typography.tesseraSans(size: 13))
+        .font(inputFont)
         .foregroundStyle(T.fg)
         .padding(.horizontal, 12)
         .padding(.vertical, 10)

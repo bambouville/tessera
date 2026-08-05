@@ -19,12 +19,16 @@ import SwiftUI
 /// `appearance.accessoryBarKeys`.
 struct SessionAccessoryBar: View {
     let accent: Color
+    let modifierState: ModifierState
     let onSend: ([UInt8]) -> Void
     let applicationCursor: () -> Bool
+    /// Return true to consume a Page Up / Page Down chip before it is encoded.
+    /// Used by the terminal's exact agent-working scroll guard; nil keeps every
+    /// ordinary bar and state on the existing byte path.
+    var onPageScrollAttempt: ((AccessoryChip) -> Bool)? = nil
 
     @Environment(AppearancePreferences.self) private var appearance
-
-    @State private var armed = ArmedModifiers.none
+    @State private var softwareKeyboardVisible = true
 
     var body: some View {
         @Bindable var appearance = appearance
@@ -35,15 +39,26 @@ struct SessionAccessoryBar: View {
                     keys: $appearance.accessoryBarKeys,
                     trashEnabled: true,
                     trashColor: Color(red: 1, green: 69/255, blue: 58/255),
-                    onTap: { chip in handleTap(chip) }
+                    onTap: { chip in handleTap(chip) },
+                    accessibilityValue: { chip in
+                        chip.isModifier
+                            ? (armedState(for: chip) ? "armed" : "not armed")
+                            : nil
+                    }
                 ) { chip, lifted in
                     chipView(chip, lifted: lifted)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.horizontal, isPhone ? 8 : 12)
+                .padding(.vertical, 4)
             }
+            .overlay(alignment: .trailing) {
+                AccessoryBarOverflowFade(
+                    background: Color(red: 28/255, green: 28/255, blue: 30/255)
+                )
+            }
+            .clipped()
 
-            hideButton
+            keyboardToggleButton
         }
         .frame(height: 52)
         // Same floating material as the sidebar / top bar, driven by the
@@ -59,31 +74,87 @@ struct SessionAccessoryBar: View {
                 .fill(Color.white.opacity(0.08))
                 .frame(height: 0.5)
         }
-        .onChange(of: appearance.accessoryBarKeys) { _, _ in armed = .none }
+        .onChange(of: appearance.accessoryBarKeys) { _, _ in modifierState.cancel() }
+        .onChange(of: appearance.modifierBehavior) { _, _ in
+            modifierState.behavior = resolvedModifierBehavior
+        }
+        .onAppear {
+            modifierState.behavior = resolvedModifierBehavior
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+            guard isPhone else { return }
+            softwareKeyboardVisible = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
+            guard isPhone else { return }
+            softwareKeyboardVisible = false
+        }
     }
 
-    /// Quick "hide bar" affordance pinned to the right edge — saves a trip
-    /// into Settings → keyboard. To bring the bar back, the user toggles
-    /// "show accessory bar" in settings.
-    private var hideButton: some View {
+    /// On iPhone this dismisses the software keyboard while leaving the
+    /// accessory bar available above the home indicator. iPad keeps the
+    /// existing quick-hide behavior for the always-visible keyboard workflow.
+    private var keyboardToggleButton: some View {
         Button {
-            appearance.showAccessoryBar = false
+            if isPhone {
+                if softwareKeyboardVisible {
+                    if !modifierState.dismissSoftwareKeyboard() {
+                        UIApplication.shared.sendAction(
+                            #selector(UIResponder.resignFirstResponder),
+                            to: nil,
+                            from: nil,
+                            for: nil
+                        )
+                    }
+                } else if !modifierState.showSoftwareKeyboard() {
+                    UIApplication.shared.sendAction(
+                        #selector(UIResponder.becomeFirstResponder),
+                        to: nil,
+                        from: nil,
+                        for: nil
+                    )
+                }
+            } else {
+                appearance.showAccessoryBar = false
+            }
         } label: {
-            Image(systemName: "keyboard.chevron.compact.down")
+            keyboardToggleIcon
                 .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(Color.white.opacity(0.65))
-                .frame(width: 44, height: 36)
+                .frame(width: 44, height: 44)
                 .background(Color.white.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 7))
         }
         .buttonStyle(.plain)
-        .padding(.trailing, 12)
-        .padding(.vertical, 8)
+        .accessibilityLabel(
+            isPhone
+                ? (softwareKeyboardVisible ? "Hide keyboard" : "Show keyboard")
+                : "Hide accessory bar"
+        )
+        .padding(.trailing, isPhone ? 4 : 12)
+        .padding(.vertical, 4)
         .overlay(alignment: .leading) {
             Rectangle()
                 .fill(Color.white.opacity(0.06))
                 .frame(width: 0.5)
                 .padding(.vertical, 12)
+        }
+    }
+
+    @ViewBuilder
+    private var keyboardToggleIcon: some View {
+        if isPhone && !softwareKeyboardVisible {
+            ZStack(alignment: .bottomTrailing) {
+                Image(systemName: "keyboard")
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 8, weight: .bold))
+                    .padding(2)
+                    .background(Color(red: 28/255, green: 28/255, blue: 30/255))
+                    .clipShape(Circle())
+                    .offset(x: 3, y: 3)
+            }
+        } else {
+            Image(systemName: "keyboard.chevron.compact.down")
         }
     }
 
@@ -94,8 +165,8 @@ struct SessionAccessoryBar: View {
         return Text(label)
             .font(Typography.tesseraMono(size: label.count > 2 ? 12 : 14, weight: .medium))
             .foregroundStyle(highlight ? accent : Color.white)
-            .frame(minWidth: 40, minHeight: 36)
-            .padding(.horizontal, 12)
+            .frame(minWidth: 44, minHeight: 44)
+            .padding(.horizontal, isPhone ? 0 : 12)
             .background(highlight ? accent.opacity(0.20) : Color.white.opacity(0.12))
             .clipShape(RoundedRectangle(cornerRadius: 7))
             .overlay(
@@ -108,34 +179,53 @@ struct SessionAccessoryBar: View {
 
     private func armedState(for chip: AccessoryChip) -> Bool {
         switch chip {
-        case .ctrl:  return armed.ctrl
-        case .alt:   return armed.alt
-        case .shift: return armed.shift
+        case .ctrl:  return modifierState.armed.ctrl
+        case .alt:   return modifierState.armed.alt
+        case .shift: return modifierState.armed.shift
         default:     return false
         }
     }
 
     private func handleTap(_ chip: AccessoryChip) {
         if chip.isModifier {
-            switch chip {
-            case .ctrl:  armed.ctrl.toggle()
-            case .alt:   armed.alt.toggle()
-            case .shift: armed.shift.toggle()
-            default:     break
-            }
+            modifierState.tap(chip)
             return
         }
 
-        let snapshot = armed
+        modifierState.behavior = resolvedModifierBehavior
+        let snapshot = modifierState.consume()
+        if (chip == .pgup || chip == .pgdn),
+           onPageScrollAttempt?(chip) == true {
+            return
+        }
         let bytes = AccessoryChipEncoder.encode(
             chip,
             armed: snapshot,
             applicationCursor: applicationCursor()
         )
         onSend(bytes)
+    }
 
-        if appearance.modifierBehavior == "oneShot" {
-            armed = .none
-        }
+    private var resolvedModifierBehavior: ModifierBehavior {
+        ModifierBehavior(rawValue: appearance.modifierBehavior) ?? .oneShot
+    }
+
+    private var isPhone: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+    }
+}
+
+/// Subtle trailing cue that makes horizontally clipped accessory keys discoverable.
+struct AccessoryBarOverflowFade: View {
+    let background: Color
+
+    var body: some View {
+        LinearGradient(
+            colors: [background.opacity(0), background.opacity(0.9)],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+        .frame(width: 22)
+        .allowsHitTesting(false)
     }
 }

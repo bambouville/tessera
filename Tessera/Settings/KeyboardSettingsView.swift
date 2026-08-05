@@ -1,11 +1,16 @@
 // Tessera/Settings/KeyboardSettingsView.swift
 // §14.8 — accessory bar editor + modifier behavior + input preferences.
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 struct KeyboardSettingsView: View {
     @Environment(AppearancePreferences.self) private var appearance
     @Environment(\.designTokens) private var T
+
+    private var isPhone: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+    }
 
     var body: some View {
         @Bindable var appearance = appearance
@@ -38,11 +43,13 @@ struct KeyboardSettingsView: View {
                 ModifierBehaviorSegmented()
             }
 
-            Field(
-                label: "shortcuts",
-                sub: "read-only for now; per-user remapping is on the roadmap"
-            ) {
-                ShortcutLegend()
+            if !isPhone {
+                Field(
+                    label: "shortcuts",
+                    sub: "read-only for now; per-user remapping is on the roadmap"
+                ) {
+                    ShortcutLegend()
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -113,9 +120,9 @@ private struct ShortcutLegend: View {
             ForEach(groups) { group in
                 VStack(alignment: .leading, spacing: 0) {
                     Text(group.title.uppercased())
-                        .font(Typography.tesseraMono(size: 9))
-                        .foregroundStyle(T.fgFaint)
-                        .tracking(1)
+                        .font(Typography.kicker)
+                        .foregroundStyle(T.fgDim)
+                        .tracking(0.6)
                         .padding(.bottom, 6)
 
                     ForEach(group.rows, id: \.keys) { row in
@@ -212,6 +219,10 @@ private struct AccessoryBarEditor: View {
                 .padding(.horizontal, 4)
                 .padding(.vertical, 4)
             }
+            .accessibilityIdentifier("accessory-bar-preview")
+            .overlay(alignment: .trailing) {
+                AccessoryBarOverflowFade(background: T.panelBg)
+            }
         }
         .padding(10)
         .background(T.panelBg)
@@ -228,6 +239,7 @@ private struct AccessoryBarEditor: View {
         VStack(alignment: .leading, spacing: 14) {
             paletteSection("navigation", chips: navChips)
             paletteSection("modifiers", chips: modifierChips)
+            paletteSection("control shortcuts", chips: controlChips)
             paletteSection("function keys", chips: fkeyChips)
             paletteSection("symbols", chips: symbolChips)
         }
@@ -268,6 +280,7 @@ private struct AccessoryBarEditor: View {
     // AccessoryChip; here we just group for the palette UI.
     private let navChips: [AccessoryChip] = [.esc, .tab, .left, .down, .up, .right, .home, .end, .pgup, .pgdn]
     private let modifierChips: [AccessoryChip] = [.ctrl, .alt, .shift]
+    private let controlChips: [AccessoryChip] = [.ctrlJ]
     private let fkeyChips: [AccessoryChip] = [.f1, .f2, .f3, .f4, .f5, .f6, .f7, .f8, .f9, .f10, .f11, .f12]
     private let symbolChips: [AccessoryChip] = [.pipe, .tilde, .slash, .backslash, .dollar, .lbrace, .rbrace, .lbracket, .rbracket, .lt, .gt]
 }

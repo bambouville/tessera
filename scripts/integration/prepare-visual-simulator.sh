@@ -20,9 +20,18 @@ mkdir -p "$VISUAL_ROOT" "$DERIVED_DATA"
 # Visual capture must not share a simulator with unit/UI tests from another
 # development session. Reinstalling the same bundle ID during a recording can
 # otherwise terminate Tessera and turn a valid milestone into SpringBoard.
+udid=''
+handoff_complete=0
+cleanup_failed_prepare() {
+  if [[ "$handoff_complete" -eq 0 ]]; then
+    delete_owned_test_simulator "$SIMULATOR_STATE/visual_simulator_udid" || true
+  fi
+}
+trap cleanup_failed_prepare EXIT
+
 udid="$(
   TESSERA_INTEGRATION_SIMULATOR_NAME="Tessera Visual Integration Tests" \
-  TESSERA_INTEGRATION_SIMULATOR_UDID_FILE="$FIXTURE_STATE/visual_simulator_udid" \
+  TESSERA_INTEGRATION_SIMULATOR_UDID_FILE="$SIMULATOR_STATE/visual_simulator_udid" \
     "$HERE/ensure-test-simulator.sh" | tail -n 1
 )"
 
@@ -60,3 +69,6 @@ jq -n \
   --arg derivedData "$DERIVED_DATA" \
   '{udid: $udid, app_path: $appPath, derived_data: $derivedData}' \
   >"$VISUAL_ROOT/runtime.json"
+
+handoff_complete=1
+trap - EXIT

@@ -71,6 +71,7 @@ struct AboutSettingsView: View {
                         Image(systemName: "sparkles")
                             .font(.system(size: 11))
                         Text("replay walkthrough")
+                            .lineLimit(1)
                     }
                 }
                 .padding(.top, 16)
@@ -90,7 +91,8 @@ struct AboutSettingsView: View {
     private var license: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("license")
-                .font(Typography.tesseraMono(size: 11, weight: .medium))
+                .font(Typography.kicker)
+                .tracking(0.6)
                 .foregroundStyle(T.fgDim)
                 .textCase(.uppercase)
 
@@ -147,11 +149,12 @@ struct AboutSettingsView: View {
     private var acknowledgments: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("acknowledgments")
-                .font(Typography.tesseraMono(size: 11, weight: .medium))
+                .font(Typography.kicker)
+                .tracking(0.6)
                 .foregroundStyle(T.fgDim)
                 .textCase(.uppercase)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 12) {
                 creditLine("SwiftTerm", "MIT License")
                 creditLine("Citadel", "MIT License")
                 creditLine("BigInt", "MIT License")
@@ -231,6 +234,6 @@ private struct BundledDocumentSheet: View {
                     .padding(20)
             }
         }
-        .background(T.bg)
+        .background(T.presentationBg)
     }
 }

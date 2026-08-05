@@ -3,8 +3,36 @@ import SwiftData
 import UIKit
 import UniformTypeIdentifiers
 
+@Observable
+final class KeysPagePresentationState {
+    var showGenerateModal = false
+    var showImportModal = false
+    let generateDraft = GenerateKeyDraft()
+
+    func presentGenerator(initialProtection: Bool) {
+        generateDraft.reset(initialProtection: initialProtection)
+        showGenerateModal = true
+    }
+
+    func closeGenerator() {
+        showGenerateModal = false
+        generateDraft.clear()
+    }
+}
+
+struct PublicKeyCopyPayload: Equatable {
+    let pasteboardValue: String
+    let feedback: String
+
+    init(publicKey: String) {
+        pasteboardValue = publicKey
+        feedback = "Public key copied"
+    }
+}
+
 /// Keys page (M3). Two-pane: 340pt list + detail.
 struct KeysPageView: View {
+    @Bindable var presentation: KeysPagePresentationState
     @Environment(\.designTokens) private var T
     @Environment(\.modelContext) private var modelContext
     @Environment(AppearancePreferences.self) private var appearance
@@ -14,8 +42,6 @@ struct KeysPageView: View {
     @State private var filterText = ""
     @State private var selectedID: UUID?
     @State private var didDefaultSelection = false
-    @State private var showGenerateModal = false
-    @State private var showImportModal = false
     @State private var showCopyToHostSheet = false
     @State private var toastText: String?
     @State private var recoveryPassphraseAction: RecoveryPassphraseAction?
@@ -34,8 +60,26 @@ struct KeysPageView: View {
     @State private var orphanedKeyIDs: Set<UUID> = []
     @State private var showOrphanCleanupConfirmation = false
     @State private var protectionUpdateKeyID: UUID?
+    @State private var deviceAccessRevision = 0
+    @State private var revokingDeviceAccessID: String?
 
     private let securityMetadata = KeySecurityMetadataStore()
+
+    init(presentation: KeysPagePresentationState = KeysPagePresentationState()) {
+        self.presentation = presentation
+    }
+
+    private var isPhone: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+    }
+
+    private func presentGenerator() {
+        presentation.presentGenerator(
+            initialProtection: KeyOwnerPresencePolicy.initialKeyPreference(
+                globalPreference: appearance.requireBiometricForKeyUse
+            )
+        )
+    }
 
     private var filteredKeys: [StoredKey] {
         let needle = filterText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -48,27 +92,38 @@ struct KeysPageView: View {
         return keys.first { $0.id == selectedID }
     }
 
+    private var trackedDeviceAccess: [KeySecurityMetadataStore.TrackedRemoteInstallation] {
+        _ = deviceAccessRevision
+        return securityMetadata.allRemoteInstallations().filter {
+            $0.installation.flow != .manual
+                || $0.installation.peerDeviceName != nil
+                || $0.installation.verificationState == .uncertain
+        }
+    }
+
     var body: some View {
         ZStack {
             T.bg.ignoresSafeArea()
 
-            HStack(spacing: 0) {
-                leftPane
+            if isPhone {
+                phoneContent
+            } else {
+                HStack(spacing: 0) {
+                    leftPane
 
-                Rectangle()
-                    .fill(T.border)
-                    .frame(width: 1)
+                    Rectangle()
+                        .fill(T.border)
+                        .frame(width: 1)
 
-                rightPane
+                    rightPane
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            if showGenerateModal {
+            if presentation.showGenerateModal {
                 GenerateKeyModal(
-                    initialProtection: KeyOwnerPresencePolicy.initialKeyPreference(
-                        globalPreference: appearance.requireBiometricForKeyUse
-                    ),
-                    onClose: { showGenerateModal = false },
+                    draft: presentation.generateDraft,
+                    onClose: { presentation.closeGenerator() },
                     onCreated: { key in
                         selectedID = key.id
                         didDefaultSelection = true
@@ -78,12 +133,12 @@ struct KeysPageView: View {
                 .zIndex(10)
             }
 
-            if showImportModal {
+            if presentation.showImportModal {
                 ImportKeyModal(
                     initialProtection: KeyOwnerPresencePolicy.initialKeyPreference(
                         globalPreference: appearance.requireBiometricForKeyUse
                     ),
-                    onClose: { showImportModal = false },
+                    onClose: { presentation.showImportModal = false },
                     onImported: { key in
                         selectedID = key.id
                         didDefaultSelection = true
@@ -160,7 +215,9 @@ struct KeysPageView: View {
             }
         }
         .onAppear {
-            applyInitialSelectionIfNeeded()
+            if !isPhone {
+                applyInitialSelectionIfNeeded()
+            }
             refreshIntegrityReport()
         }
         .onChange(of: keys.map(\.id)) { _, _ in
@@ -192,21 +249,131 @@ struct KeysPageView: View {
         }
     }
 
+    @ViewBuilder
+    private var phoneContent: some View {
+        if let selectedKey {
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    Button {
+                        selectedID = nil
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(T.accent)
+                            .frame(width: 36, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("back to keys")
+
+                    Text(displayName(for: selectedKey))
+                        .font(Typography.tesseraMono(size: 15, weight: .medium))
+                        .foregroundStyle(T.fg)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 10)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(T.border)
+                        .frame(height: 1)
+                }
+
+                ScrollView {
+                    keyDetail(selectedKey)
+                        .padding(.horizontal, 18)
+                        .padding(.top, 20)
+                        .padding(.bottom, 32)
+                }
+            }
+        } else {
+            VStack(spacing: 0) {
+                HStack(alignment: .center, spacing: 8) {
+                    Text("keys")
+                        .font(Typography.pageTitle)
+                        .foregroundStyle(T.fg)
+
+                    Spacer(minLength: 8)
+
+                    Btn("+ generate", compact: true) {
+                        presentGenerator()
+                    }
+
+                    Btn("import", compact: true) {
+                        presentation.showImportModal = true
+                    }
+                }
+                .padding(.top, 14)
+                .padding(.horizontal, 18)
+                .padding(.bottom, 12)
+
+                Input(text: $filterText, placeholder: "search")
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 12)
+
+                Rectangle()
+                    .fill(T.border)
+                    .frame(height: 1)
+
+                ScrollView {
+                    deviceAccessSection
+
+                    if !orphanedKeyIDs.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("\(orphanedKeyIDs.count) orphaned Keychain item\(orphanedKeyIDs.count == 1 ? "" : "s")")
+                                .font(Typography.tesseraMono(size: 11, weight: .medium))
+                                .foregroundStyle(T.red)
+                            Text("Private material exists without matching key metadata.")
+                                .font(Typography.tesseraMono(size: 10))
+                                .foregroundStyle(T.fgDim)
+                            Btn("review cleanup…", compact: true) {
+                                showOrphanCleanupConfirmation = true
+                            }
+                        }
+                        .padding(12)
+                    }
+
+                    if filteredKeys.isEmpty {
+                        VStack(spacing: 10) {
+                            Image(systemName: "key")
+                                .font(.system(size: 28, weight: .light))
+                                .foregroundStyle(T.fgDim)
+                            Text(keys.isEmpty ? "no keys yet" : "no matching keys")
+                                .font(Typography.tesseraMono(size: 13))
+                                .foregroundStyle(T.fgMuted)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 54)
+                    } else {
+                        LazyVStack(spacing: 2) {
+                            ForEach(filteredKeys) { key in
+                                keyListRow(key)
+                            }
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                    }
+                }
+            }
+        }
+    }
+
     private var leftPane: some View {
         VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 8) {
                 Text("keys")
-                    .font(Typography.tesseraMono(size: 20, weight: .medium))
+                    .font(Typography.pageTitle)
                     .foregroundStyle(T.fg)
 
                 Spacer()
 
                 Btn("+ generate", compact: true) {
-                    showGenerateModal = true
+                    presentGenerator()
                 }
 
                 Btn("import", compact: true) {
-                    showImportModal = true
+                    presentation.showImportModal = true
                 }
             }
             .padding(.top, 20)
@@ -224,6 +391,8 @@ struct KeysPageView: View {
             }
 
             ScrollView {
+                deviceAccessSection
+
                 if !orphanedKeyIDs.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("\(orphanedKeyIDs.count) orphaned Keychain item\(orphanedKeyIDs.count == 1 ? "" : "s")")
@@ -329,6 +498,161 @@ struct KeysPageView: View {
         .buttonStyle(.plain)
     }
 
+    @ViewBuilder
+    private var deviceAccessSection: some View {
+        if !trackedDeviceAccess.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("device access")
+                    .font(Typography.kicker)
+                    .tracking(0.6)
+                    .foregroundStyle(T.fgDim)
+                    .textCase(.uppercase)
+
+                ForEach(trackedDeviceAccess) { tracked in
+                    let item = tracked.installation
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "rectangle.on.rectangle.angled")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(T.accent)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(item.peerDeviceName ?? "other device")
+                                    .font(Typography.tesseraMono(size: 11.5, weight: .medium))
+                                    .foregroundStyle(T.fg)
+                                Text("\(deviceAccessDirectionLabel(item.direction)) · \(item.hostLabel)")
+                                    .font(Typography.tesseraMono(size: 9.5))
+                                    .foregroundStyle(T.fgMuted)
+                                Text("\(item.endpoint) · \(item.flow.rawValue)")
+                                    .font(Typography.tesseraMono(size: 9))
+                                    .foregroundStyle(T.fgDim)
+                                    .lineLimit(2)
+                                if item.verificationState == .uncertain {
+                                    Text("remote state uncertain · retry revoke or verify manually")
+                                        .font(Typography.tesseraMono(size: 9))
+                                        .foregroundStyle(T.amber)
+                                }
+                            }
+                            Spacer(minLength: 6)
+                            Btn(
+                                revokingDeviceAccessID == tracked.id ? "revoking…" : "revoke",
+                                style: .danger,
+                                compact: true
+                            ) {
+                                revokeTrackedDeviceAccess(tracked)
+                            }
+                            .disabled(revokingDeviceAccessID != nil)
+                        }
+                        if let fingerprint = item.publicKeyFingerprint {
+                            Text(fingerprint)
+                                .font(Typography.tesseraMono(size: 8.5))
+                                .foregroundStyle(T.fgDim)
+                                .lineLimit(1)
+                        }
+                    }
+                    .padding(10)
+                    .background(T.inputBg)
+                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 7)
+                            .stroke(T.border, lineWidth: 1)
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 6)
+        }
+    }
+
+    private func deviceAccessDirectionLabel(
+        _ direction: KeySecurityRecord.RemoteAccessDirection
+    ) -> String {
+        switch direction {
+        case .localInstallation: return "installed here"
+        case .grantedToPeer: return "granted from this device"
+        case .receivedFromPeer: return "received for this device"
+        }
+    }
+
+    private func revokeTrackedDeviceAccess(
+        _ tracked: KeySecurityMetadataStore.TrackedRemoteInstallation
+    ) {
+        guard revokingDeviceAccessID == nil else { return }
+        guard let host = hosts.first(where: { $0.id == tracked.installation.hostID }) else {
+            showToast("The tracked host is no longer configured on this device")
+            return
+        }
+        let line = tracked.installation.authorizedKeysLine
+            ?? keys.first(where: { $0.id == tracked.keyID })?.authorizedKeysLine
+        guard let line, !line.isEmpty else {
+            showToast("This older ledger entry has no public key material; revoke it from the host manually")
+            return
+        }
+        let hostSnapshot = Host(from: host)
+        do {
+            try RemoteAuthorizedKeysInstaller.validateRevocationRoute(
+                tracked.installation.routeIdentity,
+                on: hostSnapshot
+            )
+        } catch {
+            showToast(error.localizedDescription)
+            return
+        }
+
+        revokingDeviceAccessID = tracked.id
+        Task { @MainActor in
+            defer { revokingDeviceAccessID = nil }
+            do {
+                let targetKey = keys.first(where: { $0.id == tracked.keyID })
+                let ledgerContext = RemoteAuthorizedKeysInstaller.LedgerContext(
+                    keyID: tracked.keyID,
+                    hostID: tracked.installation.hostID,
+                    hostLabel: tracked.installation.hostLabel,
+                    endpoint: tracked.installation.endpoint,
+                    routeIdentity: tracked.installation.routeIdentity,
+                    peerDeviceName: tracked.installation.peerDeviceName,
+                    direction: tracked.installation.direction,
+                    flow: tracked.installation.flow,
+                    publicKeyFingerprint: tracked.installation.publicKeyFingerprint,
+                    authorizedKeysLine: line
+                )
+                let shouldSelfRevoke = tracked.installation.direction == .receivedFromPeer
+                    && RemoteAuthorizedKeysInstaller.shouldRevokeUsingTargetKey(
+                        keyID: tracked.keyID,
+                        on: hostSnapshot
+                    )
+                if shouldSelfRevoke {
+                    guard let targetKey else {
+                        throw KeyStore.KeyStoreError.privateMaterialMissing
+                    }
+                    try await RemoteAuthorizedKeysInstaller.revokeUsingTargetKey(
+                        line: line,
+                        keyID: tracked.keyID,
+                        on: hostSnapshot,
+                        requireBiometric: KeyOwnerPresencePolicy.isRequired(
+                            globalPreference: appearance.requireBiometricForKeyUse,
+                            key: targetKey,
+                            metadata: securityMetadata
+                        ),
+                        isSecureEnclave: targetKey.isSecureEnclave,
+                        ledgerContext: ledgerContext
+                    )
+                } else {
+                    try await RemoteAuthorizedKeysInstaller.revoke(
+                        line: line,
+                        keyID: tracked.keyID,
+                        on: hostSnapshot,
+                        ledgerContext: ledgerContext
+                    )
+                }
+                deviceAccessRevision += 1
+                showToast("device access revoked on \(tracked.installation.hostLabel)")
+            } catch {
+                showToast("Revocation failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     private func keyDetail(_ key: StoredKey) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(displayName(for: key))
@@ -376,9 +700,20 @@ struct KeysPageView: View {
                 } else {
                     HStack(spacing: 8) {
                         Btn("copy public key", compact: true) {
-                            UIPasteboard.general.string = key.authorizedKeysLine
-                            showToast("public key copied")
+                            let payload = PublicKeyCopyPayload(
+                                publicKey: key.authorizedKeysLine
+                            )
+                            UIPasteboard.general.setValue(
+                                payload.pasteboardValue,
+                                forPasteboardType: UTType.utf8PlainText.identifier
+                            )
+                            showToast(payload.feedback.lowercased())
+                            UIAccessibility.post(
+                                notification: .announcement,
+                                argument: payload.feedback
+                            )
                         }
+                        .accessibilityHint("Copies public material only")
 
                         Btn("share", compact: true) {
                             showToast("share ships later")
@@ -415,21 +750,33 @@ struct KeysPageView: View {
                             for: key,
                             metadata: securityMetadata
                         )
-                    HStack {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("biometrics or passcode")
-                                .font(Typography.tesseraMono(size: 13))
-                                .foregroundStyle(T.fg)
-                            Text(boundaryProtection == .userPresence
-                                ? "Face ID/Touch ID or passcode is enforced by the Secure Enclave"
-                                : "changing Secure Enclave protection requires key rotation")
-                                .font(Typography.tesseraMono(size: 11))
-                                .foregroundStyle(T.fgDim)
+                    if boundaryProtection == .deviceUnlocked {
+                        ToggleRow(
+                            title: "require biometrics or passcode",
+                            subtitle: "Tessera authenticates you before using this hardware-bound key",
+                            isOn: Binding(
+                                get: { key.requiresBiometric },
+                                set: { newValue in
+                                    updateProtection(for: key, enabled: newValue)
+                                }
+                            )
+                        )
+                        .disabled(protectionUpdateKeyID != nil)
+                    } else {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("biometrics or passcode")
+                                    .font(Typography.tesseraMono(size: 13))
+                                    .foregroundStyle(T.fg)
+                                Text("Face ID/Touch ID or passcode is permanently enforced for this older Secure Enclave key")
+                                    .font(Typography.tesseraMono(size: 11))
+                                    .foregroundStyle(T.fgDim)
+                            }
+                            Spacer()
+                            Tag(text: "enforced")
                         }
-                        Spacer()
-                        Tag(text: boundaryProtection == .userPresence ? "enforced" : "rotation required")
+                        .padding(.vertical, 8)
                     }
-                    .padding(.vertical, 8)
                 } else {
                     ToggleRow(
                         title: "require biometrics or passcode",
@@ -1073,16 +1420,18 @@ struct KeysPageView: View {
     }
 
     private func eligibleRemoteRevocationHosts(for key: StoredKey) -> [PersistedHost] {
-        let trackedIDs = Set(
-            securityMetadata.record(for: key.id).remoteInstallations.map(\.hostID)
-        )
+        let tracked = securityMetadata.record(for: key.id).remoteInstallations
         return hosts.filter { host in
-            guard trackedIDs.contains(host.id), let identity = host.identity else {
+            let hostSnapshot = Host(from: host)
+            guard let installation = tracked.first(where: { $0.hostID == host.id }),
+                  installation.routeIdentity
+                    == RemoteAccessRouteIdentity.value(for: hostSnapshot),
+                  let identity = host.identity else {
                 return false
             }
             switch identity.credentialMode {
             case .password:
-                return !Host(from: host).password.isEmpty
+                return !hostSnapshot.password.isEmpty
             case .key(let authKeyID):
                 guard authKeyID != key.id,
                       let authKey = keys.first(where: { $0.id == authKeyID })
@@ -1177,6 +1526,13 @@ struct KeysPageView: View {
                 var revokedCount = 0
                 for persistedHost in eligibleHosts {
                     try Task.checkCancellation()
+                    guard let installation = securityMetadata.record(for: keyID)
+                        .remoteInstallations.first(where: {
+                            $0.hostID == persistedHost.id
+                        }) else {
+                        throw RemoteAuthorizedKeysInstaller.InstallError.routeChanged
+                    }
+                    let hostSnapshot = Host(from: persistedHost)
                     let authKey: StoredKey?
                     if case .key(let authKeyID) = persistedHost.identity?.credentialMode {
                         authKey = keys.first { $0.id == authKeyID }
@@ -1186,17 +1542,26 @@ struct KeysPageView: View {
                     try await RemoteAuthorizedKeysInstaller.revoke(
                         line: line,
                         keyID: keyID,
-                        on: Host(from: persistedHost),
+                        on: hostSnapshot,
                         requireBiometric: KeyOwnerPresencePolicy.isRequired(
                             globalPreference: appearance.requireBiometricForKeyUse,
                             key: authKey,
                             metadata: securityMetadata
                         ),
-                        isSecureEnclave: authKey?.isSecureEnclave ?? false
-                    )
-                    securityMetadata.removeRemoteInstallation(
-                        keyID: keyID,
-                        hostID: persistedHost.id
+                        isSecureEnclave: authKey?.isSecureEnclave ?? false,
+                        ledgerContext: RemoteAuthorizedKeysInstaller.LedgerContext(
+                            keyID: keyID,
+                            hostID: installation.hostID,
+                            hostLabel: installation.hostLabel,
+                            endpoint: installation.endpoint,
+                            routeIdentity: installation.routeIdentity,
+                            peerDeviceName: installation.peerDeviceName,
+                            direction: installation.direction,
+                            flow: installation.flow,
+                            publicKeyFingerprint: installation.publicKeyFingerprint,
+                            authorizedKeysLine: line,
+                            preserveExistingAuditFields: true
+                        )
                     )
                     revokedCount += 1
                 }
@@ -1217,15 +1582,69 @@ struct KeysPageView: View {
     }
 
     private func updateProtection(for key: StoredKey, enabled: Bool) {
-        guard !key.isSecureEnclave else {
-            showToast("Secure Enclave protection changes require key rotation")
+        guard protectionUpdateKeyID == nil else { return }
+        if key.isSecureEnclave {
+            guard KeyOwnerPresencePolicy.currentBoundaryProtection(
+                for: key,
+                metadata: securityMetadata
+            ) == .deviceUnlocked else {
+                showToast("This older Secure Enclave key requires rotation to change authentication")
+                return
+            }
+            protectionUpdateKeyID = key.id
+            Task { @MainActor in
+                defer { protectionUpdateKeyID = nil }
+                await performSecureEnclavePreferenceUpdate(
+                    for: key,
+                    enabled: enabled
+                )
+            }
             return
         }
-        guard protectionUpdateKeyID == nil else { return }
         protectionUpdateKeyID = key.id
         Task { @MainActor in
             defer { protectionUpdateKeyID = nil }
             await performProtectionUpdate(for: key, enabled: enabled)
+        }
+    }
+
+    @MainActor
+    private func performSecureEnclavePreferenceUpdate(
+        for key: StoredKey,
+        enabled: Bool
+    ) async {
+        switch await BiometricGate.evaluateForKeyUse(
+            reason: "change key authentication for \(displayName(for: key))"
+        ) {
+        case .authenticated:
+            break
+        case .userCancelled:
+            showToast("Authentication cancelled - key setting unchanged")
+            return
+        case .unavailable(let reason), .failed(let reason):
+            showToast("Could not change key authentication: \(reason)")
+            return
+        }
+
+        do {
+            try StoredKeyLifecycle.updateOwnerAuthenticationPreference(
+                for: key,
+                enabled: enabled,
+                persistence: KeyLifecyclePersistence.live(modelContext)
+            )
+            DiagnosticLogStore.appendKeys(
+                "secure-enclave app-auth changed enabled=\(enabled)"
+            )
+            showToast(
+                enabled
+                    ? "key authentication on"
+                    : "key authentication off - future key use will not require authentication"
+            )
+        } catch {
+            DiagnosticLogStore.appendKeys(
+                "secure-enclave app-auth change failed error='\(error.localizedDescription)'"
+            )
+            showToast("Could not change key authentication: \(error.localizedDescription)")
         }
     }
 
@@ -1508,6 +1927,10 @@ private struct RecoveryPassphraseModal: View {
     @State private var privacyShielded = false
     @State private var validationError: String?
 
+    private var isPhone: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+    }
+
     var body: some View {
         ZStack {
             Color.black.opacity(0.65)
@@ -1515,7 +1938,7 @@ private struct RecoveryPassphraseModal: View {
 
             VStack(alignment: .leading, spacing: 16) {
                 Text(purpose.title)
-                    .font(Typography.tesseraMono(size: 18, weight: .medium))
+                    .font(Typography.sheetTitle)
                     .foregroundStyle(T.fg)
 
                 Text(keyName)
@@ -1549,14 +1972,16 @@ private struct RecoveryPassphraseModal: View {
                     Btn(submitTitle, style: .primary, compact: true, action: submit)
                 }
             }
-            .padding(28)
-            .frame(width: 500)
+            .padding(isPhone ? 18 : 28)
+            .frame(width: isPhone ? nil : 500)
+            .frame(maxWidth: isPhone ? .infinity : nil)
             .background(T.panelBg)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(T.borderStrong, lineWidth: 1)
             )
+            .padding(.horizontal, isPhone ? 18 : 0)
 
             if privacyShielded {
                 Color.black
@@ -1636,13 +2061,17 @@ private struct KeyRiskAcknowledgementModal: View {
 
     @Environment(\.designTokens) private var T
 
+    private var isPhone: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+    }
+
     var body: some View {
         ZStack {
             Color.black.opacity(0.65).ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 14) {
                 Text(key.isSecureEnclave ? "device-bound key" : "recovery not exported")
-                    .font(Typography.tesseraMono(size: 18, weight: .medium))
+                    .font(Typography.sheetTitle)
                     .foregroundStyle(T.fg)
 
                 Text(fingerprint)
@@ -1656,23 +2085,35 @@ private struct KeyRiskAcknowledgementModal: View {
                     .foregroundStyle(T.fgDim)
                     .fixedSize(horizontal: false, vertical: true)
 
-                HStack(spacing: 10) {
-                    Btn("cancel", compact: true, action: onCancel)
-                    Spacer()
-                    if let onExport {
-                        Btn("export recovery first", style: .primary, compact: true, action: onExport)
+                if isPhone {
+                    VStack(spacing: 8) {
+                        if let onExport {
+                            Btn("export recovery first", style: .primary, full: true, action: onExport)
+                        }
+                        Btn("I understand · continue", style: .danger, full: true, action: onAcknowledge)
+                        Btn("cancel", full: true, action: onCancel)
                     }
-                    Btn("I understand · continue", style: .danger, compact: true, action: onAcknowledge)
+                } else {
+                    HStack(spacing: 10) {
+                        Btn("cancel", compact: true, action: onCancel)
+                        Spacer()
+                        if let onExport {
+                            Btn("export recovery first", style: .primary, compact: true, action: onExport)
+                        }
+                        Btn("I understand · continue", style: .danger, compact: true, action: onAcknowledge)
+                    }
                 }
             }
-            .padding(28)
-            .frame(width: 560)
+            .padding(isPhone ? 18 : 28)
+            .frame(width: isPhone ? nil : 560)
+            .frame(maxWidth: isPhone ? .infinity : nil)
             .background(T.panelBg)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(T.borderStrong, lineWidth: 1)
             )
+            .padding(.horizontal, isPhone ? 18 : 0)
         }
     }
 }
@@ -1691,13 +2132,17 @@ private struct KeyDeletionConfirmationModal: View {
 
     @Environment(\.designTokens) private var T
 
+    private var isPhone: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+    }
+
     var body: some View {
         ZStack {
             Color.black.opacity(0.65).ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 14) {
                 Text("delete local private key")
-                    .font(Typography.tesseraMono(size: 18, weight: .medium))
+                    .font(Typography.sheetTitle)
                     .foregroundStyle(T.red)
 
                 Text(fingerprint)
@@ -1722,34 +2167,57 @@ private struct KeyDeletionConfirmationModal: View {
                     FlowTags(names: hostNames)
                 }
 
-                HStack(spacing: 10) {
-                    Btn("cancel", compact: true, action: onCancel)
-                        .disabled(isWorking)
-                    Spacer()
-                    if isWorking {
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                    } else {
-                        if eligibleRemoteRevocationCount > 0 {
-                            Btn(
-                                "revoke on \(eligibleRemoteRevocationCount) tracked host\(eligibleRemoteRevocationCount == 1 ? "" : "s") & delete",
-                                style: .primary,
-                                compact: true,
-                                action: onRevokeAndConfirm
-                            )
+                if isPhone {
+                    VStack(spacing: 8) {
+                        if isWorking {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                        } else {
+                            if eligibleRemoteRevocationCount > 0 {
+                                Btn(
+                                    "revoke on \(eligibleRemoteRevocationCount) tracked host\(eligibleRemoteRevocationCount == 1 ? "" : "s") & delete",
+                                    style: .primary,
+                                    full: true,
+                                    action: onRevokeAndConfirm
+                                )
+                            }
+                            Btn("local delete only", style: .danger, full: true, action: onConfirm)
                         }
-                        Btn("local delete only", style: .danger, compact: true, action: onConfirm)
+                        Btn("cancel", full: true, action: onCancel)
+                            .disabled(isWorking)
+                    }
+                } else {
+                    HStack(spacing: 10) {
+                        Btn("cancel", compact: true, action: onCancel)
+                            .disabled(isWorking)
+                        Spacer()
+                        if isWorking {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                        } else {
+                            if eligibleRemoteRevocationCount > 0 {
+                                Btn(
+                                    "revoke on \(eligibleRemoteRevocationCount) tracked host\(eligibleRemoteRevocationCount == 1 ? "" : "s") & delete",
+                                    style: .primary,
+                                    compact: true,
+                                    action: onRevokeAndConfirm
+                                )
+                            }
+                            Btn("local delete only", style: .danger, compact: true, action: onConfirm)
+                        }
                     }
                 }
             }
-            .padding(28)
-            .frame(width: 620)
+            .padding(isPhone ? 18 : 28)
+            .frame(width: isPhone ? nil : 620)
+            .frame(maxWidth: isPhone ? .infinity : nil)
             .background(T.panelBg)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(T.red, lineWidth: 1)
             )
+            .padding(.horizontal, isPhone ? 18 : 0)
         }
     }
 
@@ -1771,13 +2239,17 @@ private struct OrphanedKeyCleanupModal: View {
 
     @Environment(\.designTokens) private var T
 
+    private var isPhone: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+    }
+
     var body: some View {
         ZStack {
             Color.black.opacity(0.65).ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 14) {
                 Text("delete orphaned private material")
-                    .font(Typography.tesseraMono(size: 18, weight: .medium))
+                    .font(Typography.sheetTitle)
                     .foregroundStyle(T.red)
 
                 Text("Tessera found \(count) Keychain item\(count == 1 ? "" : "s") with no matching key metadata. They cannot be selected, authenticated with, exported, or associated with a host. This removes only those inaccessible orphaned items.")
@@ -1785,20 +2257,29 @@ private struct OrphanedKeyCleanupModal: View {
                     .foregroundStyle(T.fgDim)
                     .fixedSize(horizontal: false, vertical: true)
 
-                HStack(spacing: 10) {
-                    Btn("cancel", compact: true, action: onCancel)
-                    Spacer()
-                    Btn("delete \(count) orphaned item\(count == 1 ? "" : "s")", style: .danger, compact: true, action: onConfirm)
+                if isPhone {
+                    VStack(spacing: 8) {
+                        Btn("delete \(count) orphaned item\(count == 1 ? "" : "s")", style: .danger, full: true, action: onConfirm)
+                        Btn("cancel", full: true, action: onCancel)
+                    }
+                } else {
+                    HStack(spacing: 10) {
+                        Btn("cancel", compact: true, action: onCancel)
+                        Spacer()
+                        Btn("delete \(count) orphaned item\(count == 1 ? "" : "s")", style: .danger, compact: true, action: onConfirm)
+                    }
                 }
             }
-            .padding(28)
-            .frame(width: 560)
+            .padding(isPhone ? 18 : 28)
+            .frame(width: isPhone ? nil : 560)
+            .frame(maxWidth: isPhone ? .infinity : nil)
             .background(T.panelBg)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(T.red, lineWidth: 1)
             )
+            .padding(.horizontal, isPhone ? 18 : 0)
         }
     }
 }

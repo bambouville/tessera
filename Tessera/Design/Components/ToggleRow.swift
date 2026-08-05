@@ -13,11 +13,13 @@ struct ToggleRow: View {
                 Text(title)
                     .font(Typography.tesseraMono(size: 13))
                     .foregroundStyle(T.fg)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 if let subtitle = subtitle {
                     Text(subtitle)
                         .font(Typography.tesseraMono(size: 11))
                         .foregroundStyle(T.fgMuted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
