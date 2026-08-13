@@ -164,10 +164,15 @@ with the new app version that introduces it.
 
 ## Legacy paid-customer test
 
-Only a verified **production** App Transaction whose original app build is
-earlier than build 4 receives the legacy-paid entitlement. Xcode StoreKit,
-sandbox, and TestFlight app transactions are deliberately not treated as old
-paid downloads, so those environments can exercise the new free-to-IAP path.
+Only a verified **production** App Transaction whose original purchase date is
+strictly before the customer-protective grace cutoff—August 14, 2026 at noon
+in New York (`2026-08-14T16:00:00Z`)—receives the legacy-paid entitlement.
+v0.3.1 became free on August 12, but its production grandfathering was wrong;
+the grace window deliberately includes every download before the hotfix
+cutoff. The date is also necessary because paid v0.2.0 and shipped free v0.3.1
+both used build 1. Xcode StoreKit, sandbox, and TestFlight app transactions are
+deliberately not treated as old paid downloads, so those environments can
+exercise the new free-to-IAP path.
 
 For the real migration check, update a physical device whose Apple Account
 previously downloaded the paid App Store version using the released production
@@ -185,6 +190,7 @@ production update-path evidence.
   localized value rather than hard-coded copy.
 - App price changes to Free in coordination with this binary and IAP release.
 - First non-consumable is included with the new app-version submission.
+- Release version is 0.3.3 (build 4); never reset the App Store build number.
 - New customer: one host is free; second host is gated.
 - IAP customer: purchase, relaunch, reinstall/new device, and automatic restore
   all grant unlimited hosts without extra taps.

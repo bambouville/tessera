@@ -1,4 +1,5 @@
 // Tessera/Purchases/StoreKitClient.swift
+import Foundation
 import StoreKit
 
 /// The one product as the App Store describes it. `displayName`,
@@ -38,7 +39,7 @@ protocol StoreKitClient {
 
     /// Whether the verified app transaction says this Apple Account originally
     /// downloaded the paid app. Only the two non-throwing outcomes are
-    /// authoritative: `.verified` is compared against the cutoff build and
+    /// authoritative: `.verified` is compared against the purchase-date cutoff and
     /// sandbox/Xcode app transactions are deliberately not grandfathered, so
     /// TestFlight/App Review can exercise the free-to-IAP path. An unverified
     /// result throws: it never grants, but it is also not authoritative proof
@@ -113,7 +114,7 @@ struct LiveStoreKitClient: StoreKitClient {
         switch result {
         case .verified(let transaction):
             return Self.isLegacyPaidCustomer(
-                originalAppVersion: transaction.originalAppVersion,
+                originalPurchaseDate: transaction.originalPurchaseDate,
                 environment: transaction.environment
             )
         case .unverified:
@@ -122,16 +123,16 @@ struct LiveStoreKitClient: StoreKitClient {
     }
 
     /// Pure environment gate kept internal for deterministic coverage. Sandbox
-    /// and local StoreKit testing report synthetic original versions (notably
-    /// 1.0); applying the production cutoff there would hide the IAP from
+    /// and local StoreKit testing report synthetic original purchase dates;
+    /// applying the production cutoff there would hide the IAP from
     /// TestFlight/App Review.
     static func isLegacyPaidCustomer(
-        originalAppVersion: String,
+        originalPurchaseDate: Date,
         environment: AppStore.Environment
     ) -> Bool {
         environment == .production
-            && HostAccessProduct.isLegacyPaidBuild(
-                originalAppVersion: originalAppVersion
+            && HostAccessProduct.isLegacyPaidPurchase(
+                originalPurchaseDate: originalPurchaseDate
             )
     }
 

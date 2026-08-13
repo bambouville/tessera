@@ -37,88 +37,76 @@ final class HostAccessStoreTests: XCTestCase {
         try await super.tearDown()
     }
 
-    // MARK: - Product contract and legacy build compare
+    // MARK: - Product contract and legacy purchase-date cutoff
 
     func test_productContract_matchesCheckedInConstants() {
         XCTAssertEqual(
             HostAccessProduct.productID,
             "com.bambouville.TesseraApp.unlimited_hosts"
         )
-        XCTAssertEqual(HostAccessProduct.freeModelFirstBuild, 4)
+        XCTAssertEqual(
+            HostAccessProduct.legacyPaidCutoffDate,
+            Date(timeIntervalSince1970: 1_786_723_200)
+        )
     }
 
-    func test_originalBuildBelowCutoff_isLegacyPaidCustomer() {
-        // Paid App Store releases used builds 1 through 3. All must remain
-        // grandfathered after the free-model build 4 ships.
-        let legacyBuilds = [
-            "1",
-            "2",
-            "3",
-            "3.0",
-            "01",
-            "1.9",
-            "1.10",
-        ]
+    func test_originalPurchaseBeforeCutoff_isLegacyPaidCustomer() {
+        let oneSecondBeforeCutoff = HostAccessProduct.legacyPaidCutoffDate
+            .addingTimeInterval(-1)
 
-        for build in legacyBuilds {
-            XCTAssertTrue(
-                HostAccessProduct.isLegacyPaidBuild(originalAppVersion: build),
-                "originalAppVersion \(build.debugDescription) must be a legacy paid customer"
+        XCTAssertTrue(
+            HostAccessProduct.isLegacyPaidPurchase(
+                originalPurchaseDate: oneSecondBeforeCutoff
             )
-        }
+        )
     }
 
-    func test_originalBuildEqualToCutoff_isNewFreeCustomer() {
-        // originalBuild == freeModelFirstBuild means the customer first
-        // downloaded the free build: no grandfathering.
-        for build in ["4", "4.0"] {
-            XCTAssertFalse(
-                HostAccessProduct.isLegacyPaidBuild(originalAppVersion: build),
-                "originalAppVersion \(build.debugDescription) equals the cutoff and must be free"
+    func test_originalPurchaseAtCutoff_isNewFreeCustomer() {
+        XCTAssertFalse(
+            HostAccessProduct.isLegacyPaidPurchase(
+                originalPurchaseDate: HostAccessProduct.legacyPaidCutoffDate
             )
-        }
+        )
     }
 
-    func test_originalBuildAboveCutoff_isNewFreeCustomer() {
-        // "10" is the lexicographic trap: as raw strings "10" < "4", but
-        // numerically it is a later free build.
-        for build in ["5", "9", "10"] {
-            XCTAssertFalse(
-                HostAccessProduct.isLegacyPaidBuild(originalAppVersion: build),
-                "originalAppVersion \(build.debugDescription) is above the cutoff and must be free"
-            )
-        }
-    }
+    func test_originalPurchaseAfterCutoff_isNewFreeCustomer() {
+        let oneSecondAfterCutoff = HostAccessProduct.legacyPaidCutoffDate
+            .addingTimeInterval(1)
 
-    func test_malformedOriginalBuild_failsClosedAsNewFreeCustomer() {
-        // Garbage must never misclassify a new user as a paid customer, the
-        // same fail-closed rule as an unverified app transaction. " 1" is not
-        // the canonical build string AppTransaction would vend, so it is
-        // treated as malformed rather than trimmed.
-        for build in ["", "abc", "1.x", " 1"] {
-            XCTAssertFalse(
-                HostAccessProduct.isLegacyPaidBuild(originalAppVersion: build),
-                "malformed originalAppVersion \(build.debugDescription) must fail closed (free)"
+        XCTAssertFalse(
+            HostAccessProduct.isLegacyPaidPurchase(
+                originalPurchaseDate: oneSecondAfterCutoff
             )
-        }
+        )
     }
 
     func test_grandfatheringAppliesOnlyToProductionAppTransactions() {
+        let grandfatheredDownload = HostAccessProduct.legacyPaidCutoffDate
+            .addingTimeInterval(-1)
+        let postCutoffDownload = HostAccessProduct.legacyPaidCutoffDate
+            .addingTimeInterval(1)
+
         XCTAssertTrue(
             LiveStoreKitClient.isLegacyPaidCustomer(
-                originalAppVersion: "3",
+                originalPurchaseDate: grandfatheredDownload,
                 environment: .production
             )
         )
         XCTAssertFalse(
             LiveStoreKitClient.isLegacyPaidCustomer(
-                originalAppVersion: "1",
+                originalPurchaseDate: postCutoffDownload,
+                environment: .production
+            )
+        )
+        XCTAssertFalse(
+            LiveStoreKitClient.isLegacyPaidCustomer(
+                originalPurchaseDate: grandfatheredDownload,
                 environment: .sandbox
             )
         )
         XCTAssertFalse(
             LiveStoreKitClient.isLegacyPaidCustomer(
-                originalAppVersion: "1",
+                originalPurchaseDate: grandfatheredDownload,
                 environment: .xcode
             )
         )
