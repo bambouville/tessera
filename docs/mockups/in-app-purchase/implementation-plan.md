@@ -3,7 +3,7 @@
 Status: Swift implementation exists on branch `feat/iap-unlimited-hosts`
 (worktree `.worktrees/iap-unlimited-hosts`; 4 commits, full unit suite green).
 No App Store Connect state has been changed; the release checklist below and
-the `freeModelFirstBuild` confirmation remain release-time steps.
+the production grandfather cutoff confirmation remain release-time steps.
 
 Companion mock: `index.html`.
 
@@ -32,20 +32,23 @@ Production UI must render `Product.displayName`, `Product.description`, and
 Customers who originally downloaded the paid app get unlimited hosts without
 buying the IAP. This is an entitlement, not a local migration flag.
 
-At the free-model release, increment `CFBundleVersion` and freeze that exact
-build number as `freeModelFirstBuild`. On iOS/iPadOS, verify
-`AppTransaction.shared` and compare `originalAppVersion` with that cutoff:
+At the free-model release, freeze an unambiguous boundary from the verified
+`AppTransaction.shared`. Build-number comparison was planned originally, but
+v0.2.0 and the shipped free v0.3.1 both used `CFBundleVersion = 1`, so the
+hotfix uses the verified production `originalPurchaseDate` instead:
 
 ```
-legacyPaid = verifiedAppTransaction.originalBuild < freeModelFirstBuild
+legacyPaid = verifiedAppTransaction.originalPurchaseDate < legacyPaidCutoffDate
 unlimited = legacyPaid || verifiedUnlimitedHostsTransaction
 ```
 
-`originalAppVersion` is the original `CFBundleVersion` on iOS, not
-`CFBundleShortVersionString`. Compare numeric components, not raw strings. The
-repository currently says marketing version `0.2.0`, build `1`; the release
-must use the actual App Store build sequence and must not reuse the paid build
-number for the first free binary.
+The frozen customer-protective cutoff is August 14, 2026 at noon in New York
+(`2026-08-14T16:00:00Z`). v0.3.1 became free on August 12, but its production
+grandfathering was incorrect; every download before the hotfix cutoff is
+deliberately grandfathered. A download at or after the cutoff is not. Sandbox
+and Xcode supply synthetic app-transaction dates, so the production-only
+environment gate remains required. All later releases must increment
+`CFBundleVersion`; v0.3.3 uses build 4.
 
 This preserves the purchase across updates, reinstall, and the customer's
 iPhone/iPad without Tessera accounts or a server. The settings UI should name
@@ -371,10 +374,10 @@ The suite must use an injected StoreKit client for app-transaction facts and
 
 Required assertions:
 
-1. `originalBuild < freeModelFirstBuild` grants legacy unlimited access.
-2. `originalBuild == freeModelFirstBuild` is a new free customer.
-3. Numeric comparisons cover `9` vs `10`, multi-component build strings, and
-   malformed values without lexicographic mistakes.
+1. `originalPurchaseDate < legacyPaidCutoffDate` grants legacy unlimited access.
+2. A purchase exactly at or after the cutoff is a new free customer.
+3. The production-only gate prevents sandbox and Xcode's synthetic old date
+   from granting legacy access.
 4. Verified IAP, verified legacy app purchase, either source, and neither source
    produce the correct access state.
 5. Unverified app/IAP transactions never grant access.
@@ -478,12 +481,13 @@ each sandbox run. Do not record Apple Account credentials or transaction JWS.
 
 ### 7. Test the paid-to-free grandfather path honestly
 
-Apple documents that sandbox `AppTransaction.originalAppVersion` is always
-`1.0`. Therefore sandbox/TestFlight evidence cannot by itself prove the real
-production cutoff. Use three layers:
+Apple documents that sandbox `AppTransaction.originalPurchaseDate` is always a
+synthetic 2013 date. Therefore sandbox/TestFlight evidence cannot by itself
+prove the real production cutoff. Use three layers:
 
-1. **Deterministic tests:** inject original builds immediately below, at, and
-   above `freeModelFirstBuild` and test the complete access state machine.
+1. **Deterministic tests:** inject original purchase dates immediately before,
+   at, and after `legacyPaidCutoffDate` and test the complete access state
+   machine.
 2. **Upgrade rehearsal:** install the last paid production binary on a device
    using an Apple Account that actually acquired it, populate multiple hosts,
    then update to the release candidate without uninstalling. Confirm no data
@@ -534,15 +538,16 @@ that boundary is not sufficient for this migration.
 5. Put the purchase in an obvious review path: Hosts → New Host after one saved,
    and Settings → Unlimited Hosts.
 6. Review notes must explain the paid-to-free transition, the
-   `AppTransaction.originalAppVersion` grandfather rule, the one-host free
+   `AppTransaction.originalPurchaseDate` grandfather rule, the one-host free
    limit, the IAP location, and that no server/account is involved.
 7. Update App Store description/screenshots to say that saving multiple hosts
    requires a one-time purchase. Do not imply that transports or terminal
    features are paid.
 8. Coordinate the app price change to free with the binary/IAP release so no
    build is live where a new free customer can bypass or cannot buy the unlock.
-9. Confirm the production `freeModelFirstBuild` against the actual uploaded
-   build number before submission. Treat a mismatch as a release blocker.
+9. Confirm the frozen production purchase-date cutoff and monotonically
+   increasing uploaded build number before submission. Treat either mismatch
+   as a release blocker.
 
 ## Explicit non-goals
 

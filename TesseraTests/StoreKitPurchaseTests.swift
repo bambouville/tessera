@@ -335,8 +335,8 @@ final class StoreKitPurchaseTests: XCTestCase {
             switch result {
             case .verified(let appTransaction):
                 let expected = appTransaction.environment == .production
-                    && HostAccessProduct.isLegacyPaidBuild(
-                        originalAppVersion: appTransaction.originalAppVersion
+                    && HostAccessProduct.isLegacyPaidPurchase(
+                        originalPurchaseDate: appTransaction.originalPurchaseDate
                     )
                 XCTAssertEqual(
                     reported,

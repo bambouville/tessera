@@ -11,40 +11,20 @@ enum HostAccessProduct {
     /// the local `Tessera.storekit` test configuration exactly.
     static let productID = "com.bambouville.TesseraApp.unlimited_hosts"
 
-    /// First `CFBundleVersion` that ships the free model. A verified App Store
-    /// transaction whose original download build is below this cutoff belongs
-    /// to a customer who paid for the app and is owed unlimited hosts.
+    /// Customer-protective grandfather cutoff: August 14, 2026 at noon in New
+    /// York (`2026-08-14T16:00:00Z`). v0.3.1 became free on August 12, but its
+    /// production grandfathering was incorrect. Everyone whose verified
+    /// original download predates this grace cutoff keeps unlimited hosts.
     ///
-    /// Paid releases used original build numbers through 3 (v0.1.2 shipped as
-    /// build 3, and v0.2.0 reused build 1). The first free binary therefore
-    /// uses build 4 and freezes 4 as this cutoff; neither value may be reset in
-    /// later releases.
-    static let freeModelFirstBuild = 4
+    /// `originalAppVersion` cannot represent this boundary because v0.2.0 and
+    /// the shipped v0.3.1 both used `CFBundleVersion = 1`. Keep this date frozen
+    /// even as later releases increment their build number.
+    static let legacyPaidCutoffDate = Date(timeIntervalSince1970: 1_786_723_200)
 
-    /// Whether a verified `AppTransaction.originalAppVersion` predates the
-    /// free model and therefore represents a legacy paid customer.
-    ///
-    /// Numeric component-wise compare: `originalAppVersion < freeModelFirstBuild`.
-    /// "9" < "10", "1.9" < "1.10", missing components = 0. Any unparseable
-    /// component → false (never misgrant).
-    static func isLegacyPaidBuild(originalAppVersion: String) -> Bool {
-        let components = originalAppVersion.split(separator: ".", omittingEmptySubsequences: false)
-        var numbers = [Int]()
-        numbers.reserveCapacity(components.count)
-        for component in components {
-            // A negative component is nonsensical for a build string; treat it
-            // as unparseable so it can never misgrant.
-            guard let value = Int(component), value >= 0 else { return false }
-            numbers.append(value)
-        }
-
-        let cutoff = [freeModelFirstBuild]
-        let count = max(numbers.count, cutoff.count)
-        for index in 0..<count {
-            let original = index < numbers.count ? numbers[index] : 0
-            let required = index < cutoff.count ? cutoff[index] : 0
-            if original != required { return original < required }
-        }
-        return false
+    /// Whether the verified production app purchase predates the free model.
+    /// The boundary is strict: a download at or after the cutoff is a free-model
+    /// customer and needs the non-consumable for unlimited saved hosts.
+    static func isLegacyPaidPurchase(originalPurchaseDate: Date) -> Bool {
+        originalPurchaseDate < legacyPaidCutoffDate
     }
 }
