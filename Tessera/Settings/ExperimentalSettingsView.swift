@@ -101,10 +101,6 @@ struct ExperimentalSettingsView: View {
                 )
             }
 
-            Field(label: "active profile · auto-detected") {
-                ActiveProfileCard(profile: store.profiles.first)
-            }
-
             Field(label: "profiles · evaluated top-to-bottom · first match wins") {
                 ProfileListCard(
                     profiles: store.profiles,
@@ -406,55 +402,6 @@ private struct SegmentedStringPicker: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(active ? .isSelected : [])
-    }
-}
-
-// MARK: - Active profile
-
-private struct ActiveProfileCard: View {
-    let profile: SwipePadProfile?
-
-    @Environment(\.designTokens) private var T
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("detected from foreground process · resolved at puck-touch time")
-                    .font(Typography.tesseraMono(size: 11))
-                    .foregroundStyle(T.fgMuted)
-                Text(profileText)
-                    .font(Typography.tesseraMono(size: 13, weight: .medium))
-                    .foregroundStyle(T.fg)
-            }
-
-            Spacer(minLength: 12)
-
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(T.green)
-                    .frame(width: 6, height: 6)
-                Text("matching")
-                    .font(Typography.tesseraMono(size: 11, weight: .medium))
-            }
-            .foregroundStyle(T.green)
-            .padding(.vertical, 5)
-            .padding(.horizontal, 10)
-            .background(T.green.opacity(0.16))
-            .clipShape(Capsule())
-        }
-        .padding(14)
-        .background(T.panelBg)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(T.border, lineWidth: 1)
-        )
-    }
-
-    private var profileText: String {
-        guard let profile = profile else { return "no profiles configured" }
-        if profile.matchProcess.isEmpty { return "\(profile.name) · fallback" }
-        return "\(profile.name) · process == \(profile.matchProcess)"
     }
 }
 

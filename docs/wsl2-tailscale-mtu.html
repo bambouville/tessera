@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Tessera — WSL2 and Tailscale MTU warning</title>
+  <style>
+    :root {
+      --bg: #0e1013;
+      --panel: #16181c;
+      --panel-strong: #1b1e23;
+      --ink: #f2f3f6;
+      --muted: rgba(232, 236, 244, 0.66);
+      --dim: rgba(232, 236, 244, 0.42);
+      --border: rgba(255, 255, 255, 0.10);
+      --border-strong: rgba(255, 255, 255, 0.17);
+      --accent: #5b9fff;
+      --accent-soft: rgba(91, 159, 255, 0.13);
+      --amber: #ff9f0a;
+      --amber-soft: rgba(255, 159, 10, 0.12);
+      --green: #30d158;
+      --green-soft: rgba(48, 209, 88, 0.11);
+      --code: #101215;
+      --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    }
+
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f4f5f7;
+        --panel: #ffffff;
+        --panel-strong: #f8f9fb;
+        --ink: #1a1d22;
+        --muted: #4d5560;
+        --dim: #777f8b;
+        --border: rgba(25, 35, 55, 0.13);
+        --border-strong: rgba(25, 35, 55, 0.23);
+        --accent: #2668d9;
+        --accent-soft: rgba(38, 104, 217, 0.09);
+        --amber: #9a5900;
+        --amber-soft: rgba(178, 101, 0, 0.10);
+        --green: #1f7f3a;
+        --green-soft: rgba(31, 127, 58, 0.09);
+        --code: #eceef1;
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 15px;
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    main {
+      width: min(860px, calc(100% - 36px));
+      margin: 0 auto;
+      padding: 56px 0 100px;
+    }
+
+    a { color: var(--accent); text-underline-offset: 3px; }
+    a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--accent);
+      font: 700 11px/1.4 var(--mono);
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3 { font-family: var(--mono); }
+    h1 { margin: 0; font-size: clamp(27px, 6vw, 40px); font-weight: 500; line-height: 1.15; }
+    h2 { margin: 54px 0 12px; font-size: 19px; font-weight: 550; }
+    h3 { margin: 0 0 7px; font-size: 13px; font-weight: 650; }
+    p { max-width: 69ch; margin: 0 0 15px; }
+
+    .lede {
+      margin: 20px 0 0;
+      max-width: 66ch;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .notice {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 12px;
+      margin: 30px 0 0;
+      padding: 18px;
+      border: 1px solid color-mix(in srgb, var(--amber) 30%, transparent);
+      border-radius: 10px;
+      background: var(--amber-soft);
+    }
+
+    .notice svg { width: 19px; height: 19px; margin-top: 2px; color: var(--amber); }
+    .notice strong { display: block; margin-bottom: 3px; font-family: var(--mono); font-size: 13px; }
+    .notice p { margin: 0; color: var(--muted); font-size: 14px; }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .flow article, .option {
+      padding: 17px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel);
+    }
+
+    .flow .num {
+      display: inline-grid;
+      place-items: center;
+      width: 25px;
+      height: 25px;
+      margin-bottom: 12px;
+      border: 1px solid var(--border-strong);
+      border-radius: 50%;
+      color: var(--accent);
+      font: 650 11px/1 var(--mono);
+    }
+
+    .flow p, .option p { margin: 0; color: var(--muted); font-size: 14px; }
+
+    .facts {
+      width: 100%;
+      margin-top: 18px;
+      border-collapse: separate;
+      border-spacing: 0;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel);
+    }
+
+    .facts th, .facts td { padding: 12px 15px; border-bottom: 1px solid var(--border); text-align: left; }
+    .facts tr:last-child th, .facts tr:last-child td { border-bottom: 0; }
+    .facts th { width: 36%; color: var(--dim); font: 600 11px/1.4 var(--mono); }
+    .facts td { color: var(--muted); }
+
+    .options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 18px; }
+    .option.recommended { border-color: color-mix(in srgb, var(--green) 28%, transparent); background: var(--green-soft); }
+    .badge { display: inline-block; margin-bottom: 9px; padding: 3px 7px; border-radius: 5px; color: var(--green); background: var(--green-soft); font: 700 9px/1.4 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+
+    pre {
+      position: relative;
+      margin: 16px 0 20px;
+      padding: 17px 18px;
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--code);
+      color: var(--ink);
+      font: 12.5px/1.7 var(--mono);
+    }
+
+    code { font-family: var(--mono); }
+    :not(pre) > code { padding: 2px 5px; border-radius: 4px; background: var(--code); font-size: .9em; }
+
+    .good {
+      padding: 14px 16px;
+      border-left: 3px solid var(--green);
+      background: var(--green-soft);
+      color: var(--muted);
+    }
+
+    .small { color: var(--dim); font-size: 13px; }
+
+    footer {
+      margin-top: 60px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+      color: var(--dim);
+      font-size: 13px;
+    }
+
+    @media (max-width: 680px) {
+      main { padding-top: 36px; }
+      .flow, .options { grid-template-columns: 1fr; }
+      .facts th, .facts td { display: block; width: 100%; }
+      .facts th { padding-bottom: 3px; border-bottom: 0; }
+      .facts td { padding-top: 3px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Tessera network help</p>
+  <h1>WSL2 and Tailscale MTU warning</h1>
+  <p class="lede">
+    Tessera detected a WSL2 network shape that can allow SSH to connect while silently dropping larger terminal replies. This is a host networking issue, not damage to your tmux session.
+  </p>
+
+  <aside class="notice" aria-label="What Tessera detected">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3.6 2.3 20.4h19.4L12 3.6Zm0 4.1 6.3 10.9H5.7L12 7.7Zm-1 3.2v4.2h2v-4.2h-2Zm0 5.4v2h2v-2h-2Z"/></svg>
+    <div>
+      <strong>Possible packet-size blackhole</strong>
+      <p>The warning appears only when the SSH connection entered through <code>tailscale0</code>, WSL2 is present, <code>tailscale0</code> is 1280, and the outer/default interface is below 1340.</p>
+    </div>
+  </aside>
+
+  <h2>Why “attaching pane” can stall</h2>
+  <div class="flow">
+    <article>
+      <span class="num">1</span>
+      <h3>Small replies pass</h3>
+      <p>Authentication and short tmux control messages fit below the broken packet-size boundary.</p>
+    </article>
+    <article>
+      <span class="num">2</span>
+      <h3>A pane capture is larger</h3>
+      <p>Tessera requests the visible pane and scrollback so the restored terminal can paint immediately.</p>
+    </article>
+    <article>
+      <span class="num">3</span>
+      <h3>The path drops it</h3>
+      <p>The SSH connection stays open, but the larger encrypted response never reaches the device.</p>
+    </article>
+  </div>
+
+  <h2>What the probe reads</h2>
+  <p>The probe is read-only, runs over the SSH connection you already authorized, and does not use <code>sudo</code> or change the host.</p>
+  <table class="facts">
+    <tr><th>WSL version signal</th><td><code>/proc/sys/kernel/osrelease</code></td></tr>
+    <tr><th>Connection route</th><td>The server address from <code>SSH_CONNECTION</code>, matched against addresses on <code>tailscale0</code></td></tr>
+    <tr><th>Outer MTU</th><td>The MTU of WSL’s default-route interface</td></tr>
+    <tr><th>Inner MTU</th><td><code>/sys/class/net/tailscale0/mtu</code></td></tr>
+  </table>
+
+  <h2>Verify the host</h2>
+  <p>Run these commands inside the affected WSL distribution. They only display state.</p>
+  <pre><code>uname -a
+ip -br link
+ip route show default
+
+default_dev="$(ip route show default | awk 'NR == 1 { print $5 }')"
+printf 'default interface: %s\n' "$default_dev"
+cat "/sys/class/net/$default_dev/mtu"
+cat /sys/class/net/tailscale0/mtu 2&gt;/dev/null || true
+
+tailscale version 2&gt;/dev/null || true
+tailscale status 2&gt;/dev/null || true</code></pre>
+  <p class="good">For Tailscale running inside WSL2, the common healthy relationship is an outer/default interface of at least <strong>1340</strong> carrying the <strong>1280</strong>-byte Tailscale interface.</p>
+
+  <h2>Choose the remediation that matches your topology</h2>
+  <div class="options">
+    <article class="option recommended">
+      <span class="badge">Tailscale recommendation</span>
+      <h3>Run Tailscale on Windows only</h3>
+      <p>Tailscale advises against running it simultaneously on Windows and inside WSL2. First confirm which Tailscale IP Tessera targets so you do not cut off your own access.</p>
+    </article>
+    <article class="option">
+      <h3>Keep Tailscale inside WSL2</h3>
+      <p>Update Tailscale and confirm its WSL workaround raises the outer/default interface to 1340. Test a temporary MTU adjustment before making startup configuration persistent.</p>
+    </article>
+  </div>
+
+  <h2>Important safety notes</h2>
+  <p>Do not lower <code>tailscale0</code> blindly, reset the Windows network stack, shut down WSL, or disable either Tailscale installation from a remote session. Those actions can end the connection you need for recovery.</p>
+  <p>A configured MTU is not proof of the end-to-end path. If the warning persists after correction, compare ordinary OS traffic with Tailscale’s layered pings and perform a bounded packet-size test from another device.</p>
+
+  <h2>Authoritative references</h2>
+  <p>
+    <a href="https://tailscale.com/docs/install/windows/wsl2">Tailscale: Install on Windows with WSL2</a><br>
+    <a href="https://tailscale.com/docs/reference/troubleshooting/network-configuration/tcp-connection-two-devices">Tailscale: Troubleshoot TCP connection issues</a>
+  </p>
+  <p class="small">Tessera reports this as a possible cause because other routing, VPN, firewall, and packet-loss problems can produce similar symptoms.</p>
+
+  <footer>
+    Tessera connects directly to hosts you control. The network probe is evaluated on-device and does not send host details to a Tessera service.
+  </footer>
+</main>
+</body>
+</html>

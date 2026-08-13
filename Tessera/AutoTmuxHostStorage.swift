@@ -1,5 +1,141 @@
 import Foundation
+import Observation
 import TmuxControl
+
+/// Device-local, non-secret history for truthful host recency and key-use UI.
+///
+/// This deliberately stays outside SwiftData. Adding a column to the current
+/// model graph would cross PersistedHost's `[String]` migration hazard on
+/// iOS 26, while connection history is runtime metadata that should describe
+/// this device rather than travel through Nearby Setup.
+@MainActor
+@Observable
+final class ConnectionActivityStore {
+    static let shared = ConnectionActivityStore()
+    nonisolated static let defaultStorageKey = "tessera.connectionActivity.v1"
+
+    private struct Document: Codable {
+        var version = 1
+        var hostLastConnectedAt: [String: Date] = [:]
+        var keyLastUsedAt: [String: Date] = [:]
+    }
+
+    private(set) var hostLastConnectedAt: [String: Date]
+    private(set) var keyLastUsedAt: [String: Date]
+
+    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let storageKey: String
+
+    init(
+        defaults: UserDefaults = .standard,
+        storageKey: String = ConnectionActivityStore.defaultStorageKey
+    ) {
+        self.defaults = defaults
+        self.storageKey = storageKey
+        let document = Self.load(defaults: defaults, storageKey: storageKey)
+        hostLastConnectedAt = document.hostLastConnectedAt
+        keyLastUsedAt = document.keyLastUsedAt
+    }
+
+    func lastConnectedAt(for hostID: UUID) -> Date? {
+        hostLastConnectedAt[hostID.uuidString]
+    }
+
+    func lastUsedAt(for keyID: UUID) -> Date? {
+        keyLastUsedAt[keyID.uuidString]
+    }
+
+    func recordHostConnection(_ hostID: UUID, at date: Date = Date()) {
+        guard date.timeIntervalSinceReferenceDate.isFinite else { return }
+        let key = hostID.uuidString
+        guard hostLastConnectedAt[key].map({ date > $0 }) ?? true else { return }
+        hostLastConnectedAt[key] = date
+        save()
+    }
+
+    func recordKeyUse(_ keyID: UUID, at date: Date = Date()) {
+        guard date.timeIntervalSinceReferenceDate.isFinite else { return }
+        let key = keyID.uuidString
+        guard keyLastUsedAt[key].map({ date > $0 }) ?? true else { return }
+        keyLastUsedAt[key] = date
+        save()
+    }
+
+    func removeHost(_ hostID: UUID) {
+        guard hostLastConnectedAt.removeValue(forKey: hostID.uuidString) != nil else { return }
+        save()
+    }
+
+    func removeKey(_ keyID: UUID) {
+        guard keyLastUsedAt.removeValue(forKey: keyID.uuidString) != nil else { return }
+        save()
+    }
+
+    private func save() {
+        let document = Document(
+            hostLastConnectedAt: hostLastConnectedAt,
+            keyLastUsedAt: keyLastUsedAt
+        )
+        guard let data = try? JSONEncoder().encode(document) else { return }
+        defaults.set(data, forKey: storageKey)
+    }
+
+    private static func load(defaults: UserDefaults, storageKey: String) -> Document {
+        guard let data = defaults.data(forKey: storageKey),
+              let document = try? JSONDecoder().decode(Document.self, from: data),
+              document.version == 1 else {
+            return Document()
+        }
+        return Document(
+            hostLastConnectedAt: document.hostLastConnectedAt.filter {
+                $0.value.timeIntervalSinceReferenceDate.isFinite
+            },
+            keyLastUsedAt: document.keyLastUsedAt.filter {
+                $0.value.timeIntervalSinceReferenceDate.isFinite
+            }
+        )
+    }
+}
+
+enum RecentHostOrdering {
+    static func sortedIDs(
+        hostIDs: [UUID],
+        sortOrder: [UUID: Int],
+        lastConnectedAt: [UUID: Date],
+        limit: Int
+    ) -> [UUID] {
+        hostIDs
+            .filter { lastConnectedAt[$0] != nil }
+            .sorted { lhs, rhs in
+                let lhsDate = lastConnectedAt[lhs] ?? .distantPast
+                let rhsDate = lastConnectedAt[rhs] ?? .distantPast
+                if lhsDate != rhsDate { return lhsDate > rhsDate }
+                let lhsOrder = sortOrder[lhs] ?? .max
+                let rhsOrder = sortOrder[rhs] ?? .max
+                if lhsOrder != rhsOrder { return lhsOrder < rhsOrder }
+                return lhs.uuidString < rhs.uuidString
+            }
+            .prefix(max(0, limit))
+            .map(\.self)
+    }
+}
+
+enum ConnectionActivityAttribution {
+    static func newlyReadyHostIDs(
+        oldReadyIDs: Set<UUID>,
+        newReadyIDs: Set<UUID>,
+        connectedSessionIDs: Set<UUID>,
+        sessions: [LiveSession]
+    ) -> Set<UUID> {
+        let newlyReady = newReadyIDs
+            .subtracting(oldReadyIDs)
+            .intersection(connectedSessionIDs)
+        return Set(sessions.compactMap { session in
+            guard newlyReady.contains(session.id) else { return nil }
+            return session.persistedHostID
+        })
+    }
+}
 
 /// Per-host runtime data we want to remember across connects, separate
 /// from the user-edited `Host` config.

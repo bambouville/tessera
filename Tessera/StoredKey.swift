@@ -939,6 +939,7 @@ enum StoredKeyLifecycle {
         persistence: KeyLifecyclePersistence,
         journal: KeyDeletionIntentStore = KeyDeletionIntentStore(),
         metadata: KeySecurityMetadataStore = KeySecurityMetadataStore(),
+        activity: ConnectionActivityStore? = nil,
         deleteMaterial: (UUID) throws -> Void = {
             _ = try KeyStore.deleteKey(forKeyID: $0)
         }
@@ -953,6 +954,7 @@ enum StoredKeyLifecycle {
             }
             persistence.deleteKey(key)
             try persistence.save(.deletion)
+            (activity ?? .shared).removeKey(key.id)
         } catch {
             let primary = error
             persistence.rollback()
@@ -982,6 +984,7 @@ enum StoredKeyLifecycle {
         persistence: KeyLifecyclePersistence,
         journal: KeyDeletionIntentStore = KeyDeletionIntentStore(),
         metadata: KeySecurityMetadataStore = KeySecurityMetadataStore(),
+        activity: ConnectionActivityStore? = nil,
         deleteMaterial: (UUID) throws -> Void = {
             _ = try KeyStore.deleteKey(forKeyID: $0)
         }
@@ -1001,6 +1004,7 @@ enum StoredKeyLifecycle {
                     persistence.deleteKey(key)
                     try persistence.save(.deletionRecovery)
                 }
+                (activity ?? .shared).removeKey(intent.keyID)
                 try deleteMaterial(intent.keyID)
                 metadata.removeRecord(for: intent.keyID)
                 try journal.clear(keyID: intent.keyID)

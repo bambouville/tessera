@@ -300,6 +300,103 @@ final class TerminalScrollbackOracleTests: XCTestCase {
             String(decoding: queryResponse, as: UTF8.self).contains("]11;rgb:1010/1010/1010")
         )
     }
+
+    // MARK: - Terminal output contrast filter
+
+    func testContrastFilterPreservesPrintableSlices() {
+        var filter = TerminalOutputContrastFilter()
+        let storage = Array("prefix-printable terminal output-suffix".utf8)
+        let input = storage[7..<(storage.count - 7)]
+
+        let output = filter.process(
+            input,
+            defaultBackgroundRGB: 0x101010,
+            defaultForegroundRGB: 0xD4D4D4,
+            minimumContrast: 0.30
+        )
+
+        XCTAssertEqual(Array(output), Array(input))
+    }
+
+    func testContrastFilterDoesNotBypassPendingEscapeSequence() {
+        var filter = TerminalOutputContrastFilter()
+        let first = [UInt8(0x1B)]
+        XCTAssertTrue(filter.process(
+            first[...],
+            defaultBackgroundRGB: 0x101010,
+            defaultForegroundRGB: 0xD4D4D4,
+            minimumContrast: 0.30
+        ).isEmpty)
+
+        let remainder = Array("[38;2;20;20;20mtext".utf8)
+        let output = filter.process(
+            remainder[...],
+            defaultBackgroundRGB: 0x101010,
+            defaultForegroundRGB: 0xD4D4D4,
+            minimumContrast: 0.30
+        )
+
+        XCTAssertEqual(
+            Array(output),
+            Array("\u{1B}[38;2;93;93;93mtext".utf8)
+        )
+    }
+
+    func testContrastFilterStillRewritesC1TruecolorSGR() {
+        var filter = TerminalOutputContrastFilter()
+        let input = [UInt8(0x9B)] + Array("38;2;20;20;20mtext".utf8)
+        let output = filter.process(
+            input[...],
+            defaultBackgroundRGB: 0x101010,
+            defaultForegroundRGB: 0xD4D4D4,
+            minimumContrast: 0.30
+        )
+
+        XCTAssertEqual(
+            Array(output),
+            [UInt8(0x9B)] + Array("38;2;93;93;93mtext".utf8)
+        )
+    }
+
+    /// Optimized-build audit oracle. Each sample processes 64 MiB of the
+    /// common printable-only path and verifies the exact byte count.
+    func testContrastFilterPrintableThroughputAudit() throws {
+        guard ProcessInfo.processInfo.environment["TESSERA_RUN_PERFORMANCE_AUDIT"] == "1" else {
+            throw XCTSkip("Release performance audit is opt-in")
+        }
+        let bytesPerSample = 64 * 1_024 * 1_024
+        for chunkSize in [128, 1_024, 8_192] {
+            let chunk = Array(repeating: UInt8(ascii: "x"), count: chunkSize)
+            let iterations = bytesPerSample / chunkSize
+            var samples: [Double] = []
+
+            for _ in 0..<5 {
+                var filter = TerminalOutputContrastFilter()
+                var processed = 0
+                let start = CACurrentMediaTime()
+                for _ in 0..<iterations {
+                    processed += filter.process(
+                        chunk[...],
+                        defaultBackgroundRGB: 0x101010,
+                        defaultForegroundRGB: 0xD4D4D4,
+                        minimumContrast: 0.30
+                    ).count
+                }
+                samples.append((CACurrentMediaTime() - start) * 1_000)
+                XCTAssertEqual(processed, bytesPerSample)
+            }
+
+            samples.sort()
+            let sampleText = samples
+                .map { String(format: "%.3f", $0) }
+                .joined(separator: ",")
+            NSLog(
+                "contrast-filter chunk=\(chunkSize) bytes=\(bytesPerSample) "
+                    + "medianMs=\(samples[2]) maxMs=\(samples[4]) "
+                    + "samplesMs=\(sampleText)"
+            )
+        }
+    }
 }
 
 private final class NullTerminalDelegate: TerminalDelegate {

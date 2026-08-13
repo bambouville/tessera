@@ -1534,6 +1534,31 @@ final class KeyStoreSecurityTests: XCTestCase {
     }
 
     @MainActor
+    func test_successfulDeletionClearsLastUsedActivity() throws {
+        let (journal, defaults, suite) = try makeDeletionJournal()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let activityKey = "activity"
+        let activity = ConnectionActivityStore(defaults: defaults, storageKey: activityKey)
+        let key = StoredKey(name: "delete activity")
+        let harness = LifecyclePersistenceHarness(keys: [key])
+        activity.recordKeyUse(key.id, at: Date(timeIntervalSince1970: 100))
+
+        try StoredKeyLifecycle.delete(
+            key,
+            persistence: harness.persistence,
+            journal: journal,
+            activity: activity,
+            deleteMaterial: { _ in }
+        )
+
+        XCTAssertNil(activity.lastUsedAt(for: key.id))
+        XCTAssertNil(
+            ConnectionActivityStore(defaults: defaults, storageKey: activityKey)
+                .lastUsedAt(for: key.id)
+        )
+    }
+
+    @MainActor
     func test_deletionJournalResumesAfterCrashBoundaryWithoutSecrets() throws {
         let (journal, defaults, suite) = try makeDeletionJournal()
         defer { defaults.removePersistentDomain(forName: suite) }

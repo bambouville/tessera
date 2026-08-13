@@ -30,12 +30,21 @@ struct PublicKeyCopyPayload: Equatable {
     }
 }
 
+struct PublicKeySharePayload: Equatable {
+    let shareValue: String
+
+    init(publicKey: String) {
+        shareValue = publicKey
+    }
+}
+
 /// Keys page (M3). Two-pane: 340pt list + detail.
 struct KeysPageView: View {
     @Bindable var presentation: KeysPagePresentationState
     @Environment(\.designTokens) private var T
     @Environment(\.modelContext) private var modelContext
     @Environment(AppearancePreferences.self) private var appearance
+    @Environment(ConnectionActivityStore.self) private var connectionActivity
     @Query(sort: \StoredKey.createdAt, order: .reverse) private var keys: [StoredKey]
     @Query(sort: \PersistedHost.name) private var hosts: [PersistedHost]
 
@@ -664,7 +673,7 @@ struct KeysPageView: View {
             keyBadges(for: key)
                 .padding(.bottom, 8)
 
-            Text("created \(detailDate(key.createdAt))  ·  last used —")
+            Text(keyUsageSummary(for: key))
                 .font(Typography.tesseraMono(size: 13))
                 .foregroundStyle(T.fgDim)
                 .padding(.bottom, 28)
@@ -698,31 +707,7 @@ struct KeysPageView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 10)
                 } else {
-                    HStack(spacing: 8) {
-                        Btn("copy public key", compact: true) {
-                            let payload = PublicKeyCopyPayload(
-                                publicKey: key.authorizedKeysLine
-                            )
-                            UIPasteboard.general.setValue(
-                                payload.pasteboardValue,
-                                forPasteboardType: UTType.utf8PlainText.identifier
-                            )
-                            showToast(payload.feedback.lowercased())
-                            UIAccessibility.post(
-                                notification: .announcement,
-                                argument: payload.feedback
-                            )
-                        }
-                        .accessibilityHint("Copies public material only")
-
-                        Btn("share", compact: true) {
-                            showToast("share ships later")
-                        }
-
-                        Btn("copy to host…", compact: true) {
-                            requestCopyToHost(for: key)
-                        }
-                    }
+                    publicKeyActions(for: key)
                     .padding(.top, 10)
                 }
 
@@ -823,6 +808,68 @@ struct KeysPageView: View {
             .padding(.top, 40)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func publicKeyActions(for key: StoredKey) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                copyPublicKeyButton(for: key)
+                sharePublicKeyButton(for: key)
+                copyPublicKeyToHostButton(for: key)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                copyPublicKeyButton(for: key)
+                sharePublicKeyButton(for: key)
+                copyPublicKeyToHostButton(for: key)
+            }
+        }
+    }
+
+    private func copyPublicKeyButton(for key: StoredKey) -> some View {
+        Btn("copy public key", compact: true) {
+            let payload = PublicKeyCopyPayload(
+                publicKey: key.authorizedKeysLine
+            )
+            UIPasteboard.general.setValue(
+                payload.pasteboardValue,
+                forPasteboardType: UTType.utf8PlainText.identifier
+            )
+            showToast(payload.feedback.lowercased())
+            UIAccessibility.post(
+                notification: .announcement,
+                argument: payload.feedback
+            )
+        }
+        .accessibilityHint("Copies public material only")
+    }
+
+    private func sharePublicKeyButton(for key: StoredKey) -> some View {
+        let payload = PublicKeySharePayload(publicKey: key.authorizedKeysLine)
+
+        return ShareLink(item: payload.shareValue) {
+            Text("share")
+                .font(Typography.tesseraMono(size: 13))
+                .foregroundStyle(T.fg)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(T.inputBg)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(T.border, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("share public key")
+        .accessibilityHint("Shares public material only")
+    }
+
+    private func copyPublicKeyToHostButton(for key: StoredKey) -> some View {
+        Btn("copy to host…", compact: true) {
+            requestCopyToHost(for: key)
+        }
     }
 
     private func staticValue(_ text: String, size: CGFloat, color: Color) -> some View {
@@ -1786,6 +1833,17 @@ struct KeysPageView: View {
 
     private func detailDate(_ date: Date) -> String {
         date.formatted(.dateTime.year().month(.abbreviated).day())
+    }
+
+    private func keyUsageSummary(for key: StoredKey) -> String {
+        let created = "created \(detailDate(key.createdAt))"
+        guard let lastUsed = connectionActivity.lastUsedAt(for: key.id) else {
+            return "\(created)  ·  last used on this device not recorded"
+        }
+        let used = lastUsed.formatted(
+            .dateTime.year().month(.abbreviated).day().hour().minute()
+        )
+        return "\(created)  ·  last used on this device \(used)"
     }
 
     private func applyInitialSelectionIfNeeded() {

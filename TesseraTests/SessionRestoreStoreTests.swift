@@ -276,6 +276,15 @@ final class OnboardingFixRegressionTests: XCTestCase {
         XCTAssertFalse(payload.pasteboardValue.contains("PRIVATE KEY"))
     }
 
+    func test_publicKeySharePayloadContainsOnlyExactPublicText() {
+        let publicLine = "ssh-ed25519 AAAATEST tessera"
+
+        let payload = PublicKeySharePayload(publicKey: publicLine)
+
+        XCTAssertEqual(payload.shareValue, publicLine)
+        XCTAssertFalse(payload.shareValue.contains("PRIVATE KEY"))
+    }
+
     func test_hostKeyRejectionUsesIntentionalNotConnectedPresentation() {
         let reason = HostKeyRejectedError().localizedDescription
 
@@ -338,6 +347,114 @@ final class OnboardingFixRegressionTests: XCTestCase {
                 activeSessionUsesTmux: nil,
                 tmuxKnownUnavailable: false
             )
+        )
+    }
+}
+
+@MainActor
+final class ConnectionActivityStoreTests: XCTestCase {
+    func test_activityPersistsAndNeverMovesBackward() throws {
+        let suite = "ConnectionActivityStoreTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let storageKey = "activity"
+        let hostID = UUID()
+        let keyID = UUID()
+        let later = Date(timeIntervalSince1970: 1_700_000_200)
+        let earlier = Date(timeIntervalSince1970: 1_700_000_100)
+
+        let store = ConnectionActivityStore(defaults: defaults, storageKey: storageKey)
+        store.recordHostConnection(hostID, at: later)
+        store.recordHostConnection(hostID, at: earlier)
+        store.recordKeyUse(keyID, at: later)
+        store.recordKeyUse(keyID, at: earlier)
+
+        let reloaded = ConnectionActivityStore(defaults: defaults, storageKey: storageKey)
+        XCTAssertEqual(reloaded.lastConnectedAt(for: hostID), later)
+        XCTAssertEqual(reloaded.lastUsedAt(for: keyID), later)
+    }
+
+    func test_activityRemovalAndCorruptMetadataFailSafe() throws {
+        let suite = "ConnectionActivityStoreTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let hostID = UUID()
+        let keyID = UUID()
+        let store = ConnectionActivityStore(defaults: defaults, storageKey: "activity")
+        store.recordHostConnection(hostID)
+        store.recordKeyUse(keyID)
+        store.removeHost(hostID)
+        store.removeKey(keyID)
+
+        XCTAssertNil(store.lastConnectedAt(for: hostID))
+        XCTAssertNil(store.lastUsedAt(for: keyID))
+
+        defaults.set(Data("not json".utf8), forKey: "corrupt")
+        let corrupt = ConnectionActivityStore(defaults: defaults, storageKey: "corrupt")
+        XCTAssertNil(corrupt.lastConnectedAt(for: hostID))
+        XCTAssertNil(corrupt.lastUsedAt(for: keyID))
+    }
+
+    func test_recentOrderingUsesSuccessfulDatesAndStableTieBreaks() {
+        let first = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let second = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        let third = UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
+        let neverConnected = UUID()
+        let newest = Date(timeIntervalSince1970: 1_700_000_200)
+        let tied = Date(timeIntervalSince1970: 1_700_000_100)
+
+        XCTAssertEqual(
+            RecentHostOrdering.sortedIDs(
+                hostIDs: [neverConnected, third, second, first],
+                sortOrder: [first: 2, second: 1, third: 3, neverConnected: 0],
+                lastConnectedAt: [first: tied, second: tied, third: newest],
+                limit: 3
+            ),
+            [third, second, first]
+        )
+    }
+
+    func test_renderReadyAttributionIgnoresReplayAndQuickConnect() {
+        let savedHostID = UUID()
+        let saved = LiveSession(
+            session: .ssh(SSHSession(host: Host(address: "saved.example"))),
+            hostName: "saved",
+            persistedHostID: savedHostID,
+            hostKey: "saved",
+            launchMode: .autoTmux
+        )
+        let quick = LiveSession(
+            session: .ssh(SSHSession(host: Host(address: "quick.example"))),
+            hostName: "quick",
+            persistedHostID: nil,
+            hostKey: "quick",
+            launchMode: .autoTmux
+        )
+
+        XCTAssertEqual(
+            ConnectionActivityAttribution.newlyReadyHostIDs(
+                oldReadyIDs: [],
+                newReadyIDs: [saved.id, quick.id],
+                connectedSessionIDs: [saved.id, quick.id],
+                sessions: [saved, quick]
+            ),
+            [savedHostID]
+        )
+        XCTAssertTrue(
+            ConnectionActivityAttribution.newlyReadyHostIDs(
+                oldReadyIDs: [saved.id],
+                newReadyIDs: [saved.id],
+                connectedSessionIDs: [saved.id],
+                sessions: [saved]
+            ).isEmpty
+        )
+        XCTAssertTrue(
+            ConnectionActivityAttribution.newlyReadyHostIDs(
+                oldReadyIDs: [],
+                newReadyIDs: [saved.id],
+                connectedSessionIDs: [],
+                sessions: [saved]
+            ).isEmpty
         )
     }
 }

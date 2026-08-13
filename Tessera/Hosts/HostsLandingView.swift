@@ -15,6 +15,7 @@ struct HostsLandingView: View {
     let activeHostTmuxUsage: [UUID: Bool]
 
     @Environment(\.designTokens) private var T
+    @Environment(ConnectionActivityStore.self) private var connectionActivity
     @State private var search: String = ""
     @State private var pendingRemovalHost: PersistedHost?
 
@@ -49,7 +50,9 @@ struct HostsLandingView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         pageHeader
                         quickConnectRow
-                        recentSection
+                        if search.isEmpty, !recentHosts.isEmpty {
+                            recentSection
+                        }
                         allHostsSection
                     }
                 }
@@ -143,6 +146,20 @@ struct HostsLandingView: View {
         }
     }
 
+    private var recentHosts: [PersistedHost] {
+        let dates = Dictionary(uniqueKeysWithValues: hosts.compactMap { host in
+            connectionActivity.lastConnectedAt(for: host.id).map { (host.id, $0) }
+        })
+        let orderedIDs = RecentHostOrdering.sortedIDs(
+            hostIDs: hosts.map(\.id),
+            sortOrder: Dictionary(uniqueKeysWithValues: hosts.map { ($0.id, $0.sortOrder) }),
+            lastConnectedAt: dates,
+            limit: isPhone ? 2 : 3
+        )
+        let hostsByID = Dictionary(uniqueKeysWithValues: hosts.map { ($0.id, $0) })
+        return orderedIDs.compactMap { hostsByID[$0] }
+    }
+
     private var pageHeader: some View {
         VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
@@ -210,34 +227,6 @@ struct HostsLandingView: View {
         .padding(.horizontal, isPhone ? 18 : 40)
     }
 
-    private var recentSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            sectionHeader("recent")
-
-            LazyVGrid(columns: recentColumns, spacing: 12) {
-                ForEach(Array(hosts.prefix(3))) { host in
-                    HostCard(
-                        host: host,
-                        isActive: activeHostKeys.contains(host.connectionKey),
-                        activeSessionUsesTmux: activeHostTmuxUsage[host.id],
-                        onOpen: {
-                            onConnect(host)
-                        },
-                        onEdit: isPhone ? {
-                            onEdit(host)
-                        } : nil,
-                        onDelete: isPhone ? {
-                            pendingRemovalHost = host
-                        } : nil
-                    )
-                }
-            }
-            .padding(.top, 12)
-        }
-        .padding(.top, isPhone ? 22 : 28)
-        .padding(.horizontal, isPhone ? 18 : 40)
-    }
-
     private var allHostsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader("all hosts · \(filteredHosts.count)")
@@ -269,6 +258,28 @@ struct HostsLandingView: View {
         .padding(.top, isPhone ? 26 : 32)
         .padding(.horizontal, isPhone ? 18 : 40)
         .padding(.bottom, isPhone ? 24 : 40)
+    }
+
+    private var recentSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("recent")
+
+            LazyVGrid(columns: recentColumns, spacing: 12) {
+                ForEach(recentHosts) { host in
+                    HostCard(
+                        host: host,
+                        isActive: activeHostKeys.contains(host.connectionKey),
+                        activeSessionUsesTmux: activeHostTmuxUsage[host.id],
+                        onOpen: { onConnect(host) },
+                        onEdit: isPhone ? { onEdit(host) } : nil,
+                        onDelete: isPhone ? { pendingRemovalHost = host } : nil
+                    )
+                }
+            }
+            .padding(.top, 12)
+        }
+        .padding(.top, isPhone ? 22 : 28)
+        .padding(.horizontal, isPhone ? 18 : 40)
     }
 
     private var recentColumns: [GridItem] {
@@ -331,6 +342,7 @@ private struct CompactHostRow: View {
     let onDelete: (PersistedHost) -> Void
 
     @Environment(\.designTokens) private var T
+    @Environment(ConnectionActivityStore.self) private var connectionActivity
 
     var body: some View {
         HStack(spacing: 11) {
@@ -359,6 +371,17 @@ private struct CompactHostRow: View {
                             .foregroundStyle(T.fgMuted)
                             .lineLimit(1)
                             .truncationMode(.middle)
+
+                        HStack(spacing: 4) {
+                            Text("last seen")
+                            if let date = connectionActivity.lastConnectedAt(for: host.id) {
+                                Text(date, style: .relative)
+                            } else {
+                                Text("not recorded")
+                            }
+                        }
+                        .font(Typography.tesseraMono(size: 10))
+                        .foregroundStyle(T.fgDim)
                     }
 
                     Spacer(minLength: 8)
@@ -419,6 +442,7 @@ private struct HostRow: View {
     let onEdit: (PersistedHost) -> Void
 
     @Environment(\.designTokens) private var T
+    @Environment(ConnectionActivityStore.self) private var connectionActivity
     @State private var hover = false
 
     var body: some View {
@@ -443,8 +467,17 @@ private struct HostRow: View {
                 rowText(host.identity?.name ?? "—", color: T.fgDim)
                     .frame(width: 120, alignment: .leading)
 
-                rowText("—", color: T.fgDim)
-                    .frame(width: 100, alignment: .leading)
+                Group {
+                    if let date = connectionActivity.lastConnectedAt(for: host.id) {
+                        Text(date, style: .relative)
+                    } else {
+                        Text("not recorded")
+                    }
+                }
+                .font(Typography.tesseraMono(size: 12))
+                .foregroundStyle(T.fgDim)
+                .lineLimit(1)
+                .frame(width: 100, alignment: .leading)
             }
             .contentShape(Rectangle())
             .onTapGesture {

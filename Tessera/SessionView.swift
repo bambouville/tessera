@@ -1314,14 +1314,17 @@ struct SessionView: View {
                     LiveScrollForegroundProbe.observeRenderedFeed(slice)
                 }
                 #endif
-                let before = terminalScrollPosition(for: terminalBox.view)
+                let recordsScrollDiagnostics = shouldRecordScrollDiagnostics
+                let before = recordsScrollDiagnostics
+                    ? terminalScrollPosition(for: terminalBox.view)
+                    : nil
                 let performanceContext = TerminalPerformanceFeedContext(feedContext)
                 terminalBox.feedTerminalOutput(
                     slice,
                     context: performanceContext,
                     shellIntegration: shellIntegration
                 )
-                if shouldRecordScrollDiagnostics,
+                if recordsScrollDiagnostics,
                    let view = terminalBox.view,
                    shouldLogTerminalFeedScroll(before: before, after: terminalScrollPosition(for: view)) {
                     recordScrollDiagnostic(
@@ -7402,7 +7405,10 @@ final class TerminalBox {
         )
     }
 
-    private func filteredBytes(_ bytes: ArraySlice<UInt8>, for view: TerminalView) -> [UInt8] {
+    private func filteredBytes(
+        _ bytes: ArraySlice<UInt8>,
+        for view: TerminalView
+    ) -> ArraySlice<UInt8> {
         let container = view.superview as? TesseraTerminalContainer
         return contrastFilter.process(
             bytes,
@@ -8580,7 +8586,10 @@ private struct SessionTopBar: View {
                     action: { tmux.newWindow() }
                 )
                 .disabled(tmuxIsDegraded || tmux.gridAuthority.isPeer)
-                .opacity(tmux.gridAuthority.isPeer ? 0.45 : 1)
+                .opacity((tmuxIsDegraded || tmux.gridAuthority.isPeer) ? 0.45 : 1)
+                .accessibilityHint(
+                    tmuxIsDegraded ? "Unavailable while tmux sync is offline" : ""
+                )
                 .accessibilityIdentifier("tmux-new-window")
             }
 
@@ -9015,7 +9024,6 @@ private struct SessionTopBar: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityIdentifier("chrome-\(systemName)")
     }
 
     // MARK: - Passthrough layout
@@ -9205,9 +9213,12 @@ private struct SessionTopBar: View {
         // the bar reads as one consistent set (matching the mockup,
         // where new-window is a plain `+` icon, not a ringed circle).
         chromeIconButton(systemName: "plus", action: { tmux.newWindow() })
-            .disabled(tmux.gridAuthority.isPeer)
-            .opacity(tmux.gridAuthority.isPeer ? 0.45 : 1)
+            .disabled(tmuxIsDegraded || tmux.gridAuthority.isPeer)
+            .opacity((tmuxIsDegraded || tmux.gridAuthority.isPeer) ? 0.45 : 1)
             .accessibilityLabel("New tmux window")
+            .accessibilityHint(
+                tmuxIsDegraded ? "Unavailable while tmux sync is offline" : ""
+            )
             .accessibilityIdentifier("tmux-new-window")
     }
 
@@ -9305,7 +9316,10 @@ private struct SessionTopBar: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(tmux.gridAuthority.isPeer)
+            .disabled(isDegraded || tmux.gridAuthority.isPeer)
+            .accessibilityHint(
+                isDegraded ? "Unavailable while tmux sync is offline" : ""
+            )
             .accessibilityIdentifier("tmux-window-\(windowID)-tab")
 
             TmuxTabCloseButton(
@@ -9669,7 +9683,12 @@ private struct TmuxWindowListPopover: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .disabled(isDegraded)
+            .opacity(isDegraded ? 0.45 : 1)
             .accessibilityLabel("New tmux window")
+            .accessibilityHint(
+                isDegraded ? "Unavailable while tmux sync is offline" : ""
+            )
             .accessibilityIdentifier("tmux-window-list-new")
             .padding(.bottom, 5)
         }
@@ -9744,6 +9763,10 @@ private struct TmuxWindowListPopover: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .disabled(isDegraded)
+            .accessibilityHint(
+                isDegraded ? "Unavailable while tmux sync is offline" : ""
+            )
             // Explicit label replaces child aggregation, so fold the agent
             // sparkle's state back in — a VoiceOver user scanning the list
             // for the window whose agent needs attention has no other signal.

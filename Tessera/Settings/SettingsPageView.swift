@@ -305,6 +305,34 @@ enum DiagnosticLogStore {
     private static let fileName = "tessera-diagnostics.log"
     private static let queue = DispatchQueue(label: "app.tessera.diagnostic-log")
     private static var rateStates: [String: RateState] = [:]
+    private static let sanitizationRules: [(NSRegularExpression, String)] = [
+        (
+            try! NSRegularExpression(
+                pattern: #"(?i)\b(currentProfile|title)=.*?(?=\s+[A-Za-z][A-Za-z0-9_-]*=|$)"#
+            ),
+            "$1=<redacted>"
+        ),
+        (
+            try! NSRegularExpression(
+                pattern: #"(?i)\b(commandLine|command|preview|payload|prompt|summary|target|endpoint|user|address|remoteHost|names|process|profile|session|spec|matchProcess|pane_current_command|path|env|environment|error)=('.*?'|".*?"|[^\s]+)"#
+            ),
+            "$1=<redacted>"
+        ),
+        (
+            try! NSRegularExpression(
+                pattern: #"\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\b"#
+            ),
+            "<uuid>"
+        ),
+        (try! NSRegularExpression(pattern: #"\S+@\S+"#), "<redacted-endpoint>"),
+        (try! NSRegularExpression(pattern: #"failed\([^)]*\)"#), "failed(<redacted>)"),
+        (try! NSRegularExpression(pattern: #" {2,}"#), " "),
+    ]
+    private static let timestampFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
 
     private struct RateState {
         var windowStart: Date
@@ -644,36 +672,13 @@ enum DiagnosticLogStore {
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\t", with: " ")
 
-        sanitized = replacingMatches(
-            in: sanitized,
-            pattern: #"(?i)\b(currentProfile|title)=.*?(?=\s+[A-Za-z][A-Za-z0-9_-]*=|$)"#,
-            template: "$1=<redacted>"
-        )
-        sanitized = replacingMatches(
-            in: sanitized,
-            pattern: #"(?i)\b(commandLine|command|preview|payload|prompt|summary|target|endpoint|user|address|remoteHost|names|process|profile|session|spec|matchProcess|pane_current_command|path|env|environment|error)=('.*?'|".*?"|[^\s]+)"#,
-            template: "$1=<redacted>"
-        )
-        sanitized = replacingMatches(
-            in: sanitized,
-            pattern: #"\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\b"#,
-            template: "<uuid>"
-        )
-        sanitized = replacingMatches(
-            in: sanitized,
-            pattern: #"\S+@\S+"#,
-            template: "<redacted-endpoint>"
-        )
-        sanitized = replacingMatches(
-            in: sanitized,
-            pattern: #"failed\([^)]*\)"#,
-            template: "failed(<redacted>)"
-        )
-        sanitized = replacingMatches(
-            in: sanitized,
-            pattern: #" {2,}"#,
-            template: " "
-        )
+        for (expression, template) in sanitizationRules {
+            sanitized = replacingMatches(
+                in: sanitized,
+                expression: expression,
+                template: template
+            )
+        }
         return sanitized.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -704,12 +709,9 @@ enum DiagnosticLogStore {
 
     private static func replacingMatches(
         in string: String,
-        pattern: String,
+        expression: NSRegularExpression,
         template: String
     ) -> String {
-        guard let expression = try? NSRegularExpression(pattern: pattern) else {
-            return string
-        }
         let range = NSRange(location: 0, length: (string as NSString).length)
         return expression.stringByReplacingMatches(
             in: string,
@@ -726,9 +728,7 @@ enum DiagnosticLogStore {
     }
 
     private static func timestamp() -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.string(from: Date())
+        timestampFormatter.string(from: Date())
     }
 }
 

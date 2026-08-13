@@ -4,7 +4,7 @@
 JUMP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INTEGRATION_DIR="$(cd "$JUMP_DIR/.." && pwd)"
 JUMP_CONFIG="${TESSERA_JUMP_CONFIG:-$JUMP_DIR/jump.env}"
-JUMP_STATE="$INTEGRATION_DIR/.state/jump"
+JUMP_STATE="${TESSERA_INTEGRATION_FIXTURE_STATE_DIR:-$INTEGRATION_DIR/.state}/jump"
 
 jump_die() {
   printf 'error: %s\n' "$*" >&2
@@ -22,8 +22,11 @@ jump_require_value() {
 
 load_jump_config() {
   [[ -f "$JUMP_CONFIG" ]] || jump_die "missing $JUMP_CONFIG (copy jump.env.example)"
+  local harness_jump_dir="$JUMP_DIR"
+  JUMP_DIR="$(cd "$(dirname "$JUMP_CONFIG")" && pwd)"
   # shellcheck disable=SC1090
   source "$JUMP_CONFIG"
+  JUMP_DIR="$harness_jump_dir"
 
   : "${TESSERA_JUMP_CONTROL_USER:=root}"
   : "${TESSERA_JUMP_CONTROL_PORT:=22}"

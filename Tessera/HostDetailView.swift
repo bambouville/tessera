@@ -212,6 +212,7 @@ struct HostDetailView: View {
         }
         .disabled(!connectEnabled)
         .opacity(connectEnabled ? 1 : 0.5)
+        .keyboardShortcut(.return, modifiers: .command)
         .padding(.horizontal, isPhone ? 18 : 36)
         .padding(.vertical, 16)
         .frame(maxWidth: 560, alignment: .leading)
@@ -436,7 +437,7 @@ struct HostDetailView: View {
                 }
             }
 
-            Field(label: "notes", sub: "free-form, shown in tooltips and host details") {
+            Field(label: "notes", sub: "free-form notes stored with this host") {
                 multilineInput("notes", text: $host.notes)
             }
 

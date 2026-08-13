@@ -131,6 +131,7 @@ struct ContentView: View {
     @Environment(\.designTokens) private var T
     @Environment(AppearancePreferences.self) private var appearance
     @Environment(HostTerminalBackgroundStore.self) private var hostBackgrounds
+    @Environment(ConnectionActivityStore.self) private var connectionActivity
     @Environment(AppLockController.self) private var appLockController
     @Environment(OnboardingController.self) private var onboarding
     @Environment(AppPhase.self) private var appPhase
@@ -656,7 +657,17 @@ struct ContentView: View {
                 guard let pending else { return }
                 handleIncomingContinuation(pending)
             }
-            .onChange(of: sessionRegistry.renderReadyIDs) { _, readyIDs in
+            .onChange(of: sessionRegistry.renderReadyIDs) { oldReadyIDs, readyIDs in
+                for hostID in ConnectionActivityAttribution.newlyReadyHostIDs(
+                    oldReadyIDs: oldReadyIDs,
+                    newReadyIDs: readyIDs,
+                    connectedSessionIDs: Set(activeSessions.compactMap { session in
+                        session.session.terminalSession.state == .connected ? session.id : nil
+                    }),
+                    sessions: activeSessions
+                ) where fetchHost(hostID) != nil {
+                    connectionActivity.recordHostConnection(hostID)
+                }
                 guard let continuationLiveSessionID,
                       readyIDs.contains(continuationLiveSessionID)
                 else { return }
@@ -1700,6 +1711,7 @@ struct ContentView: View {
             && host.address.trimmingCharacters(in: .whitespaces).isEmpty
         if force || (deleteIfDraft && isDraft) {
             hostBackgrounds.removeOverride(for: host.id)
+            connectionActivity.removeHost(host.id)
             // GC only this host's outgoing jump link. Links pointing AT
             // this host stay: dependents must fail closed ("jump host no
             // longer exists"), never silently connect direct.

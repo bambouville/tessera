@@ -200,7 +200,17 @@ func establishSSHChain(
 
                     do {
                         try Task.checkCancellation()
-                        try await SSHAuthenticationPolicyStore.shared.revalidate(resolved.policy)
+                        // Validate and record in one MainActor turn. This keeps
+                        // accepted-key attribution ordered with key deletion:
+                        // deletion before this turn fails closed with no write;
+                        // deletion afterward removes the timestamp. Loading a
+                        // signer or a rejected authentication never counts.
+                        try await MainActor.run {
+                            try SSHAuthenticationPolicyStore.shared.revalidate(resolved.policy)
+                            if let keyID = resolved.policy.host.storedKeyID {
+                                ConnectionActivityStore.shared.recordKeyUse(keyID)
+                            }
+                        }
                     } catch {
                         try? await client.close()
                         throw error
