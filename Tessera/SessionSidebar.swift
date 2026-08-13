@@ -14,6 +14,7 @@ struct SessionSidebar: View {
     @Environment(\.designTokens) private var T
     @Environment(AppearancePreferences.self) private var appearance
     @Environment(HostTerminalBackgroundStore.self) private var hostBackgrounds
+    @Environment(ConnectionActivityStore.self) private var connectionActivity
     @Environment(AgentCenter.self) private var agentCenter
 
     @Binding var activeSessions: [LiveSession]
@@ -156,6 +157,7 @@ struct SessionSidebar: View {
                     onDelete: {
                         if selectedItem == .host(host.id) { selectedItem = nil }
                         hostBackgrounds.removeOverride(for: host.id)
+                        connectionActivity.removeHost(host.id)
                         // Outgoing link only — dependents keep their link
                         // and fail closed (see HostJumpChainResolver).
                         HostJumpChainResolver.removeOutgoingLink(for: host.id, in: modelContext)

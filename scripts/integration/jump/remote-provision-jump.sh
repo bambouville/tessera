@@ -105,12 +105,17 @@ install_sshd_unit() {
 [Unit]
 Description=Tessera jump-test SSH endpoint ($name)
 After=network.target
+# /run is tmpfs and the privsep dir can be reaped out from under us; never let
+# the restart limiter permanently wedge the endpoint (seen 2026-07-14).
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
+# sshd refuses to start without its privilege separation directory.
+ExecStartPre=/usr/bin/install -d -m 0755 -o root -g root /run/sshd
 ExecStart=/usr/sbin/sshd -D -e -f $config
-Restart=on-failure
-RestartSec=1
+Restart=always
+RestartSec=2
 
 [Install]
 WantedBy=multi-user.target

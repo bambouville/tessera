@@ -8,6 +8,7 @@ source "$HERE/lib.sh"
 RUN_DIR="${1:-}"
 [[ -n "$RUN_DIR" ]] || { printf 'usage: run-app-transport-tests.sh RUN_DIR\n' >&2; exit 2; }
 TEST_FILTER="${2:-TesseraTests/RealHostTransportIntegrationTests}"
+BUILD_CONFIGURATION="${TESSERA_INTEGRATION_BUILD_CONFIGURATION:-Debug}"
 
 load_fixture_config
 ensure_fixture_credentials
@@ -17,7 +18,7 @@ require_command xcodebuild
 require_command xcrun
 
 udid=''
-derived_data="$FIXTURE_STATE/DerivedData"
+derived_data="${TESSERA_INTEGRATION_DERIVED_DATA:-$FIXTURE_STATE/DerivedData}"
 result_bundle="$RUN_DIR/programmatic/real-host-transports.xcresult"
 mkdir -p "$derived_data" "$(dirname "$result_bundle")"
 rm -rf "$result_bundle"
@@ -40,6 +41,8 @@ cleanup() {
   if [[ -n "$udid" ]]; then
     xcrun simctl spawn "$udid" launchctl unsetenv TESSERA_REAL_HOST_CONFIG_B64 \
       >/dev/null 2>&1 || true
+    xcrun simctl spawn "$udid" launchctl unsetenv TESSERA_RUN_PERFORMANCE_AUDIT \
+      >/dev/null 2>&1 || true
   fi
   if [[ "${TESSERA_KEEP_TEST_SIM_BOOTED:-0}" != 1 ]]; then
     delete_owned_test_simulator "$SIMULATOR_STATE/simulator_udid" || true
@@ -51,12 +54,29 @@ udid="$($HERE/ensure-test-simulator.sh | tail -n 1)"
 
 xcrun simctl spawn "$udid" launchctl setenv \
   TESSERA_REAL_HOST_CONFIG_B64 "$config_b64"
+if [[ "${TESSERA_RUN_PERFORMANCE_AUDIT:-0}" == 1 ]]; then
+  xcrun simctl spawn "$udid" launchctl setenv TESSERA_RUN_PERFORMANCE_AUDIT 1
+fi
+
+xcode_settings=()
+if [[ "$BUILD_CONFIGURATION" == Release ]]; then
+  # Integration tests are DEBUG-gated. This retains Release optimization but
+  # is an optimized test artifact, not a bit-for-bit App Store binary.
+  xcode_settings+=(
+    ONLY_ACTIVE_ARCH=YES
+    ENABLE_TESTABILITY=YES
+    'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) DEBUG'
+  )
+fi
 
 xcodebuild test \
   -project "$REPO_ROOT/Tessera.xcodeproj" \
   -scheme Tessera \
-  -configuration Debug \
+  -configuration "$BUILD_CONFIGURATION" \
   -destination "platform=iOS Simulator,id=$udid" \
   -derivedDataPath "$derived_data" \
+  -disableAutomaticPackageResolution \
+  -onlyUsePackageVersionsFromResolvedFile \
   -resultBundlePath "$result_bundle" \
-  -only-testing:"$TEST_FILTER"
+  -only-testing:"$TEST_FILTER" \
+  "${xcode_settings[@]}"

@@ -653,8 +653,17 @@ struct TerminalOutputContrastFilter {
         defaultBackgroundRGB: Int,
         defaultForegroundRGB: Int,
         minimumContrast: Double
-    ) -> [UInt8] {
-        guard !bytes.isEmpty else { return [] }
+    ) -> ArraySlice<UInt8> {
+        guard !bytes.isEmpty else { return bytes }
+
+        // Printable output cannot change the tracked SGR background. Borrow
+        // the caller's slice directly instead of copying it into both input
+        // and output arrays. Any pending control prefix, ESC sequence, or C1
+        // CSI stays on the streaming parser path below.
+        if pendingControlBytes.isEmpty,
+           !bytes.contains(where: { $0 == 0x1B || $0 == 0x9B }) {
+            return bytes
+        }
 
         var input = pendingControlBytes
         input.append(contentsOf: bytes)
@@ -736,7 +745,7 @@ struct TerminalOutputContrastFilter {
             index += 1
         }
 
-        return output
+        return output[...]
     }
 
     private mutating func rewriteSGRPayload(

@@ -44,10 +44,7 @@ struct KeyboardSettingsView: View {
             }
 
             if !isPhone {
-                Field(
-                    label: "shortcuts",
-                    sub: "read-only for now; per-user remapping is on the roadmap"
-                ) {
+                Field(label: "shortcuts") {
                     ShortcutLegend()
                 }
             }
@@ -67,7 +64,7 @@ private struct ShortcutLegend: View {
         var id: String { title }
     }
 
-    // Mirrors every chord the app actually registers:
+    // Reference for the primary chords the app registers:
     //   · global ⌘N / ⌘K / ⌘, live on hidden buttons in ContentView
     //   · session ⌘⇧K / ⌘⇧J + the find / settings chords ride
     //     TesseraTerminalContainer's UIKeyCommands (see
@@ -75,7 +72,7 @@ private struct ShortcutLegend: View {
     //     are dropped by iPadOS before the keyCommand can match).
     //     The bare ⌘[ / ⌘] brackets were reassigned to in-window pane
     //     cycling, so session switching moved to the ⌘⇧K / ⌘⇧J letters.
-    //   · ⌘↩ connect lives on HostEntryView's connect button
+    //   · ⌘↩ connect lives on HostDetailView's regular-width connect button
     //   · the tmux block is only active while a tmux session is attached;
     //     the pane chords (⌘D / ⌘[ / ⌘] / ⇧⌘↩) only do anything once a
     //     window holds more than one pane
@@ -84,10 +81,12 @@ private struct ShortcutLegend: View {
             ("⌘N",        "new host"),
             ("⌘K",        "quick-switch palette"),
             ("⌘,",        "settings"),
+            ("⌘⇧A",       "toggle agent center"),
         ]),
         Group(title: "sessions", rows: [
             ("⌘⇧K / ⌘⇧J", "previous / next session"),
             ("⌘⇧E",       "toggle files panel"),
+            ("⌘R",        "refresh terminal"),
             ("⌘↩",        "connect (host editor)"),
         ]),
         Group(title: "find in scrollback", rows: [

@@ -34,6 +34,13 @@ actor KnownHostsStore {
         case invalidDates
     }
 
+    struct OpenSSHImportSummary: Equatable, Sendable {
+        let added: Int
+        let replaced: Int
+        let unchanged: Int
+        let stalePlanConflicts: Int
+    }
+
     /// Days since `lastSeen` after which a known host is reported as
     /// `stale` on the Known Hosts page. 90 days mirrors a common SSH
     /// host-key rotation cadence — long enough that occasional reuse
@@ -304,6 +311,89 @@ actor KnownHostsStore {
         return rows.sorted { $0.lastSeen > $1.lastSeen }
     }
 
+    /// Interoperable OpenSSH known_hosts text. Host fingerprints are public;
+    /// this export never reads or includes authentication key material.
+    func openSSHExportText() -> String {
+        records
+            .map { endpoint, record in
+                KnownHostsOpenSSHCodec.exportLine(
+                    endpoint: endpoint,
+                    keyString: record.keyString
+                )
+            }
+            .sorted()
+            .joined(separator: "\n")
+            .appending(records.isEmpty ? "" : "\n")
+    }
+
+    /// Applies a plan that the user has already reviewed and confirmed. New
+    /// pins are added, differing local pins are explicitly replaced while
+    /// retaining rotation history, and identical pins remain untouched.
+    func applyConfirmedOpenSSHImport(
+        _ entries: [KnownHostsOpenSSHImportPlan.Entry]
+    ) throws -> OpenSSHImportSummary {
+        let now = nowProvider()
+        var stagedRecords = records
+        var added = 0
+        var replaced = 0
+        var unchanged = 0
+        var stalePlanConflicts = 0
+
+        for entry in entries {
+            let actualFingerprint = stagedRecords[entry.endpoint]?.fingerprint
+            guard actualFingerprint == entry.expectedPriorFingerprint else {
+                stalePlanConflicts += 1
+                continue
+            }
+
+            switch entry.action {
+            case .add:
+                stagedRecords[entry.endpoint] = HostRecord(
+                    fingerprint: entry.fingerprint,
+                    keyString: entry.keyString,
+                    firstSeen: now,
+                    lastSeen: now,
+                    pendingFingerprint: nil,
+                    pendingKeyString: nil,
+                    previousFingerprint: nil,
+                    matchedPeerLabel: nil
+                )
+                added += 1
+
+            case .replace:
+                guard let existing = stagedRecords[entry.endpoint] else {
+                    stalePlanConflicts += 1
+                    continue
+                }
+                stagedRecords[entry.endpoint] = HostRecord(
+                    fingerprint: entry.fingerprint,
+                    keyString: entry.keyString,
+                    firstSeen: existing.firstSeen,
+                    lastSeen: now,
+                    pendingFingerprint: nil,
+                    pendingKeyString: nil,
+                    previousFingerprint: existing.fingerprint,
+                    matchedPeerLabel: nil
+                )
+                replaced += 1
+
+            case .unchanged:
+                unchanged += 1
+            }
+        }
+
+        if added > 0 || replaced > 0 {
+            try writeToDisk(stagedRecords)
+            records = stagedRecords
+        }
+        return OpenSSHImportSummary(
+            added: added,
+            replaced: replaced,
+            unchanged: unchanged,
+            stalePlanConflicts: stalePlanConflicts
+        )
+    }
+
     // MARK: - Fingerprint
 
     /// SHA-256 fingerprint of the key's SSH wire format, matching
@@ -361,10 +451,236 @@ actor KnownHostsStore {
     }
 
     private func saveToDisk() {
+        try? writeToDisk(records)
+    }
+
+    private func writeToDisk(_ records: [String: HostRecord]) throws {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(records) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        let data = try encoder.encode(records)
+        try data.write(to: fileURL, options: .atomic)
+    }
+}
+
+struct KnownHostsOpenSSHImportPlan: Equatable, Sendable {
+    enum Action: String, Equatable, Sendable {
+        case add
+        case replace
+        case unchanged
+    }
+
+    struct Entry: Identifiable, Equatable, Sendable {
+        let lineNumber: Int
+        let endpoint: String
+        let keyString: String
+        let fingerprint: String
+        let action: Action
+        let expectedPriorFingerprint: String?
+
+        var id: String { "\(lineNumber):\(endpoint)" }
+    }
+
+    struct Rejection: Identifiable, Equatable, Sendable {
+        let lineNumber: Int
+        let source: String
+        let reason: String
+
+        var id: String { "\(lineNumber):\(source):\(reason)" }
+    }
+
+    let entries: [Entry]
+    let rejections: [Rejection]
+    let warnings: [String]
+
+    var addCount: Int { entries.count { $0.action == .add } }
+    var replaceCount: Int { entries.count { $0.action == .replace } }
+    var unchangedCount: Int { entries.count { $0.action == .unchanged } }
+}
+
+enum KnownHostsOpenSSHCodec {
+    private struct ParsedEntry {
+        let lineNumber: Int
+        let endpoint: String
+        let keyString: String
+        let fingerprint: String
+    }
+
+    static func importPlan(
+        text: String,
+        currentRows: [KnownHostsStore.DisplayRow]
+    ) -> KnownHostsOpenSSHImportPlan {
+        let currentFingerprints = Dictionary(
+            uniqueKeysWithValues: currentRows.map { ($0.id, $0.fingerprint) }
+        )
+        var candidates: [ParsedEntry] = []
+        var rejections: [KnownHostsOpenSSHImportPlan.Rejection] = []
+        var warnings: [String] = []
+
+        for (offset, rawLine) in text.components(separatedBy: .newlines).enumerated() {
+            let lineNumber = offset + 1
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty, !line.hasPrefix("#") else { continue }
+
+            let fields = line.split(whereSeparator: { $0.isWhitespace })
+            guard fields.count >= 3 else {
+                rejections.append(.init(
+                    lineNumber: lineNumber,
+                    source: line,
+                    reason: "expected host, key type, and public key"
+                ))
+                continue
+            }
+            guard !fields[0].hasPrefix("@") else {
+                rejections.append(.init(
+                    lineNumber: lineNumber,
+                    source: line,
+                    reason: "OpenSSH marker entries are not supported"
+                ))
+                continue
+            }
+
+            let hostField = String(fields[0])
+            let keyString = "\(fields[1]) \(fields[2])"
+            let key: NIOSSHPublicKey
+            do {
+                key = try NIOSSHPublicKey(openSSHPublicKey: keyString)
+            } catch {
+                rejections.append(.init(
+                    lineNumber: lineNumber,
+                    source: line,
+                    reason: "invalid or unsupported OpenSSH public key"
+                ))
+                continue
+            }
+            let canonicalKey = String(openSSHPublicKey: key)
+            let fingerprint = KnownHostsStore.fingerprint(of: key)
+
+            for hostToken in hostField.split(separator: ",", omittingEmptySubsequences: false) {
+                let token = String(hostToken)
+                let endpoint: String
+                do {
+                    endpoint = try parseEndpoint(fromKnownHostsHost: token)
+                } catch let error as HostParseError {
+                    rejections.append(.init(
+                        lineNumber: lineNumber,
+                        source: token,
+                        reason: error.reason
+                    ))
+                    continue
+                } catch {
+                    rejections.append(.init(
+                        lineNumber: lineNumber,
+                        source: token,
+                        reason: "invalid host field"
+                    ))
+                    continue
+                }
+
+                candidates.append(ParsedEntry(
+                    lineNumber: lineNumber,
+                    endpoint: endpoint,
+                    keyString: canonicalKey,
+                    fingerprint: fingerprint
+                ))
+            }
+        }
+
+        var parsed: [ParsedEntry] = []
+        for (endpoint, endpointCandidates) in Dictionary(grouping: candidates, by: \.endpoint) {
+            let fingerprints = Set(endpointCandidates.map(\.fingerprint))
+            guard fingerprints.count == 1 else {
+                for candidate in endpointCandidates {
+                    rejections.append(.init(
+                        lineNumber: candidate.lineNumber,
+                        source: endpoint,
+                        reason: "ambiguous: multiple different keys were supplied for this endpoint"
+                    ))
+                }
+                continue
+            }
+            if endpointCandidates.count > 1 {
+                for duplicate in endpointCandidates.dropFirst() {
+                    warnings.append(
+                        "Line \(duplicate.lineNumber): duplicate pin for \(endpoint) ignored"
+                    )
+                }
+            }
+            if let first = endpointCandidates.first {
+                parsed.append(first)
+            }
+        }
+        parsed.sort { lhs, rhs in
+            lhs.lineNumber == rhs.lineNumber
+                ? lhs.endpoint < rhs.endpoint
+                : lhs.lineNumber < rhs.lineNumber
+        }
+
+        let entries = parsed.map { parsedEntry in
+            let action: KnownHostsOpenSSHImportPlan.Action
+            if let current = currentFingerprints[parsedEntry.endpoint] {
+                action = current == parsedEntry.fingerprint ? .unchanged : .replace
+            } else {
+                action = .add
+            }
+            return KnownHostsOpenSSHImportPlan.Entry(
+                lineNumber: parsedEntry.lineNumber,
+                endpoint: parsedEntry.endpoint,
+                keyString: parsedEntry.keyString,
+                fingerprint: parsedEntry.fingerprint,
+                action: action,
+                expectedPriorFingerprint: currentFingerprints[parsedEntry.endpoint]
+            )
+        }
+        return KnownHostsOpenSSHImportPlan(
+            entries: entries,
+            rejections: rejections,
+            warnings: warnings
+        )
+    }
+
+    static func exportLine(endpoint: String, keyString: String) -> String {
+        "\(knownHostsHost(fromEndpoint: endpoint)) \(keyString)"
+    }
+
+    static func knownHostsHost(fromEndpoint endpoint: String) -> String {
+        guard let separator = endpoint.lastIndex(of: ":") else { return endpoint }
+        let host = String(endpoint[..<separator])
+        let port = String(endpoint[endpoint.index(after: separator)...])
+        guard Int(port) != nil else { return endpoint }
+        return port == "22" ? host : "[\(host)]:\(port)"
+    }
+
+    private struct HostParseError: Error {
+        let reason: String
+    }
+
+    private static func parseEndpoint(fromKnownHostsHost token: String) throws -> String {
+        guard !token.isEmpty else {
+            throw HostParseError(reason: "empty host field")
+        }
+        guard !token.hasPrefix("|") else {
+            throw HostParseError(reason: "hashed hosts cannot be mapped to a Tessera endpoint")
+        }
+        guard !token.contains("*") && !token.contains("?") && !token.hasPrefix("!") else {
+            throw HostParseError(reason: "wildcard and negated hosts are not supported")
+        }
+        if token.hasPrefix("[") {
+            guard let close = token.firstIndex(of: "]"),
+                  token.index(after: close) < token.endIndex,
+                  token[token.index(after: close)] == ":" else {
+                throw HostParseError(reason: "invalid bracketed host and port")
+            }
+            let host = String(token[token.index(after: token.startIndex)..<close])
+            let portStart = token.index(close, offsetBy: 2)
+            let port = String(token[portStart...])
+            guard !host.isEmpty,
+                  let portNumber = Int(port),
+                  (1...65535).contains(portNumber) else {
+                throw HostParseError(reason: "invalid host or port")
+            }
+            return "\(host):\(portNumber)"
+        }
+        return "\(token):22"
     }
 }

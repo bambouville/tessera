@@ -144,6 +144,7 @@ struct TesseraApp: App {
     @State private var swipePadStore: SwipePadProfileStore
     @State private var dictationController: SpeechDictationController
     @State private var hostBackgrounds: HostTerminalBackgroundStore
+    @State private var connectionActivity: ConnectionActivityStore
     @State private var activityBroadcaster: ActivityBroadcaster
     @State private var continuationCoordinator: ContinuationCoordinator
     @State private var bootstrapCoordinator: BootstrapCoordinator
@@ -185,6 +186,7 @@ struct TesseraApp: App {
                 swipePadStore: swipePadStore,
                 dictationController: dictationController,
                 hostBackgrounds: hostBackgrounds,
+                connectionActivity: connectionActivity,
                 activityBroadcaster: activityBroadcaster,
                 continuationCoordinator: continuationCoordinator,
                 bootstrapCoordinator: bootstrapCoordinator,
@@ -245,6 +247,7 @@ struct TesseraApp: App {
         _swipePadStore = State(initialValue: SwipePadProfileStore())
         _dictationController = State(initialValue: SpeechDictationController(appearance: appearance))
         _hostBackgrounds = State(initialValue: HostTerminalBackgroundStore())
+        _connectionActivity = State(initialValue: ConnectionActivityStore.shared)
         _activityBroadcaster = State(initialValue: ActivityBroadcaster())
         _continuationCoordinator = State(initialValue: ContinuationCoordinator())
         #if DEBUG
@@ -494,6 +497,7 @@ struct RootView: View {
     @Bindable var swipePadStore: SwipePadProfileStore
     @Bindable var dictationController: SpeechDictationController
     @Bindable var hostBackgrounds: HostTerminalBackgroundStore
+    @Bindable var connectionActivity: ConnectionActivityStore
     @Bindable var activityBroadcaster: ActivityBroadcaster
     @Bindable var continuationCoordinator: ContinuationCoordinator
     @Bindable var bootstrapCoordinator: BootstrapCoordinator
@@ -571,6 +575,7 @@ struct RootView: View {
         .environment(swipePadStore)
         .environment(dictationController)
         .environment(hostBackgrounds)
+        .environment(connectionActivity)
         .environment(activityBroadcaster)
         .environment(continuationCoordinator)
         .environment(bootstrapCoordinator)

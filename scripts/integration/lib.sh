@@ -3,8 +3,8 @@
 INTEGRATION_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$INTEGRATION_DIR/../.." && pwd)"
 FIXTURE_CONFIG="${TESSERA_FIXTURE_CONFIG:-$INTEGRATION_DIR/fixture.env}"
-FIXTURE_STATE="$INTEGRATION_DIR/.state"
-FIXTURE_OUT="$INTEGRATION_DIR/out"
+FIXTURE_STATE="${TESSERA_INTEGRATION_FIXTURE_STATE_DIR:-$INTEGRATION_DIR/.state}"
+FIXTURE_OUT="${TESSERA_INTEGRATION_OUTPUT_DIR:-$INTEGRATION_DIR/out}"
 SIMULATOR_STATE="${TESSERA_INTEGRATION_SIMULATOR_STATE_DIR:-$FIXTURE_STATE}"
 
 die() {
@@ -61,8 +61,11 @@ delete_owned_test_simulator() {
 
 load_fixture_config() {
   [[ -f "$FIXTURE_CONFIG" ]] || die "missing $FIXTURE_CONFIG (copy fixture.env.example)"
+  local harness_integration_dir="$INTEGRATION_DIR"
+  INTEGRATION_DIR="$(cd "$(dirname "$FIXTURE_CONFIG")" && pwd)"
   # shellcheck disable=SC1090
   source "$FIXTURE_CONFIG"
+  INTEGRATION_DIR="$harness_integration_dir"
 
   : "${TESSERA_FIXTURE_CONTROL_USER:=root}"
   : "${TESSERA_FIXTURE_CONTROL_PORT:=22}"

@@ -4,6 +4,8 @@
 # Usage:
 #   scripts/install-ipad.sh                       # auto-pick the first connected iPad
 #   scripts/install-ipad.sh <UDID>                # target a specific device
+#   scripts/install-ipad.sh --release [<UDID>]    # optimized Release build
+#   scripts/install-ipad.sh --debug [<UDID>]      # Debug build (default)
 #   IPAD_UDID=<UDID> scripts/install-ipad.sh      # same, via env var
 #   BUNDLE_ID=com.you.Tessera scripts/install-ipad.sh
 #   NO_LAUNCH=1 scripts/install-ipad.sh           # build + install only
@@ -27,10 +29,43 @@ CONFIG="Debug"
 BUNDLE_ID="${BUNDLE_ID:-com.bambouville.TesseraApp}"
 
 FIND_ONLY="${FIND_ONLY:-}"
-if [[ "${1:-}" == "--find-only" ]]; then
-  FIND_ONLY=1
+DEVICE_UDID=""
+CONFIG_FLAG=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --release)
+      if [[ -n "$CONFIG_FLAG" && "$CONFIG_FLAG" != "Release" ]]; then
+        echo "error: --release and --debug cannot be used together." >&2
+        exit 2
+      fi
+      CONFIG="Release"
+      CONFIG_FLAG="Release"
+      ;;
+    --debug)
+      if [[ -n "$CONFIG_FLAG" && "$CONFIG_FLAG" != "Debug" ]]; then
+        echo "error: --release and --debug cannot be used together." >&2
+        exit 2
+      fi
+      CONFIG="Debug"
+      CONFIG_FLAG="Debug"
+      ;;
+    --find-only)
+      FIND_ONLY=1
+      ;;
+    --*)
+      echo "error: unknown option: $1" >&2
+      exit 2
+      ;;
+    *)
+      if [[ -n "$DEVICE_UDID" ]]; then
+        echo "error: only one device UDID may be supplied." >&2
+        exit 2
+      fi
+      DEVICE_UDID="$1"
+      ;;
+  esac
   shift
-fi
+done
 
 # --find-only path: enumerate iPads with enough detail to tell whether
 # the device is reachable over USB, local Wi-Fi, or a Tailscale/WAN link.
@@ -115,7 +150,7 @@ echo "==> team: $TEAM_ID"
 # identifier (a UUID), but xcodebuild needs the hardware UDID
 # (00008xxx-xxxxxxxxxxxxxxxx). devicectl accepts both forms, so we always
 # resolve to the hardware UDID and use it for both tools.
-UDID="${1:-${IPAD_UDID:-}}"
+UDID="${DEVICE_UDID:-${IPAD_UDID:-}}"
 if [[ -z "$UDID" ]]; then
   UDID="$(xcrun devicectl list devices --json-output - 2>/dev/null \
     | python3 -c '

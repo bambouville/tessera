@@ -1,14 +1,28 @@
 import NIOSSH
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 struct KnownHostsPageView: View {
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
     @Environment(\.designTokens) private var T
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var rows: [KnownHostsStore.DisplayRow] = []
     @State private var filter: Filter = .all
     @State private var expandedIDs: Set<String> = []
+    @State private var exportDocument: KnownHostsTextDocument?
+    @State private var showExporter = false
+    @State private var showImporter = false
+    @State private var importReview: KnownHostsImportReview?
+    @State private var notice: String?
 
     // The table cells render Dynamic-Type-scaling mono text; scale the fixed
     // column widths with it so larger text sizes don't wrap or collide.
@@ -57,27 +71,99 @@ struct KnownHostsPageView: View {
         }
         .accessibilityIdentifier("known-hosts-page")
         .task { await reload() }
+        .fileExporter(
+            isPresented: $showExporter,
+            document: exportDocument,
+            contentType: .plainText,
+            defaultFilename: "known_hosts"
+        ) { result in
+            if case .failure(let error) = result {
+                notice = "Export failed: \(error.localizedDescription)"
+            }
+            exportDocument = nil
+        }
+        .fileImporter(
+            isPresented: $showImporter,
+            allowedContentTypes: [.plainText, .data],
+            allowsMultipleSelection: false,
+            onCompletion: handleImportSelection
+        )
+        .sheet(item: $importReview) { review in
+            KnownHostsImportReviewSheet(
+                plan: review.plan,
+                onCancel: { importReview = nil },
+                onConfirm: {
+                    Task { @MainActor in
+                        do {
+                            let summary = try await KnownHostsStore.shared
+                                .applyConfirmedOpenSSHImport(review.plan.entries)
+                            importReview = nil
+                            await reload()
+                            let conflictSuffix = summary.stalePlanConflicts == 0
+                                ? ""
+                                : ", \(summary.stalePlanConflicts) skipped because Known Hosts changed during review"
+                            notice = "Imported \(summary.added) added, \(summary.replaced) replaced, \(summary.unchanged) unchanged\(conflictSuffix)"
+                        } catch {
+                            notice = "Import was not saved and Known Hosts was not changed: \(error.localizedDescription)"
+                        }
+                    }
+                }
+            )
+        }
+        .alert("known hosts", isPresented: Binding(
+            get: { notice != nil },
+            set: { if !$0 { notice = nil } }
+        )) {
+            Button("OK") { notice = nil }
+        } message: {
+            Text(notice ?? "")
+        }
     }
 
     private var header: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Text("known hosts")
-                .font(Typography.pageTitle)
-                .foregroundStyle(T.fg)
-                .lineLimit(1)
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 8) {
+                headerTitle
+                Spacer(minLength: 8)
+                headerActions
+            }
 
-            Spacer()
-
-            if !isPhone {
-                Btn("export", compact: true) {
-                }
-
-                Btn("import", compact: true) {
+            VStack(alignment: .leading, spacing: 10) {
+                headerTitle
+                HStack(spacing: 8) {
+                    headerActions
                 }
             }
         }
         .padding(.top, isPhone ? 14 : 28)
         .padding(.horizontal, isPhone ? 18 : 40)
+    }
+
+    private var headerTitle: some View {
+        Text("known hosts")
+            .font(Typography.pageTitle)
+            .foregroundStyle(T.fg)
+            .lineLimit(1)
+    }
+
+    @ViewBuilder
+    private var headerActions: some View {
+        Btn("export", compact: true) {
+            Task { @MainActor in
+                exportDocument = KnownHostsTextDocument(
+                    text: await KnownHostsStore.shared.openSSHExportText()
+                )
+                showExporter = true
+            }
+        }
+        .disabled(rows.isEmpty)
+        .opacity(rows.isEmpty ? 0.45 : 1)
+        .accessibilityHint("Exports public host keys and fingerprints as an OpenSSH known hosts file")
+
+        Btn("import", compact: true) {
+            showImporter = true
+        }
+        .accessibilityHint("Reviews an OpenSSH known hosts file before merging it")
     }
 
     private var mismatchBanner: some View {
@@ -423,11 +509,7 @@ struct KnownHostsPageView: View {
     }
 
     private func formatDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: date)
+        Self.dateFormatter.string(from: date)
     }
 
     @MainActor
@@ -454,5 +536,226 @@ struct KnownHostsPageView: View {
     private func remove(_ row: KnownHostsStore.DisplayRow) async {
         await KnownHostsStore.shared.remove(endpoint: row.id)
         await reload()
+    }
+
+    private func handleImportSelection(_ result: Result<[URL], Error>) {
+        do {
+            guard let url = try result.get().first else { return }
+            let didAccess = url.startAccessingSecurityScopedResource()
+            defer {
+                if didAccess { url.stopAccessingSecurityScopedResource() }
+            }
+            let maximumImportBytes = 1_048_576
+            let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize
+            if let fileSize, fileSize > maximumImportBytes {
+                notice = "Import failed: known_hosts files must be 1 MiB or smaller."
+                return
+            }
+            let data = try Data(contentsOf: url)
+            guard data.count <= maximumImportBytes else {
+                notice = "Import failed: known_hosts files must be 1 MiB or smaller."
+                return
+            }
+            guard let text = String(data: data, encoding: .utf8) else {
+                notice = "Import failed: the selected file is not UTF-8 text."
+                return
+            }
+            let plan = KnownHostsOpenSSHCodec.importPlan(
+                text: text,
+                currentRows: rows
+            )
+            importReview = KnownHostsImportReview(plan: plan)
+        } catch {
+            notice = "Import failed: \(error.localizedDescription)"
+        }
+    }
+}
+
+private struct KnownHostsTextDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.plainText] }
+
+    let text: String
+
+    init(text: String) {
+        self.text = text
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents,
+              let text = String(data: data, encoding: .utf8) else {
+            throw CocoaError(.fileReadInapplicableStringEncoding)
+        }
+        self.text = text
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: Data(text.utf8))
+    }
+}
+
+private struct KnownHostsImportReview: Identifiable {
+    let id = UUID()
+    let plan: KnownHostsOpenSSHImportPlan
+}
+
+private struct KnownHostsImportReviewSheet: View {
+    @Environment(\.designTokens) private var T
+    @Environment(\.dismiss) private var dismiss
+
+    let plan: KnownHostsOpenSSHImportPlan
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text("Nothing changes until you confirm. Replacements preserve the prior fingerprint in Known Hosts for review.")
+                        .font(Typography.tesseraMono(size: 11))
+                        .foregroundStyle(T.fgDim)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            summaryTags
+                        }
+                        VStack(alignment: .leading, spacing: 6) {
+                            summaryTags
+                        }
+                    }
+
+                    if plan.entries.isEmpty {
+                        Text("No importable host pins were found.")
+                            .font(Typography.tesseraMono(size: 12))
+                            .foregroundStyle(T.fgDim)
+                    } else {
+                        reviewSection("parsed entries") {
+                            ForEach(plan.entries) { entry in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text(entry.endpoint)
+                                            .font(Typography.tesseraMono(size: 12, weight: .medium))
+                                            .foregroundStyle(T.fg)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                        Spacer(minLength: 8)
+                                        summaryTag(
+                                            entry.action.rawValue,
+                                            color: actionColor(entry.action)
+                                        )
+                                    }
+                                    Text(entry.fingerprint)
+                                        .font(Typography.tesseraMono(size: 10))
+                                        .foregroundStyle(T.fgDim)
+                                        .textSelection(.enabled)
+                                    if entry.action == .replace,
+                                       let prior = entry.expectedPriorFingerprint {
+                                        Text("replaces \(prior)")
+                                            .font(Typography.tesseraMono(size: 10))
+                                            .foregroundStyle(T.amber)
+                                            .textSelection(.enabled)
+                                    }
+                                }
+                                .padding(.vertical, 8)
+                            }
+                        }
+                    }
+
+                    if !plan.rejections.isEmpty {
+                        reviewSection("rejected lines") {
+                            ForEach(plan.rejections) { rejection in
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("line \(rejection.lineNumber) · \(rejection.reason)")
+                                        .font(Typography.tesseraMono(size: 11, weight: .medium))
+                                        .foregroundStyle(T.red)
+                                    Text(rejection.source)
+                                        .font(Typography.tesseraMono(size: 10))
+                                        .foregroundStyle(T.fgDim)
+                                        .lineLimit(3)
+                                }
+                                .padding(.vertical, 6)
+                            }
+                        }
+                    }
+
+                    if !plan.warnings.isEmpty {
+                        reviewSection("warnings") {
+                            ForEach(plan.warnings, id: \.self) { warning in
+                                Text(warning)
+                                    .font(Typography.tesseraMono(size: 10))
+                                    .foregroundStyle(T.amber)
+                                    .padding(.vertical, 4)
+                            }
+                        }
+                    }
+                }
+                .padding(20)
+            }
+            .background(T.bg.ignoresSafeArea())
+            .navigationTitle("review known hosts import")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("cancel") {
+                        dismiss()
+                        onCancel()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(confirmButtonLabel) {
+                        onConfirm()
+                    }
+                    .disabled(plan.addCount + plan.replaceCount == 0)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func actionColor(_ action: KnownHostsOpenSSHImportPlan.Action) -> Color {
+        switch action {
+        case .add: T.green
+        case .replace: T.amber
+        case .unchanged: T.fgDim
+        }
+    }
+
+    private var confirmButtonLabel: String {
+        "import \(plan.addCount) · replace \(plan.replaceCount)"
+    }
+
+    @ViewBuilder
+    private var summaryTags: some View {
+        summaryTag("add \(plan.addCount)", color: T.green)
+        summaryTag("replace \(plan.replaceCount)", color: T.amber)
+        summaryTag("unchanged \(plan.unchangedCount)", color: T.fgDim)
+        if !plan.rejections.isEmpty {
+            summaryTag("rejected \(plan.rejections.count)", color: T.red)
+        }
+    }
+
+    private func summaryTag(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(Typography.tesseraMono(size: 10, weight: .medium))
+            .foregroundStyle(color)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(color.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+
+    private func reviewSection<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(Typography.tesseraMono(size: 11, weight: .medium))
+                .foregroundStyle(T.fgMuted)
+                .textCase(.uppercase)
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

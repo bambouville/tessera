@@ -114,6 +114,86 @@ final class RealHostTransportIntegrationTests: XCTestCase {
         XCTAssertFalse(promptedAgain, "mosh bootstrap must reuse accepted trust")
     }
 
+    /// Optimized audit measurement using the production contrast-filter implementation
+    /// and actual SSH output chunk sizes delivered by the stable VPS. Run the
+    /// same harness on baseline and candidate checkouts for the A/B result.
+    @MainActor
+    func test_liveSSHPrintableContrastFilterPerformanceAudit() async throws {
+        guard ProcessInfo.processInfo.environment["TESSERA_RUN_PERFORMANCE_AUDIT"] == "1" else {
+            throw XCTSkip("Release performance audit is opt-in")
+        }
+        let config = try Config.load()
+        await resetConnectionState(endpoint: "\(config.stableHost):\(config.port)")
+        let session = SSHSession(host: makeHost(config: config, transport: .ssh))
+        defer { session.disconnect() }
+
+        _ = try await connect(
+            session: session,
+            pendingRequest: { session.pendingHostKeyVerification },
+            timeout: 20
+        )
+
+        let payloadByteCount = 16 * 1_024 * 1_024
+        let markerPrefix = "TESSERA_PERF_"
+        let markerSuffix = "COMPLETE_\(UUID().uuidString)"
+        let marker = markerPrefix + markerSuffix
+        let script = "import sys; "
+            + "sys.stdout.buffer.write(b'x' * \(payloadByteCount)); "
+            + "sys.stdout.buffer.write(b'\\n' + b'\(markerPrefix)' "
+            + "+ b'\(markerSuffix)' + b'\\n'); "
+            + "sys.stdout.buffer.flush()"
+        session.send(Array("python3 -c \(shellQuote(script))\n".utf8))
+
+        let received = try await collectOutputChunks(
+            session.outputStream,
+            containing: marker,
+            timeout: 30
+        )
+        let printableChunks = received.filter { chunk in
+            !chunk.contains(0x1B) && !chunk.contains(0x9B)
+        }
+        let receivedByteCount = printableChunks.reduce(0) { $0 + $1.count }
+        XCTAssertGreaterThanOrEqual(receivedByteCount, payloadByteCount)
+
+        var validationFilter = TerminalOutputContrastFilter()
+        for chunk in printableChunks {
+            let output = validationFilter.process(
+                chunk[...],
+                defaultBackgroundRGB: 0x101010,
+                defaultForegroundRGB: 0xD4D4D4,
+                minimumContrast: 0.30
+            )
+            XCTAssertEqual(Array(output), chunk)
+        }
+
+        var samples: [Double] = []
+        var checksum: Int?
+        for _ in 0..<5 {
+            let sample = timePrintableFilter(printableChunks)
+            samples.append(sample.milliseconds)
+            if let checksum {
+                XCTAssertEqual(sample.checksum, checksum)
+            } else {
+                checksum = sample.checksum
+            }
+        }
+        samples.sort()
+        let sampleText = samples
+            .map { String(format: "%.3f", $0) }
+            .joined(separator: ",")
+
+        NSLog(
+            "live-ssh-contrast bytes=%d chunks=%d "
+                + "filterMedianMs=%.3f filterMaxMs=%.3f checksum=%d samplesMs=%@",
+            receivedByteCount,
+            printableChunks.count,
+            samples[2],
+            samples[4],
+            checksum ?? 0,
+            sampleText
+        )
+    }
+
     @MainActor
     func test_liveSSHInformedTOFUMismatchRequiresExplicitUnsafeOverride() async throws {
         let config = try Config.load()
@@ -2136,6 +2216,68 @@ final class RealHostTransportIntegrationTests: XCTestCase {
             group.cancelAll()
             return value
         }
+    }
+
+    private func collectOutputChunks(
+        _ stream: AsyncStream<[UInt8]>,
+        containing marker: String,
+        timeout: TimeInterval
+    ) async throws -> [[UInt8]] {
+        try await withThrowingTaskGroup(of: [[UInt8]].self) { group in
+            group.addTask {
+                var chunks: [[UInt8]] = []
+                var markerWindow = ""
+                for await bytes in stream {
+                    chunks.append(bytes)
+                    markerWindow += String(decoding: bytes, as: UTF8.self)
+                    if markerWindow.contains(marker) {
+                        return chunks
+                    }
+                    if markerWindow.utf8.count > 16 * 1_024 {
+                        markerWindow = String(markerWindow.suffix(8 * 1_024))
+                    }
+                }
+                throw IntegrationError.streamEnded(marker)
+            }
+            group.addTask {
+                try await Task.sleep(
+                    nanoseconds: UInt64(timeout * 1_000_000_000)
+                )
+                throw IntegrationError.timedOut("output marker \(marker)")
+            }
+
+            guard let value = try await group.next() else {
+                throw IntegrationError.streamEnded(marker)
+            }
+            group.cancelAll()
+            return value
+        }
+    }
+
+    private func timePrintableFilter(
+        _ chunks: [[UInt8]]
+    ) -> (milliseconds: Double, checksum: Int) {
+        let start = ContinuousClock.now
+        var filter = TerminalOutputContrastFilter()
+        var checksum = 0
+        for chunk in chunks {
+            let output = filter.process(
+                chunk[...],
+                defaultBackgroundRGB: 0x101010,
+                defaultForegroundRGB: 0xD4D4D4,
+                minimumContrast: 0.30
+            )
+            checksum &+= output.count
+            checksum &+= Int(output.first ?? 0)
+            checksum &+= Int(output.last ?? 0)
+        }
+        return (millisecondsSince(start), checksum)
+    }
+
+    private func millisecondsSince(_ start: ContinuousClock.Instant) -> Double {
+        let elapsed = start.duration(to: .now)
+        return Double(elapsed.components.seconds) * 1_000
+            + Double(elapsed.components.attoseconds) / 1e15
     }
 
     private func shellQuote(_ value: String) -> String {
