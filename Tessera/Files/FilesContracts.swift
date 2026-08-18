@@ -119,15 +119,15 @@ extension FileBridgeError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notConnected:
-            return "Not connected to the host."
+            return String(localized: "Not connected to the host.")
         case .hostKeyNeedsTerminalTrust:
-            return "This host's key isn't trusted yet. Open a terminal session to it first to review the key, then retry."
+            return String(localized: "This host's key isn't trusted yet. Open a terminal session to it first to review the key, then retry.")
         case .authenticationFailed(let detail):
-            return "Authentication failed: \(detail)"
+            return String(localized: "Authentication failed: \(detail)")
         case .network(let detail):
-            return "Network error: \(detail)"
+            return String(localized: "Network error: \(detail)")
         case .sftpUnavailable(let detail):
-            return "SFTP is unavailable on this host: \(detail)"
+            return String(localized: "SFTP is unavailable on this host: \(detail)")
         case .remoteOperationFailed(let detail):
             return detail
         case .cancelled:

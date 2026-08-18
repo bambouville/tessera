@@ -1,0 +1,290 @@
+{
+  "Back — session keeps running": {
+    "de": "Zurück – die Sitzung läuft weiter",
+    "es": "Atrás: la sesión sigue en marcha",
+    "fr": "Retour — la session continue de tourner",
+    "ja": "戻る — セッションは動いたままです",
+    "zh-Hans": "返回 —— 会话继续运行",
+    "zh-Hant": "返回 —— 工作階段繼續執行"
+  },
+  "Find in terminal": {
+    "de": "Im Terminal suchen",
+    "es": "Buscar en el terminal",
+    "fr": "Rechercher dans le terminal",
+    "ja": "ターミナル内を検索",
+    "zh-Hans": "在终端中查找",
+    "zh-Hant": "在終端機中尋找"
+  },
+  "Switch session, window, or pane": {
+    "de": "Sitzung, Fenster oder Bereich wechseln",
+    "es": "Cambiar de sesión, ventana o panel",
+    "fr": "Changer de session, de fenêtre ou de volet",
+    "ja": "セッション・ウインドウ・ペインを切り替え",
+    "zh-Hans": "切换会话、窗口或窗格",
+    "zh-Hant": "切換工作階段、視窗或窗格"
+  },
+  "Switch session, window, or pane. %@": {
+    "de": "Sitzung, Fenster oder Bereich wechseln. %@",
+    "es": "Cambiar de sesión, ventana o panel. %@",
+    "fr": "Changer de session, de fenêtre ou de volet. %@",
+    "ja": "セッション・ウインドウ・ペインを切り替え。%@",
+    "zh-Hans": "切换会话、窗口或窗格。%@",
+    "zh-Hant": "切換工作階段、視窗或窗格。%@"
+  },
+  "%@, window %lld": {
+    "de": "%@, Fenster %lld",
+    "es": "%@, ventana %lld",
+    "fr": "%@, fenêtre %lld",
+    "ja": "%1$@、ウインドウ %2$lld",
+    "zh-Hans": "%1$@，窗口 %2$lld",
+    "zh-Hant": "%1$@，視窗 %2$lld"
+  },
+  "%@, window %lld, agent active": {
+    "de": "%@, Fenster %lld, Agent aktiv",
+    "es": "%@, ventana %lld, agente activo",
+    "fr": "%@, fenêtre %lld, agent actif",
+    "ja": "%1$@、ウインドウ %2$lld、エージェント稼働中",
+    "zh-Hans": "%1$@，窗口 %2$lld，智能体运行中",
+    "zh-Hant": "%1$@，視窗 %2$lld，智慧體執行中"
+  },
+  "%@, window %lld, agent just finished": {
+    "de": "%@, Fenster %lld, Agent gerade fertig",
+    "es": "%@, ventana %lld, el agente acaba de terminar",
+    "fr": "%@, fenêtre %lld, l'agent vient de terminer",
+    "ja": "%1$@、ウインドウ %2$lld、エージェントが完了しました",
+    "zh-Hans": "%1$@，窗口 %2$lld，智能体刚刚完成",
+    "zh-Hant": "%1$@，視窗 %2$lld，智慧體剛剛完成"
+  },
+  "%@, window %lld, agent needs input": {
+    "de": "%@, Fenster %lld, Agent braucht Eingabe",
+    "es": "%@, ventana %lld, el agente necesita entrada",
+    "fr": "%@, fenêtre %lld, l'agent attend une saisie",
+    "ja": "%1$@、ウインドウ %2$lld、エージェントが入力待ち",
+    "zh-Hans": "%1$@，窗口 %2$lld，智能体等待输入",
+    "zh-Hant": "%1$@，視窗 %2$lld，智慧體等待輸入"
+  },
+  "Asks before closing every pane in this window": {
+    "de": "Fragt nach, bevor alle Bereiche dieses Fensters geschlossen werden",
+    "es": "Pregunta antes de cerrar todos los paneles de esta ventana",
+    "fr": "Demande confirmation avant de fermer tous les volets de cette fenêtre",
+    "ja": "このウインドウ内のすべてのペインを閉じる前に確認します",
+    "zh-Hans": "关闭此窗口中所有窗格前会先询问",
+    "zh-Hant": "關閉此視窗中所有窗格前會先詢問"
+  },
+  "Closes this window": {
+    "de": "Schließt dieses Fenster",
+    "es": "Cierra esta ventana",
+    "fr": "Ferme cette fenêtre",
+    "ja": "このウインドウを閉じます",
+    "zh-Hans": "关闭此窗口",
+    "zh-Hant": "關閉此視窗"
+  },
+  "Unavailable while tmux window details are syncing": {
+    "de": "Nicht verfügbar, solange die Fensterdetails von tmux synchronisiert werden",
+    "es": "No disponible mientras se sincronizan los detalles de la ventana de tmux",
+    "fr": "Indisponible pendant la synchronisation des détails de la fenêtre tmux",
+    "ja": "tmux のウインドウ情報を同期している間は利用できません",
+    "zh-Hans": "tmux 窗口详情同步期间不可用",
+    "zh-Hant": "tmux 視窗詳細資訊同步期間不可用"
+  },
+  "“%@” contains %lld panes. Closing this window will close every pane in it.": {
+    "de": "„%@“ enthält %lld Bereiche. Beim Schließen dieses Fensters werden alle darin enthaltenen Bereiche geschlossen.",
+    "es": "«%@» contiene %lld paneles. Cerrar esta ventana cerrará todos sus paneles.",
+    "fr": "« %@ » contient %lld volets. Fermer cette fenêtre fermera tous ses volets.",
+    "ja": "「%1$@」には %2$lld 個のペインがあります。このウインドウを閉じると、その中のペインもすべて閉じられます。",
+    "zh-Hans": "「%1$@」包含 %2$lld 个窗格。关闭此窗口会一并关闭其中所有窗格。",
+    "zh-Hant": "「%1$@」包含 %2$lld 個窗格。關閉此視窗會一併關閉其中所有窗格。"
+  },
+  "“%@” is still syncing its pane layout. Closing this window will close every pane it contains.": {
+    "de": "„%@“ synchronisiert noch seine Bereichsaufteilung. Beim Schließen dieses Fensters werden alle darin enthaltenen Bereiche geschlossen.",
+    "es": "«%@» todavía está sincronizando la disposición de sus paneles. Cerrar esta ventana cerrará todos los paneles que contenga.",
+    "fr": "« %@ » synchronise encore la disposition de ses volets. Fermer cette fenêtre fermera tous les volets qu'elle contient.",
+    "ja": "「%@」はまだペインの配置を同期しています。このウインドウを閉じると、含まれるペインもすべて閉じられます。",
+    "zh-Hans": "「%@」仍在同步窗格布局。关闭此窗口会一并关闭其中包含的所有窗格。",
+    "zh-Hant": "「%@」仍在同步窗格版面。關閉此視窗會一併關閉其中包含的所有窗格。"
+  },
+  "Installing shell integration…": {
+    "de": "Shell-Integration wird installiert…",
+    "es": "Instalando la integración con el shell…",
+    "fr": "Installation de l'intégration au shell…",
+    "ja": "シェル統合をインストール中…",
+    "zh-Hans": "正在安装 shell 集成…",
+    "zh-Hant": "正在安裝 shell 整合…"
+  },
+  "Agent integration": {
+    "de": "Agenten-Integration",
+    "es": "Integración del agente",
+    "fr": "Intégration de l'agent",
+    "ja": "エージェント統合",
+    "zh-Hans": "智能体集成",
+    "zh-Hant": "智慧體整合"
+  },
+  "Install and enable integration?": {
+    "de": "Integration installieren und aktivieren?",
+    "es": "¿Instalar y activar la integración?",
+    "fr": "Installer et activer l'intégration ?",
+    "ja": "統合をインストールして有効にしますか？",
+    "zh-Hans": "要安装并启用集成吗？",
+    "zh-Hant": "要安裝並啟用整合嗎？"
+  },
+  "Install agent integration?": {
+    "de": "Agenten-Integration installieren?",
+    "es": "¿Instalar la integración del agente?",
+    "fr": "Installer l'intégration de l'agent ?",
+    "ja": "エージェント統合をインストールしますか？",
+    "zh-Hans": "要安装智能体集成吗？",
+    "zh-Hant": "要安裝智慧體整合嗎？"
+  },
+  "Enable integration here?": {
+    "de": "Integration hier aktivieren?",
+    "es": "¿Activar la integración aquí?",
+    "fr": "Activer l'intégration ici ?",
+    "ja": "ここで統合を有効にしますか？",
+    "zh-Hans": "要在这里启用集成吗？",
+    "zh-Hant": "要在這裡啟用整合嗎？"
+  },
+  "Enable integration automatically?": {
+    "de": "Integration automatisch aktivieren?",
+    "es": "¿Activar la integración automáticamente?",
+    "fr": "Activer l'intégration automatiquement ?",
+    "ja": "統合を自動的に有効にしますか？",
+    "zh-Hans": "要自动启用集成吗？",
+    "zh-Hant": "要自動啟用整合嗎？"
+  },
+  "Check agent integration?": {
+    "de": "Agenten-Integration prüfen?",
+    "es": "¿Comprobar la integración del agente?",
+    "fr": "Vérifier l'intégration de l'agent ?",
+    "ja": "エージェント統合を確認しますか？",
+    "zh-Hans": "要检查智能体集成吗？",
+    "zh-Hant": "要檢查智慧體整合嗎？"
+  },
+  "Retry integration check?": {
+    "de": "Prüfung der Integration wiederholen?",
+    "es": "¿Reintentar la comprobación de la integración?",
+    "fr": "Refaire la vérification de l'intégration ?",
+    "ja": "統合の確認をやり直しますか？",
+    "zh-Hans": "要重试集成检查吗？",
+    "zh-Hant": "要重試整合檢查嗎？"
+  },
+  "Writes Tessera hook files, edits bash/zsh startup files, then types one source command so agents launched here report precise status. Continue only at an empty bash/zsh prompt.": {
+    "de": "Schreibt Tessera-Hook-Dateien, bearbeitet die Startdateien von bash/zsh und tippt dann einen source-Befehl, damit hier gestartete Agenten ihren Status genau melden. Fahre nur an einem leeren bash/zsh-Prompt fort.",
+    "es": "Escribe los archivos de hook de Tessera, edita los archivos de inicio de bash/zsh y luego escribe un comando source para que los agentes lanzados aquí informen de su estado con precisión. Continúa solo con un prompt de bash/zsh vacío.",
+    "fr": "Écrit les fichiers de hook Tessera, modifie les fichiers de démarrage de bash/zsh, puis saisit une commande source pour que les agents lancés ici rapportent un état précis. Ne continuez qu'à une invite bash/zsh vide.",
+    "ja": "Tessera のフックファイルを書き込み、bash/zsh の起動ファイルを編集したうえで、source コマンドを 1 つ入力します。これにより、ここで起動したエージェントが正確な状態を報告できるようになります。bash/zsh の空のプロンプトでのみ続行してください。",
+    "zh-Hans": "写入 Tessera 钩子文件，修改 bash/zsh 启动文件，然后输入一条 source 命令，使在此启动的智能体能报告精确状态。请仅在 bash/zsh 的空提示符下继续。",
+    "zh-Hant": "寫入 Tessera 掛鉤檔案，修改 bash/zsh 啟動檔案，然後輸入一條 source 指令，使在此啟動的智慧體能回報精確狀態。請僅在 bash/zsh 的空提示符下繼續。"
+  },
+  "Writes Tessera hook files and edits bash/zsh startup files. If this exact terminal reaches an empty bash/zsh prompt before the action runs, Tessera also types one source command to enable it immediately. It never types into a running agent or other program.": {
+    "de": "Schreibt Tessera-Hook-Dateien und bearbeitet die Startdateien von bash/zsh. Erreicht genau dieses Terminal vor der Ausführung ein leeres bash/zsh-Prompt, tippt Tessera zusätzlich einen source-Befehl, um die Integration sofort zu aktivieren. In einen laufenden Agenten oder ein anderes Programm tippt es nie.",
+    "es": "Escribe los archivos de hook de Tessera y edita los archivos de inicio de bash/zsh. Si este terminal concreto llega a un prompt de bash/zsh vacío antes de que se ejecute la acción, Tessera también escribe un comando source para activarla de inmediato. Nunca escribe dentro de un agente en marcha ni de otro programa.",
+    "fr": "Écrit les fichiers de hook Tessera et modifie les fichiers de démarrage de bash/zsh. Si ce terminal précis atteint une invite bash/zsh vide avant l'exécution de l'action, Tessera saisit également une commande source pour l'activer immédiatement. Il ne saisit jamais rien dans un agent en cours d'exécution ou un autre programme.",
+    "ja": "Tessera のフックファイルを書き込み、bash/zsh の起動ファイルを編集します。この操作の実行前に、まさにこのターミナルが bash/zsh の空のプロンプトに達した場合は、すぐ有効化するために source コマンドも 1 つ入力します。実行中のエージェントやほかのプログラムに入力することはありません。",
+    "zh-Hans": "写入 Tessera 钩子文件并修改 bash/zsh 启动文件。如果在动作执行前，正是这个终端到达了 bash/zsh 的空提示符，Tessera 还会输入一条 source 命令以立即启用。它绝不会向运行中的智能体或其他程序输入内容。",
+    "zh-Hant": "寫入 Tessera 掛鉤檔案並修改 bash/zsh 啟動檔案。如果在動作執行前，正是這個終端機到達了 bash/zsh 的空提示符，Tessera 還會輸入一條 source 指令以立即啟用。它絕不會向執行中的智慧體或其他程式輸入內容。"
+  },
+  "Types one source command so agents launched here report precise status. Continue only at an empty bash/zsh prompt.": {
+    "de": "Tippt einen source-Befehl, damit hier gestartete Agenten ihren Status genau melden. Fahre nur an einem leeren bash/zsh-Prompt fort.",
+    "es": "Escribe un comando source para que los agentes lanzados aquí informen de su estado con precisión. Continúa solo con un prompt de bash/zsh vacío.",
+    "fr": "Saisit une commande source pour que les agents lancés ici rapportent un état précis. Ne continuez qu'à une invite bash/zsh vide.",
+    "ja": "source コマンドを 1 つ入力し、ここで起動したエージェントが正確な状態を報告できるようにします。bash/zsh の空のプロンプトでのみ続行してください。",
+    "zh-Hans": "输入一条 source 命令，使在此启动的智能体能报告精确状态。请仅在 bash/zsh 的空提示符下继续。",
+    "zh-Hant": "輸入一條 source 指令，使在此啟動的智慧體能回報精確狀態。請僅在 bash/zsh 的空提示符下繼續。"
+  },
+  "Adds one guarded activation line to this exact bash/zsh shell's startup file, then loads it here. Future windows of this shell activate automatically. Continue only at an empty bash/zsh prompt.": {
+    "de": "Fügt der Startdatei genau dieser bash/zsh-Shell eine abgesicherte Aktivierungszeile hinzu und lädt sie hier. Künftige Fenster dieser Shell aktivieren sich automatisch. Fahre nur an einem leeren bash/zsh-Prompt fort.",
+    "es": "Añade una línea de activación protegida al archivo de inicio de este shell bash/zsh concreto y lo carga aquí. Las próximas ventanas de este shell se activarán automáticamente. Continúa solo con un prompt de bash/zsh vacío.",
+    "fr": "Ajoute une ligne d'activation protégée au fichier de démarrage de ce shell bash/zsh précis, puis le charge ici. Les prochaines fenêtres de ce shell s'activeront automatiquement. Ne continuez qu'à une invite bash/zsh vide.",
+    "ja": "まさにこの bash/zsh シェルの起動ファイルに、条件付きの有効化行を 1 行追加し、この場で読み込みます。以降、このシェルの新しいウインドウでは自動的に有効になります。bash/zsh の空のプロンプトでのみ続行してください。",
+    "zh-Hans": "在这个 bash/zsh shell 的启动文件中添加一行带保护条件的激活语句，并在此处载入。此后该 shell 的新窗口会自动启用。请仅在 bash/zsh 的空提示符下继续。",
+    "zh-Hant": "在這個 bash/zsh shell 的啟動檔案中加入一行帶保護條件的啟用語句，並在此處載入。此後該 shell 的新視窗會自動啟用。請僅在 bash/zsh 的空提示符下繼續。"
+  },
+  "Uses secondary SSH to verify this terminal's integration. Your key may ask to unlock.": {
+    "de": "Prüft die Integration dieses Terminals über eine zweite SSH-Verbindung. Dein Key fragt dabei möglicherweise nach dem Entsperren.",
+    "es": "Usa una segunda conexión SSH para verificar la integración de este terminal. Puede que tu clave pida desbloquearse.",
+    "fr": "Utilise une seconde connexion SSH pour vérifier l'intégration de ce terminal. Votre clé peut demander à être déverrouillée.",
+    "ja": "二次的な SSH 接続を使って、このターミナルの統合状態を確認します。キーのロック解除を求められることがあります。",
+    "zh-Hans": "使用第二条 SSH 连接校验此终端的集成状态。你的密钥可能会要求解锁。",
+    "zh-Hant": "使用第二條 SSH 連線檢驗此終端機的整合狀態。你的金鑰可能會要求解鎖。"
+  },
+  "Runs a read-only host check to verify the integration state.": {
+    "de": "Führt eine nur lesende Prüfung auf dem Host aus, um den Integrationsstatus zu bestätigen.",
+    "es": "Ejecuta una comprobación de solo lectura en el host para verificar el estado de la integración.",
+    "fr": "Effectue une vérification en lecture seule sur l'hôte pour confirmer l'état de l'intégration.",
+    "ja": "ホスト上で読み取り専用のチェックを実行し、統合の状態を確認します。",
+    "zh-Hans": "在主机上执行一次只读检查，以确认集成状态。",
+    "zh-Hant": "在主機上執行一次唯讀檢查，以確認整合狀態。"
+  },
+  "Install and enable": {
+    "de": "Installieren und aktivieren",
+    "es": "Instalar y activar",
+    "fr": "Installer et activer",
+    "ja": "インストールして有効にする",
+    "zh-Hans": "安装并启用",
+    "zh-Hant": "安裝並啟用"
+  },
+  "Run source command": {
+    "de": "source-Befehl ausführen",
+    "es": "Ejecutar el comando source",
+    "fr": "Exécuter la commande source",
+    "ja": "source コマンドを実行",
+    "zh-Hans": "执行 source 命令",
+    "zh-Hant": "執行 source 指令"
+  },
+  "Enable automatically": {
+    "de": "Automatisch aktivieren",
+    "es": "Activar automáticamente",
+    "fr": "Activer automatiquement",
+    "ja": "自動的に有効にする",
+    "zh-Hans": "自动启用",
+    "zh-Hant": "自動啟用"
+  },
+  "Check": {
+    "de": "Prüfen",
+    "es": "Comprobar",
+    "fr": "Vérifier",
+    "ja": "確認",
+    "zh-Hans": "检查",
+    "zh-Hant": "檢查"
+  },
+  "Retry": {
+    "de": "Wiederholen",
+    "es": "Reintentar",
+    "fr": "Réessayer",
+    "ja": "再試行",
+    "zh-Hans": "重试",
+    "zh-Hant": "重試"
+  },
+  "tmux not available on remote host — multi-window features disabled": {
+    "de": "tmux ist auf dem entfernten Host nicht verfügbar – Mehrfenster-Funktionen deaktiviert",
+    "es": "tmux no está disponible en el host remoto: las funciones multiventana quedan desactivadas",
+    "fr": "tmux n'est pas disponible sur l'hôte distant — les fonctions multifenêtres sont désactivées",
+    "ja": "リモートホストで tmux を利用できません — 複数ウインドウの機能は無効です",
+    "zh-Hans": "远程主机上没有 tmux —— 多窗口功能已停用",
+    "zh-Hant": "遠端主機上沒有 tmux —— 多視窗功能已停用"
+  },
+  "tmux could not start a session on this host — showing the plain shell": {
+    "de": "tmux konnte auf diesem Host keine Sitzung starten – es wird die einfache Shell angezeigt",
+    "es": "tmux no pudo iniciar una sesión en este host: se muestra el shell simple",
+    "fr": "tmux n'a pas pu démarrer de session sur cet hôte — affichage du shell simple",
+    "ja": "このホストで tmux がセッションを開始できませんでした — 素のシェルを表示します",
+    "zh-Hans": "tmux 无法在此主机上启动会话 —— 显示纯 shell",
+    "zh-Hant": "tmux 無法在此主機上啟動工作階段 —— 顯示純 shell"
+  },
+  "tmux never started — showing the plain shell (the terminal below has the details)": {
+    "de": "tmux ist nie gestartet – es wird die einfache Shell angezeigt (Details stehen im Terminal darunter)",
+    "es": "tmux nunca arrancó: se muestra el shell simple (los detalles están en el terminal de abajo)",
+    "fr": "tmux n'a jamais démarré — affichage du shell simple (les détails sont dans le terminal ci-dessous)",
+    "ja": "tmux が起動しませんでした — 素のシェルを表示します（詳細は下のターミナルに出ています）",
+    "zh-Hans": "tmux 始终没有启动 —— 显示纯 shell（详情见下方终端）",
+    "zh-Hant": "tmux 始終沒有啟動 —— 顯示純 shell（詳細資訊見下方終端機）"
+  },
+  "this host starts its own tmux at login — showing that session as a plain terminal": {
+    "de": "Dieser Host startet beim Login sein eigenes tmux – diese Sitzung wird als einfaches Terminal angezeigt",
+    "es": "este host arranca su propio tmux al iniciar sesión: se muestra esa sesión como un terminal simple",
+    "fr": "cet hôte démarre son propre tmux à la connexion — cette session est affichée comme un terminal simple",
+    "ja": "このホストはログイン時に独自の tmux を起動します — そのセッションを素のターミナルとして表示します",
+    "zh-Hans": "此主机在登录时会自行启动 tmux —— 将该会话作为纯终端显示",
+    "zh-Hant": "此主機在登入時會自行啟動 tmux —— 將該工作階段作為純終端機顯示"
+  }
+}

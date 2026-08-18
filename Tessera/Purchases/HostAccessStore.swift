@@ -204,7 +204,7 @@ final class HostAccessStore {
                 purchasePending = true
             }
         } catch {
-            operationErrorMessage = "the App Store could not complete the request. your saved host is unchanged."
+            operationErrorMessage = String(localized: "the App Store could not complete the request. your saved host is unchanged.")
         }
     }
 
@@ -231,7 +231,7 @@ final class HostAccessStore {
                 runDeferredOnce()
             }
         } catch {
-            operationErrorMessage = "the App Store could not complete the request. your saved host is unchanged."
+            operationErrorMessage = String(localized: "the App Store could not complete the request. your saved host is unchanged.")
         }
     }
 
@@ -309,7 +309,7 @@ final class HostAccessStore {
         guard revision == accessRevision else { return }
         if encounteredVerificationFailure {
             accessState = .checking
-            accessErrorMessage = "the App Store could not confirm your existing purchases. your saved hosts remain available."
+            accessErrorMessage = String(localized: "the App Store could not confirm your existing purchases. your saved hosts remain available.")
             // A failed scan is not an Ask-to-Buy decline signal.
             return
         }
@@ -369,7 +369,7 @@ final class HostAccessStore {
             guard revision == productRevision else { return }
             product = nil
             isProductUnavailable = true
-            productErrorMessage = "the App Store could not load this purchase. existing hosts remain available."
+            productErrorMessage = String(localized: "the App Store could not load this purchase. existing hosts remain available.")
         }
     }
 

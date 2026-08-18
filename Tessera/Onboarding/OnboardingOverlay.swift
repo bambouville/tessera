@@ -85,12 +85,8 @@ struct OnboardingOverlay: View {
                     .padding(.bottom, 10)
 
                 Text(compact
-                    ? "A fast terminal for SSH & Mosh — native tmux, remote files, "
-                        + "agent-aware controls, and a keyboard built for your phone. "
-                        + "Want a quick tour?"
-                    : "A fast iPad terminal for SSH & Mosh — trackpad scrolling "
-                        + "in TUIs, native tmux, truecolor, edge-to-edge. Want a "
-                        + "quick tour?")
+                    ? "A fast terminal for SSH & Mosh — native tmux, remote files, agent-aware controls, and a keyboard built for your phone. Want a quick tour?"
+                    : "A fast iPad terminal for SSH & Mosh — trackpad scrolling in TUIs, native tmux, truecolor, edge-to-edge. Want a quick tour?")
                     .tesseraSansScaled(size: 14)
                     .foregroundStyle(tokens.fgMuted)
                     .multilineTextAlignment(.center)
@@ -249,7 +245,7 @@ struct OnboardingOverlay: View {
     }
 
     private func bodyText(_ body: String) -> some View {
-        Text(body)
+        Text(verbatim: body)
             .tesseraSansScaled(size: 13)
             .foregroundStyle(tokens.fgMuted)
             .lineSpacing(2)
@@ -314,7 +310,7 @@ struct OnboardingOverlay: View {
         }
     }
 
-    private func calloutButton(_ title: String, filled: Bool, action: @escaping () -> Void) -> some View {
+    private func calloutButton(_ title: LocalizedStringKey, filled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
                 .font(Typography.tesseraMono(size: 12, weight: filled ? .semibold : .regular))
@@ -495,13 +491,13 @@ private struct KeySecurityIllustration: View {
         )
     }
 
-    private func keyCard(systemName: String, title: String, detail: String) -> some View {
+    private func keyCard(systemName: String, title: String, detail: LocalizedStringKey) -> some View {
         HStack(spacing: 7) {
             Image(systemName: systemName)
                 .font(.system(size: 13))
                 .foregroundStyle(tokens.accent)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).foregroundStyle(tokens.fg)
+                Text(verbatim: title).foregroundStyle(tokens.fg)
                 Text(detail).foregroundStyle(tokens.fgDim)
             }
             .lineLimit(1)
@@ -536,7 +532,7 @@ private struct MockTerminalIllustration: View {
                     tab("3:logs", active: false, bell: false)
                 }
                 Spacer(minLength: 0)
-                Text("+")
+                Text(verbatim: "+")
                     .font(Typography.tesseraMono(size: 14))
                     .foregroundStyle(tokens.fgDim)
             }
@@ -595,7 +591,7 @@ private struct MockTerminalIllustration: View {
             }
             if showCursor {
                 HStack(spacing: 0) {
-                    Text("$ ")
+                    Text(verbatim: "$ ")
                         .font(Typography.tesseraMono(size: 11.5))
                         .foregroundStyle(tokens.fgMuted)
                     Rectangle()
@@ -772,7 +768,7 @@ private struct SwipePadGestureIllustration: View {
 
     private func petal(
         symbol: String,
-        label: String,
+        label: LocalizedStringKey,
         color: Color,
         active: Bool = false
     ) -> some View {
@@ -801,19 +797,28 @@ private struct SwipePadGestureIllustration: View {
 private struct ShortcutsIllustration: View {
     let tokens: DesignTokens
 
-    private let rows: [(String, String)] = [
-        ("⌘N", "new host"),
-        ("⌘F", "find in scrollback"),
-        ("⌘T", "new tmux window"),
-        ("⌘⇧W", "close window"),
-        ("⌘1–9", "switch window"),
-        ("⌘⇧[ ]", "prev / next window"),
-        ("⌘D", "split pane"),
-        ("⌘⇧E", "files panel"),
-        ("⌘⇧A", "agent center"),
-        ("⌘K", "session switcher"),
-        ("⌘,", "settings")
-    ]
+    @Environment(AppearancePreferences.self) private var appearance
+
+    /// Chords are values, not strings, so the cheat sheet follows the
+    /// `modifierNotation` preference like every other shortcut surface.
+    private var rows: [(chord: String, label: LocalizedStringResource)] {
+        let n = appearance.modifierNotation
+        return [
+            (Chord.cmd("n").rendered(n), "new host"),
+            (Chord.cmd("f").rendered(n), "find in scrollback"),
+            (Chord.cmd("t").rendered(n), "new tmux window"),
+            (Chord.cmdShift("w").rendered(n), "close window"),
+            (ChordRange(modifiers: [.command], from: "1", to: "9")
+                .rendered(n, compact: true), "switch window"),
+            (ChordPair(first: Chord.cmdShift("["), second: Chord.cmdShift("]"))
+                .rendered(n), "prev / next window"),
+            (Chord.cmd("d").rendered(n), "split pane"),
+            (Chord.cmdShift("e").rendered(n), "files panel"),
+            (Chord.cmdShift("a").rendered(n), "agent center"),
+            (Chord.cmd("k").rendered(n), "session switcher"),
+            (Chord([.command], .character(",")).rendered(n), "settings")
+        ]
+    }
 
     private let columns = [
         GridItem(.flexible(), spacing: 18, alignment: .leading),
@@ -823,9 +828,9 @@ private struct ShortcutsIllustration: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
-                ForEach(rows, id: \.0) { chord, label in
+                ForEach(rows, id: \.chord) { chord, label in
                     HStack(spacing: 9) {
-                        Text(chord)
+                        Text(verbatim: chord)
                             .font(Typography.tesseraMono(size: 11))
                             .foregroundStyle(tokens.fg)
                             .padding(.horizontal, 7)
@@ -870,7 +875,20 @@ private struct ShortcutsIllustration: View {
 private struct PhoneControlsIllustration: View {
     let tokens: DesignTokens
 
-    private let keys = ["esc", "tab", "ctrl", "⌘", "←", "↑", "↓", "→"]
+    @Environment(AppearancePreferences.self) private var appearance
+
+    /// A picture of the accessory bar, so its modifier caps follow the same
+    /// notation the real bar uses.
+    private var keys: [String] {
+        let n = appearance.modifierNotation
+        return [
+            KeyToken.escape.rendered(n),
+            KeyToken.tab.rendered(n),
+            KeyToken.control.rendered(n),
+            KeyToken.command.rendered(n),
+            "←", "↑", "↓", "→"
+        ]
+    }
     private let columns = Array(
         repeating: GridItem(.flexible(), spacing: 6),
         count: 4
@@ -918,7 +936,7 @@ private struct PhoneControlsIllustration: View {
         )
     }
 
-    private func legend(dot: Color, text: String) -> some View {
+    private func legend(dot: Color, text: LocalizedStringKey) -> some View {
         HStack(spacing: 5) {
             Circle().fill(dot).frame(width: 6, height: 6)
             Text(text)
@@ -973,7 +991,7 @@ private struct FilesPanelIllustration: View {
             termLine("$ npm run build", tokens.fgMuted)
             termLine("  ✓ built in 1.2s", tokens.green.opacity(0.8))
             HStack(spacing: 0) {
-                Text("$ ")
+                Text(verbatim: "$ ")
                     .font(Typography.tesseraMono(size: 9.5))
                     .foregroundStyle(tokens.fgMuted)
                 Rectangle()
@@ -986,7 +1004,7 @@ private struct FilesPanelIllustration: View {
     }
 
     private func termLine(_ text: String, _ color: Color) -> some View {
-        Text(text)
+        Text(verbatim: text)
             .font(Typography.tesseraMono(size: 9.5))
             .foregroundStyle(color)
             .lineLimit(1)
@@ -1004,9 +1022,9 @@ private struct FilesPanelIllustration: View {
                 Spacer(minLength: 6)
                 HStack(spacing: 5) {
                     Circle().fill(tokens.green).frame(width: 5, height: 5)
-                    Text("qi@perch")
+                    Text(verbatim: "qi@perch")
                         .foregroundStyle(tokens.fgMuted)
-                    Text("· sftp")
+                    Text(verbatim: "· sftp")
                         .foregroundStyle(tokens.fgDim)
                 }
                 .font(Typography.tesseraMono(size: 9))
@@ -1050,16 +1068,17 @@ private struct FilesPanelIllustration: View {
     }
 
     private var crumbs: some View {
-        (Text("~ ").foregroundColor(tokens.fgMuted)
-            + Text("/ ").foregroundColor(tokens.fgFaint)
-            + Text("projects ").foregroundColor(tokens.fgMuted)
-            + Text("/ ").foregroundColor(tokens.fgFaint)
-            + Text("dashboard").foregroundColor(tokens.fg))
+        (Text(verbatim: "~ ").foregroundColor(tokens.fgMuted)
+            + Text(verbatim: "/ ").foregroundColor(tokens.fgFaint)
+            + Text(verbatim: "projects ").foregroundColor(tokens.fgMuted)
+            + Text(verbatim: "/ ").foregroundColor(tokens.fgFaint)
+            + Text(verbatim: "dashboard").foregroundColor(tokens.fg))
             .font(Typography.tesseraMono(size: 10))
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Illustration only — the file names and sizes are sample data.
     private func fileRow(
         chevron: Bool, expanded: Bool, glyphName: String,
         name: String, meta: String?, selected: Bool, progress: Double?
@@ -1077,7 +1096,7 @@ private struct FilesPanelIllustration: View {
 
             glyph(glyphName, size: 11, tokens.fgMuted)
 
-            Text(name)
+            Text(verbatim: name)
                 .font(Typography.tesseraMono(size: 10))
                 .foregroundStyle(tokens.fg)
                 .lineLimit(1)
@@ -1089,12 +1108,12 @@ private struct FilesPanelIllustration: View {
                 HStack(spacing: 5) {
                     ProgressBar(fraction: progress, tokens: tokens)
                         .frame(width: 44, height: 3)
-                    Text("\(Int(progress * 100))%")
+                    Text(verbatim: "\(Int(progress * 100))%")
                         .font(Typography.tesseraMono(size: 9))
                         .foregroundStyle(tokens.accent)
                 }
             } else if let meta {
-                Text(meta)
+                Text(verbatim: meta)
                     .font(Typography.tesseraMono(size: 9))
                     .foregroundStyle(tokens.fgDim)
             }
@@ -1176,7 +1195,7 @@ private struct ShareInOutIllustration: View {
     }
 
     private func compactLane(
-        directionLabel: String,
+        directionLabel: LocalizedStringKey,
         directionGlyph: String,
         fileGlyph: String,
         fileName: String,
@@ -1190,7 +1209,7 @@ private struct ShareInOutIllustration: View {
             }
             HStack(spacing: 7) {
                 glyph("arrow.turn.down.right", size: 12, tokens.fgDim)
-                Text(destination)
+                Text(verbatim: destination)
                     .font(Typography.tesseraMono(size: 9.5))
                     .foregroundStyle(tokens.fgMuted)
                     .lineLimit(1)
@@ -1238,7 +1257,7 @@ private struct ShareInOutIllustration: View {
         )
     }
 
-    private func direction(_ label: String, arrow: String) -> some View {
+    private func direction(_ label: LocalizedStringKey, arrow: String) -> some View {
         HStack(spacing: 5) {
             glyph(arrow, size: 12, tokens.accent)
             Text(label)
@@ -1252,11 +1271,11 @@ private struct ShareInOutIllustration: View {
     private func chip(glyphName: String, name: String, size: String?) -> some View {
         HStack(spacing: 6) {
             glyph(glyphName, size: 12, tokens.fgMuted)
-            Text(name)
+            Text(verbatim: name)
                 .font(Typography.tesseraMono(size: 10))
                 .foregroundStyle(tokens.fg)
             if let size {
-                Text(size)
+                Text(verbatim: size)
                     .font(Typography.tesseraMono(size: 9))
                     .foregroundStyle(tokens.fgDim)
             }
@@ -1289,8 +1308,8 @@ private struct ShareInOutIllustration: View {
     private var hostChip: some View {
         HStack(spacing: 6) {
             glyph("folder", size: 12, tokens.accent)
-            (Text("qi@perch ").foregroundColor(tokens.fg)
-                + Text("~/projects").foregroundColor(tokens.fgDim))
+            (Text(verbatim: "qi@perch ").foregroundColor(tokens.fg)
+                + Text(verbatim: "~/projects").foregroundColor(tokens.fgDim))
                 .font(Typography.tesseraMono(size: 10))
         }
         .padding(.horizontal, 9)
@@ -1355,13 +1374,13 @@ private struct AgentImagePasteIllustration: View {
 
             // agent composer with the [Image #1] token
             HStack(spacing: 0) {
-                Text("› ")
+                Text(verbatim: "› ")
                     .foregroundStyle(tokens.fgDim)
                 if !compact {
                     Text("compare against this layout ")
                         .foregroundStyle(tokens.fg)
                 }
-                Text("[Image #1]")
+                Text(verbatim: "[Image #1]")
                     .foregroundStyle(tokens.accent)
                     .padding(.horizontal, 4)
                     .background(

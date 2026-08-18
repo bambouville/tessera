@@ -81,20 +81,23 @@ struct AgentIntegrationWarningState: Equatable, Sendable {
     }
 
     let kind: Kind
-    let title: String
-    let message: String
-    let actionLabel: String?
+    /// Notice copy is stored as `LocalizedStringResource`, not `String`, so
+    /// every literal below is a key string extraction can see. A `String`
+    /// here would silently keep the whole notice set out of the catalog.
+    let title: LocalizedStringResource
+    let message: LocalizedStringResource
+    let actionLabel: LocalizedStringResource?
     let action: AgentIntegrationFixAction?
-    let secondaryActionLabel: String?
+    let secondaryActionLabel: LocalizedStringResource?
     let secondaryAction: AgentIntegrationFixAction?
 
     init(
         kind: Kind,
-        title: String,
-        message: String,
-        actionLabel: String?,
+        title: LocalizedStringResource,
+        message: LocalizedStringResource,
+        actionLabel: LocalizedStringResource?,
         action: AgentIntegrationFixAction?,
-        secondaryActionLabel: String? = nil,
+        secondaryActionLabel: LocalizedStringResource? = nil,
         secondaryAction: AgentIntegrationFixAction? = nil
     ) {
         self.kind = kind
@@ -272,7 +275,7 @@ struct AgentIntegrationWarningState: Equatable, Sendable {
         action: .check
     )
 
-    static func unavailable(_ detail: String? = nil) -> Self {
+    static func unavailable(_ detail: LocalizedStringResource? = nil) -> Self {
         Self(
             kind: .unavailable,
             title: "Could not verify agent integration",
@@ -634,16 +637,28 @@ struct AgentLocation: Hashable, Sendable {
     let paneID: Int?
 
     var addressText: String {
-        guard let paneID else { return "\(hostName) · raw session" }
+        guard let paneID else {
+            return String(
+                localized: "\(hostName) · raw session",
+                comment: "Agent location when the session is not running under tmux"
+            )
+        }
         var parts = [hostName]
         if let tmuxSessionName, !tmuxSessionName.isEmpty { parts.append(tmuxSessionName) }
         if let windowID {
             if let windowName, !windowName.isEmpty {
-                parts.append("window \(windowID) “\(windowName)”")
+                parts.append(String(
+                    localized: "window \(windowID) “\(windowName)”",
+                    comment: "Agent location: tmux window number and its name"
+                ))
             } else {
-                parts.append("window \(windowID)")
+                parts.append(String(
+                    localized: "window \(windowID)",
+                    comment: "Agent location: tmux window number"
+                ))
             }
         }
+        // `%21` is tmux's own pane identifier syntax, not prose.
         parts.append("pane %\(paneID)")
         return parts.joined(separator: " · ")
     }
@@ -1041,7 +1056,7 @@ enum AgentPromptParser {
         let lines = segment.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-        return lines.first ?? "input requested"
+        return lines.first ?? String(localized: "input requested")
     }
 
     /// Provider footers, timers, and redraw hints after the final option are
@@ -1368,6 +1383,12 @@ final class AgentCenter {
     private(set) var activityRevision: UInt64 = 0
     private(set) var observationBootstrapSessionIDs: Set<UUID> = []
     private(set) var currentIntegrationStates: [UUID: AgentIntegrationWarningState] = [:]
+    /// Per-provider mirrors of the scroll-lock preferences. Observable on
+    /// purpose: session views evaluate `scrollPrevention` inline in their
+    /// bodies, so a toggle flipped mid-turn has to invalidate them the same
+    /// way a status change does.
+    private(set) var scrollLockEnabledForClaudeCode = true
+    private(set) var scrollLockEnabledForCodex = true
 
     @ObservationIgnored private var sources: [UUID: AgentSessionSource] = [:]
     @ObservationIgnored private var profiles: [SwipePadProfile] = SwipePadProfile.allBuiltIns
@@ -1625,6 +1646,20 @@ final class AgentCenter {
 
     func syncProfiles(_ profiles: [SwipePadProfile]) {
         self.profiles = profiles
+    }
+
+    /// Adopts the user's per-provider scroll-lock choices. Nothing else is
+    /// torn down: the gate lives in `scrollPrevention`, so flipping a switch
+    /// only changes whether the next gesture is answered with a blocker.
+    func setScrollLock(claudeCode: Bool, codex: Bool) {
+        guard scrollLockEnabledForClaudeCode != claudeCode
+            || scrollLockEnabledForCodex != codex
+        else { return }
+        scrollLockEnabledForClaudeCode = claudeCode
+        scrollLockEnabledForCodex = codex
+        DiagnosticLogStore.appendAgentCenter(
+            "scroll-lock-settings claude=\(claudeCode) codex=\(codex)"
+        )
     }
 
     /// Keeps session registrations warm so enabling the experiment does not
@@ -3022,6 +3057,10 @@ final class AgentCenter {
     /// Process detection or an installed-but-inactive hook is deliberately
     /// insufficient: those states cannot prove that the apparent working UI
     /// is current, so ordinary terminal scrolling must remain untouched.
+    ///
+    /// Every caller funnels through here, so the user's per-provider opt-out
+    /// is applied at this one point — the "is a blocker active" read and the
+    /// notice that explains it can never disagree.
     func scrollPrevention(
         sessionID: UUID,
         paneID: Int?
@@ -3030,9 +3069,24 @@ final class AgentCenter {
         let id = AgentInstanceID(sessionID: sessionID, paneID: paneID)
         guard let agent = agent(id),
               agent.status == .working,
-              lifecycleIntegrationState(agentID: id) == .active
+              lifecycleIntegrationState(agentID: id) == .active,
+              scrollLockEnabled(profileID: agent.profileID)
         else { return nil }
         return AgentScrollPrevention(agentID: id, agentName: agent.name)
+    }
+
+    /// Only the two lifecycle providers have a switch; anything else keeps
+    /// the pre-setting behavior. In practice `.active` already restricts the
+    /// caller to those two, so the fall-through is a safety net rather than a
+    /// reachable path.
+    private func scrollLockEnabled(profileID: UUID) -> Bool {
+        if profileID == SwipePadProfile.builtInClaudeCodeID {
+            return scrollLockEnabledForClaudeCode
+        }
+        if profileID == SwipePadProfile.builtInCodexCLIID {
+            return scrollLockEnabledForCodex
+        }
+        return true
     }
 
     // MARK: SwipePad projection
@@ -3949,7 +4003,7 @@ final class AgentCenter {
               integrationTasks[source.lifecycleIntegrationCacheKey] == nil
         else { return }
         if let index = agents.firstIndex(where: { $0.id == agentID }) {
-            agents[index].actionMessage = "installing precise status integration…"
+            agents[index].actionMessage = String(localized: "installing precise status integration…")
             agents[index].actionIsError = false
         }
         let sessionID = agentID.sessionID
@@ -4948,7 +5002,7 @@ final class AgentCenter {
                 self.finishSend(
                     agentID,
                     generation: generation,
-                    message: "status unavailable — open the pane",
+                    message: String(localized: "status unavailable — open the pane"),
                     isError: true,
                     completion: completion
                 )
@@ -4974,7 +5028,7 @@ final class AgentCenter {
                     self.finishSend(
                         agentID,
                         generation: generation,
-                        message: "prompt changed",
+                        message: String(localized: "prompt changed"),
                         isError: true,
                         completion: completion
                     )
@@ -5027,8 +5081,8 @@ final class AgentCenter {
                         agentID,
                         generation: generation,
                         message: stageIndex > 0
-                            ? "submission failed — text may still be in the composer"
-                            : "didn't land — open the pane",
+                            ? String(localized: "submission failed — text may still be in the composer")
+                            : String(localized: "didn't land — open the pane"),
                         isError: true,
                         completion: completion
                     )
@@ -5067,7 +5121,7 @@ final class AgentCenter {
                         self.finishSend(
                             agentID,
                             generation: generation,
-                            message: "text landed but the composer did not become ready — open the pane",
+                            message: String(localized: "text landed but the composer did not become ready — open the pane"),
                             isError: true,
                             completion: completion
                         )
@@ -5174,8 +5228,8 @@ final class AgentCenter {
                     agentID,
                     generation: generation,
                     message: echoNeedle == nil
-                        ? "didn't land — open the pane"
-                        : "submission not verified — open the pane",
+                        ? String(localized: "didn't land — open the pane")
+                        : String(localized: "submission not verified — open the pane"),
                     isError: true,
                     completion: completion
                 )

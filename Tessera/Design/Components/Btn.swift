@@ -27,8 +27,13 @@ struct Btn<Label: View>: View {
         self.label = label
     }
 
+    /// Titles are `LocalizedStringKey`, not `String`, so every literal call
+    /// site is picked up by string extraction and translated automatically.
+    /// A runtime string (a host name, a user-chosen label) is not a
+    /// translatable key — pass it through the `ViewBuilder` initializer above
+    /// as `Text(verbatim:)` instead.
     init(
-        _ text: String,
+        _ titleKey: LocalizedStringKey,
         style: BtnStyle = .default,
         compact: Bool = false,
         full: Bool = false,
@@ -38,7 +43,7 @@ struct Btn<Label: View>: View {
         self.style = style
         self.compact = compact
         self.full = full
-        self.label = { Text(text) }
+        self.label = { Text(titleKey) }
     }
 
     private var colors: (bg: Color, fg: Color, border: Color) {
@@ -82,16 +87,17 @@ private struct BtnPreviewPalette: View {
         let tokens = DesignTokens.make(mode: mode, accent: .blue)
 
         VStack(alignment: .leading, spacing: 12) {
+            // Style names, and preview-only — they must not reach the catalog.
             HStack(spacing: 8) {
-                Btn("Primary", style: .primary) {}
-                Btn("Default", style: .default) {}
-                Btn("Danger", style: .danger) {}
+                Btn(style: .primary, action: {}) { Text(verbatim: "Primary") }
+                Btn(style: .default, action: {}) { Text(verbatim: "Default") }
+                Btn(style: .danger, action: {}) { Text(verbatim: "Danger") }
             }
 
             HStack(spacing: 8) {
-                Btn("Primary", style: .primary, compact: true) {}
-                Btn("Default", style: .default, compact: true) {}
-                Btn("Danger", style: .danger, compact: true) {}
+                Btn(style: .primary, compact: true, action: {}) { Text(verbatim: "Primary") }
+                Btn(style: .default, compact: true, action: {}) { Text(verbatim: "Default") }
+                Btn(style: .danger, compact: true, action: {}) { Text(verbatim: "Danger") }
             }
         }
         .padding()

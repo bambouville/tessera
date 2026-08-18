@@ -68,7 +68,7 @@ final class AppLockController {
         pendingAutoPrompt = false
         let attemptedGeneration = lockGeneration
 
-        let result = await BiometricGate.evaluate(reason: "Unlock Tessera")
+        let result = await BiometricGate.evaluate(reason: String(localized: "Unlock Tessera"))
 
         // A background/idle lock that happened while the system sheet was up
         // supersedes this completion, even if LocalAuthentication reports

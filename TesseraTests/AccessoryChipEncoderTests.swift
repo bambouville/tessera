@@ -1,11 +1,61 @@
 import XCTest
+import UIKit
 @testable import Tessera
 
 final class AccessoryChipEncoderTests: XCTestCase {
+    /// The keyboard reports the private animation curve 7. UIKit will not
+    /// describe it as a cubic Bézier — it answers the identity control points,
+    /// which replay as a linear ramp — so the session lift must never be
+    /// rebuilt from `keyboardAnimationCurveUserInfoKey`. Curve 6 is worse: it
+    /// raises `NSInvalidArgumentException`. This pins the reason the keyboard
+    /// transition is driven off SwiftUI's animated inset instead.
+    func testKeyboardCurveCannotBeRebuiltAsACubicBezier() {
+        let keyboardCurve = UIView.AnimationCurve(rawValue: 7)
+        XCTAssertNotNil(
+            keyboardCurve,
+            "raw curve 7 is bridged as a valid case, so a `?? .easeInOut` fallback never fires"
+        )
+        let parameters = UICubicTimingParameters(animationCurve: keyboardCurve!)
+        XCTAssertEqual(parameters.controlPoint1, .zero)
+        XCTAssertEqual(parameters.controlPoint2, CGPoint(x: 1, y: 1))
+    }
+
+    func testCollapsedAccessoryProgressTracksTheLift() {
+        // Resting: the bar floats above the home indicator.
+        XCTAssertEqual(
+            SessionAccessoryBar.collapsedProgress(lift: 0, homeIndicator: 34),
+            1,
+            accuracy: 0.0001
+        )
+        // Mid-transition it interpolates rather than snapping.
+        XCTAssertEqual(
+            SessionAccessoryBar.collapsedProgress(lift: 17, homeIndicator: 34),
+            0.5,
+            accuracy: 0.0001
+        )
+        // Once lifted clear of the home-indicator band the bar is flush.
+        XCTAssertEqual(
+            SessionAccessoryBar.collapsedProgress(lift: 318, homeIndicator: 34),
+            0,
+            accuracy: 0.0001
+        )
+        // Devices without a home indicator still collapse on keyboard state.
+        XCTAssertEqual(
+            SessionAccessoryBar.collapsedProgress(lift: 0, homeIndicator: 0),
+            1,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            SessionAccessoryBar.collapsedProgress(lift: 318, homeIndicator: 0),
+            0,
+            accuracy: 0.0001
+        )
+    }
+
     func testDefaultBarOrderUsesCompactPhoneLayout() {
         XCTAssertEqual(
             AccessoryChip.defaultBarOrder(for: .phone),
-            [.esc, .ctrl, .tab, .left, .right, .down, .up, .alt, .ctrlJ]
+            [.esc, .ctrl, .tab, .left, .right, .down, .up, .alt, .ctrlC, .ctrlJ]
         )
     }
 
@@ -14,6 +64,14 @@ final class AccessoryChipEncoderTests: XCTestCase {
             AccessoryChip.defaultBarOrder(for: .pad),
             [.esc, .ctrl, .alt, .tab, .left, .down, .up, .right, .pipe, .tilde]
         )
+    }
+
+    /// Both default bars must fit their idiom's chip budget. The phone bar is
+    /// the tight one — chips are 44pt minimum with no horizontal padding, and
+    /// the bar scrolls, but the *default* set should not arrive pre-overflowed.
+    func testDefaultBarsStayWithinTheirChipBudget() {
+        XCTAssertLessThanOrEqual(AccessoryChip.defaultBarOrder(for: .phone).count, 11)
+        XCTAssertLessThanOrEqual(AccessoryChip.defaultBarOrder(for: .pad).count, 12)
     }
 
     func test_escIgnoresArmedAndApplicationCursor() {
@@ -31,6 +89,13 @@ final class AccessoryChipEncoderTests: XCTestCase {
         XCTAssertEqual(
             AccessoryChipEncoder.encode(.ctrlJ, armed: .none, applicationCursor: false),
             [0x0A]
+        )
+    }
+
+    func test_ctrlCEncodesInterrupt() {
+        XCTAssertEqual(
+            AccessoryChipEncoder.encode(.ctrlC, armed: .none, applicationCursor: false),
+            [0x03]
         )
     }
 

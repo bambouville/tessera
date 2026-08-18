@@ -295,9 +295,38 @@ final class OnboardingFixRegressionTests: XCTestCase {
         XCTAssertFalse(reason.contains("HostKeyRejectedError"))
     }
 
+    /// The jump-host wording carries a hop label, so the recogniser cannot
+    /// compare whole strings — it renders the same catalog entry around a
+    /// placeholder and matches what sits on either side. Any label has to work,
+    /// including one that contains the sentence's own words.
+    func test_jumpHostKeyRejectionAlsoPresentsAsNotConnected() {
+        for hopLabel in ["bastion", "host key", "a"] {
+            let reason = MoshBootstrapError.hostKeyRejected(hopLabel: hopLabel)
+                .localizedDescription
+
+            XCTAssertEqual(
+                SessionLaunchFailurePresentation.resolve(reason: reason),
+                SessionLaunchFailurePresentation(title: "not connected", isCancellation: true),
+                "hop label \(hopLabel)"
+            )
+        }
+    }
+
     func test_realTransportErrorRemainsConnectionFailure() {
         XCTAssertEqual(
             SessionLaunchFailurePresentation.resolve(reason: "Connection timed out"),
+            SessionLaunchFailurePresentation(title: "connection failed", isCancellation: false)
+        )
+    }
+
+    /// The old recogniser matched the bare phrase anywhere in the reason, so a
+    /// transport error that merely mentions a cancelled connection would have
+    /// been dressed up as a deliberate decision.
+    func test_unrelatedCancellationWordingIsNotTreatedAsHostKeyRejection() {
+        XCTAssertEqual(
+            SessionLaunchFailurePresentation.resolve(
+                reason: "The connection cancelled itself while reading the banner."
+            ),
             SessionLaunchFailurePresentation(title: "connection failed", isCancellation: false)
         )
     }

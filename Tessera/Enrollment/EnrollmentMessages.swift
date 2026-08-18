@@ -59,23 +59,23 @@ struct EnrollmentPublicKey: Codable, Equatable, Sendable {
         var errorDescription: String? {
             switch self {
             case .emptyDisplayName:
-                return "Enrollment public-key name is empty."
+                return String(localized: "Enrollment public-key name is empty.")
             case .displayNameTooLong:
-                return "Enrollment public-key name is too long."
+                return String(localized: "Enrollment public-key name is too long.")
             case .invalidBlob:
-                return "Enrollment public-key blob is not canonical base64."
+                return String(localized: "Enrollment public-key blob is not canonical base64.")
             case .blobTooLarge:
-                return "Enrollment public-key blob exceeds the protocol limit."
+                return String(localized: "Enrollment public-key blob exceeds the protocol limit.")
             case .algorithmMismatch:
-                return "Enrollment public-key blob does not match its declared algorithm."
+                return String(localized: "Enrollment public-key blob does not match its declared algorithm.")
             case .protectionMismatch:
-                return "Enrollment public-key protection metadata is impossible for its algorithm."
+                return String(localized: "Enrollment public-key protection metadata is impossible for its algorithm.")
             case .invalidFingerprint:
-                return "Enrollment public-key fingerprint is invalid."
+                return String(localized: "Enrollment public-key fingerprint is invalid.")
             case .fingerprintMismatch:
-                return "Enrollment public-key fingerprint does not match its blob."
+                return String(localized: "Enrollment public-key fingerprint does not match its blob.")
             case .unsafeDisplayName:
-                return "Enrollment public-key name contains unsafe display characters."
+                return String(localized: "Enrollment public-key name contains unsafe display characters.")
             }
         }
     }
@@ -197,13 +197,13 @@ struct EnrollmentRequest: Codable, Equatable, Sendable {
         var errorDescription: String? {
             switch self {
             case .emptyHostName:
-                return "Enrollment host name is empty."
+                return String(localized: "Enrollment host name is empty.")
             case .emptyDeviceName:
-                return "Enrollment device name is empty."
+                return String(localized: "Enrollment device name is empty.")
             case .displayNameTooLong:
-                return "Enrollment display metadata is too long."
+                return String(localized: "Enrollment display metadata is too long.")
             case .unsafeDisplayMetadata:
-                return "Enrollment display metadata contains unsafe characters."
+                return String(localized: "Enrollment display metadata contains unsafe characters.")
             }
         }
     }
@@ -331,15 +331,15 @@ extension EnrollmentMessage: Codable {
         var errorDescription: String? {
             switch self {
             case .unsupportedVersion(let version):
-                return "Unsupported enrollment message version \(version)."
+                return String(localized: "Unsupported enrollment message version \(version).")
             case .missingRequest:
-                return "Enrollment request payload is missing."
+                return String(localized: "Enrollment request payload is missing.")
             case .unexpectedRequest:
-                return "Enrollment control message contains a request payload."
+                return String(localized: "Enrollment control message contains a request payload.")
             case .missingFailure:
-                return "Enrollment failure code is missing."
+                return String(localized: "Enrollment failure code is missing.")
             case .unexpectedFailure:
-                return "Enrollment non-failure message contains a failure code."
+                return String(localized: "Enrollment non-failure message contains a failure code.")
             }
         }
     }
@@ -443,11 +443,11 @@ enum EnrollmentFrameCodec {
         var errorDescription: String? {
             switch self {
             case .emptyPayload:
-                return "Enrollment frame payload is empty."
+                return String(localized: "Enrollment frame payload is empty.")
             case .payloadTooLarge(let count):
-                return "Enrollment frame payload is too large (\(count) bytes)."
+                return String(localized: "Enrollment frame payload is too large (\(count) bytes).")
             case .invalidPayload:
-                return "Enrollment frame payload is invalid."
+                return String(localized: "Enrollment frame payload is invalid.")
             }
         }
     }

@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 
 struct HostsLandingView: View {
+    @Environment(AppearancePreferences.self) private var appearance
     @Query(sort: \PersistedHost.sortOrder) private var hosts: [PersistedHost]
 
     let onConnect: (PersistedHost) -> Void
@@ -26,7 +27,26 @@ struct HostsLandingView: View {
     /// The full quick-connect instruction truncates inside the ~300 pt field a
     /// phone offers; the empty state's bottom hint already teaches `user@host`,
     /// so the compact placeholder stays short.
-    private var searchPlaceholder: String {
+    /// One sentence rather than three concatenated `Text` fragments. The
+    /// fragments only existed so `user@host` could be tinted, but they also
+    /// froze the English word order — every language has to be free to put
+    /// the literal wherever its own grammar needs it, so it travels as an
+    /// argument and the tint is applied to wherever it lands.
+    private var quickConnectHint: AttributedString {
+        let token = "user@host"
+        var hint = AttributedString(
+            String(
+                localized: "or type \(token) in the search bar above to connect right away",
+                comment: "Empty-state hint. The argument is the literal text user@host, shown as-is."
+            )
+        )
+        if let range = hint.range(of: token) {
+            hint[range].foregroundColor = T.fgMuted
+        }
+        return hint
+    }
+
+    private var searchPlaceholder: LocalizedStringKey {
         guard isPhone else {
             return "search hosts, or type user@host to quick-connect"
         }
@@ -92,8 +112,7 @@ struct HostsLandingView: View {
                 .foregroundStyle(T.fg)
                 .padding(.bottom, 10)
 
-            Text("Add a server to open a session over SSH or Mosh — with tmux, "
-                + "truecolor, and trackpad scrolling built in.")
+            Text("Add a server to open a session over SSH or Mosh — with tmux, truecolor, and trackpad scrolling built in.")
                 .tesseraSansScaled(size: 14)
                 .foregroundStyle(T.fgMuted)
                 .multilineTextAlignment(.center)
@@ -107,7 +126,7 @@ struct HostsLandingView: View {
                     HStack(spacing: 8) {
                         Text("add your first host")
                         if !isPhone {
-                            Text("⌘N")
+                            Text(Chord.cmd("n").rendered(appearance.modifierNotation))
                                 .font(Typography.tesseraMono(size: 11))
                                 .foregroundStyle((T.isLight ? Color.white : Color.black).opacity(0.55))
                         }
@@ -121,9 +140,7 @@ struct HostsLandingView: View {
             }
 
             Group {
-                Text("or type ")
-                    + Text("user@host").foregroundColor(T.fgMuted)
-                    + Text(" in the search bar above to connect right away")
+                Text(quickConnectHint)
             }
             .font(Typography.tesseraMono(size: 12))
             .foregroundStyle(T.fgDim)
@@ -174,7 +191,7 @@ struct HostsLandingView: View {
                         Image(systemName: "plus")
                         Text("new host")
                         if !isPhone {
-                            Text("⌘N")
+                            Text(Chord.cmd("n").rendered(appearance.modifierNotation))
                                 .font(Typography.tesseraMono(size: 11))
                                 .foregroundStyle(T.fgDim)
                         }
@@ -291,7 +308,7 @@ struct HostsLandingView: View {
 
     private var hostTableHeader: some View {
         HStack(spacing: 0) {
-            Text("")
+            Text(verbatim: "")
                 .frame(width: 24, alignment: .leading)
             headerCell("name")
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -303,7 +320,7 @@ struct HostsLandingView: View {
                 .frame(width: 120, alignment: .leading)
             headerCell("last seen")
                 .frame(width: 100, alignment: .leading)
-            Text("")
+            Text(verbatim: "")
                 .frame(width: 28, alignment: .leading)
         }
         .padding(.vertical, 10)
@@ -315,7 +332,7 @@ struct HostsLandingView: View {
         }
     }
 
-    private func sectionHeader(_ text: String) -> some View {
+    private func sectionHeader(_ text: LocalizedStringKey) -> some View {
         // One case treatment for every header on this page — "RECENT" was
         // uppercased at its call site while "all hosts · N" stayed lowercase.
         Text(text)
@@ -325,7 +342,7 @@ struct HostsLandingView: View {
             .textCase(.uppercase)
     }
 
-    private func headerCell(_ text: String) -> some View {
+    private func headerCell(_ text: LocalizedStringKey) -> some View {
         Text(text)
             .font(Typography.tesseraMono(size: 10))
             .foregroundStyle(T.fgMuted)
@@ -366,7 +383,7 @@ private struct CompactHostRow: View {
                             .foregroundStyle(T.fg)
                             .lineLimit(1)
 
-                        Text(endpoint)
+                        Text(verbatim: endpoint)
                             .font(Typography.tesseraMono(size: 11))
                             .foregroundStyle(T.fgMuted)
                             .lineLimit(1)
@@ -390,7 +407,8 @@ private struct CompactHostRow: View {
                         Text(String(host.port))
                             .font(Typography.tesseraMono(size: 11))
                             .foregroundStyle(T.fgDim)
-                        Text(host.transport == .mosh ? "mosh" : "ssh")
+                        // Protocol names, identical in every language.
+                        Text(verbatim: host.transport == .mosh ? "mosh" : "ssh")
                             .font(Typography.tesseraMono(size: 10))
                             .foregroundStyle(T.fgDim)
                     }
@@ -511,7 +529,7 @@ private struct HostRow: View {
     }
 
     private func rowText(_ text: String, color: Color) -> some View {
-        Text(text)
+        Text(verbatim: text)
             .font(Typography.tesseraMono(size: 12))
             .foregroundStyle(color)
             .lineLimit(1)

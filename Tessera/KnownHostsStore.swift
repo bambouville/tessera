@@ -527,7 +527,7 @@ enum KnownHostsOpenSSHCodec {
                 rejections.append(.init(
                     lineNumber: lineNumber,
                     source: line,
-                    reason: "expected host, key type, and public key"
+                    reason: String(localized: "expected host, key type, and public key")
                 ))
                 continue
             }
@@ -535,7 +535,7 @@ enum KnownHostsOpenSSHCodec {
                 rejections.append(.init(
                     lineNumber: lineNumber,
                     source: line,
-                    reason: "OpenSSH marker entries are not supported"
+                    reason: String(localized: "OpenSSH marker entries are not supported")
                 ))
                 continue
             }
@@ -549,7 +549,7 @@ enum KnownHostsOpenSSHCodec {
                 rejections.append(.init(
                     lineNumber: lineNumber,
                     source: line,
-                    reason: "invalid or unsupported OpenSSH public key"
+                    reason: String(localized: "invalid or unsupported OpenSSH public key")
                 ))
                 continue
             }
@@ -572,7 +572,7 @@ enum KnownHostsOpenSSHCodec {
                     rejections.append(.init(
                         lineNumber: lineNumber,
                         source: token,
-                        reason: "invalid host field"
+                        reason: String(localized: "invalid host field")
                     ))
                     continue
                 }
@@ -594,7 +594,7 @@ enum KnownHostsOpenSSHCodec {
                     rejections.append(.init(
                         lineNumber: candidate.lineNumber,
                         source: endpoint,
-                        reason: "ambiguous: multiple different keys were supplied for this endpoint"
+                        reason: String(localized: "ambiguous: multiple different keys were supplied for this endpoint")
                     ))
                 }
                 continue
@@ -657,19 +657,19 @@ enum KnownHostsOpenSSHCodec {
 
     private static func parseEndpoint(fromKnownHostsHost token: String) throws -> String {
         guard !token.isEmpty else {
-            throw HostParseError(reason: "empty host field")
+            throw HostParseError(reason: String(localized: "empty host field"))
         }
         guard !token.hasPrefix("|") else {
-            throw HostParseError(reason: "hashed hosts cannot be mapped to a Tessera endpoint")
+            throw HostParseError(reason: String(localized: "hashed hosts cannot be mapped to a Tessera endpoint"))
         }
         guard !token.contains("*") && !token.contains("?") && !token.hasPrefix("!") else {
-            throw HostParseError(reason: "wildcard and negated hosts are not supported")
+            throw HostParseError(reason: String(localized: "wildcard and negated hosts are not supported"))
         }
         if token.hasPrefix("[") {
             guard let close = token.firstIndex(of: "]"),
                   token.index(after: close) < token.endIndex,
                   token[token.index(after: close)] == ":" else {
-                throw HostParseError(reason: "invalid bracketed host and port")
+                throw HostParseError(reason: String(localized: "invalid bracketed host and port"))
             }
             let host = String(token[token.index(after: token.startIndex)..<close])
             let portStart = token.index(close, offsetBy: 2)
@@ -677,7 +677,7 @@ enum KnownHostsOpenSSHCodec {
             guard !host.isEmpty,
                   let portNumber = Int(port),
                   (1...65535).contains(portNumber) else {
-                throw HostParseError(reason: "invalid host or port")
+                throw HostParseError(reason: String(localized: "invalid host or port"))
             }
             return "\(host):\(portNumber)"
         }

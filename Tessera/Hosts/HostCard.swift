@@ -50,7 +50,7 @@ struct HostCard: View {
                     .foregroundStyle(T.fg)
                     .lineLimit(1)
 
-                Text(endpointText)
+                Text(verbatim: endpointText)
                     .font(Typography.tesseraMono(size: 11))
                     .foregroundStyle(T.fgDim)
                     .lineLimit(1)
@@ -60,12 +60,14 @@ struct HostCard: View {
                 // size-matched whether or not the host has tags.
                 HStack(spacing: 6) {
                     if tagTexts.isEmpty {
-                        Tag(text: "—")
+                        // Invisible spacer, and the tags themselves are tool
+                        // names (mosh, tmux) that stay English everywhere.
+                        Tag(verbatim: "—")
                             .opacity(0)
                             .accessibilityHidden(true)
                     } else {
                         ForEach(Array(tagTexts.enumerated()), id: \.offset) { _, text in
-                            Tag(text: text)
+                            Tag(verbatim: text)
                         }
                     }
                 }

@@ -362,7 +362,7 @@ final class BellController {
 
             let content = UNMutableNotificationContent()
             content.title = paneTitle.map { "\(hostDisplayName) · \($0)" } ?? hostDisplayName
-            content.body = "rang a bell that needs attention"
+            content.body = String(localized: "rang a bell that needs attention")
             content.sound = nil
 
             let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 0.1, repeats: false)

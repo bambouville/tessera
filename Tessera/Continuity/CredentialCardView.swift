@@ -17,7 +17,7 @@ struct CredentialCardView: View {
                 Image(systemName: "key.horizontal.fill")
                     .foregroundStyle(T.accent)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("authenticate to \(hostName.isEmpty ? "host" : hostName)")
+                    Text("authenticate to \(hostName.isEmpty ? String(localized: "host", comment: "Stand-in when a session has no host name yet") : hostName)")
                         .font(Typography.tesseraMono(size: 12.5, weight: .semibold))
                         .foregroundStyle(T.fg)
                     Text("first time on this device")

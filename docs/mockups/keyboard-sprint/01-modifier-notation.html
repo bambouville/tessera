@@ -1,0 +1,1069 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tessera — modifier notation (glyph vs text)</title>
+<style>
+  /* ────────────────────────────────────────────────────────────────
+     Real Tessera design tokens — mirrored from Tessera/Design/DesignTokens.swift
+     ──────────────────────────────────────────────────────────────── */
+  :root, [data-theme="dark"] {
+    --bg:            #000000;
+    --canvas:        #000000;
+    --sidebar-bg:    rgba(210,210,214,.18);
+    --sidebar-border:rgba(255,255,255,.06);
+    --panel-bg:      #0A0A0A;
+    --input-bg:      #141414;
+    --input-bg-soft: #1C1C1E;
+    --fg:            #FFFFFF;
+    --fg-muted:      rgba(235,235,245,.60);
+    --fg-dim:        rgba(235,235,245,.35);
+    --fg-faint:      rgba(235,235,245,.18);
+    --accent:        #5B9FFF;
+    --accent-soft:   rgba(91,159,255,.14);
+    --green:         #30D158;
+    --red:           #FF453A;
+    --amber:         #FF9F0A;
+    --border:        rgba(255,255,255,.08);
+    --border-strong: rgba(255,255,255,.14);
+  }
+  [data-theme="light"] {
+    --bg:            #F2F2F7;
+    --canvas:        #F2F2F7;
+    --sidebar-bg:    rgba(255,255,255,.50);
+    --sidebar-border:rgba(0,0,0,.08);
+    --panel-bg:      rgba(255,255,255,.75);
+    --input-bg:      rgba(255,255,255,.80);
+    --input-bg-soft: rgba(255,255,255,.60);
+    --fg:            #1A1A1A;
+    --fg-muted:      rgba(0,0,0,.60);
+    --fg-dim:        rgba(0,0,0,.40);
+    --fg-faint:      rgba(0,0,0,.18);
+    --accent:        #0060DF;
+    --accent-soft:   rgba(0,96,223,.10);
+    --green:         #00A63C;
+    --red:           #D70015;
+    --amber:         #B26B00;
+    --border:        rgba(0,0,0,.08);
+    --border-strong: rgba(0,0,0,.14);
+  }
+  :root {
+    --mono: 'JetBrains Mono','JetBrainsMono-Regular','SF Mono',ui-monospace,Menlo,monospace;
+    /* the in-session accessory bar / top bar chrome is hard-coded dark in the
+       app (Color(red:28/255,...)) regardless of the appearance mode — kept
+       accurate here so the bar looks the same in both theme previews */
+    --chrome:        rgb(28,28,30);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { background: #0d0d0f; }
+  [data-theme="light"] html { background: #e6e6ea; }
+  body {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--fg);
+    background: var(--canvas);
+    padding: 22px 26px 80px;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── page chrome ─────────────────────────────────────────────── */
+  .wrap { max-width: 1360px; margin: 0 auto; }
+  header.top {
+    display: flex; align-items: flex-start; gap: 28px; flex-wrap: wrap;
+    padding-bottom: 18px; margin-bottom: 26px;
+    border-bottom: 1px solid var(--border);
+  }
+  header.top .titles { flex: 1 1 420px; min-width: 320px; }
+  header.top h1 { font-size: 22px; font-weight: 500; letter-spacing: .01em; }
+  header.top .kicker {
+    font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--fg-dim); margin-bottom: 6px;
+  }
+  header.top p { color: var(--fg-muted); font-size: 11.5px; line-height: 1.6; margin-top: 8px; max-width: 720px; }
+
+  .ctrls { display: flex; flex-direction: column; gap: 10px; }
+  .ctrl-row { display: flex; align-items: center; gap: 10px; }
+  .ctrl-row > .lab {
+    font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--fg-faint); width: 74px; flex: 0 0 auto;
+  }
+  .seg {
+    display: inline-flex; gap: 2px; padding: 3px;
+    background: var(--input-bg); border: 1px solid var(--border); border-radius: 9px;
+  }
+  .seg button {
+    font-family: var(--mono); font-size: 12px; cursor: pointer;
+    padding: 7px 14px; border: 0; border-radius: 6px;
+    background: transparent; color: var(--fg-muted);
+  }
+  .seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+  .hint-pill {
+    font-size: 10.5px; color: var(--fg-dim); border: 1px dashed var(--border-strong);
+    border-radius: 20px; padding: 5px 11px;
+  }
+
+  /* ── section scaffolding ─────────────────────────────────────── */
+  section { margin-bottom: 42px; }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; }
+  .sec-num {
+    font-size: 10px; color: var(--accent); border: 1px solid var(--accent);
+    border-radius: 5px; padding: 1px 6px; letter-spacing: .06em;
+  }
+  .sec-head h2 { font-size: 16px; font-weight: 500; }
+  .sec-sub { color: var(--fg-muted); font-size: 11.5px; line-height: 1.6; margin: 6px 0 18px; max-width: 860px; }
+
+  .grid { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); align-items: start; }
+
+  .card {
+    background: var(--panel-bg); border: 1px solid var(--border);
+    border-radius: 12px; padding: 14px;
+  }
+  .card > .cap {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    margin-bottom: 11px;
+  }
+  .card > .cap .name { font-size: 11px; color: var(--fg); }
+  .card > .cap .src { font-size: 9.5px; color: var(--fg-faint); text-align: right; }
+  .card .note { font-size: 10.5px; color: var(--fg-dim); line-height: 1.55; margin-top: 11px; }
+
+  /* ── generic app pieces ──────────────────────────────────────── */
+  .kicker-lab { font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--fg-faint); }
+  .fieldlab { font-size: 11px; color: var(--fg-muted); margin-bottom: 6px; }
+  .fieldsub { font-size: 11px; color: var(--fg-dim); margin-top: 7px; line-height: 1.5; }
+
+  /* settings shell */
+  .settings-shell {
+    display: flex; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden; min-height: 520px;
+  }
+  .settings-rail { width: 220px; flex: 0 0 220px; border-right: 1px solid var(--border); padding: 22px 8px 0; }
+  .settings-rail .h { font-size: 24px; font-weight: 500; padding: 0 12px 16px; }
+  .settings-rail .row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 12px; border-radius: 8px; color: var(--fg-muted); font-size: 13px;
+  }
+  .settings-rail .row.sel { background: var(--accent-soft); color: var(--accent); }
+  .settings-rail .row .ic { width: 14px; text-align: center; font-size: 11px; opacity: .9; }
+  .settings-body { flex: 1 1 auto; padding: 26px 34px 34px; max-width: 620px; }
+  .settings-body h3 { font-size: 22px; font-weight: 500; margin-bottom: 24px; }
+  .toggle-row { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+  .toggle-row .tt { font-size: 13px; }
+  .toggle-row .ts { font-size: 11px; color: var(--fg-muted); margin-top: 2px; }
+  .switch {
+    width: 51px; height: 31px; border-radius: 16px; flex: 0 0 auto; position: relative;
+    background: var(--input-bg-soft); border: 1px solid var(--border);
+  }
+  .switch.on { background: var(--accent); border-color: transparent; }
+  .switch::after {
+    content: ''; position: absolute; top: 2px; left: 2px; width: 25px; height: 25px;
+    border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.4);
+  }
+  .switch.on::after { left: auto; right: 2px; }
+
+  /* ── keycap rendering ────────────────────────────────────────── */
+  .cap-chord { display: inline-flex; align-items: center; gap: 3px; vertical-align: middle; }
+  .cap-key {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 22px; height: 22px; padding: 0 6px;
+    font-size: 11px; font-weight: 500; color: var(--fg);
+    background: var(--input-bg); border: 1px solid var(--border-strong);
+    border-radius: 5px; white-space: nowrap;
+  }
+  .cap-plus { color: var(--fg-faint); font-size: 10px; padding: 0 1px; }
+  .cap-sep  { color: var(--fg-dim); font-size: 11px; padding: 0 4px; }
+  /* inline (prose / legend) chord — no keycap box, just the tokens */
+  .tok { font-weight: 500; white-space: nowrap; }
+  .tok .p { color: var(--fg-dim); font-weight: 400; }
+
+  /* ── accessory bar ───────────────────────────────────────────── */
+  .device { border-radius: 20px; background: #17181a; border: 1px solid #26272b; padding: 8px; }
+  .device .screen { border-radius: 14px; overflow: hidden; background: #000; position: relative; }
+  .accbar {
+    display: flex; align-items: center; height: 52px;
+    background: var(--chrome); border-top: .5px solid rgba(255,255,255,.08);
+  }
+  .accbar .strip {
+    flex: 1 1 auto; display: flex; align-items: center; gap: 6px;
+    padding: 4px 12px; overflow: hidden; position: relative;
+  }
+  .accbar.phone .strip { padding: 4px 8px; gap: 4px; }
+  .accbar .fade {
+    position: absolute; right: 0; top: 0; bottom: 0; width: 22px; pointer-events: none;
+    background: linear-gradient(to right, rgba(28,28,30,0), rgba(28,28,30,.9));
+  }
+  .achip {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 44px; height: 44px; padding: 0 12px;
+    font-size: 14px; font-weight: 500; color: #fff;
+    background: rgba(255,255,255,.12); border-radius: 7px;
+    border: 1px solid transparent; white-space: nowrap; flex: 0 0 auto;
+  }
+  .accbar.phone .achip { padding: 0 6px; min-width: 44px; }
+  .achip.long { font-size: 12px; }
+  .achip.armed {
+    color: var(--accent); background: rgba(91,159,255,.20); border-color: var(--accent);
+  }
+  .accbar .kbtoggle {
+    width: 44px; height: 44px; margin: 0 12px 0 0; border-radius: 7px;
+    background: rgba(255,255,255,.08); color: rgba(255,255,255,.65);
+    display: flex; align-items: center; justify-content: center; font-size: 16px;
+    border-left: .5px solid rgba(255,255,255,.06); flex: 0 0 auto;
+  }
+  .overflow-warn {
+    font-size: 10px; color: var(--amber); margin-top: 9px; line-height: 1.5;
+    display: none;
+  }
+  body[data-notation="text"] .overflow-warn { display: block; }
+
+  /* palette chips (settings accessory-bar editor) */
+  .pchip {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 36px; height: 30px; padding: 0 10px; margin: 0 6px 6px 0;
+    font-size: 13px; font-weight: 500; color: var(--fg);
+    background: var(--input-bg-soft); border: 1px solid var(--border); border-radius: 7px;
+  }
+  .pchip.long { font-size: 11px; }
+  .pchip.dim { opacity: .35; }
+
+  /* ── shortcut legend ─────────────────────────────────────────── */
+  .legend { background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+  .legend .grp + .grp { margin-top: 16px; }
+  .legend .gtitle {
+    font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--fg-dim); padding-bottom: 6px;
+  }
+  .legend .lrow {
+    display: flex; gap: 12px; align-items: baseline;
+    padding: 6px 0; border-bottom: 1px solid var(--border);
+  }
+  .legend .grp .lrow:last-child { border-bottom: 0; }
+  .legend .lkeys { flex: 0 0 auto; min-width: 116px; font-size: 12px; }
+  body[data-notation="text"] .legend .lkeys { min-width: 168px; }
+  .legend .llab { font-size: 12px; color: var(--fg-muted); }
+
+  /* ── misc app surfaces ───────────────────────────────────────── */
+  .topbar {
+    height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 10px;
+    background: rgba(28,28,30,.72); backdrop-filter: blur(14px);
+    border-bottom: .5px solid var(--border); font-size: 10.5px; color: rgba(235,235,245,.6);
+  }
+  .tabstrip {
+    display: flex; gap: 6px; padding: 6px 8px; background: rgba(28,28,30,.9);
+    border-bottom: .5px solid rgba(255,255,255,.06); overflow: hidden;
+  }
+  .tab {
+    display: flex; align-items: center; gap: 7px; height: 26px; padding: 0 9px;
+    border-radius: 7px; background: rgba(255,255,255,.07); color: rgba(255,255,255,.72);
+    font-size: 11px; white-space: nowrap; flex: 0 0 auto;
+  }
+  .tab.sel { background: rgba(91,159,255,.18); color: #fff; box-shadow: inset 0 0 0 1px rgba(91,159,255,.5); }
+  .tab .num { color: rgba(255,255,255,.4); font-size: 10px; }
+  .tab .hint { font-size: 9.5px; color: rgba(255,255,255,.35); }
+  body[data-notation="text"] .tab .hint { font-size: 9px; }
+
+  .palette {
+    background: rgba(20,20,22,.92); border: 1px solid var(--border-strong);
+    border-radius: 12px; overflow: hidden; backdrop-filter: blur(20px);
+  }
+  .palette .pin { padding: 11px 13px; font-size: 12.5px; color: rgba(255,255,255,.5); border-bottom: 1px solid var(--border); }
+  .palette .prow { display: flex; align-items: center; gap: 10px; padding: 9px 13px; font-size: 12px; color: rgba(255,255,255,.85); }
+  .palette .prow.sel { background: rgba(91,159,255,.14); }
+  .palette .prow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex: 0 0 auto; }
+  .palette .pfoot {
+    display: flex; gap: 16px; padding: 8px 13px; border-top: 1px solid var(--border);
+    font-size: 10px; color: rgba(235,235,245,.35);
+  }
+  .palette .pfoot span { display: inline-flex; align-items: center; gap: 5px; }
+
+  .landing-btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 10px 14px; border-radius: 9px;
+    background: var(--input-bg); border: 1px solid var(--border); font-size: 13px;
+  }
+  .landing-btn .badge {
+    font-size: 10.5px; color: var(--fg-dim);
+    padding: 2px 6px; border: 1px solid var(--border); border-radius: 5px;
+  }
+  .connect-btn {
+    display: inline-flex; align-items: center; gap: 9px;
+    padding: 10px 18px; border-radius: 9px;
+    background: var(--accent-soft); border: 1px solid var(--accent); color: var(--accent); font-size: 13px;
+  }
+
+  .prose {
+    font-size: 12px; color: var(--fg-muted); line-height: 1.7;
+    background: var(--input-bg); border: 1px solid var(--border);
+    border-radius: 9px; padding: 12px 14px;
+  }
+  .cheat { display: grid; grid-template-columns: auto 1fr; gap: 7px 16px; font-size: 11.5px; align-items: baseline; }
+  .cheat .k { color: var(--fg); }
+  .cheat .v { color: var(--fg-muted); }
+
+  .agenthints { display: flex; gap: 16px; font-size: 10.5px; color: var(--fg-dim); }
+  .agenthints span { display: inline-flex; align-items: center; gap: 6px; }
+
+  /* ── inventory table ─────────────────────────────────────────── */
+  table.inv { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  table.inv th {
+    text-align: left; font-weight: 500; font-size: 9.5px; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--fg-faint);
+    padding: 0 10px 8px 0; border-bottom: 1px solid var(--border);
+  }
+  table.inv td { padding: 8px 10px 8px 0; border-bottom: 1px solid var(--border); vertical-align: top; color: var(--fg-muted); }
+  table.inv td.f { color: var(--fg); white-space: nowrap; font-size: 11px; }
+  table.inv td.st { white-space: nowrap; }
+  .pill {
+    display: inline-block; font-size: 9.5px; padding: 2px 7px; border-radius: 20px;
+    border: 1px solid var(--border-strong); color: var(--fg-dim);
+  }
+  .pill.tok { border-color: rgba(91,159,255,.5); color: var(--accent); }
+  .pill.prose { border-color: rgba(255,159,10,.5); color: var(--amber); }
+  .pill.none { border-color: var(--border); color: var(--fg-faint); }
+
+  .decide {
+    border: 1px solid var(--amber); border-radius: 11px; padding: 14px 16px;
+    background: rgba(255,159,10,.06);
+  }
+  .decide h4 { font-size: 12px; font-weight: 500; color: var(--amber); margin-bottom: 8px; }
+  .decide p { font-size: 11.5px; color: var(--fg-muted); line-height: 1.65; }
+  .decide .ab { display: flex; gap: 22px; margin-top: 12px; flex-wrap: wrap; }
+  .decide .ab .opt { display: flex; align-items: center; gap: 9px; font-size: 11px; color: var(--fg-dim); }
+
+  .callout {
+    border-left: 2px solid var(--accent); padding: 2px 0 2px 13px;
+    font-size: 11.5px; color: var(--fg-muted); line-height: 1.65;
+  }
+  code {
+    font-family: var(--mono); font-size: .95em;
+    background: var(--input-bg-soft); border: 1px solid var(--border);
+    border-radius: 4px; padding: 1px 5px; color: var(--fg);
+  }
+  .stack { display: flex; flex-direction: column; gap: 14px; }
+  .rowsplit { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
+</style>
+</head>
+<body data-notation="glyph" data-theme="dark">
+<div class="wrap">
+
+<header class="top">
+  <div class="titles">
+    <div class="kicker">keyboard sprint · mock 1 of 2</div>
+    <h1>modifier notation — glyphs vs words</h1>
+    <p>
+      One global preference that changes how every modifier key is written across the app.
+      Flip the switch on the right: every surface below re-renders live, because in production they all
+      route through one formatter instead of hard-coded <code>"⌘⇧E"</code> string literals.
+      The point of this mock is <em>coverage</em> — the ten places the glyphs actually appear today.
+      <br><strong style="color:var(--fg)">Both decisions in §03 are settled:</strong> control unifies on ⌃,
+      and words are hyphen-joined (<code>cmd-shift-e</code>).
+    </p>
+  </div>
+  <div class="ctrls">
+    <div class="ctrl-row">
+      <span class="lab">notation</span>
+      <div class="seg" id="segNotation">
+        <button data-v="glyph" aria-pressed="true">⌘ glyphs</button>
+        <button data-v="text" aria-pressed="false">cmd words</button>
+      </div>
+    </div>
+    <div class="ctrl-row">
+      <span class="lab">appearance</span>
+      <div class="seg" id="segTheme">
+        <button data-v="dark" aria-pressed="true">dark</button>
+        <button data-v="light" aria-pressed="false">light</button>
+      </div>
+    </div>
+    <div class="ctrl-row">
+      <span class="lab"></span>
+      <span class="hint-pill">everything below is live — no static screenshots</span>
+    </div>
+  </div>
+</header>
+
+<!-- ══════════════════════════════════════════════════════════════ 1 -->
+<section>
+  <div class="sec-head"><span class="sec-num">01</span><h2>the setting</h2></div>
+  <p class="sec-sub">
+    Lives in <strong>settings → keyboard &amp; input</strong>, directly under <em>modifier behavior</em> — the two
+    are the pair of "how do modifiers work / how are they written" controls. Same segmented-control component
+    already used by modifier behavior, so no new primitive.
+  </p>
+
+  <div class="settings-shell">
+    <div class="settings-rail">
+      <div class="h">settings</div>
+      <div class="row"><span class="ic">◐</span>appearance</div>
+      <div class="row"><span class="ic">▤</span>sync &amp; continuity</div>
+      <div class="row"><span class="ic">▶</span>terminal</div>
+      <div class="row"><span class="ic">▣</span>files</div>
+      <div class="row"><span class="ic">◈</span>themes</div>
+      <div class="row sel"><span class="ic">⌨</span>keyboard &amp; input</div>
+      <div class="row"><span class="ic">⛨</span>security</div>
+      <div class="row"><span class="ic">⚗</span>experimental</div>
+    </div>
+    <div class="settings-body">
+      <h3>keyboard &amp; input</h3>
+
+      <div class="toggle-row">
+        <div style="flex:1">
+          <div class="tt">natural text editing</div>
+          <div class="ts">mac-style word, line, and delete shortcuts in shells and terminal apps</div>
+        </div>
+        <div class="switch on"></div>
+      </div>
+      <div class="toggle-row">
+        <div style="flex:1">
+          <div class="tt">show accessory bar</div>
+          <div class="ts">row of special keys above the on-screen keyboard</div>
+        </div>
+        <div class="switch on"></div>
+      </div>
+
+      <div style="margin-bottom:22px">
+        <div class="fieldlab">modifier behavior</div>
+        <div class="seg" style="pointer-events:none">
+          <button aria-pressed="true">one-shot</button>
+          <button aria-pressed="false">sticky</button>
+        </div>
+        <div class="fieldsub">
+          one-shot: tap <span class="tok" data-tok="ctrl"></span>, then a key — modifier auto-clears after one
+          press · sticky: tap to lock the modifier, tap again to release
+        </div>
+      </div>
+
+      <!-- ★ the new field -->
+      <div style="margin-bottom:22px; padding:13px; border:1px dashed var(--accent); border-radius:10px; background:var(--accent-soft)">
+        <div class="fieldlab" style="color:var(--accent)">modifier notation &nbsp;<span style="font-size:9px;letter-spacing:.08em">◂ NEW</span></div>
+        <div class="seg" id="segNotationInline">
+          <button data-v="glyph" aria-pressed="true">glyphs</button>
+          <button data-v="text" aria-pressed="false">words</button>
+        </div>
+        <div class="fieldsub">
+          how modifier keys are written everywhere in the app — the accessory bar, the shortcut list,
+          window tabs, and hints. glyphs: <span class="tok" data-tok="cmd+shift+e"></span> ·
+          words: cmd-shift-e
+        </div>
+        <div style="display:flex; gap:10px; align-items:center; margin-top:11px; padding-top:11px; border-top:1px solid var(--border)">
+          <span class="kicker-lab">preview</span>
+          <span class="cap-chord" data-cap="cmd+n"></span>
+          <span class="cap-chord" data-cap="cmd+shift+e"></span>
+          <span class="cap-chord" data-cap="opt+left"></span>
+          <span class="cap-chord" data-cap="cmd+ret"></span>
+          <span class="cap-chord" data-cap="ctrl"></span>
+        </div>
+      </div>
+
+      <div>
+        <div class="fieldlab">accessory bar layout</div>
+        <div style="background:var(--panel-bg);border:1px solid var(--border);border-radius:10px;padding:10px">
+          <div class="kicker-lab" style="padding-left:4px;margin-bottom:8px">PREVIEW</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <span class="pchip long">esc</span>
+            <span class="pchip" data-chip="ctrl"></span>
+            <span class="pchip" data-chip="opt"></span>
+            <span class="pchip" data-chip="tab"></span>
+            <span class="pchip">←</span><span class="pchip">↓</span>
+            <span class="pchip">↑</span><span class="pchip">→</span>
+            <span class="pchip">|</span><span class="pchip">~</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout" style="margin-top:16px">
+    The preference is device-local but <strong>syncs through the same continuity channel as the rest of
+    <code>AppearancePreferences</code></strong> — a user who reads glyphs on iPad reads glyphs on iPhone.
+    Storage: <code>tessera.pref.modifierNotation</code>, values <code>"glyph" | "text"</code>, default
+    <code>"glyph"</code> (today's behavior, so no existing user sees a change until they opt in).
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════ 2 -->
+<section>
+  <div class="sec-head"><span class="sec-num">02</span><h2>every surface it touches</h2></div>
+  <p class="sec-sub">
+    The audit found <strong>ten</strong> render sites. Six are structured (a token or a chord that a formatter can
+    own outright), two are chrome badges with a hard width budget, and two are English prose with the glyph
+    baked into the sentence. All ten are below, live.
+  </p>
+
+  <div class="grid">
+
+    <!-- accessory bar iPad -->
+    <div class="card">
+      <div class="cap">
+        <span class="name">accessory bar — iPad, in session</span>
+        <span class="src">SessionAccessoryBar.swift<br>AccessoryChip.displayLabel</span>
+      </div>
+      <div class="device">
+        <div class="screen">
+          <div class="topbar"><span style="width:6px;height:6px;border-radius:50%;background:var(--green)"></span> deploy-box · tmux</div>
+          <div style="height:74px;background:#000;padding:10px 12px;font-size:11px;color:rgba(235,235,245,.7);line-height:1.5">
+            <span style="color:var(--green)">~/srv</span> $ tail -f app.log<br>
+            <span style="color:var(--fg-dim)">2026-08-15 09:14:02  ready</span><br>
+            <span style="color:var(--fg-dim)">2026-08-15 09:14:07  ok</span>
+          </div>
+          <div class="accbar">
+            <div class="strip">
+              <span class="achip long">esc</span>
+              <span class="achip armed" data-chip="ctrl"></span>
+              <span class="achip" data-chip="opt"></span>
+              <span class="achip" data-chip="tab"></span>
+              <span class="achip">←</span><span class="achip">↓</span>
+              <span class="achip">↑</span><span class="achip">→</span>
+              <span class="achip">|</span><span class="achip">~</span>
+              <div class="fade"></div>
+            </div>
+            <div class="kbtoggle">⌨</div>
+          </div>
+        </div>
+      </div>
+      <div class="note">
+        The <span class="tok" data-tok="ctrl"></span> chip is shown <em>armed</em> (one-shot mode). Words mode widens
+        each modifier chip from 44 → ~62pt.
+      </div>
+      <div class="overflow-warn">
+        ⚠ words mode pushes ~2 chips past the fold on a 11" iPad in landscape. The bar already scrolls
+        horizontally with an overflow fade, so this degrades gracefully — but the <em>default</em> bar order
+        should be re-checked in words mode before shipping.
+      </div>
+    </div>
+
+    <!-- accessory bar iPhone -->
+    <div class="card">
+      <div class="cap">
+        <span class="name">accessory bar — iPhone, keyboard up</span>
+        <span class="src">SessionAccessoryBar.swift (isPhone path)</span>
+      </div>
+      <div class="device" style="max-width:330px">
+        <div class="screen">
+          <div style="height:60px;background:#000;padding:8px 10px;font-size:10px;color:rgba(235,235,245,.7);line-height:1.5">
+            <span style="color:var(--green)">~</span> $ vim conf.yml<br>
+            <span style="color:var(--fg-dim)">-- INSERT --</span>
+          </div>
+          <div class="accbar phone">
+            <div class="strip">
+              <span class="achip long">esc</span>
+              <span class="achip" data-chip="ctrl"></span>
+              <span class="achip" data-chip="tab"></span>
+              <span class="achip">←</span><span class="achip">→</span>
+              <span class="achip">↓</span><span class="achip">↑</span>
+              <span class="achip" data-chip="opt"></span>
+              <span class="achip long">^C</span>
+              <div class="fade"></div>
+            </div>
+            <div class="kbtoggle" style="margin:0 4px 0 0">⌨</div>
+          </div>
+          <div style="height:118px;background:#141416;display:grid;place-items:center;color:var(--fg-faint);font-size:10px">
+            software keyboard
+          </div>
+        </div>
+      </div>
+      <div class="note">
+        iPhone chips carry <code>padding.horizontal = 0</code> and a 44pt minimum. Words mode is the tight case:
+        <code>shift</code> at 12pt mono needs ~52pt. Decision below.
+      </div>
+    </div>
+
+    <!-- settings palette -->
+    <div class="card">
+      <div class="cap">
+        <span class="name">accessory bar editor — palette</span>
+        <span class="src">KeyboardSettingsView.swift · ChipLabel</span>
+      </div>
+      <div style="background:var(--panel-bg);border:1px solid var(--border);border-radius:10px;padding:14px">
+        <div class="kicker-lab" style="margin-bottom:7px">NAVIGATION</div>
+        <div>
+          <span class="pchip long">esc</span><span class="pchip" data-chip="tab"></span>
+          <span class="pchip">←</span><span class="pchip">↓</span><span class="pchip">↑</span><span class="pchip">→</span>
+          <span class="pchip long">home</span><span class="pchip long">end</span>
+        </div>
+        <div class="kicker-lab" style="margin:12px 0 7px">MODIFIERS</div>
+        <div>
+          <span class="pchip dim" data-chip="ctrl"></span>
+          <span class="pchip dim" data-chip="opt"></span>
+          <span class="pchip" data-chip="shift"></span>
+        </div>
+        <div class="kicker-lab" style="margin:12px 0 7px">CONTROL SHORTCUTS</div>
+        <div><span class="pchip long">^C</span><span class="pchip long">^J</span></div>
+      </div>
+      <div class="note">
+        Dimmed = already on the bar. The <em>control shortcuts</em> group stays caret-notated in both modes —
+        <code>^C</code> is what the shell echoes, not a modifier the user is pressing.
+      </div>
+    </div>
+
+    <!-- shortcut legend -->
+    <div class="card" style="grid-column: span 1">
+      <div class="cap">
+        <span class="name">shortcut list (iPad settings)</span>
+        <span class="src">KeyboardSettingsView.ShortcutLegend</span>
+      </div>
+      <div class="legend">
+        <div class="grp">
+          <div class="gtitle">global</div>
+          <div class="lrow"><span class="lkeys tok" data-tok="cmd+n"></span><span class="llab">new host</span></div>
+          <div class="lrow"><span class="lkeys tok" data-tok="cmd+k"></span><span class="llab">quick-switch palette</span></div>
+          <div class="lrow"><span class="lkeys tok" data-tok="cmd+,"></span><span class="llab">settings</span></div>
+          <div class="lrow"><span class="lkeys tok" data-tok="cmd+shift+a"></span><span class="llab">toggle agent center</span></div>
+        </div>
+        <div class="grp">
+          <div class="gtitle">sessions</div>
+          <div class="lrow"><span class="lkeys tok" data-tok="cmd+shift+k / cmd+shift+j"></span><span class="llab">previous / next session</span></div>
+          <div class="lrow"><span class="lkeys tok" data-tok="cmd+shift+e"></span><span class="llab">toggle files panel</span></div>
+          <div class="lrow"><span class="lkeys tok" data-tok="cmd+ret"></span><span class="llab">connect (host editor)</span></div>
+        </div>
+        <div class="grp">
+          <div class="gtitle">text editing</div>
+          <div class="lrow"><span class="lkeys tok" data-tok="opt+left / opt+right"></span><span class="llab">previous / next word</span></div>
+          <div class="lrow"><span class="lkeys tok" data-tok="opt+del"></span><span class="llab">delete word left</span></div>
+        </div>
+        <div class="grp">
+          <div class="gtitle">tmux</div>
+          <div class="lrow"><span class="lkeys tok" data-tok="cmd+t"></span><span class="llab">new window</span></div>
+          <div class="lrow"><span class="lkeys tok" data-tok="shift+cmd+w"></span><span class="llab">close pane / window</span></div>
+          <div class="lrow"><span class="lkeys tok" data-tok="cmd+1..9"></span><span class="llab">jump to window 1–9</span></div>
+        </div>
+      </div>
+      <div class="note">
+        The key column's fixed <code>minWidth: 116</code> has to grow to <strong>168</strong> in words mode
+        (<span class="tok" data-tok="cmd+shift+k / cmd+shift+j"></span> is the widest row). Derive it from the
+        notation rather than hard-coding a second magic number.
+      </div>
+    </div>
+
+    <!-- tmux tabs -->
+    <div class="card">
+      <div class="cap">
+        <span class="name">tmux window tabs — ⌘N hints</span>
+        <span class="src">SessionView.swift:9419 · :9871<br>AppearanceSettingsView.swift:448</span>
+      </div>
+      <div class="device">
+        <div class="screen">
+          <div class="tabstrip">
+            <div class="tab sel"><span class="num">1</span> editor <span class="hint" data-tok="cmd+1"></span></div>
+            <div class="tab"><span class="num">2</span> logs <span class="hint" data-tok="cmd+2"></span></div>
+            <div class="tab"><span class="num">3</span> psql <span class="hint" data-tok="cmd+3"></span></div>
+            <div class="tab"><span class="num">4</span> htop <span class="hint" data-tok="cmd+4"></span></div>
+          </div>
+          <div style="height:64px;background:#000"></div>
+        </div>
+      </div>
+      <div class="note">
+        <strong>The width-budget case.</strong> Tabs sit on a 26pt-floor strip whose height is a user setting.
+        <span class="tok" data-tok="cmd+3"></span> → <code>cmd+3</code> costs ~22pt per tab and fewer tabs stay
+        visible before overflow. Options: (a) let it widen — the strip already overflows gracefully;
+        (b) keep tab hints glyph-only regardless of the setting, since they're a positional cue rather than a
+        chord the user reads. <em>Recommendation: (a).</em> A setting that silently doesn't apply somewhere is
+        worse than a slightly wider tab.
+      </div>
+    </div>
+
+    <!-- command palette -->
+    <div class="card">
+      <div class="cap">
+        <span class="name">command palette footer</span>
+        <span class="src">Navigation/CommandPaletteView.swift:730</span>
+      </div>
+      <div class="palette">
+        <div class="pin">jump to session or host…</div>
+        <div class="prow sel"><span class="dot"></span> deploy-box <span style="color:var(--fg-dim);font-size:10.5px">· tmux · 4 windows</span></div>
+        <div class="prow"><span class="dot" style="background:var(--fg-faint)"></span> build-01 <span style="color:var(--fg-dim);font-size:10.5px">· mosh</span></div>
+        <div class="pfoot">
+          <span><span class="cap-key" data-tok="ret"></span> switch</span>
+          <span><span class="cap-key">↑↓</span> move</span>
+          <span><span class="cap-key" data-tok="esc"></span> close</span>
+        </div>
+      </div>
+      <div class="note">
+        The palette footer already renders symbols as small keycaps — the formatter just feeds it different
+        strings. <span class="tok" data-tok="ret"></span> / <span class="tok" data-tok="esc"></span> are
+        non-modifier keys and follow the same setting so one row doesn't read half-and-half.
+      </div>
+    </div>
+
+    <!-- landing + connect -->
+    <div class="card">
+      <div class="cap">
+        <span class="name">hosts landing · host detail</span>
+        <span class="src">Hosts/HostsLandingView.swift:110,177<br>HostDetailView.swift:215</span>
+      </div>
+      <div class="stack">
+        <div class="rowsplit">
+          <span class="landing-btn">+ new host <span class="badge tok" data-tok="cmd+n"></span></span>
+          <span class="connect-btn">connect <span class="tok" data-tok="cmd+ret" style="opacity:.85"></span></span>
+        </div>
+        <div class="agenthints">
+          <span><span class="cap-key" data-tok="tab"></span> next card</span>
+          <span><span class="cap-key" data-tok="cmd+ret"></span> open</span>
+          <span style="color:var(--fg-faint)">— AgentCenterPage.swift:181</span>
+        </div>
+      </div>
+      <div class="note">
+        Three button-adjacent badges. All structured, all cheap — the chord is already a separate
+        <code>Text</code> next to the label.
+      </div>
+    </div>
+
+    <!-- onboarding cheat sheet -->
+    <div class="card">
+      <div class="cap">
+        <span class="name">onboarding cheat sheet</span>
+        <span class="src">Onboarding/OnboardingOverlay.swift:805–815</span>
+      </div>
+      <div style="background:var(--panel-bg);border:1px solid var(--border);border-radius:10px;padding:14px">
+        <div class="cheat">
+          <span class="k tok" data-tok="cmd+n"></span><span class="v">new host</span>
+          <span class="k tok" data-tok="cmd+f"></span><span class="v">find in scrollback</span>
+          <span class="k tok" data-tok="cmd+t"></span><span class="v">new tmux window</span>
+          <span class="k tok" data-tok="cmd+shift+w"></span><span class="v">close window</span>
+          <span class="k tok" data-tok="cmd+1..9"></span><span class="v">switch window</span>
+          <span class="k tok" data-tok="cmd+d"></span><span class="v">split pane</span>
+          <span class="k tok" data-tok="cmd+shift+e"></span><span class="v">files panel</span>
+          <span class="k tok" data-tok="cmd+,"></span><span class="v">settings</span>
+        </div>
+      </div>
+      <div class="note">
+        Structured pairs — same shape as the settings legend, so both consume one shared formatter.
+      </div>
+    </div>
+
+    <!-- prose -->
+    <div class="card">
+      <div class="cap">
+        <span class="name">prose with a glyph inside the sentence</span>
+        <span class="src">Onboarding/OnboardingStep.swift:96,112,134<br>KeyboardSettingsView.swift:48</span>
+      </div>
+      <div class="stack">
+        <div class="prose">
+          Give the host a name, pick an identity, then connect.
+          <span class="tok" data-tok="cmd+n"></span> works from anywhere.
+        </div>
+        <div class="prose">
+          In tmux sessions, every window is a tab up top — <span class="tok" data-tok="cmd+t"></span> opens one,
+          <span class="tok" data-tok="cmd+1..9"></span> jumps, and <span class="tok" data-tok="cmd+d"></span>
+          splits a pane.
+        </div>
+        <div class="prose">
+          one-shot: tap <span class="tok" data-tok="ctrl"></span>, then a key — modifier auto-clears after one press.
+        </div>
+      </div>
+      <div class="note">
+        <strong>The awkward two.</strong> These are single string literals with the glyph baked in mid-sentence.
+        They need interpolation (<code>"\(Chord.cmdN) works from anywhere."</code>) — mechanical, but it is the
+        step most likely to be skipped, which is exactly how a "global" setting ends up 80% global.
+      </div>
+    </div>
+
+    <!-- swipe pad -->
+    <div class="card">
+      <div class="cap">
+        <span class="name">swipe pad macro labels</span>
+        <span class="src">SwipePad/SwipePadView.swift:1450</span>
+      </div>
+      <div style="display:grid;place-items:center;padding:16px 0">
+        <div style="position:relative;width:190px;height:130px">
+          <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:46px;height:46px;border-radius:50%;background:rgba(255,255,255,.12);border:1px solid var(--border-strong);display:grid;place-items:center;font-size:13px">◎</div>
+          <div style="position:absolute;left:6px;top:50%;transform:translateY(-50%);text-align:center">
+            <div style="width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.10);border:1px solid var(--border);display:grid;place-items:center;font-size:14px">←</div>
+            <div style="font-size:9px;color:var(--fg-dim);margin-top:4px">esc</div>
+          </div>
+          <div style="position:absolute;right:0;top:50%;transform:translateY(-50%);text-align:center">
+            <div style="width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.10);border:1px solid var(--border);display:grid;place-items:center;font-size:14px">→</div>
+            <div style="font-size:9px;color:var(--fg-dim);margin-top:4px" class="tok" data-tok="shift" data-tok-suffix=" tab"></div>
+          </div>
+          <div style="position:absolute;left:50%;top:0;transform:translateX(-50%);text-align:center">
+            <div style="width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.10);border:1px solid var(--border);display:grid;place-items:center;font-size:14px">↑</div>
+            <div style="font-size:9px;color:var(--fg-dim);margin-top:4px">1↵</div>
+          </div>
+        </div>
+      </div>
+      <div class="note">
+        <code>SwipePadView</code> pretty-prints the macro spec <code>shift-tab</code> as
+        "<span class="tok" data-tok="shift"></span> tab". One <code>replacingOccurrences</code> call — the only
+        macro-language surface the setting touches. The rest of the spec language
+        (<code>↵</code>, <code>\t</code>, <code>\x1b</code>) is <em>syntax</em>, not display, and must not change.
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════ 3 -->
+<section>
+  <div class="sec-head"><span class="sec-num">03</span><h2>the two decisions, settled</h2></div>
+
+  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(420px,1fr))">
+    <div class="decide" style="border-color:var(--green); background:rgba(48,209,88,.06)">
+      <h4 style="color:var(--green)">A · control unifies on ⌃ &nbsp;<span style="font-size:9px;letter-spacing:.08em">DECIDED</span></h4>
+      <p>
+        The bar's control chip rendered <code>^</code> — terminal caret notation — while the legend wrote ⌃.
+        Glyph mode now uses <strong>⌃ everywhere</strong>, so one app has one notation.
+      </p>
+      <div class="ab">
+        <span class="opt"><span class="achip" style="min-width:38px;height:34px;font-size:13px;opacity:.4;text-decoration:line-through">^</span> was</span>
+        <span class="opt"><span class="achip" style="min-width:38px;height:34px;font-size:13px;border-color:var(--green)">⌃</span> glyph mode</span>
+        <span class="opt"><span class="achip long" style="min-width:38px;height:34px;border-color:var(--green)">ctrl</span> words mode</span>
+      </div>
+      <p style="margin-top:11px;color:var(--fg-dim)">
+        The caret survives only where it is genuinely caret notation: the <code>^C</code> and <code>^J</code>
+        chips send a literal control character and the shell echoes them that way, so they are unaffected by
+        the setting in either mode.
+      </p>
+    </div>
+
+    <div class="decide" style="border-color:var(--green); background:rgba(48,209,88,.06)">
+      <h4 style="color:var(--green)">B · words are hyphen-joined &nbsp;<span style="font-size:9px;letter-spacing:.08em">DECIDED</span></h4>
+      <p>
+        Short lowercase vocabulary, joined with <code>-</code> — the tmux/emacs house style the audience already
+        reads, and it sits better with the app's lowercase voice than <code>Ctrl+Shift+E</code> would.
+      </p>
+      <div style="display:grid;grid-template-columns:auto auto;gap:6px 18px;margin-top:12px;font-size:11.5px">
+        <span style="color:var(--fg-dim)">⌘ ⌥ ⌃ ⇧</span><span>cmd &nbsp; opt &nbsp; ctrl &nbsp; shift</span>
+        <span style="color:var(--fg-dim)">⇥ ↩ ⌫</span><span>tab &nbsp; ret &nbsp; del</span>
+        <span style="color:var(--fg-dim)">← ↓ ↑ →</span><span>unchanged — arrows have no useful word form</span>
+        <span style="color:var(--fg-dim)">joiner</span><span><code>-</code>, letters stay lowercase: <code>cmd-shift-e</code></span>
+      </div>
+      <p style="margin-top:11px;color:var(--fg-dim)">
+        One consequence to watch: the hyphen is also a literal key. A chord on the minus key renders
+        <code>cmd--</code> in words mode, so the formatter special-cases it to <code>cmd-minus</code>.
+        Nothing in the shipped keymap binds it, but the recorder can produce it.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════ 4 -->
+<section>
+  <div class="sec-head"><span class="sec-num">04</span><h2>implementation inventory</h2></div>
+  <p class="sec-sub">
+    Doubles as the checklist. <span class="pill tok">token</span> = the chord is already its own value and only
+    needs to route through the formatter. <span class="pill prose">prose</span> = the glyph is welded into an
+    English sentence and needs interpolation. <span class="pill none">unchanged</span> = deliberately excluded.
+  </p>
+
+  <table class="inv">
+    <thead>
+      <tr><th style="width:280px">file</th><th style="width:110px">kind</th><th>what changes</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="f">Design/AppearancePreferences.swift</td>
+        <td class="st"><span class="pill">new</span></td>
+        <td><code>modifierNotation: String = "glyph"</code> + <code>tessera.pref.modifierNotation</code> defaults key, mirroring every other pref's <code>didSet</code>.</td>
+      </tr>
+      <tr>
+        <td class="f">Keyboard/ModifierNotation.swift</td>
+        <td class="st"><span class="pill">new</span></td>
+        <td>The single formatter: a <code>Chord</code> value type (modifier set + base key) with <code>render(_:)</code>. Pure, so it gets unit tests covering both modes and every token — the one file that makes "global" true.</td>
+      </tr>
+      <tr>
+        <td class="f">Keyboard/AccessoryChip.swift</td>
+        <td class="st"><span class="pill tok">token</span></td>
+        <td><code>displayLabel</code> becomes notation-aware for <code>.ctrl</code> / <code>.alt</code> / <code>.shift</code> / <code>.tab</code>. It's a plain computed property today, so it needs the notation passed in (or read from the environment at the call sites — 3 of them).</td>
+      </tr>
+      <tr>
+        <td class="f">Keyboard/SessionAccessoryBar.swift</td>
+        <td class="st"><span class="pill tok">token</span></td>
+        <td>Chip font-size heuristic <code>label.count > 2 ? 12 : 14</code> already handles longer words. Verify the iPhone chip at <code>padding.horizontal = 0</code> still clears 44pt with <code>shift</code>.</td>
+      </tr>
+      <tr>
+        <td class="f">Settings/KeyboardSettingsView.swift</td>
+        <td class="st"><span class="pill tok">token</span> <span class="pill prose">prose</span></td>
+        <td>New segmented field; <code>ShortcutLegend</code>'s 6 groups move from string literals to <code>Chord</code> values; the key column's <code>minWidth: 116</code> becomes notation-derived; the modifier-behavior <code>sub:</code> string needs interpolation.</td>
+      </tr>
+      <tr>
+        <td class="f">SessionView.swift :9419 :9871</td>
+        <td class="st"><span class="pill tok">token</span></td>
+        <td><code>Text("⌘\(number)")</code> ×2 → formatter. Re-measure the tab strip at its 26pt floor in words mode.</td>
+      </tr>
+      <tr>
+        <td class="f">Settings/AppearanceSettingsView.swift :448</td>
+        <td class="st"><span class="pill tok">token</span></td>
+        <td>Same <code>⌘N</code> badge inside the top-bar-height preview.</td>
+      </tr>
+      <tr>
+        <td class="f">Hosts/HostsLandingView.swift :110 :177</td>
+        <td class="st"><span class="pill tok">token</span></td>
+        <td>Two <code>⌘N</code> badges on the new-host affordance.</td>
+      </tr>
+      <tr>
+        <td class="f">AgentCenter/AgentCenterPage.swift :181 :183</td>
+        <td class="st"><span class="pill tok">token</span></td>
+        <td><code>hint("⇥", …)</code> / <code>hint("⌘↩", …)</code>.</td>
+      </tr>
+      <tr>
+        <td class="f">Navigation/CommandPaletteView.swift :730</td>
+        <td class="st"><span class="pill tok">token</span></td>
+        <td>Footer hints. The bare <code>↩</code> row markers at :586 :626 :705 are selection cursors, not shortcut hints — leave them.</td>
+      </tr>
+      <tr>
+        <td class="f">Onboarding/OnboardingOverlay.swift :805–815</td>
+        <td class="st"><span class="pill tok">token</span></td>
+        <td>The 11-row cheat sheet. Its key-rain animation at :873 uses <code>"⌘"</code> as decorative confetti — leave it.</td>
+      </tr>
+      <tr>
+        <td class="f">Onboarding/OnboardingStep.swift :96 :112 :134</td>
+        <td class="st"><span class="pill prose">prose</span></td>
+        <td>Three tour bodies with glyphs mid-sentence. Interpolation.</td>
+      </tr>
+      <tr>
+        <td class="f">SwipePad/SwipePadView.swift :1450</td>
+        <td class="st"><span class="pill tok">token</span></td>
+        <td>The <code>"shift-tab" → "⇧ tab"</code> pretty-printer. Display only — the macro <em>spec language</em> is unchanged.</td>
+      </tr>
+      <tr>
+        <td class="f">SwipePad/MacroEncoder.swift</td>
+        <td class="st"><span class="pill none">unchanged</span></td>
+        <td>Spec syntax (<code>↵</code>, <code>\t</code>, <code>esc</code>, <code>\x1b</code>) is parsed, not read. Touching it would silently break saved profiles.</td>
+      </tr>
+      <tr>
+        <td class="f">TesseraTerminalView.swift comments</td>
+        <td class="st"><span class="pill none">unchanged</span></td>
+        <td>~35 glyph occurrences, all in the doc comments that record why each chord was chosen. Not user-facing.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout" style="margin-top:18px">
+    <strong>Cross-transport check:</strong> nothing here reaches the wire. Notation is display-only, so plain SSH,
+    SSH+tmux, mosh, and mosh+tmux behave identically — the bytes <code>AccessoryChipEncoder</code> emits for a
+    chip are keyed off the <code>AccessoryChip</code> case, never off <code>displayLabel</code>. That's worth one
+    assertion in the tests so a future refactor can't start formatting the wire.
+    <br><br>
+    <strong>iPhone story:</strong> full parity. The setting is the same control in the same section, the value
+    syncs, and the only compact-width consequence is the chip-width question in decision A.
+  </div>
+</section>
+
+<footer style="border-top:1px solid var(--border); padding-top:16px; color:var(--fg-faint); font-size:10.5px">
+  mock 1 of 2 · <span style="color:var(--fg-dim)">docs/mockups/keyboard-sprint/01-modifier-notation.html</span>
+  &nbsp;·&nbsp; next: <span style="color:var(--fg-dim)">02-shortcuts-and-keymaps.html</span> — custom shortcuts + iPad keymap remapping
+</footer>
+
+</div>
+
+<script>
+/* ────────────────────────────────────────────────────────────────
+   The formatter this mock is arguing for, in miniature.
+   In production this is Keyboard/ModifierNotation.swift.
+   ──────────────────────────────────────────────────────────────── */
+const GLYPH = {
+  cmd:'⌘', opt:'⌥', alt:'⌥', ctrl:'⌃', shift:'⇧',
+  tab:'⇥', ret:'↩', del:'⌫', esc:'esc',
+  left:'←', right:'→', up:'↑', down:'↓'
+};
+const WORD = {
+  cmd:'cmd', opt:'opt', alt:'opt', ctrl:'ctrl', shift:'shift',
+  tab:'tab', ret:'ret', del:'del', esc:'esc',
+  left:'←', right:'→', up:'↑', down:'↓'
+};
+
+/* Render one chord spec ("cmd+shift+e") for the active notation. */
+const MODIFIER_ORDER = ['ctrl', 'opt', 'alt', 'shift', 'cmd'];
+/* Apple's canonical order (⌃⌥⇧⌘) — iPadOS renders our UIKeyCommands this way in
+   the hold-⌘ HUD, so the app follows the platform rather than the old, split
+   hand-written strings. */
+function orderParts(parts) {
+  const mods = parts.filter(p => MODIFIER_ORDER.includes(p));
+  const rest = parts.filter(p => !MODIFIER_ORDER.includes(p));
+  mods.sort((a, b) => MODIFIER_ORDER.indexOf(a) - MODIFIER_ORDER.indexOf(b));
+  return mods.concat(rest);
+}
+function renderChord(spec, mode) {
+  const map = mode === 'text' ? WORD : GLYPH;
+  const joiner = mode === 'text' ? '-' : '';
+  return orderParts(spec.split('+').map(p => p.trim())).map(part => {
+    const p = part.trim();
+    if (map[p] !== undefined) return map[p];
+    // the hyphen joiner is also a literal key — "cmd--" would be unreadable
+    if (p === '-') return mode === 'text' ? 'minus' : '-';
+    if (p === '1..9') return mode === 'text' ? '1–9' : '1–9';   // range tail
+    // a single letter: uppercase in glyph mode (⌘⇧E), lowercase in words (cmd+shift+e)
+    if (/^[a-z]$/.test(p)) return mode === 'text' ? p : p.toUpperCase();
+    return p;
+  }).join(joiner);
+}
+
+/* Ranges like "cmd+1..9" want ⌘1–⌘9 in glyph mode, cmd+1–9 in words mode. */
+function renderExpr(expr, mode) {
+  return expr.split('/').map(seg => {
+    const s = seg.trim();
+    if (s.endsWith('1..9')) {
+      const base = s.slice(0, -4);           // "cmd+"
+      if (mode === 'text') return renderChord(base + '1', mode) + '–9';
+      const one = renderChord(base + '1', mode);
+      const nine = renderChord(base + '9', mode);
+      return one + '–' + nine;
+    }
+    return renderChord(s, mode);
+  }).join(mode === 'text' ? ' / ' : ' / ');
+}
+
+function applyNotation(mode) {
+  document.body.dataset.notation = mode;
+
+  // inline tokens (legend rows, prose, badges, tab hints)
+  document.querySelectorAll('[data-tok]').forEach(el => {
+    const suffix = el.dataset.tokSuffix || '';
+    el.textContent = renderExpr(el.dataset.tok, mode) + suffix;
+  });
+
+  // accessory-bar / palette chips — single tokens, plus a size class
+  document.querySelectorAll('[data-chip]').forEach(el => {
+    const map = mode === 'text' ? WORD : GLYPH;
+    const label = map[el.dataset.chip] ?? el.dataset.chip;
+    el.textContent = label;
+    el.classList.toggle('long', label.length > 2);
+  });
+
+  // keycap groups: one boxed cap per key
+  document.querySelectorAll('[data-cap]').forEach(el => {
+    const parts = el.dataset.cap.split('+');
+    const map = mode === 'text' ? WORD : GLYPH;
+    el.innerHTML = '';
+    parts.forEach((raw, i) => {
+      const p = raw.trim();
+      let label = map[p] ?? p;
+      if (/^[a-z]$/.test(p)) label = mode === 'text' ? p : p.toUpperCase();
+      if (i > 0 && mode === 'text') {
+        const plus = document.createElement('span');
+        plus.className = 'cap-plus'; plus.textContent = '-';
+        el.appendChild(plus);
+      }
+      const cap = document.createElement('span');
+      cap.className = 'cap-key'; cap.textContent = label;
+      el.appendChild(cap);
+    });
+  });
+
+  // keycaps that carry a data-tok directly (palette footer)
+  document.querySelectorAll('.cap-key[data-tok]').forEach(el => {
+    const map = mode === 'text' ? WORD : GLYPH;
+    el.textContent = map[el.dataset.tok] ?? renderExpr(el.dataset.tok, mode);
+  });
+
+  // keep both segmented controls in sync
+  document.querySelectorAll('#segNotation button, #segNotationInline button')
+    .forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === mode)));
+}
+
+document.querySelectorAll('#segNotation button, #segNotationInline button').forEach(b => {
+  b.addEventListener('click', () => applyNotation(b.dataset.v));
+});
+document.querySelectorAll('#segTheme button').forEach(b => {
+  b.addEventListener('click', () => {
+    document.body.dataset.theme = b.dataset.v;
+    document.documentElement.dataset.theme = b.dataset.v;
+    document.querySelectorAll('#segTheme button')
+      .forEach(x => x.setAttribute('aria-pressed', String(x.dataset.v === b.dataset.v)));
+  });
+});
+
+applyNotation('glyph');
+</script>
+</body>
+</html>

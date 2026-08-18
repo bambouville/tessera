@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 struct AgentCenterPage: View {
+    @Environment(AppearancePreferences.self) private var appearance
     @Bindable var center: AgentCenter
 
     @Environment(\.designTokens) private var T
@@ -93,7 +94,7 @@ struct AgentCenterPage: View {
 
                     Spacer(minLength: 12)
 
-                    Text(summary)
+                    Text(verbatim: summary)
                         .font(Typography.tesseraMono(size: 11))
                         .foregroundStyle(T.fgDim)
                 }
@@ -110,12 +111,12 @@ struct AgentCenterPage: View {
     }
 
     @ViewBuilder
-    private func group(_ status: AgentStatus, label: String) -> some View {
+    private func group(_ status: AgentStatus, label: LocalizedStringResource) -> some View {
         let agents = center.sortedAgents.filter { $0.status == status }
         if !agents.isEmpty {
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
-                    Text("\(label) · \(agents.count)")
+                    Text(verbatim: "\(String(localized: label)) · \(agents.count)")
                         .font(Typography.tesseraMono(size: 11))
                         .tracking(0.4)
                         .foregroundStyle(groupColor(status))
@@ -178,18 +179,18 @@ struct AgentCenterPage: View {
                     .font(Typography.tesseraMono(size: 10))
                     .foregroundStyle(T.fgDim)
                 Spacer(minLength: 8)
-                hint("⇥", "next card")
+                hint(KeyToken.tab.rendered(appearance.modifierNotation), "next card")
                 hint("1–9", "answer")
-                hint("⌘↩", "open")
+                hint(Chord([.command], .return).rendered(appearance.modifierNotation), "open")
             }
             .padding(.vertical, 12)
             .overlay(alignment: .top) { Rectangle().fill(T.border).frame(height: 1) }
         }
     }
 
-    private func hint(_ key: String, _ label: String) -> some View {
+    private func hint(_ key: String, _ label: LocalizedStringKey) -> some View {
         HStack(spacing: 5) {
-            Text(key)
+            Text(verbatim: key)
                 .font(Typography.tesseraMono(size: 10))
                 .foregroundStyle(T.fgMuted)
                 .padding(.horizontal, 5)
@@ -324,7 +325,7 @@ private struct AgentCard: View {
                 inputFocused = true
             }
         }
-        .alert(integrationConfirmationTitle, isPresented: $showingIntegrationConfirmation) {
+        .alert(Text(integrationConfirmationTitle), isPresented: $showingIntegrationConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Help") {
                 Task { @MainActor in
@@ -332,7 +333,7 @@ private struct AgentCard: View {
                     showingIntegrationHelp = true
                 }
             }
-            Button(integrationInstallLabel) { onInstallLifecycleIntegration() }
+            Button(String(localized: integrationInstallLabel)) { onInstallLifecycleIntegration() }
         } message: {
             Text(RemoteAgentLifecycleIntegrationInstaller.confirmationText)
         }
@@ -464,7 +465,7 @@ private struct AgentCard: View {
     }
 
     private func tail(_ text: String) -> some View {
-        Text(text)
+        Text(verbatim: text)
             .font(Typography.tesseraMono(size: 11))
             .foregroundStyle(T.fgMuted)
             .lineLimit(5)
@@ -556,7 +557,7 @@ private struct AgentCard: View {
             Button("retry check", action: onRetryLifecycleIntegrationProbe)
                 .agentSecondaryButton(T: T)
         } else if integrationState != .active && integrationState != .installedInactive {
-            Button(integrationInstallLabel) {
+            Button(String(localized: integrationInstallLabel)) {
                 showingIntegrationConfirmation = true
             }
             .agentSecondaryButton(T: T)
@@ -591,7 +592,7 @@ private struct AgentCard: View {
         .disabled(agent.sendInFlight)
     }
 
-    private var integrationMessage: String {
+    private var integrationMessage: LocalizedStringResource {
         switch integrationState {
         case .checking:
             "checking whether precise status support is installed on this host…"
@@ -611,17 +612,17 @@ private struct AgentCard: View {
         }
     }
 
-    private var integrationInstallLabel: String {
+    private var integrationInstallLabel: LocalizedStringResource {
         if case .outdated = integrationState { return "update status hook" }
         return "install status hook"
     }
 
-    private var integrationConfirmationTitle: String {
+    private var integrationConfirmationTitle: LocalizedStringResource {
         if case .outdated = integrationState { return "Update agent status hook?" }
         return "Install agent status hook?"
     }
 
-    private func inputRow(label: String, actionLabel: String) -> some View {
+    private func inputRow(label: LocalizedStringKey, actionLabel: LocalizedStringKey) -> some View {
         HStack(spacing: 8) {
             TextField(label, text: $message)
                 .textFieldStyle(.plain)
@@ -663,7 +664,7 @@ private struct AgentCard: View {
         }
     }
 
-    private var statusLabel: String {
+    private var statusLabel: LocalizedStringResource {
         switch agent.status {
         case .waitingForInput: return "waiting for input"
         case .justFinished: return "just finished"
@@ -682,29 +683,37 @@ private struct AgentCard: View {
         }
     }
 
+    /// The elapsed-time chip. Each state gets its own whole sentence with
+    /// the duration as an argument rather than a shared "<state> <time>"
+    /// template — the states inflect differently, and some languages put the
+    /// duration first.
     private func duration(at now: Date) -> String {
         let seconds: Int
-        let prefix: String
         switch agent.status {
         case .waitingForInput:
             seconds = max(0, Int(now.timeIntervalSince(agent.statusChangedAt)))
-            prefix = "blocked"
+            return String(localized: "blocked \(elapsed(seconds))")
         case .working:
             seconds = max(0, Int(now.timeIntervalSince(agent.detectedAt)))
-            prefix = "running"
+            return String(localized: "running \(elapsed(seconds))")
         case .justFinished:
             seconds = max(0, Int(now.timeIntervalSince(agent.finishedAt ?? agent.statusChangedAt)))
-            prefix = "finished"
+            return String(localized: "finished \(elapsed(seconds))")
         case .idle:
             seconds = max(0, Int(now.timeIntervalSince(agent.lastLifecycleEventAt ?? agent.statusChangedAt)))
-            prefix = "last event"
+            return String(localized: "last event \(elapsed(seconds))")
         case .unavailable:
             seconds = max(0, Int(now.timeIntervalSince(agent.lastOutputAt ?? agent.statusChangedAt)))
-            prefix = "quiet"
+            return String(localized: "quiet \(elapsed(seconds))")
         }
-        if seconds < 60 { return "\(prefix) \(seconds)s" }
-        if seconds < 3600 { return "\(prefix) \(seconds / 60)m" }
-        return "\(prefix) \(seconds / 3600)h"
+    }
+
+    /// `12s` / `4m` / `2h`. The unit letters are the same in every language
+    /// Tessera ships, and the chip has room for nothing longer.
+    private func elapsed(_ seconds: Int) -> String {
+        if seconds < 60 { return "\(seconds)s" }
+        if seconds < 3600 { return "\(seconds / 60)m" }
+        return "\(seconds / 3600)h"
     }
 }
 
@@ -907,9 +916,9 @@ struct AgentLifecycleIntegrationHelpView: View {
         .presentationDetents([.large])
     }
 
-    private func helpLine(_ text: String) -> some View {
+    private func helpLine(_ text: LocalizedStringKey) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text("·")
+            Text(verbatim: "·")
             Text(text)
         }
         .font(Typography.tesseraMono(size: 11))
@@ -949,7 +958,7 @@ struct AgentCenterHarnessView: View {
         } else {
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("Tessera")
+                    Text(verbatim: "Tessera")
                         .font(Typography.tesseraMono(size: 17, weight: .medium))
                         .foregroundStyle(T.fg)
                         .padding(.horizontal, 18)

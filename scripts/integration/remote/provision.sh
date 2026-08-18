@@ -109,6 +109,21 @@ ensure_user() {
 ensure_user "$FIXTURE_USER" "$FIXTURE_SHELL"
 ensure_user "$NOTMUX_USER" "$NOTMUX_SHELL"
 
+# Launch-hostile account: its own login dotfiles take over the terminal
+# with a plain tmux client before the auto-tmux one-liner can run. This
+# is the shape of host that used to leave the app waiting forever on a
+# control-mode handshake that was never coming, so the regression suite
+# keeps one around to prove the launch watchdog degrades instead.
+DOTFILE_TMUX_USER="$FIXTURE_USER-dotfile-tmux"
+ensure_user "$DOTFILE_TMUX_USER" "$FIXTURE_SHELL"
+cat >"/home/$DOTFILE_TMUX_USER/.bashrc" <<'EOF'
+# Tessera fixture: user-side auto-tmux, the way many real setups do it.
+if [ -z "$TMUX" ] && [ -n "$SSH_TTY" ]; then
+  exec tmux new -A -s dotfile-main
+fi
+EOF
+chown "$DOTFILE_TMUX_USER:$DOTFILE_TMUX_USER" "/home/$DOTFILE_TMUX_USER/.bashrc"
+
 install -d -m 2770 -o root -g tessera-fixture "$STATE" "$STATE/runs"
 
 for user in "$FIXTURE_USER" "$NOTMUX_USER"; do
@@ -138,7 +153,7 @@ PubkeyAuthentication yes
 PasswordAuthentication yes
 KbdInteractiveAuthentication no
 UsePAM yes
-AllowUsers $FIXTURE_USER $NOTMUX_USER
+AllowUsers $FIXTURE_USER $NOTMUX_USER $DOTFILE_TMUX_USER
 AllowTcpForwarding yes
 GatewayPorts no
 X11Forwarding no
@@ -173,6 +188,7 @@ cat >"$ROOT/role.env" <<EOF
 role=$ROLE
 fixture_user=$FIXTURE_USER
 notmux_user=$NOTMUX_USER
+dotfile_tmux_user=$DOTFILE_TMUX_USER
 app_port=$APP_PORT
 EOF
 

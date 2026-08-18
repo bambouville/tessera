@@ -1,0 +1,738 @@
+{
+  "about": {
+    "de": "Über",
+    "es": "acerca de",
+    "fr": "à propos",
+    "ja": "情報",
+    "zh-Hans": "关于",
+    "zh-Hant": "關於"
+  },
+  "appearance": {
+    "de": "Erscheinungsbild",
+    "es": "apariencia",
+    "fr": "apparence",
+    "ja": "外観",
+    "zh-Hans": "外观",
+    "zh-Hant": "外觀"
+  },
+  "bell": {
+    "de": "Signalton",
+    "es": "campana",
+    "fr": "cloche",
+    "ja": "ベル",
+    "zh-Hans": "响铃",
+    "zh-Hant": "響鈴"
+  },
+  "connection": {
+    "de": "Verbindung",
+    "es": "conexión",
+    "fr": "connexion",
+    "ja": "接続",
+    "zh-Hans": "连接",
+    "zh-Hant": "連線"
+  },
+  "credentials": {
+    "de": "Anmeldeinformationen",
+    "es": "credenciales",
+    "fr": "identifiants",
+    "ja": "資格情報",
+    "zh-Hans": "凭据",
+    "zh-Hant": "憑證"
+  },
+  "diagnostics": {
+    "de": "Diagnose",
+    "es": "diagnósticos",
+    "fr": "diagnostics",
+    "ja": "診断",
+    "zh-Hans": "诊断",
+    "zh-Hant": "診斷"
+  },
+  "experimental": {
+    "de": "experimentell",
+    "es": "experimental",
+    "fr": "expérimental",
+    "ja": "実験的機能",
+    "zh-Hans": "实验性功能",
+    "zh-Hant": "實驗性功能"
+  },
+  "geometry": {
+    "de": "Geometrie",
+    "es": "geometría",
+    "fr": "géométrie",
+    "ja": "サイズと配置",
+    "zh-Hans": "尺寸与位置",
+    "zh-Hant": "尺寸與位置"
+  },
+  "keyboard & input": {
+    "de": "Tastatur & Eingabe",
+    "es": "teclado y entrada",
+    "fr": "clavier et saisie",
+    "ja": "キーボードと入力",
+    "zh-Hans": "键盘与输入",
+    "zh-Hant": "鍵盤與輸入"
+  },
+  "security": {
+    "de": "Sicherheit",
+    "es": "seguridad",
+    "fr": "sécurité",
+    "ja": "セキュリティ",
+    "zh-Hans": "安全",
+    "zh-Hant": "安全性"
+  },
+  "startup": {
+    "de": "Start",
+    "es": "inicio",
+    "fr": "démarrage",
+    "ja": "起動",
+    "zh-Hans": "启动",
+    "zh-Hant": "啟動"
+  },
+  "sync & continuity": {
+    "de": "Sync & Continuity",
+    "es": "sincronización y continuidad",
+    "fr": "synchronisation et continuité",
+    "ja": "同期と Handoff",
+    "zh-Hans": "同步与接力",
+    "zh-Hant": "同步與接力"
+  },
+  "terminal": {
+    "de": "Terminal",
+    "es": "terminal",
+    "fr": "terminal",
+    "ja": "ターミナル",
+    "zh-Hans": "终端",
+    "zh-Hant": "終端機"
+  },
+  "themes": {
+    "de": "Themes",
+    "es": "temas",
+    "fr": "thèmes",
+    "ja": "テーマ",
+    "zh-Hans": "主题",
+    "zh-Hant": "主題"
+  },
+  "unlimited hosts": {
+    "de": "unbegrenzte Hosts",
+    "es": "hosts ilimitados",
+    "fr": "hôtes illimités",
+    "ja": "ホスト数無制限",
+    "zh-Hans": "无限主机",
+    "zh-Hant": "無限主機"
+  },
+  "voice input": {
+    "de": "Spracheingabe",
+    "es": "entrada por voz",
+    "fr": "saisie vocale",
+    "ja": "音声入力",
+    "zh-Hans": "语音输入",
+    "zh-Hant": "語音輸入"
+  },
+  "your shortcuts": {
+    "de": "deine Kurzbefehle",
+    "es": "tus atajos",
+    "fr": "vos raccourcis",
+    "ja": "自分のショートカット",
+    "zh-Hans": "你的快捷键",
+    "zh-Hant": "你的快捷鍵"
+  },
+  "remote shell": {
+    "de": "Remote-Shell",
+    "es": "shell remoto",
+    "fr": "shell distant",
+    "ja": "リモートシェル",
+    "zh-Hans": "远程 shell",
+    "zh-Hant": "遠端 shell"
+  },
+  "more": {
+    "de": "mehr",
+    "es": "más",
+    "fr": "plus",
+    "ja": "その他",
+    "zh-Hans": "更多",
+    "zh-Hant": "更多"
+  },
+  "hosts home": {
+    "de": "Host-Übersicht",
+    "es": "inicio de hosts",
+    "fr": "accueil des hôtes",
+    "ja": "ホスト一覧",
+    "zh-Hans": "主机主页",
+    "zh-Hant": "主機首頁"
+  },
+  "no saved hosts yet.": {
+    "de": "noch keine gesicherten Hosts.",
+    "es": "aún no hay hosts guardados.",
+    "fr": "aucun hôte enregistré pour l'instant.",
+    "ja": "保存済みのホストはまだありません。",
+    "zh-Hans": "还没有已保存的主机。",
+    "zh-Hant": "還沒有已儲存的主機。"
+  },
+  "host not connected": {
+    "de": "Host nicht verbunden",
+    "es": "host sin conexión",
+    "fr": "hôte non connecté",
+    "ja": "ホストが未接続です",
+    "zh-Hans": "主机未连接",
+    "zh-Hant": "主機未連線"
+  },
+  "No host attached": {
+    "de": "Kein Host angehängt",
+    "es": "Ningún host asociado",
+    "fr": "Aucun hôte rattaché",
+    "ja": "ホストが割り当てられていません",
+    "zh-Hans": "未关联主机",
+    "zh-Hant": "未關聯主機"
+  },
+  "connect (host editor)": {
+    "de": "verbinden (Host-Editor)",
+    "es": "conectar (editor de hosts)",
+    "fr": "se connecter (éditeur d'hôtes)",
+    "ja": "接続（ホストエディタ）",
+    "zh-Hans": "连接（主机编辑器）",
+    "zh-Hant": "連線（主機編輯器）"
+  },
+  "host editor only": {
+    "de": "nur im Host-Editor",
+    "es": "solo en el editor de hosts",
+    "fr": "éditeur d'hôtes uniquement",
+    "ja": "ホストエディタのみ",
+    "zh-Hans": "仅限主机编辑器",
+    "zh-Hant": "僅限主機編輯器"
+  },
+  "fingerprint": {
+    "de": "Fingerabdruck",
+    "es": "huella",
+    "fr": "empreinte",
+    "ja": "フィンガープリント",
+    "zh-Hans": "指纹",
+    "zh-Hant": "指紋"
+  },
+  "key": {
+    "de": "Key",
+    "es": "clave",
+    "fr": "clé",
+    "ja": "キー",
+    "zh-Hans": "密钥",
+    "zh-Hant": "金鑰"
+  },
+  "Legacy key": {
+    "de": "Legacy-Key",
+    "es": "Clave heredada",
+    "fr": "Clé héritée",
+    "ja": "レガシーキー",
+    "zh-Hans": "旧版密钥",
+    "zh-Hant": "舊版金鑰"
+  },
+  "Password": {
+    "de": "Passwort",
+    "es": "Contraseña",
+    "fr": "Mot de passe",
+    "ja": "パスワード",
+    "zh-Hans": "密码",
+    "zh-Hant": "密碼"
+  },
+  "today": {
+    "de": "heute",
+    "es": "hoy",
+    "fr": "aujourd'hui",
+    "ja": "今日",
+    "zh-Hans": "今天",
+    "zh-Hant": "今天"
+  },
+  "off": {
+    "de": "aus",
+    "es": "desactivado",
+    "fr": "désactivé",
+    "ja": "オフ",
+    "zh-Hans": "关闭",
+    "zh-Hant": "關閉"
+  },
+  "auto": {
+    "de": "automatisch",
+    "es": "automático",
+    "fr": "automatique",
+    "ja": "自動",
+    "zh-Hans": "自动",
+    "zh-Hant": "自動"
+  },
+  "manual": {
+    "de": "manuell",
+    "es": "manual",
+    "fr": "manuel",
+    "ja": "手動",
+    "zh-Hans": "手动",
+    "zh-Hant": "手動"
+  },
+  "always": {
+    "de": "immer",
+    "es": "siempre",
+    "fr": "toujours",
+    "ja": "常に",
+    "zh-Hans": "始终",
+    "zh-Hant": "一律"
+  },
+  "never": {
+    "de": "nie",
+    "es": "nunca",
+    "fr": "jamais",
+    "ja": "しない",
+    "zh-Hans": "从不",
+    "zh-Hant": "永不"
+  },
+  "confirm": {
+    "de": "bestätigen",
+    "es": "confirmar",
+    "fr": "confirmer",
+    "ja": "確認",
+    "zh-Hans": "确认",
+    "zh-Hant": "確認"
+  },
+  "open": {
+    "de": "öffnen",
+    "es": "abrir",
+    "fr": "ouvrir",
+    "ja": "開く",
+    "zh-Hans": "打开",
+    "zh-Hant": "開啟"
+  },
+  "glyphs": {
+    "de": "Zeichen",
+    "es": "símbolos",
+    "fr": "symboles",
+    "ja": "記号",
+    "zh-Hans": "符号",
+    "zh-Hant": "符號"
+  },
+  "words": {
+    "de": "Wörter",
+    "es": "palabras",
+    "fr": "mots",
+    "ja": "単語",
+    "zh-Hans": "文字",
+    "zh-Hant": "文字"
+  },
+  "image": {
+    "de": "Bild",
+    "es": "imagen",
+    "fr": "image",
+    "ja": "画像",
+    "zh-Hans": "图片",
+    "zh-Hant": "圖片"
+  },
+  "custom image": {
+    "de": "eigenes Bild",
+    "es": "imagen personalizada",
+    "fr": "image personnalisée",
+    "ja": "カスタム画像",
+    "zh-Hans": "自定图片",
+    "zh-Hant": "自訂圖片"
+  },
+  "choose photo": {
+    "de": "Foto wählen",
+    "es": "elegir foto",
+    "fr": "choisir une photo",
+    "ja": "写真を選択",
+    "zh-Hans": "选取照片",
+    "zh-Hant": "選取照片"
+  },
+  "theme color": {
+    "de": "Theme-Farbe",
+    "es": "color del tema",
+    "fr": "couleur du thème",
+    "ja": "テーマカラー",
+    "zh-Hans": "主题颜色",
+    "zh-Hant": "主題顏色"
+  },
+  "follows settings → themes (currently: theme color).": {
+    "de": "folgt Einstellungen → Themes (aktuell: Theme-Farbe).",
+    "es": "sigue ajustes → temas (actualmente: color del tema).",
+    "fr": "suit réglages → thèmes (actuellement : couleur du thème).",
+    "ja": "設定 → テーマ に従います（現在: テーマカラー）。",
+    "zh-Hans": "跟随设置 → 主题（当前：主题颜色）。",
+    "zh-Hant": "跟隨設定 → 主題（目前：主題顏色）。"
+  },
+  "follows settings → themes (currently: custom image · dim %lld%%).": {
+    "de": "folgt Einstellungen → Themes (aktuell: eigenes Bild · %lld %% abgedunkelt).",
+    "es": "sigue ajustes → temas (actualmente: imagen personalizada · atenuada al %lld %%).",
+    "fr": "suit réglages → thèmes (actuellement : image personnalisée · assombrie à %lld %%).",
+    "ja": "設定 → テーマ に従います（現在: カスタム画像 · 暗さ %lld%%）。",
+    "zh-Hans": "跟随设置 → 主题（当前：自定图片 · 变暗 %lld%%）。",
+    "zh-Hant": "跟隨設定 → 主題（目前：自訂圖片 · 變暗 %lld%%）。"
+  },
+  "compact · 44pt": {
+    "de": "kompakt · 44 pt",
+    "es": "compacto · 44 pt",
+    "fr": "compact · 44 pt",
+    "ja": "コンパクト · 44 pt",
+    "zh-Hans": "紧凑 · 44 pt",
+    "zh-Hant": "緊湊 · 44 pt"
+  },
+  "standard · 52pt": {
+    "de": "Standard · 52 pt",
+    "es": "estándar · 52 pt",
+    "fr": "standard · 52 pt",
+    "ja": "標準 · 52 pt",
+    "zh-Hans": "标准 · 52 pt",
+    "zh-Hant": "標準 · 52 pt"
+  },
+  "large · 64pt": {
+    "de": "groß · 64 pt",
+    "es": "grande · 64 pt",
+    "fr": "grand · 64 pt",
+    "ja": "大 · 64 pt",
+    "zh-Hans": "大 · 64 pt",
+    "zh-Hant": "大 · 64 pt"
+  },
+  "fits this device": {
+    "de": "passt zu diesem Gerät",
+    "es": "se ajusta a este dispositivo",
+    "fr": "adapté à cet appareil",
+    "ja": "このデバイスに合わせます",
+    "zh-Hans": "适配本设备",
+    "zh-Hant": "適配本裝置"
+  },
+  "top left": {
+    "de": "oben links",
+    "es": "arriba a la izquierda",
+    "fr": "en haut à gauche",
+    "ja": "左上",
+    "zh-Hans": "左上",
+    "zh-Hant": "左上"
+  },
+  "top right": {
+    "de": "oben rechts",
+    "es": "arriba a la derecha",
+    "fr": "en haut à droite",
+    "ja": "右上",
+    "zh-Hans": "右上",
+    "zh-Hant": "右上"
+  },
+  "bottom left": {
+    "de": "unten links",
+    "es": "abajo a la izquierda",
+    "fr": "en bas à gauche",
+    "ja": "左下",
+    "zh-Hans": "左下",
+    "zh-Hant": "左下"
+  },
+  "bottom right": {
+    "de": "unten rechts",
+    "es": "abajo a la derecha",
+    "fr": "en bas à droite",
+    "ja": "右下",
+    "zh-Hans": "右下",
+    "zh-Hant": "右下"
+  },
+  "monochrome SF Symbols — they tint with the theme, which is what keeps the bar reading as chrome. want an emoji instead? switch to text and type one.": {
+    "de": "monochrome SF Symbols — sie färben sich mit dem Theme ein, wodurch die Leiste weiterhin wie Bedienoberfläche wirkt. Lieber ein Emoji? Wechsle zu Text und tippe eines ein.",
+    "es": "SF Symbols monocromos — se tiñen con el tema, que es lo que mantiene la barra con aspecto de interfaz. ¿prefieres un emoji? cambia a texto y escríbelo.",
+    "fr": "SF Symbols monochromes — ils se teintent avec le thème, ce qui garde à la barre son allure d'interface. plutôt un emoji ? passez en texte et saisissez-en un.",
+    "ja": "モノクロの SF Symbols — テーマに合わせて色づくので、バーが操作画面らしさを保てます。絵文字にしたい場合は、テキストに切り替えて入力してください。",
+    "zh-Hans": "单色 SF Symbols —— 它们会随主题着色，这正是让这条栏保持界面质感的原因。想改用 emoji？切换到文本模式并输入一个。",
+    "zh-Hant": "單色 SF Symbols —— 它們會隨主題著色，這正是讓這條列保持介面質感的原因。想改用 emoji？切換到文字模式並輸入一個。"
+  },
+  "while locked": {
+    "de": "während der Sperre",
+    "es": "mientras está bloqueado",
+    "fr": "pendant le verrouillage",
+    "ja": "ロック中",
+    "zh-Hans": "锁定期间",
+    "zh-Hant": "鎖定期間"
+  },
+  "broadcast stops; incoming continuations wait for Face ID": {
+    "de": "Die Übertragung stoppt; eingehende Fortsetzungen warten auf Face ID",
+    "es": "la difusión se detiene; las continuaciones entrantes esperan a Face ID",
+    "fr": "la diffusion s'arrête ; les continuations entrantes attendent Face ID",
+    "ja": "ブロードキャストは停止し、受信した継続は Face ID を待ちます",
+    "zh-Hans": "广播会停止；收到的接续会等待面容 ID",
+    "zh-Hant": "廣播會停止；收到的接續會等待 Face ID"
+  },
+  "stay on each device": {
+    "de": "bleiben auf jedem Gerät",
+    "es": "se quedan en cada dispositivo",
+    "fr": "restent sur chaque appareil",
+    "ja": "各デバイスにとどまります",
+    "zh-Hans": "留在各自设备上",
+    "zh-Hant": "留在各自裝置上"
+  },
+  "every session, every transport": {
+    "de": "jede Sitzung, jeder Transport",
+    "es": "todas las sesiones, todos los transportes",
+    "fr": "toutes les sessions, tous les transports",
+    "ja": "すべてのセッション、すべてのトランスポート",
+    "zh-Hans": "所有会话、所有传输方式",
+    "zh-Hant": "所有工作階段、所有傳輸方式"
+  },
+  "rang a bell that needs attention": {
+    "de": "hat einen Signalton ausgelöst, der Aufmerksamkeit braucht",
+    "es": "hizo sonar una campana que requiere atención",
+    "fr": "a fait sonner une cloche qui demande votre attention",
+    "ja": "注意が必要なベルを鳴らしました",
+    "zh-Hans": "触发了需要关注的响铃",
+    "zh-Hant": "觸發了需要關注的響鈴"
+  },
+  "sends": {
+    "de": "sendet",
+    "es": "envía",
+    "fr": "envoie",
+    "ja": "送信内容",
+    "zh-Hans": "发送",
+    "zh-Hant": "傳送"
+  },
+  "sends %@": {
+    "de": "sendet %@",
+    "es": "envía %@",
+    "fr": "envoie %@",
+    "ja": "%@ を送信します",
+    "zh-Hans": "发送 %@",
+    "zh-Hant": "傳送 %@"
+  },
+  "typed literally, spaces included.": {
+    "de": "wird wörtlich getippt, Leerzeichen inbegriffen.",
+    "es": "se escribe literalmente, espacios incluidos.",
+    "fr": "saisi littéralement, espaces compris.",
+    "ja": "スペースも含めて、そのまま入力されます。",
+    "zh-Hans": "按字面输入，包括空格。",
+    "zh-Hant": "按字面輸入，包括空格。"
+  },
+  "sent verbatim to the login shell on connect.": {
+    "de": "wird beim Verbinden wörtlich an die Login-Shell gesendet.",
+    "es": "se envía tal cual al shell de inicio de sesión al conectar.",
+    "fr": "envoyé tel quel au shell de connexion lors de la connexion.",
+    "ja": "接続時に、そのままログインシェルへ送られます。",
+    "zh-Hans": "连接时原样发送给登录 shell。",
+    "zh-Hant": "連線時原樣傳送給登入 shell。"
+  },
+  "run by `mosh-server new -- <command>` as the initial command.": {
+    "de": "wird von `mosh-server new -- <command>` als erster Befehl ausgeführt.",
+    "es": "lo ejecuta `mosh-server new -- <command>` como comando inicial.",
+    "fr": "exécuté par `mosh-server new -- <command>` comme commande initiale.",
+    "ja": "`mosh-server new -- <command>` によって最初のコマンドとして実行されます。",
+    "zh-Hans": "由 `mosh-server new -- <command>` 作为初始命令执行。",
+    "zh-Hant": "由 `mosh-server new -- <command>` 作為初始指令執行。"
+  },
+  "falls back to the first 6 characters of the name if left empty.": {
+    "de": "greift auf die ersten 6 Zeichen des Namens zurück, wenn das Feld leer bleibt.",
+    "es": "si se deja vacío, se usan los 6 primeros caracteres del nombre.",
+    "fr": "si laissé vide, les 6 premiers caractères du nom sont utilisés.",
+    "ja": "空のままにすると、名前の先頭 6 文字が使われます。",
+    "zh-Hans": "留空时使用名称的前 6 个字符。",
+    "zh-Hant": "留空時使用名稱的前 6 個字元。"
+  },
+  "session cwd": {
+    "de": "Arbeitsverzeichnis der Sitzung",
+    "es": "directorio actual de la sesión",
+    "fr": "répertoire courant de la session",
+    "ja": "セッションのカレントディレクトリ",
+    "zh-Hans": "会话当前目录",
+    "zh-Hant": "工作階段目前目錄"
+  },
+  "no session cwd": {
+    "de": "kein Arbeitsverzeichnis der Sitzung",
+    "es": "sin directorio actual de sesión",
+    "fr": "aucun répertoire courant de session",
+    "ja": "セッションのカレントディレクトリなし",
+    "zh-Hans": "没有会话当前目录",
+    "zh-Hant": "沒有工作階段目前目錄"
+  },
+  "no directory signal from this session": {
+    "de": "kein Verzeichnissignal aus dieser Sitzung",
+    "es": "esta sesión no envía señal de directorio",
+    "fr": "aucun signal de répertoire depuis cette session",
+    "ja": "このセッションからディレクトリの信号がありません",
+    "zh-Hans": "此会话没有目录信号",
+    "zh-Hant": "此工作階段沒有目錄信號"
+  },
+  "following terminal directory — tap to browse freely": {
+    "de": "folgt dem Terminal-Verzeichnis — tippen, um frei zu blättern",
+    "es": "sigue el directorio del terminal — toca para navegar libremente",
+    "fr": "suit le répertoire du terminal — touchez pour naviguer librement",
+    "ja": "ターミナルのディレクトリに追従中 — タップすると自由に閲覧できます",
+    "zh-Hans": "正跟随终端目录 —— 轻点可自由浏览",
+    "zh-Hant": "正跟隨終端機目錄 —— 輕點可自由瀏覽"
+  },
+  "not following — tap to sync to terminal directory": {
+    "de": "folgt nicht — tippen, um mit dem Terminal-Verzeichnis abzugleichen",
+    "es": "no sigue — toca para sincronizar con el directorio del terminal",
+    "fr": "ne suit pas — touchez pour synchroniser avec le répertoire du terminal",
+    "ja": "追従していません — タップするとターミナルのディレクトリに合わせます",
+    "zh-Hans": "未跟随 —— 轻点以同步到终端目录",
+    "zh-Hant": "未跟隨 —— 輕點以同步到終端機目錄"
+  },
+  "Empty directory": {
+    "de": "Leeres Verzeichnis",
+    "es": "Directorio vacío",
+    "fr": "Répertoire vide",
+    "ja": "空のディレクトリ",
+    "zh-Hans": "空目录",
+    "zh-Hant": "空目錄"
+  },
+  "No destination directory yet.": {
+    "de": "Noch kein Zielverzeichnis.",
+    "es": "Todavía no hay directorio de destino.",
+    "fr": "Aucun répertoire de destination pour l'instant.",
+    "ja": "宛先のディレクトリがまだありません。",
+    "zh-Hans": "还没有目标目录。",
+    "zh-Hant": "還沒有目標目錄。"
+  },
+  "new folder": {
+    "de": "neuer Ordner",
+    "es": "carpeta nueva",
+    "fr": "nouveau dossier",
+    "ja": "新規フォルダ",
+    "zh-Hans": "新建文件夹",
+    "zh-Hant": "新增檔案夾"
+  },
+  "temp folder": {
+    "de": "temporärer Ordner",
+    "es": "carpeta temporal",
+    "fr": "dossier temporaire",
+    "ja": "一時フォルダ",
+    "zh-Hans": "临时文件夹",
+    "zh-Hant": "暫存檔案夾"
+  },
+  "sort by modified": {
+    "de": "nach Änderungsdatum sortieren",
+    "es": "ordenar por fecha de modificación",
+    "fr": "trier par date de modification",
+    "ja": "変更日で並べ替え",
+    "zh-Hans": "按修改时间排序",
+    "zh-Hant": "依修改時間排序"
+  },
+  "no file": {
+    "de": "keine Datei",
+    "es": "ningún archivo",
+    "fr": "aucun fichier",
+    "ja": "ファイルなし",
+    "zh-Hans": "无文件",
+    "zh-Hant": "無檔案"
+  },
+  "not written": {
+    "de": "nicht geschrieben",
+    "es": "no escrito",
+    "fr": "non écrit",
+    "ja": "書き込まれていません",
+    "zh-Hans": "未写入",
+    "zh-Hant": "未寫入"
+  },
+  "upload here": {
+    "de": "hierher hochladen",
+    "es": "subir aquí",
+    "fr": "envoyer ici",
+    "ja": "ここにアップロード",
+    "zh-Hans": "上传到这里",
+    "zh-Hant": "上傳到這裡"
+  },
+  "connect on upload…": {
+    "de": "beim Hochladen verbinden …",
+    "es": "conectar al subir…",
+    "fr": "se connecter lors de l'envoi…",
+    "ja": "アップロード時に接続…",
+    "zh-Hans": "上传时连接…",
+    "zh-Hant": "上傳時連線…"
+  },
+  "Upload & paste path": {
+    "de": "Hochladen & Pfad einfügen",
+    "es": "Subir y pegar la ruta",
+    "fr": "Envoyer et coller le chemin",
+    "ja": "アップロードしてパスを貼り付け",
+    "zh-Hans": "上传并粘贴路径",
+    "zh-Hant": "上傳並貼上路徑"
+  },
+  "Reveal in Files": {
+    "de": "In „Dateien“ zeigen",
+    "es": "Mostrar en Archivos",
+    "fr": "Afficher dans Fichiers",
+    "ja": "「ファイル」で表示",
+    "zh-Hans": "在“文件”中显示",
+    "zh-Hant": "在「檔案」中顯示"
+  },
+  "Selection doesn't look like a path.": {
+    "de": "Die Auswahl sieht nicht nach einem Pfad aus.",
+    "es": "La selección no parece una ruta.",
+    "fr": "La sélection ne ressemble pas à un chemin.",
+    "ja": "選択範囲はパスのようには見えません。",
+    "zh-Hans": "所选内容看起来不像是一个路径。",
+    "zh-Hant": "所選內容看起來不像是一個路徑。"
+  },
+  "1 d": {
+    "de": "1 T",
+    "es": "1 d",
+    "fr": "1 j",
+    "ja": "1 日",
+    "zh-Hans": "1 天",
+    "zh-Hant": "1 天"
+  },
+  "7 d": {
+    "de": "7 T",
+    "es": "7 d",
+    "fr": "7 j",
+    "ja": "7 日",
+    "zh-Hans": "7 天",
+    "zh-Hant": "7 天"
+  },
+  "30 d": {
+    "de": "30 T",
+    "es": "30 d",
+    "fr": "30 j",
+    "ja": "30 日",
+    "zh-Hans": "30 天",
+    "zh-Hant": "30 天"
+  },
+  "view source code": {
+    "de": "Quellcode ansehen",
+    "es": "ver el código fuente",
+    "fr": "voir le code source",
+    "ja": "ソースコードを見る",
+    "zh-Hans": "查看源代码",
+    "zh-Hant": "檢視原始碼"
+  },
+  "view license (GPL-3.0)": {
+    "de": "Lizenz ansehen (GPL-3.0)",
+    "es": "ver la licencia (GPL-3.0)",
+    "fr": "voir la licence (GPL-3.0)",
+    "ja": "ライセンスを見る（GPL-3.0）",
+    "zh-Hans": "查看许可证（GPL-3.0）",
+    "zh-Hant": "檢視授權條款（GPL-3.0）"
+  },
+  "view third-party licenses & notices": {
+    "de": "Lizenzen & Hinweise Dritter ansehen",
+    "es": "ver licencias y avisos de terceros",
+    "fr": "voir les licences et mentions tierces",
+    "ja": "サードパーティのライセンスと表示を見る",
+    "zh-Hans": "查看第三方许可证与声明",
+    "zh-Hant": "檢視第三方授權條款與聲明"
+  },
+  "app store exception & trademark notice": {
+    "de": "App-Store-Ausnahme & Markenhinweis",
+    "es": "excepción de la App Store y aviso de marcas",
+    "fr": "exception App Store et mentions de marques",
+    "ja": "App Store 例外条項と商標に関する表示",
+    "zh-Hans": "App Store 例外条款与商标声明",
+    "zh-Hant": "App Store 例外條款與商標聲明"
+  },
+  "gpl-3.0 at gnu.org": {
+    "de": "GPL-3.0 auf gnu.org",
+    "es": "GPL-3.0 en gnu.org",
+    "fr": "GPL-3.0 sur gnu.org",
+    "ja": "gnu.org の GPL-3.0",
+    "zh-Hans": "gnu.org 上的 GPL-3.0",
+    "zh-Hant": "gnu.org 上的 GPL-3.0"
+  },
+  "this program": {
+    "de": "dieses Programm",
+    "es": "este programa",
+    "fr": "ce programme",
+    "ja": "このプログラム",
+    "zh-Hans": "本程序",
+    "zh-Hant": "本程式"
+  },
+  "this document failed to load from the app bundle — please report this build issue at https://github.com/bambouville/tessera/issues": {
+    "de": "Dieses Dokument konnte nicht aus dem App-Bundle geladen werden — melde diesen Build-Fehler bitte unter https://github.com/bambouville/tessera/issues",
+    "es": "este documento no se pudo cargar desde el paquete de la app — informa de este problema de compilación en https://github.com/bambouville/tessera/issues",
+    "fr": "ce document n'a pas pu être chargé depuis le bundle de l'app — signalez ce problème de compilation sur https://github.com/bambouville/tessera/issues",
+    "ja": "この文書を App バンドルから読み込めませんでした — このビルドの問題を https://github.com/bambouville/tessera/issues に報告してください",
+    "zh-Hans": "无法从应用包中加载该文档 —— 请在 https://github.com/bambouville/tessera/issues 报告这个构建问题",
+    "zh-Hant": "無法從 App 套件中載入該文件 —— 請在 https://github.com/bambouville/tessera/issues 回報這個建置問題"
+  }
+}

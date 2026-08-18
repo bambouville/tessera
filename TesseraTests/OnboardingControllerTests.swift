@@ -151,7 +151,7 @@ final class OnboardingControllerTests: XCTestCase {
     // MARK: - Step list shape
 
     func test_firstRun_hasNineStepsInOrder() {
-        let steps = OnboardingStep.firstRun
+        let steps = OnboardingStep.firstRun(.glyph)
         XCTAssertEqual(steps.count, 9)
         XCTAssertEqual(steps[0].kind, .spotlight(.addHost, .below))
         XCTAssertEqual(steps[1].kind, .spotlight(.keysNav, .right))
@@ -167,7 +167,7 @@ final class OnboardingControllerTests: XCTestCase {
     }
 
     func test_compactFirstRun_adaptsDeviceSpecificStepsWithoutChangingSequence() {
-        let steps = OnboardingStep.firstRun.map { $0.presentation(compact: true) }
+        let steps = OnboardingStep.firstRun(.glyph).map { $0.presentation(compact: true) }
 
         XCTAssertEqual(steps.count, 9)
         XCTAssertEqual(steps[0].kind, .spotlight(.addHost, .below))
@@ -188,7 +188,7 @@ final class OnboardingControllerTests: XCTestCase {
 
     func test_controllerStepsMatchFirstRun() {
         let (controller, _) = makeController()
-        XCTAssertEqual(controller.steps.count, OnboardingStep.firstRun.count)
-        XCTAssertEqual(controller.steps.map(\.kind), OnboardingStep.firstRun.map(\.kind))
+        XCTAssertEqual(controller.steps.count, OnboardingStep.firstRun(.glyph).count)
+        XCTAssertEqual(controller.steps.map(\.kind), OnboardingStep.firstRun(.glyph).map(\.kind))
     }
 }

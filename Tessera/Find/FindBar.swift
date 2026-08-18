@@ -108,6 +108,10 @@ struct FindBar: View {
                 .foregroundStyle(T.fgDim)
 
             TextField("find in scrollback", text: $controller.query)
+                // The query field's on-screen position is a regression surface:
+                // the session's keyboard translation once carried it off the top
+                // of the screen. `IPhoneFindBarKeyboardHarnessTests` reads this.
+                .accessibilityIdentifier("find-query-field")
                 .font(Typography.tesseraMono(size: 12 * scale))
                 .foregroundStyle(T.fg)
                 .textInputAutocapitalization(.never)
@@ -167,14 +171,16 @@ struct FindBar: View {
         }
     }
 
+    /// `label` is the glyph on the button (Aa / [w] / .*); `hint` is what
+    /// VoiceOver reads.
     private func toggle(
         label: String,
         isOn: Bool,
-        hint: String,
+        hint: LocalizedStringKey,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Text(label)
+            Text(verbatim: label)
                 .font(Typography.tesseraMono(size: 11 * scale, weight: isOn ? .semibold : .regular))
                 .foregroundStyle(isOn ? T.accent : T.fgMuted)
                 .padding(.horizontal, 7 * scale)
@@ -186,7 +192,7 @@ struct FindBar: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(hint)
+        .accessibilityLabel(Text(hint))
     }
 
     // MARK: - Action buttons (↑ ↓ ✕)
@@ -208,7 +214,7 @@ struct FindBar: View {
 
     private func actionButton(
         systemName: String,
-        label: String,
+        label: LocalizedStringKey,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {

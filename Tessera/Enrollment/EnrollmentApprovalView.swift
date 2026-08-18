@@ -39,10 +39,12 @@ struct EnrollmentApprovalView: View {
                 .font(Typography.sheetTitle)
                 .foregroundStyle(T.fg)
                 .multilineTextAlignment(.center)
-            Text(headerSubtitle)
-                .tesseraSansScaled(size: 12)
-                .foregroundStyle(T.fgMuted)
-                .multilineTextAlignment(.center)
+            if let headerSubtitle {
+                Text(headerSubtitle)
+                    .tesseraSansScaled(size: 12)
+                    .foregroundStyle(T.fgMuted)
+                    .multilineTextAlignment(.center)
+            }
         }
     }
 
@@ -85,7 +87,7 @@ struct EnrollmentApprovalView: View {
             statusPanel(
                 icon: "exclamationmark.triangle.fill",
                 color: T.red,
-                text: message
+                resolvedText: message
             )
         case .idle:
             EmptyView()
@@ -100,7 +102,7 @@ struct EnrollmentApprovalView: View {
             )
             detailRow(
                 label: "host",
-                value: coordinator.approvalHostName ?? "current authenticated session"
+                value: coordinator.approvalHostName ?? String(localized: "current authenticated session")
             )
             if let endpoint = coordinator.approvalEndpoint {
                 detailRow(label: "endpoint", value: endpoint)
@@ -127,14 +129,14 @@ struct EnrollmentApprovalView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func detailRow(label: String, value: String) -> some View {
+    private func detailRow(label: LocalizedStringKey, value: String) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(label)
                 .font(Typography.kicker)
                 .tracking(0.6)
                 .foregroundStyle(T.fgDim)
                 .textCase(.uppercase)
-            Text(value)
+            Text(verbatim: value)
                 .font(Typography.tesseraMono(size: 11.5))
                 .foregroundStyle(T.fg)
                 .textSelection(.enabled)
@@ -149,7 +151,7 @@ struct EnrollmentApprovalView: View {
         }
     }
 
-    private func progressPanel(_ text: String) -> some View {
+    private func progressPanel(_ text: LocalizedStringKey) -> some View {
         HStack(spacing: 11) {
             ProgressView().controlSize(.small)
             Text(text)
@@ -162,10 +164,19 @@ struct EnrollmentApprovalView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
-    private func statusPanel(icon: String, color: Color, text: String) -> some View {
+    private func statusPanel(icon: String, color: Color, text: LocalizedStringKey) -> some View {
+        statusPanel(icon: icon, color: color, message: Text(text))
+    }
+
+    /// The failure case shows a message the coordinator already resolved.
+    private func statusPanel(icon: String, color: Color, resolvedText: String) -> some View {
+        statusPanel(icon: icon, color: color, message: Text(verbatim: resolvedText))
+    }
+
+    private func statusPanel(icon: String, color: Color, message: Text) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: icon).foregroundStyle(color)
-            Text(text)
+            message
                 .tesseraSansScaled(size: 12)
                 .foregroundStyle(T.fgMuted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -219,7 +230,7 @@ struct EnrollmentApprovalView: View {
         }
     }
 
-    private var headerTitle: String {
+    private var headerTitle: LocalizedStringResource {
         switch coordinator.phase {
         case .awaitingApproval: return "Authorize Device"
         case .authorizing: return "Confirm Your Identity"
@@ -234,7 +245,7 @@ struct EnrollmentApprovalView: View {
         }
     }
 
-    private var headerSubtitle: String {
+    private var headerSubtitle: LocalizedStringResource? {
         switch coordinator.phase {
         case .awaitingApproval:
             return "Review the exact host and public key before granting access."
@@ -251,7 +262,7 @@ struct EnrollmentApprovalView: View {
         case .rejected, .cancelled, .failed:
             return "No private key or password was transferred."
         case .idle:
-            return ""
+            return nil
         }
     }
 
@@ -266,9 +277,9 @@ struct EnrollmentApprovalView: View {
         let protection: String
         switch key.protection {
         case .secureEnclave:
-            protection = "Secure Enclave (peer-reported)"
+            protection = String(localized: "Secure Enclave (peer-reported)")
         case .software:
-            protection = "software key (peer-reported)"
+            protection = String(localized: "software key (peer-reported)")
         }
         return "\(algorithm) · \(protection)"
     }

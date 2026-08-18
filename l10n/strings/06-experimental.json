@@ -1,0 +1,330 @@
+{
+  "HEADS UP": {
+    "de": "ACHTUNG",
+    "es": "AVISO",
+    "fr": "ATTENTION",
+    "ja": "注意",
+    "zh-Hans": "请注意",
+    "zh-Hant": "請注意"
+  },
+  "features in this section are under active design — keybindings, defaults, and storage layouts may change between releases.": {
+    "de": "Die Funktionen in diesem Abschnitt werden gerade aktiv entworfen – Tastenbelegungen, Voreinstellungen und Speicherformate können sich zwischen Versionen ändern.",
+    "es": "las funciones de esta sección están en pleno diseño: los atajos, los valores por omisión y los formatos de almacenamiento pueden cambiar entre versiones.",
+    "fr": "les fonctionnalités de cette section sont en cours de conception — raccourcis, réglages par défaut et formats de stockage peuvent changer d'une version à l'autre.",
+    "ja": "このセクションの機能は現在設計中です。キー割り当て、デフォルト値、保存形式はリリースごとに変わる可能性があります。",
+    "zh-Hans": "本节中的功能仍在积极设计中 —— 快捷键、默认值和存储结构可能在不同版本之间变化。",
+    "zh-Hant": "本節中的功能仍在積極設計中 —— 快速鍵、預設值和儲存結構可能在不同版本之間變化。"
+  },
+  "swipe pad": {
+    "de": "Swipe-Pad",
+    "es": "panel de gestos",
+    "fr": "pavé de gestes",
+    "ja": "スワイプパッド",
+    "zh-Hans": "滑动手势板",
+    "zh-Hant": "滑動手勢板"
+  },
+  "floating thumb-zone puck · 3 discrete gestures · radial macros + on-device dictation": {
+    "de": "schwebender Puck in Daumenreichweite · 3 klar getrennte Gesten · radiale Makros + Diktieren auf dem Gerät",
+    "es": "disco flotante al alcance del pulgar · 3 gestos diferenciados · macros radiales + dictado en el dispositivo",
+    "fr": "pastille flottante à portée du pouce · 3 gestes distincts · macros radiales + dictée sur l'appareil",
+    "ja": "親指の届く位置に浮かぶパック · 3 つの明確なジェスチャ · 放射状マクロ + オンデバイス音声入力",
+    "zh-Hans": "拇指可及的悬浮圆钮 · 3 种明确手势 · 放射状宏 + 设备端听写",
+    "zh-Hant": "拇指可及的懸浮圓鈕 · 3 種明確手勢 · 放射狀巨集 + 裝置端聽寫"
+  },
+  "gestures": {
+    "de": "Gesten",
+    "es": "gestos",
+    "fr": "gestes",
+    "ja": "ジェスチャ",
+    "zh-Hans": "手势",
+    "zh-Hant": "手勢"
+  },
+  "puck size": {
+    "de": "Puck-Größe",
+    "es": "tamaño del disco",
+    "fr": "taille de la pastille",
+    "ja": "パックのサイズ",
+    "zh-Hans": "圆钮大小",
+    "zh-Hant": "圓鈕大小"
+  },
+  "default corner": {
+    "de": "Standardecke",
+    "es": "esquina por omisión",
+    "fr": "coin par défaut",
+    "ja": "デフォルトの隅",
+    "zh-Hans": "默认角落",
+    "zh-Hant": "預設角落"
+  },
+  "the puck remembers its last position per-orientation. this is just the cold-launch fallback.": {
+    "de": "Der Puck merkt sich seine letzte Position je Ausrichtung. Dies ist nur der Rückfall beim Kaltstart.",
+    "es": "el disco recuerda su última posición en cada orientación. esto es solo el valor de reserva al arrancar en frío.",
+    "fr": "la pastille retient sa dernière position pour chaque orientation. ceci n'est que la valeur de repli au démarrage à froid.",
+    "ja": "パックは向きごとに最後の位置を記憶します。これはコールド起動時のフォールバックにすぎません。",
+    "zh-Hans": "圆钮会按屏幕方向分别记住上次的位置。这里设置的只是冷启动时的回退值。",
+    "zh-Hant": "圓鈕會依螢幕方向分別記住上次的位置。這裡設定的只是冷啟動時的回退值。"
+  },
+  "%@ · drag %@": {
+    "de": "%@ · %@ ziehen",
+    "es": "%@ · arrastrar %@",
+    "fr": "%@ · glisser %@",
+    "ja": "%@ · %@ をドラッグ",
+    "zh-Hans": "%@ · 拖动 %@",
+    "zh-Hant": "%@ · 拖移 %@"
+  },
+  "drag %@": {
+    "de": "%@ ziehen",
+    "es": "arrastrar %@",
+    "fr": "glisser %@",
+    "ja": "%@ をドラッグ",
+    "zh-Hans": "拖动 %@",
+    "zh-Hant": "拖移 %@"
+  },
+  "drag %@ · petal hidden until set": {
+    "de": "%@ ziehen · Blütenblatt bleibt verborgen, bis es belegt ist",
+    "es": "arrastrar %@ · el pétalo queda oculto hasta que lo definas",
+    "fr": "glisser %@ · le pétale reste masqué tant qu'il n'est pas défini",
+    "ja": "%@ をドラッグ · 設定するまで花びらは表示されません",
+    "zh-Hans": "拖动 %@ · 未设置前不显示该花瓣",
+    "zh-Hant": "拖移 %@ · 未設定前不顯示該花瓣"
+  },
+  "edit macro": {
+    "de": "Makro bearbeiten",
+    "es": "editar la macro",
+    "fr": "modifier la macro",
+    "ja": "マクロを編集",
+    "zh-Hans": "编辑宏",
+    "zh-Hant": "編輯巨集"
+  },
+  "macro spec": {
+    "de": "Makro-Definition",
+    "es": "definición de la macro",
+    "fr": "définition de la macro",
+    "ja": "マクロの記述",
+    "zh-Hans": "宏定义",
+    "zh-Hant": "巨集定義"
+  },
+  "macro spec: literal chars, ↵ for Enter, esc/\\e/\\x1b for Escape, \\t/tab, \\r, \\n.": {
+    "de": "Makro-Definition: wörtliche Zeichen, ↵ für Enter, esc/\\e/\\x1b für Escape, \\t/tab, \\r, \\n.",
+    "es": "definición de la macro: caracteres literales, ↵ para Intro, esc/\\e/\\x1b para Escape, \\t/tab, \\r, \\n.",
+    "fr": "définition de la macro : caractères littéraux, ↵ pour Entrée, esc/\\e/\\x1b pour Échap, \\t/tab, \\r, \\n.",
+    "ja": "マクロの記述: 文字はそのまま、Enter は ↵、Escape は esc/\\e/\\x1b、ほかに \\t/tab、\\r、\\n が使えます。",
+    "zh-Hans": "宏定义：字面字符，↵ 表示回车，esc/\\e/\\x1b 表示 Escape，还有 \\t/tab、\\r、\\n。",
+    "zh-Hant": "巨集定義：字面字元，↵ 表示 Enter，esc/\\e/\\x1b 表示 Escape，還有 \\t/tab、\\r、\\n。"
+  },
+  "on-device dictation": {
+    "de": "Diktieren auf dem Gerät",
+    "es": "dictado en el dispositivo",
+    "fr": "dictée sur l'appareil",
+    "ja": "オンデバイス音声入力",
+    "zh-Hans": "设备端听写",
+    "zh-Hant": "裝置端聽寫"
+  },
+  "SFSpeechRecognizer · no audio leaves the device · english": {
+    "de": "SFSpeechRecognizer · kein Audio verlässt das Gerät · Englisch",
+    "es": "SFSpeechRecognizer · ningún audio sale del dispositivo · inglés",
+    "fr": "SFSpeechRecognizer · aucun son ne quitte l'appareil · anglais",
+    "ja": "SFSpeechRecognizer · 音声はデバイスの外に出ません · 英語",
+    "zh-Hans": "SFSpeechRecognizer · 音频不会离开设备 · 英语",
+    "zh-Hant": "SFSpeechRecognizer · 音訊不會離開裝置 · 英語"
+  },
+  "not available for your language on this device": {
+    "de": "auf diesem Gerät für deine Sprache nicht verfügbar",
+    "es": "no disponible para tu idioma en este dispositivo",
+    "fr": "indisponible pour votre langue sur cet appareil",
+    "ja": "このデバイスではお使いの言語で利用できません",
+    "zh-Hans": "本设备上不支持你的语言",
+    "zh-Hant": "本裝置上不支援你的語言"
+  },
+  "triggered by double tap on the puck. independent of the radial — no swipe required.": {
+    "de": "wird durch Doppeltippen auf den Puck ausgelöst. unabhängig vom Radialmenü – kein Wischen nötig.",
+    "es": "se activa con un doble toque en el disco. es independiente del radial: no hace falta deslizar.",
+    "fr": "déclenché par un double appui sur la pastille. indépendant du menu radial — aucun balayage requis.",
+    "ja": "パックをダブルタップすると起動します。放射状メニューとは独立していて、スワイプは不要です。",
+    "zh-Hans": "双点圆钮即可触发。与放射状菜单相互独立 —— 无需滑动。",
+    "zh-Hant": "點兩下圓鈕即可觸發。與放射狀選單相互獨立 —— 無需滑動。"
+  },
+  "live waveform on the puck": {
+    "de": "Live-Wellenform auf dem Puck",
+    "es": "onda en directo en el disco",
+    "fr": "forme d'onde en direct sur la pastille",
+    "ja": "パック上のリアルタイム波形",
+    "zh-Hans": "圆钮上的实时波形",
+    "zh-Hant": "圓鈕上的即時波形"
+  },
+  "the puck morphs into a mic+waveform glyph while listening": {
+    "de": "Während des Zuhörens verwandelt sich der Puck in ein Mikrofon-Wellenform-Symbol",
+    "es": "mientras escucha, el disco se transforma en un glifo de micrófono con onda",
+    "fr": "pendant l'écoute, la pastille se transforme en un glyphe micro + forme d'onde",
+    "ja": "聞き取り中、パックはマイクと波形のグリフに変化します",
+    "zh-Hans": "聆听时圆钮会变成麦克风加波形的图形",
+    "zh-Hant": "聆聽時圓鈕會變成麥克風加波形的圖形"
+  },
+  "commit on silence": {
+    "de": "bei Stille übernehmen",
+    "es": "confirmar tras el silencio",
+    "fr": "valider après un silence",
+    "ja": "無音で確定",
+    "zh-Hans": "静默后提交",
+    "zh-Hant": "靜默後提交"
+  },
+  "auto-send after 1.2s of silence · otherwise double-tap again to send": {
+    "de": "nach 1,2 s Stille automatisch senden · andernfalls zum Senden erneut doppeltippen",
+    "es": "envío automático tras 1,2 s de silencio · si no, vuelve a tocar dos veces para enviar",
+    "fr": "envoi automatique après 1,2 s de silence · sinon, appuyez de nouveau deux fois pour envoyer",
+    "ja": "1.2 秒の無音で自動送信 · そうでない場合はもう一度ダブルタップして送信",
+    "zh-Hans": "静默 1.2 秒后自动发送 · 否则再次双点即可发送",
+    "zh-Hant": "靜默 1.2 秒後自動傳送 · 否則再次點兩下即可傳送"
+  },
+  "append return": {
+    "de": "Zeilenumbruch anhängen",
+    "es": "añadir un retorno",
+    "fr": "ajouter un retour",
+    "ja": "改行を付加",
+    "zh-Hans": "追加回车",
+    "zh-Hant": "附加換行"
+  },
+  "send a ↵ after the transcript hits the terminal": {
+    "de": "nach dem Einfügen des Transkripts ein ↵ senden",
+    "es": "enviar un ↵ después de que la transcripción llegue al terminal",
+    "fr": "envoyer un ↵ une fois la transcription arrivée dans le terminal",
+    "ja": "文字起こしがターミナルに入ったあとに ↵ を送信します",
+    "zh-Hans": "转写内容送入终端后再发送一个 ↵",
+    "zh-Hant": "轉寫內容送入終端機後再傳送一個 ↵"
+  },
+  "agent center": {
+    "de": "Agent-Center",
+    "es": "centro de agentes",
+    "fr": "centre d'agents",
+    "ja": "エージェントセンター",
+    "zh-Hans": "智能体中心",
+    "zh-Hant": "智慧體中心"
+  },
+  "discover Claude and Codex sessions · precise status requires an optional host hook · off by default · disabling does not uninstall host hooks": {
+    "de": "Claude- und Codex-Sitzungen erkennen · für den genauen Status ist ein optionaler Host-Hook nötig · standardmäßig aus · das Deaktivieren entfernt keine Host-Hooks",
+    "es": "detecta sesiones de Claude y Codex · el estado preciso requiere un hook opcional en el host · desactivado por omisión · desactivarlo no desinstala los hooks del host",
+    "fr": "détecte les sessions Claude et Codex · l'état précis nécessite un hook facultatif sur l'hôte · désactivé par défaut · le désactiver ne désinstalle pas les hooks de l'hôte",
+    "ja": "Claude と Codex のセッションを検出します · 正確な状態を得るには任意のホストフックが必要です · 初期状態はオフ · オフにしてもホストフックはアンインストールされません",
+    "zh-Hans": "发现 Claude 和 Codex 会话 · 精确状态需要可选的主机钩子 · 默认关闭 · 关闭不会卸载主机钩子",
+    "zh-Hant": "探索 Claude 和 Codex 工作階段 · 精確狀態需要選用的主機掛鉤 · 預設關閉 · 關閉不會解除安裝主機掛鉤"
+  },
+  "agent attention notifications": {
+    "de": "Benachrichtigungen, wenn ein Agent Aufmerksamkeit braucht",
+    "es": "avisos cuando un agente requiere atención",
+    "fr": "notifications lorsqu'un agent réclame votre attention",
+    "ja": "エージェントが対応を必要とするときの通知",
+    "zh-Hans": "智能体需要关注时的通知",
+    "zh-Hant": "智慧體需要關注時的通知"
+  },
+  "iOS notification when an off-screen agent finishes or needs input while Tessera is running in the background · iPadOS may suspend longer sessions": {
+    "de": "iOS-Mitteilung, wenn ein nicht sichtbarer Agent fertig wird oder eine Eingabe braucht, während Tessera im Hintergrund läuft · iPadOS kann längere Sitzungen anhalten",
+    "es": "aviso de iOS cuando un agente fuera de pantalla termina o necesita entrada mientras Tessera está en segundo plano · iPadOS puede suspender las sesiones largas",
+    "fr": "notification iOS lorsqu'un agent hors écran termine ou attend une saisie pendant que Tessera est en arrière-plan · iPadOS peut suspendre les sessions longues",
+    "ja": "Tessera がバックグラウンドで動作しているときに、画面外のエージェントが完了したり入力を必要としたりすると iOS 通知を送ります · iPadOS は長時間のセッションを一時停止することがあります",
+    "zh-Hans": "当 Tessera 在后台运行时，屏幕外的智能体完成或需要输入会发出 iOS 通知 · iPadOS 可能会挂起较长的会话",
+    "zh-Hant": "當 Tessera 在背景執行時，畫面外的智慧體完成或需要輸入會發出 iOS 通知 · iPadOS 可能會暫停較長的工作階段"
+  },
+  "profile + agent detection": {
+    "de": "Profil- und Agentenerkennung",
+    "es": "perfil y detección de agentes",
+    "fr": "profil et détection des agents",
+    "ja": "プロファイルとエージェント検出",
+    "zh-Hans": "配置与智能体识别",
+    "zh-Hant": "設定檔與智慧體辨識"
+  },
+  "profiles · evaluated top-to-bottom · first match wins": {
+    "de": "Profile · werden von oben nach unten ausgewertet · der erste Treffer gewinnt",
+    "es": "perfiles · se evalúan de arriba abajo · gana la primera coincidencia",
+    "fr": "profils · évalués de haut en bas · la première correspondance l'emporte",
+    "ja": "プロファイル · 上から順に評価 · 最初に一致したものが使われます",
+    "zh-Hans": "配置 · 自上而下逐条判断 · 以首个匹配项为准",
+    "zh-Hant": "設定檔 · 自上而下逐條判斷 · 以首個相符項為準"
+  },
+  "+ add profile": {
+    "de": "+ Profil hinzufügen",
+    "es": "+ añadir perfil",
+    "fr": "+ ajouter un profil",
+    "ja": "+ プロファイルを追加",
+    "zh-Hans": "+ 添加配置",
+    "zh-Hant": "+ 加入設定檔"
+  },
+  "detect as an agent": {
+    "de": "als Agent erkennen",
+    "es": "detectar como agente",
+    "fr": "détecter comme un agent",
+    "ja": "エージェントとして検出",
+    "zh-Hans": "识别为智能体",
+    "zh-Hant": "辨識為智慧體"
+  },
+  "always on": {
+    "de": "immer an",
+    "es": "siempre activo",
+    "fr": "toujours actif",
+    "ja": "常にオン",
+    "zh-Hans": "始终开启",
+    "zh-Hant": "始終開啟"
+  },
+  "smart default": {
+    "de": "intelligenter Standard",
+    "es": "valor inteligente por omisión",
+    "fr": "réglage intelligent par défaut",
+    "ja": "スマートなデフォルト",
+    "zh-Hans": "智能默认",
+    "zh-Hant": "智慧預設"
+  },
+  "process or regex:…": {
+    "de": "Prozess oder regex:…",
+    "es": "proceso o regex:…",
+    "fr": "processus ou regex:…",
+    "ja": "プロセスまたは regex:…",
+    "zh-Hans": "进程或 regex:…",
+    "zh-Hant": "行程或 regex:…"
+  },
+  "idle prompt regexes · one per line": {
+    "de": "Regexes für den Ruhe-Prompt · eine pro Zeile",
+    "es": "regexes del prompt inactivo · uno por línea",
+    "fr": "regex de l'invite au repos · une par ligne",
+    "ja": "待機中プロンプトの正規表現 · 1 行に 1 つ",
+    "zh-Hans": "空闲提示符的正则表达式 · 每行一条",
+    "zh-Hant": "閒置提示符的正規表達式 · 每行一條"
+  },
+  "blocking prompt regexes · one per line": {
+    "de": "Regexes für blockierende Prompts · eine pro Zeile",
+    "es": "regexes de prompts bloqueantes · uno por línea",
+    "fr": "regex des invites bloquantes · une par ligne",
+    "ja": "ブロッキングプロンプトの正規表現 · 1 行に 1 つ",
+    "zh-Hans": "阻塞提示符的正则表达式 · 每行一条",
+    "zh-Hant": "阻塞提示符的正規表達式 · 每行一條"
+  },
+  "menu option regex · captures marker, number, label, shortcut": {
+    "de": "Regex für Menüoptionen · erfasst Markierung, Nummer, Beschriftung und Kürzel",
+    "es": "regex de las opciones de menú · captura el marcador, el número, la etiqueta y el atajo",
+    "fr": "regex des options de menu · capture le marqueur, le numéro, le libellé et le raccourci",
+    "ja": "メニュー項目の正規表現 · マーカー・番号・ラベル・ショートカットを取得します",
+    "zh-Hans": "菜单选项的正则表达式 · 捕获标记、编号、标签和快捷键",
+    "zh-Hant": "選單項目的正規表達式 · 擷取標記、編號、標籤和快速鍵"
+  },
+  "fallback response": {
+    "de": "Ersatzantwort",
+    "es": "respuesta de reserva",
+    "fr": "réponse de repli",
+    "ja": "フォールバック応答",
+    "zh-Hans": "回退响应",
+    "zh-Hant": "回退回應"
+  },
+  "response · {index}/{shortcut}": {
+    "de": "Antwort · {index}/{shortcut}",
+    "es": "respuesta · {index}/{shortcut}",
+    "fr": "réponse · {index}/{shortcut}",
+    "ja": "応答 · {index}/{shortcut}",
+    "zh-Hans": "响应 · {index}/{shortcut}",
+    "zh-Hant": "回應 · {index}/{shortcut}"
+  },
+  "invalid or incomplete rules degrade to “status unavailable”; Agent Center never guesses controls.": {
+    "de": "Ungültige oder unvollständige Regeln fallen auf „Status nicht verfügbar“ zurück; das Agent-Center rät nie, welche Steuerung gemeint ist.",
+    "es": "las reglas inválidas o incompletas se degradan a «estado no disponible»; el centro de agentes nunca adivina los controles.",
+    "fr": "les règles invalides ou incomplètes se dégradent en « état indisponible » ; le centre d'agents ne devine jamais les commandes.",
+    "ja": "不正または不完全なルールは「状態を取得できません」に切り替わります。エージェントセンターが操作を推測することはありません。",
+    "zh-Hans": "无效或不完整的规则会降级为「状态不可用」；智能体中心绝不会猜测控件。",
+    "zh-Hant": "無效或不完整的規則會降級為「狀態不可用」；智慧體中心絕不會猜測控制項。"
+  }
+}

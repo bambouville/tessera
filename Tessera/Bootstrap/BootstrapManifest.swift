@@ -289,47 +289,47 @@ public enum BootstrapManifestError: Error, Equatable, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .unsupportedVersion(let version):
-            return "Unsupported bootstrap manifest version \(version)."
+            return String(localized: "Unsupported bootstrap manifest version \(version).")
         case .encodedSizeExceeded(let actual, let maximum):
-            return "Bootstrap manifest is \(actual) bytes; maximum is \(maximum)."
+            return String(localized: "Bootstrap manifest is \(actual) bytes; maximum is \(maximum).")
         case .tooManyHosts(let count):
-            return "Bootstrap manifest contains too many hosts (\(count))."
+            return String(localized: "Bootstrap manifest contains too many hosts (\(count)).")
         case .tooManyIdentities(let count):
-            return "Bootstrap manifest contains too many identities (\(count))."
+            return String(localized: "Bootstrap manifest contains too many identities (\(count)).")
         case .tooManyJumpChains(let count):
-            return "Bootstrap manifest contains too many jump-chain links (\(count))."
+            return String(localized: "Bootstrap manifest contains too many jump-chain links (\(count)).")
         case .tooManyKnownHosts(let count):
-            return "Bootstrap manifest contains too many known-host records (\(count))."
+            return String(localized: "Bootstrap manifest contains too many known-host records (\(count)).")
         case .duplicateIdentityID(let id):
-            return "Bootstrap manifest repeats identity \(id)."
+            return String(localized: "Bootstrap manifest repeats identity \(id).")
         case .invalidIdentity(let id, let field):
-            return "Bootstrap identity \(id) has an invalid \(field)."
+            return String(localized: "Bootstrap identity \(id) has an invalid \(field).")
         case .duplicateHostID(let id):
-            return "Bootstrap manifest repeats host \(id)."
+            return String(localized: "Bootstrap manifest repeats host \(id).")
         case .invalidHost(let id, let field):
-            return "Bootstrap host \(id) has an invalid \(field)."
+            return String(localized: "Bootstrap host \(id) has an invalid \(field).")
         case .duplicateJumpLink(let id):
-            return "Bootstrap manifest repeats the jump link for \(id)."
+            return String(localized: "Bootstrap manifest repeats the jump link for \(id).")
         case .danglingJumpLink(let id):
-            return "Bootstrap jump link references missing host \(id)."
+            return String(localized: "Bootstrap jump link references missing host \(id).")
         case .cyclicJumpChain(let id):
-            return "Bootstrap jump chain contains a cycle at \(id)."
+            return String(localized: "Bootstrap jump chain contains a cycle at \(id).")
         case .jumpChainTooDeep(let id):
-            return "Bootstrap jump chain for \(id) is too deep."
+            return String(localized: "Bootstrap jump chain for \(id) is too deep.")
         case .duplicateKnownHost(let id):
-            return "Bootstrap manifest repeats the known-host record for \(id)."
+            return String(localized: "Bootstrap manifest repeats the known-host record for \(id).")
         case .invalidKnownHost(let id, let field):
-            return "Bootstrap known-host record \(id) has an invalid \(field)."
+            return String(localized: "Bootstrap known-host record \(id) has an invalid \(field).")
         case .invalidAppearance(let field):
-            return "Bootstrap appearance field \(field) is invalid."
+            return String(localized: "Bootstrap appearance field \(field) is invalid.")
         case .invalidSettings(let field):
-            return "Bootstrap setting \(field) is invalid."
+            return String(localized: "Bootstrap setting \(field) is invalid.")
         case .unselectedOptionalField(let field):
-            return "Bootstrap optional field \(field) was not approved for transfer."
+            return String(localized: "Bootstrap optional field \(field) was not approved for transfer.")
         case .malformedJSON:
-            return "Bootstrap manifest is not a JSON object."
+            return String(localized: "Bootstrap manifest is not a JSON object.")
         case .unknownField(let path, let field):
-            return "Bootstrap manifest contains unknown field \(path).\(field)."
+            return String(localized: "Bootstrap manifest contains unknown field \(path).\(field).")
         }
     }
 }
@@ -824,8 +824,13 @@ public enum BootstrapSyncClassification {
         "terminalBackgroundBlur": .neverSyncs,
         "naturalTextEditingEnabled": .neverSyncs,
         "showAccessoryBar": .neverSyncs,
+        "resizeTerminalWithKeyboard": .neverSyncs,
         "accessoryBarKeys": .syncable,
         "modifierBehavior": .syncable,
+        // How chords are *written*, not what they do. A user who reads
+        // glyphs on iPad reads glyphs on iPhone — it follows the person,
+        // like the accessory bar layout beside it.
+        "modifierNotation": .syncable,
         "filesReaperDays": .syncable,
         "filesDefaultDestination": .syncable,
         "requireFaceIDToUnlock": .neverSyncs,
@@ -837,6 +842,11 @@ public enum BootstrapSyncClassification {
         "bellNotificationEnabled": .syncable,
         "agentCenterNotificationsEnabled": .neverSyncs,
         "agentCenterEnabled": .neverSyncs,
+        // Scroll-lock opt-outs ride with the gate they depend on: Agent
+        // Center itself is device-local, so a per-provider sub-toggle has
+        // nothing to attach to on the other device.
+        "agentScrollLockClaudeCodeEnabled": .neverSyncs,
+        "agentScrollLockCodexEnabled": .neverSyncs,
         "swipePadEnabled": .neverSyncs,
         "swipePadCorner": .neverSyncs,
         "swipePadSize": .neverSyncs,

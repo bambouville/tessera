@@ -1,0 +1,10 @@
+{
+  "saving replaces the password stored in this device's keychain.": {
+    "de": "Beim Speichern wird das Passwort im Schlüsselbund dieses Geräts ersetzt.",
+    "es": "al guardar se reemplaza la contraseña del llavero de este dispositivo.",
+    "fr": "l'enregistrement remplace le mot de passe du trousseau de cet appareil.",
+    "ja": "保存すると、このデバイスのキーチェーンにあるパスワードが置き換えられます。",
+    "zh-Hans": "保存后会替换本设备钥匙串中的密码。",
+    "zh-Hant": "儲存後會取代本裝置鑰匙圈中的密碼。"
+  }
+}

@@ -35,7 +35,7 @@ enum DistroLogo {
             // Greek π letter instead — instantly readable as "Pi" and
             // free of trademark concerns.
             return AnyView(
-                Text("π")
+                Text(verbatim: "π")
                     .font(.system(size: size * 0.95, weight: .bold))
                     .frame(width: size, height: size)
             )

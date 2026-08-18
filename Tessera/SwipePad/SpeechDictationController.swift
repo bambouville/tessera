@@ -276,13 +276,13 @@ final class SpeechDictationController {
         case .authorized:
             return .granted
         case .denied:
-            return .denied(reason: "Speech recognition permission was denied.")
+            return .denied(reason: String(localized: "Speech recognition permission was denied."))
         case .restricted:
-            return .denied(reason: "Speech recognition is restricted on this device.")
+            return .denied(reason: String(localized: "Speech recognition is restricted on this device."))
         case .notDetermined:
             return .unknown
         @unknown default:
-            return .denied(reason: "Speech recognition permission is unavailable.")
+            return .denied(reason: String(localized: "Speech recognition permission is unavailable."))
         }
     }
 
@@ -292,16 +292,16 @@ final class SpeechDictationController {
             case .granted:
                 return nil
             case .denied:
-                return .denied(reason: "Microphone permission was denied.")
+                return .denied(reason: String(localized: "Microphone permission was denied."))
             case .undetermined:
                 let granted = await withCheckedContinuation { continuation in
                     AVAudioApplication.requestRecordPermission { granted in
                         continuation.resume(returning: granted)
                     }
                 }
-                return granted ? nil : .denied(reason: "Microphone permission was denied.")
+                return granted ? nil : .denied(reason: String(localized: "Microphone permission was denied."))
             @unknown default:
-                return .denied(reason: "Microphone permission is unavailable.")
+                return .denied(reason: String(localized: "Microphone permission is unavailable."))
             }
         } else {
             let session = AVAudioSession.sharedInstance()
@@ -309,16 +309,16 @@ final class SpeechDictationController {
             case .granted:
                 return nil
             case .denied:
-                return .denied(reason: "Microphone permission was denied.")
+                return .denied(reason: String(localized: "Microphone permission was denied."))
             case .undetermined:
                 let granted = await withCheckedContinuation { continuation in
                     session.requestRecordPermission { granted in
                         continuation.resume(returning: granted)
                     }
                 }
-                return granted ? nil : .denied(reason: "Microphone permission was denied.")
+                return granted ? nil : .denied(reason: String(localized: "Microphone permission was denied."))
             @unknown default:
-                return .denied(reason: "Microphone permission is unavailable.")
+                return .denied(reason: String(localized: "Microphone permission is unavailable."))
             }
         }
     }

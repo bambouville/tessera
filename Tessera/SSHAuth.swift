@@ -31,27 +31,32 @@ enum AuthResolutionError: LocalizedError {
             // The "edit host" action on the connection-failed overlay now
             // points the user at the identity picker, so the old trailing
             // "Edit the identity…" sentence is redundant.
-            return "SSH key \(id.uuidString.prefix(8))… not found in Keychain."
+            //
+            // The short id is materialized as a String first: a Substring
+            // cannot be interpolated into a localization value.
+            let shortID = String(id.uuidString.prefix(8))
+            return String(localized: "SSH key \(shortID)… not found in Keychain.")
         case .storedKeyMetadataNotFound(let id):
-            return "SSH key \(id.uuidString.prefix(8))… has no trusted metadata. Restore or replace the key before connecting."
+            let shortID = String(id.uuidString.prefix(8))
+            return String(localized: "SSH key \(shortID)… has no trusted metadata. Restore or replace the key before connecting.")
         case .legacyDevKeyUnavailable:
-            return "This legacy development-key identity is unavailable. Replace it with a Keychain-backed key before connecting."
+            return String(localized: "This legacy development-key identity is unavailable. Replace it with a Keychain-backed key before connecting.")
         case .appLocked:
-            return "Unlock Tessera before starting a connection."
+            return String(localized: "Unlock Tessera before starting a connection.")
         case .hostNoLongerAvailable:
-            return "This saved host no longer exists."
+            return String(localized: "This saved host no longer exists.")
         case .policyChanged:
-            return "The host or authentication policy changed while connecting. Try again."
+            return String(localized: "The host or authentication policy changed while connecting. Try again.")
         case .ownerAuthenticationDisabledForProtectedKey:
-            return "This key is still protected by iOS while authentication is off. Open Keys and choose ‘finish turning protection off’ before using it."
+            return String(localized: "This key is still protected by iOS while authentication is off. Open Keys and choose ‘finish turning protection off’ before using it.")
         case .biometricCancelled:
-            return "Device authentication was cancelled - connection wasn't started."
+            return String(localized: "Device authentication was cancelled - connection wasn't started.")
         case .biometricFailed(let reason):
             let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
-                return "Device authentication failed - connection wasn't started."
+                return String(localized: "Device authentication failed - connection wasn't started.")
             }
-            return "Device authentication failed - \(trimmed)"
+            return String(localized: "Device authentication failed - \(trimmed)")
         }
     }
 }
@@ -1140,8 +1145,44 @@ actor HostKeyVerificationCoordinator {
     }
 }
 
-struct HostKeyRejectedError: LocalizedError {
-    var errorDescription: String? {
-        "Connection cancelled because the server's host key was not trusted."
+/// The one connect failure the launch overlay presents as a decision rather
+/// than an error: the user declined a host-key prompt.
+///
+/// Transports hand the UI a plain `String` through `SessionState.failed`, so
+/// the overlay has to recognise this case from the message itself. An English
+/// needle stops matching the moment that message is translated, so the text and
+/// the recogniser are built from the same catalog entries here — a new language
+/// cannot make the two disagree.
+enum HostKeyRejectionMessage {
+    static var server: String {
+        String(
+            localized: "Connection cancelled because the server's host key was not trusted.",
+            comment: "The user declined the host-key prompt"
+        )
     }
+
+    static func jumpHost(_ hopLabel: String) -> String {
+        String(
+            localized: "Jump host \(hopLabel): connection cancelled because its host key was not trusted.",
+            comment: "The user declined a jump host's key prompt; the argument names the hop"
+        )
+    }
+
+    /// U+FFFC OBJECT REPLACEMENT CHARACTER: never present in a hop label or in
+    /// any translation, so rendering the jump message around it and splitting
+    /// there recovers the localized text on either side of the placeholder —
+    /// wherever in the sentence that language puts it.
+    private static let placeholder = "\u{FFFC}"
+
+    static func matches(_ reason: String) -> Bool {
+        if reason == server { return true }
+        let parts = jumpHost(placeholder).components(separatedBy: placeholder)
+        guard parts.count == 2 else { return false }
+        guard reason.count >= parts[0].count + parts[1].count else { return false }
+        return reason.hasPrefix(parts[0]) && reason.hasSuffix(parts[1])
+    }
+}
+
+struct HostKeyRejectedError: LocalizedError {
+    var errorDescription: String? { HostKeyRejectionMessage.server }
 }

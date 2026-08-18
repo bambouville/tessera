@@ -1,0 +1,146 @@
+{
+  "recent": {
+    "de": "zuletzt",
+    "es": "recientes",
+    "fr": "récents",
+    "ja": "最近",
+    "zh-Hans": "最近",
+    "zh-Hant": "最近"
+  },
+  "all hosts · %lld": {
+    "de": "alle Hosts · %lld",
+    "es": "todos los hosts · %lld",
+    "fr": "tous les hôtes · %lld",
+    "ja": "すべてのホスト · %lld",
+    "zh-Hans": "所有主机 · %lld",
+    "zh-Hant": "所有主機 · %lld"
+  },
+  "delete %@": {
+    "de": "%@ löschen",
+    "es": "eliminar %@",
+    "fr": "supprimer %@",
+    "ja": "%@ を削除",
+    "zh-Hans": "删除 %@",
+    "zh-Hant": "刪除 %@"
+  },
+  "Host": {
+    "de": "Host",
+    "es": "Host",
+    "fr": "Hôte",
+    "ja": "ホスト",
+    "zh-Hans": "主机",
+    "zh-Hant": "主機"
+  },
+  "Destination": {
+    "de": "Ziel",
+    "es": "Destino",
+    "fr": "Destination",
+    "ja": "宛先",
+    "zh-Hans": "目标位置",
+    "zh-Hant": "目標位置"
+  },
+  "Key installed on %@": {
+    "de": "Key auf %@ installiert",
+    "es": "Clave instalada en %@",
+    "fr": "Clé installée sur %@",
+    "ja": "%@ にキーをインストールしました",
+    "zh-Hans": "已在 %@ 上安装密钥",
+    "zh-Hant": "已在 %@ 上安裝金鑰"
+  },
+  "IN": {
+    "de": "REIN",
+    "es": "ENTRA",
+    "fr": "ENTRÉE",
+    "ja": "受信",
+    "zh-Hans": "接收",
+    "zh-Hant": "接收"
+  },
+  "OUT": {
+    "de": "RAUS",
+    "es": "SALE",
+    "fr": "SORTIE",
+    "ja": "送信",
+    "zh-Hans": "发送",
+    "zh-Hant": "傳送"
+  },
+  "all": {
+    "de": "alle",
+    "es": "todos",
+    "fr": "tous",
+    "ja": "すべて",
+    "zh-Hans": "全部",
+    "zh-Hant": "全部"
+  },
+  "bound": {
+    "de": "belegt",
+    "es": "asignados",
+    "fr": "assignés",
+    "ja": "割り当て済み",
+    "zh-Hans": "已绑定",
+    "zh-Hant": "已綁定"
+  },
+  "navigate": {
+    "de": "navigieren",
+    "es": "navegar",
+    "fr": "naviguer",
+    "ja": "移動",
+    "zh-Hans": "导航",
+    "zh-Hant": "導覽"
+  },
+  "switch": {
+    "de": "wechseln",
+    "es": "cambiar",
+    "fr": "changer",
+    "ja": "切り替え",
+    "zh-Hans": "切换",
+    "zh-Hant": "切換"
+  },
+  "dismiss": {
+    "de": "schließen",
+    "es": "cerrar",
+    "fr": "fermer",
+    "ja": "閉じる",
+    "zh-Hans": "关闭",
+    "zh-Hant": "關閉"
+  },
+  "next": {
+    "de": "weiter",
+    "es": "siguiente",
+    "fr": "suivant",
+    "ja": "次へ",
+    "zh-Hans": "下一步",
+    "zh-Hant": "下一步"
+  },
+  "fit": {
+    "de": "einpassen",
+    "es": "ajustar",
+    "fr": "ajuster",
+    "ja": "全体を表示",
+    "zh-Hans": "适应",
+    "zh-Hant": "符合"
+  },
+  "one-shot": {
+    "de": "einmalig",
+    "es": "una vez",
+    "fr": "une fois",
+    "ja": "ワンショット",
+    "zh-Hans": "单次",
+    "zh-Hant": "單次"
+  },
+  "sticky": {
+    "de": "haftend",
+    "es": "persistente",
+    "fr": "persistant",
+    "ja": "固定",
+    "zh-Hans": "保持",
+    "zh-Hant": "保持"
+  },
+  "recoverable": {
+    "de": "wiederherstellbar",
+    "es": "recuperable",
+    "fr": "récupérable",
+    "ja": "復元可能",
+    "zh-Hans": "可恢复",
+    "zh-Hant": "可復原"
+  }
+}

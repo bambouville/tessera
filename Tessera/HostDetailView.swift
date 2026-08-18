@@ -9,6 +9,20 @@ private enum Tab: String, CaseIterable {
     case advanced
     case forwarding
     case snippets
+
+    /// The raw value stays the stable identity; the tab strip shows this.
+    var displayName: LocalizedStringResource {
+        switch self {
+        case .connection: return LocalizedStringResource(
+            "connection", comment: "Host editor tab")
+        case .advanced:   return LocalizedStringResource(
+            "advanced", comment: "Host editor tab")
+        case .forwarding: return LocalizedStringResource(
+            "forwarding", comment: "Host editor tab: port forwarding")
+        case .snippets:   return LocalizedStringResource(
+            "snippets", comment: "Host editor tab: startup command snippets")
+        }
+    }
 }
 
 struct HostEditorCredentialDraft: Equatable {
@@ -34,6 +48,9 @@ struct HostDetailView: View {
     @Environment(AppearancePreferences.self) private var appearance
     @Environment(HostTerminalBackgroundStore.self) private var hostBackgrounds
     @Environment(TunnelsRegistry.self) private var tunnelsRegistry
+    /// Optional so a view mounted outside `RootView` (previews, harnesses) falls
+    /// back to the shipped chord instead of trapping on a missing store.
+    @Environment(ShortcutStore.self) private var shortcutStore: ShortcutStore?
     @Query(sort: \StoredKey.createdAt, order: .reverse) private var storedKeys: [StoredKey]
     var onConnect: (PersistedHost, String, [UUID: String]) -> Void
     var onCancel: () -> Void
@@ -42,7 +59,7 @@ struct HostDetailView: View {
     var continuationSourceLabel: String? = nil
     var continuationAction: ContinuationAction? = nil
     var continuationTmuxSessionName: String? = nil
-    var compactPrimaryTitle: String = "save"
+    var compactPrimaryTitle: LocalizedStringKey = "save"
     var onAuthorizeFromPeer: (() -> Void)? = nil
 
     /// Transient password — entered here and never stored in SwiftData.
@@ -101,8 +118,10 @@ struct HostDetailView: View {
             VStack(alignment: .leading, spacing: 0) {
                 PageHeader(
                     title: isContinuationDraft
-                        ? "add host & connect"
-                        : (isDraft ? "new host" : (host.name.isEmpty ? "host" : host.name)),
+                        ? String(localized: "add host & connect")
+                        : (isDraft
+                            ? String(localized: "new host")
+                            : (host.name.isEmpty ? String(localized: "host") : host.name)),
                     onCancel: onCancel,
                     onDelete: (isDraft || isContinuationDraft) ? nil : onDelete
                 )
@@ -178,13 +197,12 @@ struct HostDetailView: View {
 
     @ViewBuilder
     private var tabContent: some View {
-        if isPhone {
-            switch selectedTab {
-            case .forwarding:
-                forwardingTab
-            default:
-                connectionTab
-            }
+        // The continuation handoff renders no section picker — it is a focused
+        // one-shot form, not the editor — so it stays on the connection fields
+        // whatever `selectedTab` happens to hold. Every other path, phone and
+        // iPad alike, walks the same four sections.
+        if isPhone && isContinuationDraft {
+            connectionTab
         } else {
             switch selectedTab {
             case .connection:
@@ -212,7 +230,10 @@ struct HostDetailView: View {
         }
         .disabled(!connectEnabled)
         .opacity(connectEnabled ? 1 : 0.5)
-        .keyboardShortcut(.return, modifiers: .command)
+        // From the keymap, not a literal: the terminal container has no selector
+        // for `.connect`, so this button is the whole registration — a literal
+        // here makes the editor's connect row inert.
+        .storedKeyboardShortcut(.connect, in: shortcutStore)
         .padding(.horizontal, isPhone ? 18 : 36)
         .padding(.vertical, 16)
         .frame(maxWidth: 560, alignment: .leading)
@@ -263,7 +284,7 @@ struct HostDetailView: View {
     private var connectionTab: some View {
         VStack(alignment: .leading, spacing: 20) {
             Field(label: "name") {
-                Input(text: hostNameBinding, placeholder: "my-server")
+                Input(text: hostNameBinding, verbatimPlaceholder: "my-server")
             }
 
             if isPhone {
@@ -292,10 +313,30 @@ struct HostDetailView: View {
                 identityField
             }
 
-            if !isPhone && !isContinuationDraft && !destinationNeedsCredentialInput {
+            if showsPasswordField {
                 Field(label: "password") {
-                    Input(text: $credentials.password, placeholder: "••••••••", secure: true)
-                        .textContentType(.password)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Input(text: $credentials.password, verbatimPlaceholder: "••••••••", secure: true)
+                            .textContentType(.password)
+
+                        if isPhone {
+                            Text("saving replaces the password stored in this device's keychain.")
+                                .font(Typography.tesseraMono(size: 11))
+                                .foregroundStyle(T.fgDim)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        // The credential card owns this message when it is on
+                        // screen; here the field is the only place a keychain
+                        // write can report itself, and a Save that aborts
+                        // silently is worse than no field at all.
+                        if let credentialPersistenceError {
+                            Text(verbatim: credentialPersistenceError)
+                                .font(Typography.tesseraMono(size: 11))
+                                .foregroundStyle(T.red)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                 }
             }
 
@@ -310,18 +351,19 @@ struct HostDetailView: View {
 
             transportSection
 
-            if !isPhone {
-                jumpHostSection
-                launchSection
-            } else {
+            if isPhone && isContinuationDraft {
+                // Handoff form: a read-only route summary plus whatever hop
+                // passwords the secret-free descriptor could not carry.
                 compactContinuationRouteSummary
                 if isCredentialSetupContext {
                     compactContinuationJumpCredentials
                 }
-                Text("jump chains, environment variables, startup snippets, and terminal backgrounds remain editable on iPad.")
-                    .font(Typography.tesseraMono(size: 10))
-                    .foregroundStyle(T.fgDim)
-                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                // `jumpHostSection` already carries the hop-password inputs and
+                // the chain caption, so the compact editor must not also render
+                // `compactContinuationJumpCredentials` — they would double up.
+                jumpHostSection
+                launchSection
             }
         }
     }
@@ -442,7 +484,7 @@ struct HostDetailView: View {
             }
 
             Field(label: "environment variables", sub: "one KEY=value per line; an optional leading `export ` is stripped. values are passed to the remote shell verbatim — `$HOME`, `$(…)`, and quotes work as written.") {
-                multilineInput("PATH=/opt/local/bin:$PATH\nEDITOR=nvim", text: $host.envVars)
+                multilineInput(verbatim: "PATH=/opt/local/bin:$PATH\nEDITOR=nvim", text: $host.envVars)
             }
 
             Text("tmux gotcha: env vars and the startup snippet only run when tmux *starts*. if you re-attach to an existing tmux session on this host, the running panes keep their old env. run `tmux kill-server` on the remote (or kill the session) and reconnect to pick up changes.")
@@ -473,15 +515,15 @@ struct HostDetailView: View {
 
     private var globalBackgroundCaption: String {
         if let bg = appearance.globalTerminalBackground {
-            return "follows settings → themes (currently: custom image · dim \(Int((bg.dim * 100).rounded()))%)."
+            return String(localized: "follows settings → themes (currently: custom image · dim \(Int((bg.dim * 100).rounded()))%).")
         }
-        return "follows settings → themes (currently: theme color)."
+        return String(localized: "follows settings → themes (currently: theme color).")
     }
 
     private var terminalBackgroundField: some View {
         Field(label: "terminal background") {
             VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
+                segmentedRow {
                     backgroundModeButton(.inherit, label: "global")
                     backgroundModeButton(.color, label: "theme color")
                     backgroundModeButton(.image, label: "image")
@@ -490,7 +532,7 @@ struct HostDetailView: View {
 
                 switch backgroundOverride.mode {
                 case .inherit:
-                    Text(globalBackgroundCaption)
+                    Text(verbatim: globalBackgroundCaption)
                         .font(Typography.tesseraMono(size: 11))
                         .foregroundStyle(T.fgDim)
                         .fixedSize(horizontal: false, vertical: true)
@@ -545,10 +587,12 @@ struct HostDetailView: View {
 
     private func backgroundModeButton(
         _ mode: HostTerminalBackgroundMode,
-        label: String
+        label: LocalizedStringKey
     ) -> some View {
         let isSelected = backgroundOverride.mode == mode
-        return Btn(style: isSelected ? .primary : .default, full: true, action: {
+        // Equal-width on iPad; natural width on the phone so `segmentedRow`'s
+        // flow layout can wrap the row instead of squeezing "theme color".
+        return Btn(style: isSelected ? .primary : .default, full: !isPhone, action: {
             var override = backgroundOverride
             override.mode = mode
             hostBackgrounds.set(override, for: host.id)
@@ -570,7 +614,7 @@ struct HostDetailView: View {
 
     private var addressField: some View {
         Field(label: "address") {
-            Input(text: hostAddressBinding, placeholder: "192.168.1.10")
+            Input(text: hostAddressBinding, verbatimPlaceholder: "192.168.1.10")
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .textContentType(.URL)
@@ -600,7 +644,7 @@ struct HostDetailView: View {
                 }
             } label: {
                 HStack(spacing: 6) {
-                    Text(identityDisplayLabel)
+                    Text(verbatim: identityDisplayLabel)
                         .font(Typography.tesseraMono(size: 13))
                         .foregroundStyle(T.fg)
                     Spacer()
@@ -631,17 +675,18 @@ struct HostDetailView: View {
             }
             switch identity.credentialMode {
             case .password:
-                return "Password"
+                return String(localized: "Password")
             case .legacyDevKey:
-                return "Legacy key"
+                return String(localized: "Legacy key")
             case .none:
-                return "None"
+                return String(localized: "None")
             case .key:
                 break
             }
         }
-        guard let id = identityKeyBinding.wrappedValue else { return "None" }
-        return storedKeys.first(where: { $0.id == id })?.name ?? "None"
+        let noKey = String(localized: "None")
+        guard let id = identityKeyBinding.wrappedValue else { return noKey }
+        return storedKeys.first(where: { $0.id == id })?.name ?? noKey
     }
 
     private var identityKeyBinding: Binding<UUID?> {
@@ -689,7 +734,7 @@ struct HostDetailView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Text(tag)
-                        Text("✕")
+                        Text(verbatim: "✕")
                     }
                     .font(Typography.tesseraMono(size: 10))
                     .foregroundStyle(T.fgMuted)
@@ -728,8 +773,19 @@ struct HostDetailView: View {
         host.tags.remove(at: index)
     }
 
-    private func multilineInput(_ placeholder: String, text: Binding<String>) -> some View {
-        TextField(placeholder, text: text, axis: .vertical)
+    /// Prose shown until the field is filled in — extracted and translated.
+    private func multilineInput(_ placeholder: LocalizedStringKey, text: Binding<String>) -> some View {
+        multilineInput(placeholder: Text(placeholder), text: text)
+    }
+
+    /// Sample input that must read the same in every language: shell syntax,
+    /// paths, `KEY=value` pairs.
+    private func multilineInput(verbatim placeholder: String, text: Binding<String>) -> some View {
+        multilineInput(placeholder: Text(verbatim: placeholder), text: text)
+    }
+
+    private func multilineInput(placeholder: Text, text: Binding<String>) -> some View {
+        TextField(text: text, prompt: placeholder, axis: .vertical) { placeholder }
             .lineLimit(4...10)
             .font(Typography.tesseraMono(size: 13))
             .foregroundStyle(T.fg)
@@ -782,12 +838,12 @@ struct HostDetailView: View {
     }
 
     private var selectedJumpHostLabel: String {
-        guard let jumpHostID else { return "none" }
+        guard let jumpHostID else { return String(localized: "none") }
         let descriptor = FetchDescriptor<PersistedHost>(
             predicate: #Predicate { $0.id == jumpHostID }
         )
         guard let bastion = (try? modelContext.fetch(descriptor))?.first else {
-            return "missing host"
+            return String(localized: "missing host")
         }
         return jumpHostDisplayName(bastion)
     }
@@ -798,16 +854,19 @@ struct HostDetailView: View {
         guard jumpHostID != nil else { return nil }
         let resolution = HostJumpChainResolver.resolve(for: host, in: modelContext)
         if resolution.isBroken {
-            return "⚠ \(resolution.brokenReason ?? "the jump chain could not be resolved.") connections fail until this is fixed."
+            let reason = resolution.brokenReason
+                ?? String(localized: "the jump chain could not be resolved.")
+            return String(localized: "⚠ \(reason) connections fail until this is fixed.")
         }
         let path = (resolution.hops.map(jumpHostDisplayName)
                     + [jumpHostDisplayName(host)]).joined(separator: " → ")
-        var caption = "path: \(path)"
-        if resolution.hops.count > 1 {
-            caption += " (the jump host's own jump host extends the chain)"
-        }
+        // Both path forms are whole sentences: the parenthetical is a clause,
+        // not a suffix that can be appended in every language.
+        var caption = resolution.hops.count > 1
+            ? String(localized: "path: \(path) (the jump host's own jump host extends the chain)")
+            : String(localized: "path: \(path)")
         if host.transport == .mosh {
-            caption += "\nmosh UDP cannot traverse bastions — if the mosh server is unreachable the session falls back to SSH."
+            caption += "\n" + String(localized: "mosh UDP cannot traverse bastions — if the mosh server is unreachable the session falls back to SSH.")
         }
         return caption
     }
@@ -868,7 +927,7 @@ struct HostDetailView: View {
             Field(label: "password · \(jumpHostDisplayName(jumpHost))") {
                 Input(
                     text: jumpPasswordBinding(for: jumpHost.id),
-                    placeholder: "••••••••",
+                    verbatimPlaceholder: "••••••••",
                     secure: true
                 )
                 .textContentType(.password)
@@ -894,7 +953,7 @@ struct HostDetailView: View {
             }
 
             if let jumpChainCaption {
-                Text(jumpChainCaption)
+                Text(verbatim: jumpChainCaption)
                     .font(Typography.tesseraMono(size: 10))
                     .foregroundStyle(T.fgDim)
                     .fixedSize(horizontal: false, vertical: true)
@@ -917,7 +976,7 @@ struct HostDetailView: View {
                 }
             } label: {
                 HStack(spacing: 6) {
-                    Text(selectedJumpHostLabel)
+                    Text(verbatim: selectedJumpHostLabel)
                         .font(Typography.tesseraMono(size: 13))
                         .foregroundStyle(T.fg)
                     Spacer()
@@ -939,11 +998,17 @@ struct HostDetailView: View {
 
             jumpPasswordInputs
 
-            Text(jumpChainCaption
-                 ?? "connect through another saved host (SSH bastion / ProxyJump).")
-                .font(Typography.tesseraMono(size: 11))
-                .foregroundStyle(T.fgDim)
-                .fixedSize(horizontal: false, vertical: true)
+            if let jumpChainCaption {
+                Text(verbatim: jumpChainCaption)
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.fgDim)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("connect through another saved host (SSH bastion / ProxyJump).")
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.fgDim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.vertical, 4)
     }
@@ -964,7 +1029,7 @@ struct HostDetailView: View {
             // roll our own using the same styling vocabulary as the
             // rest of the form (white opacity-0.08 field background
             // for unselected, solid white for selected).
-            HStack(spacing: 8) {
+            segmentedRow {
                 modeButton(.autoTmux, label: "auto-tmux")
                 modeButton(.pinnedTmux, label: "named tmux")
                 modeButton(.customCommand, label: "custom")
@@ -973,14 +1038,14 @@ struct HostDetailView: View {
 
             switch host.launchMode {
             case .autoTmux:
-                Text(autoTmuxDescription)
+                Text(verbatim: autoTmuxDescription)
                     .font(Typography.tesseraMono(size: 11))
                     .foregroundStyle(T.fgDim)
             case .pinnedTmux:
                 Field(label: "tmux session name") {
                     Input(
                         text: optionalStringBinding($host.tmuxSessionName),
-                        placeholder: "dev"
+                        verbatimPlaceholder: "dev"
                     )
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -993,7 +1058,7 @@ struct HostDetailView: View {
                 Field(label: "launch command") {
                     Input(
                         text: optionalStringBinding($host.launchCommand),
-                        placeholder: customLaunchPlaceholder
+                        verbatimPlaceholder: customLaunchPlaceholder
                     )
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -1012,14 +1077,32 @@ struct HostDetailView: View {
         return Btn(style: isSelected ? .primary : .default, full: true, action: {
             compactTransport = transport
         }) {
-            Text(label)
+            Text(verbatim: label)
                 .font(Typography.tesseraMono(size: 13, weight: isSelected ? .semibold : .regular))
         }
     }
 
-    private func modeButton(_ mode: HostLaunchMode, label: String) -> some View {
+    /// Three-way selectors keep the iPad's equal-width segmented row. The same
+    /// row on a 390pt phone is three ~112pt cells inside the 18pt page margins
+    /// — narrower than "theme color" renders at 13pt mono, and Dynamic Type
+    /// only widens the labels — so on compact the buttons size to their own
+    /// text and wrap onto a second line rather than clipping or squeezing.
+    /// Two-button rows (transport, os logo) keep ~173pt cells and stay put.
+    @ViewBuilder
+    private func segmentedRow<Content: View>(
+        @ViewBuilder _ content: () -> Content
+    ) -> some View {
+        if isPhone {
+            FlowLayout(spacing: 8) { content() }
+        } else {
+            HStack(spacing: 8) { content() }
+        }
+    }
+
+    private func modeButton(_ mode: HostLaunchMode, label: LocalizedStringKey) -> some View {
         let isSelected = host.launchMode == mode
-        return Btn(style: isSelected ? .primary : .default, full: true, action: { host.launchMode = mode }) {
+        // Equal-width on iPad, natural width inside the compact flow row.
+        return Btn(style: isSelected ? .primary : .default, full: !isPhone, action: { host.launchMode = mode }) {
             Text(label)
                 .font(Typography.tesseraMono(size: 13, weight: isSelected ? .semibold : .regular))
         }
@@ -1027,7 +1110,7 @@ struct HostDetailView: View {
 
     /// Two-state segmented button for the os-logo auto/manual selector.
     /// Mirrors the launch-mode and transport buttons stylistically.
-    private func osModeButton(manual: Bool, label: String) -> some View {
+    private func osModeButton(manual: Bool, label: LocalizedStringKey) -> some View {
         let isSelected = isOSManual == manual
         return Btn(style: isSelected ? .primary : .default, full: true, action: {
             isOSManual = manual
@@ -1050,9 +1133,15 @@ struct HostDetailView: View {
     private var autoTmuxDescription: String {
         switch selectedTransport {
         case .ssh:
-            return "attach to per-host tmux session `\(derivedSessionName)`."
+            return String(
+                localized: "attach to per-host tmux session `\(derivedSessionName)`.",
+                comment: "Auto-tmux description on SSH; the argument is a tmux session name"
+            )
         case .mosh:
-            return "start mosh inside per-host tmux session `\(derivedSessionName)`."
+            return String(
+                localized: "start mosh inside per-host tmux session `\(derivedSessionName)`.",
+                comment: "Auto-tmux description on mosh; the argument is a tmux session name"
+            )
         }
     }
 
@@ -1065,7 +1154,7 @@ struct HostDetailView: View {
         }
     }
 
-    private var customLaunchDescription: String {
+    private var customLaunchDescription: LocalizedStringResource {
         switch selectedTransport {
         case .ssh:
             return "sent verbatim to the login shell on connect."
@@ -1077,9 +1166,13 @@ struct HostDetailView: View {
     // MARK: - Port field
 
     private var portField: some View {
-        Field(label: "port") {
+        // The default SSH port, shown as placeholder text. Held in a String
+        // so TextField takes its StringProtocol overload rather than treating
+        // a bare literal as a translatable key — "22" is a number, not a word.
+        let portPlaceholder = "22"
+        return Field(label: "port") {
             TextField(
-                "22",
+                portPlaceholder,
                 value: hostPortBinding,
                 formatter: NumberFormatter.port
             )
@@ -1139,9 +1232,16 @@ struct HostDetailView: View {
         guard compactSaveEnabled else { return }
 
         commitStagedHostFields()
+        // Snapshot before any keychain write: storing a first-time password
+        // flips `destinationNeedsCredentialInput`, and the plain field would
+        // then look present after the fact and rewrite what was just stored.
+        let editedPasswordIdentity = isPhone && showsPasswordField
+            ? editablePasswordIdentity
+            : nil
         guard persistCredentialPasswordIfNeeded(
             required: isContinuationDraft
         ) else { return }
+        guard persistEditedPassword(into: editedPasswordIdentity) else { return }
         guard prepareContinuationJumpPasswordIdentitiesIfNeeded() else { return }
         try? modelContext.save()
         let hostID = host.id
@@ -1212,6 +1312,30 @@ struct HostDetailView: View {
                 )
             }
         }
+    }
+
+    /// The plain password field means different things per idiom, because the
+    /// two editors end differently. The iPad editor ends in Connect, so a typed
+    /// password rides along with that one connection and the field is offered
+    /// for any already-credentialed host. The compact editor ends in Save and
+    /// never connects, so it is offered only where Save can act on it — a host
+    /// that already authenticates by password — instead of being a control that
+    /// silently discards whatever was typed into it.
+    private var showsPasswordField: Bool {
+        guard !isContinuationDraft, !destinationNeedsCredentialInput else {
+            return false
+        }
+        return !isPhone || editablePasswordIdentity != nil
+    }
+
+    /// This host's own password identity, unless the identity picker has been
+    /// pointed at a key during this edit. `nil` for key-backed, legacy-key and
+    /// unconfigured hosts — none of which have a stored password to rewrite.
+    private var editablePasswordIdentity: Identity? {
+        if compactIdentityWasChanged, compactIdentityKeyID != nil { return nil }
+        guard let identity = host.identity,
+              case .password = identity.credentialMode else { return nil }
+        return identity
     }
 
     private var destinationNeedsCredentialInput: Bool {
@@ -1299,7 +1423,7 @@ struct HostDetailView: View {
                 continue
             }
             guard !enteredPassword.isEmpty else {
-                credentialPersistenceError = "Enter a password for every unconfigured jump host."
+                credentialPersistenceError = String(localized: "Enter a password for every unconfigured jump host.")
                 return false
             }
             do {
@@ -1323,6 +1447,30 @@ struct HostDetailView: View {
         }
     }
 
+    /// Save, not Connect, is the compact editor's terminal action, so a
+    /// password typed into the plain field would be dropped on the floor unless
+    /// it is written here — `connectFromEditor` is what carries it on iPad.
+    /// The caller snapshots the target identity first, before any other
+    /// keychain write can move `destinationNeedsCredentialInput` underneath it.
+    /// Only an existing password identity is rewritten, so typing in this form
+    /// can never downgrade a key-backed host to a password, and the secret
+    /// stays inside the ThisDeviceOnly Keychain boundary rather than SwiftData.
+    private func persistEditedPassword(into identity: Identity?) -> Bool {
+        guard let identity, !credentials.password.isEmpty else { return true }
+
+        do {
+            try KeychainHelper.setPassword(
+                credentials.password,
+                forIdentityID: identity.id
+            )
+            credentialPersistenceError = nil
+            return true
+        } catch {
+            credentialPersistenceError = error.localizedDescription
+            return false
+        }
+    }
+
     /// A password entered for a continuation is a one-time setup cost. Keep it
     /// available for later one-tap continuations on this device, using the
     /// existing ThisDeviceOnly Keychain boundary. Nothing here is encodable by
@@ -1335,8 +1483,8 @@ struct HostDetailView: View {
         guard !credentials.password.isEmpty else {
             if required {
                 credentialPersistenceError = onAuthorizeFromPeer == nil
-                    ? "Enter a password or choose a key before connecting."
-                    : "Enter a password or authorize this device from your other device."
+                    ? String(localized: "Enter a password or choose a key before connecting.")
+                    : String(localized: "Enter a password or authorize this device from your other device.")
                 return false
             }
             credentialPersistenceError = nil
@@ -1373,6 +1521,7 @@ struct HostDetailView: View {
 }
 
 private struct PageHeader: View {
+    /// Already resolved — usually the host's own name.
     var title: String
     var onCancel: () -> Void
     var onDelete: (() -> Void)?
@@ -1387,7 +1536,7 @@ private struct PageHeader: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 10) {
-                Text(title)
+                Text(verbatim: title)
                     .font(Typography.heroTitle)
                     .foregroundStyle(T.fg)
                     .lineLimit(1)
@@ -1438,7 +1587,7 @@ private struct SegmentedTabBar: View {
             ForEach(Tab.allCases, id: \.self) { tab in
                 Button { selectedTab = tab } label: {
                     VStack(spacing: 0) {
-                        Text(tab.rawValue)
+                        Text(tab.displayName)
                             .font(Typography.tesseraMono(size: 12))
                             .foregroundStyle(selectedTab == tab ? T.fg : T.fgMuted)
                             .padding(.horizontal, 14)
@@ -1459,34 +1608,57 @@ private struct SegmentedTabBar: View {
     }
 }
 
-/// The compact editor intentionally exposes only the phone-supported host
-/// sections. Forwarding uses the same rule editor as iPad; connection fields
-/// and rules are both staged until the bottom Save action.
+/// Every section the iPad tab strip exposes, on one compact row. Four equal
+/// cells would be ~85pt inside a 390pt phone's 18pt page margins — narrower
+/// than "connection" renders at 12pt mono, and Dynamic Type only widens it —
+/// so the chips size to their own labels and the row scrolls once they stop
+/// fitting. Nothing truncates, and selecting a chip reveals it.
+///
+/// Forwarding uses the same rule editor as iPad; connection fields and rules
+/// are both staged until the bottom Save action, while the advanced, launch
+/// and snippet controls write straight through as they do on iPad.
 private struct CompactHostSectionPicker: View {
     @Binding var selectedTab: Tab
     @Environment(\.designTokens) private var T
 
     var body: some View {
-        HStack(spacing: 8) {
-            sectionButton(.connection, title: "connection")
-            sectionButton(.forwarding, title: "tunnels")
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    sectionButton(.connection, title: "connection")
+                    sectionButton(.advanced, title: "advanced")
+                    sectionButton(.forwarding, title: "tunnels")
+                    sectionButton(.snippets, title: "snippets")
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 8)
+            }
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .onChange(of: selectedTab) { _, tab in
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo(tab, anchor: .center)
+                }
+            }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 10)
+        // A scroll view is greedy in both axes; without this the picker would
+        // split the page's vertical space with the form scroll below it.
+        .fixedSize(horizontal: false, vertical: true)
         .background(T.presentationBg)
         .overlay(alignment: .bottom) {
             Rectangle().fill(T.border).frame(height: 0.5)
         }
     }
 
-    private func sectionButton(_ tab: Tab, title: String) -> some View {
+    private func sectionButton(_ tab: Tab, title: LocalizedStringKey) -> some View {
         Button {
             selectedTab = tab
         } label: {
             Text(title)
                 .font(Typography.tesseraMono(size: 12, weight: .medium))
                 .foregroundStyle(selectedTab == tab ? T.fg : T.fgMuted)
-                .frame(maxWidth: .infinity, minHeight: 36)
+                .lineLimit(1)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 44)
                 .background(selectedTab == tab ? T.accentSoft : T.inputBg)
                 .clipShape(RoundedRectangle(cornerRadius: 7))
                 .overlay {
@@ -1495,6 +1667,7 @@ private struct CompactHostSectionPicker: View {
                 }
         }
         .buttonStyle(.plain)
+        .id(tab)
     }
 }
 

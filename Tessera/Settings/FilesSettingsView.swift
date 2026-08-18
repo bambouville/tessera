@@ -7,13 +7,13 @@ struct FilesSettingsView: View {
     @Environment(AppearancePreferences.self) private var appearance
     @Environment(\.designTokens) private var T
 
-    private let cleanupOptions: [(value: Int, label: String)] = [
+    private let cleanupOptions: [(value: Int, label: LocalizedStringResource)] = [
         (0, "off"),
         (1, "1 d"),
         (7, "7 d"),
         (30, "30 d")
     ]
-    private let destinationOptions: [(value: String, label: String)] = [
+    private let destinationOptions: [(value: String, label: LocalizedStringResource)] = [
         ("cwd", "session cwd"),
         ("temp", "temp folder")
     ]
@@ -34,7 +34,7 @@ struct FilesSettingsView: View {
                         selection: $appearance.filesReaperDays
                     )
 
-                    Text(cleanupDisplay(appearance.filesReaperDays))
+                    Text(verbatim: cleanupDisplay(appearance.filesReaperDays))
                         .font(Typography.tesseraMono(size: 12, weight: .medium))
                         .foregroundStyle(T.fg)
                         .padding(.vertical, 7)
@@ -64,7 +64,9 @@ struct FilesSettingsView: View {
     }
 
     private func cleanupDisplay(_ days: Int) -> String {
-        days == 0 ? "off" : "\(days) d"
+        days == 0
+            ? String(localized: "off", comment: "Temp-file cleanup is disabled")
+            : String(localized: "\(days) d", comment: "Temp-file retention, in days")
     }
 
     private var footnoteRow: some View {
@@ -85,7 +87,7 @@ struct FilesSettingsView: View {
 }
 
 private struct FilesSegmentedPicker<Value: Hashable>: View {
-    let options: [(value: Value, label: String)]
+    let options: [(value: Value, label: LocalizedStringResource)]
     @Binding var selection: Value
 
     @Environment(\.designTokens) private var T
@@ -105,7 +107,7 @@ private struct FilesSegmentedPicker<Value: Hashable>: View {
         )
     }
 
-    private func segment(_ label: String, value: Value) -> some View {
+    private func segment(_ label: LocalizedStringResource, value: Value) -> some View {
         let active = selection == value
 
         return Button {

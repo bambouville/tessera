@@ -1,0 +1,562 @@
+{
+  "welcome to Tessera": {
+    "de": "Willkommen bei Tessera",
+    "es": "te damos la bienvenida a Tessera",
+    "fr": "bienvenue dans Tessera",
+    "ja": "Tessera へようこそ",
+    "zh-Hans": "欢迎使用 Tessera",
+    "zh-Hant": "歡迎使用 Tessera"
+  },
+  "take the tour": {
+    "de": "Rundgang starten",
+    "es": "hacer el recorrido",
+    "fr": "faire la visite",
+    "ja": "ツアーを見る",
+    "zh-Hans": "开始导览",
+    "zh-Hant": "開始導覽"
+  },
+  "skip tour ✕": {
+    "de": "Rundgang überspringen ✕",
+    "es": "omitir el recorrido ✕",
+    "fr": "passer la visite ✕",
+    "ja": "ツアーをスキップ ✕",
+    "zh-Hans": "跳过导览 ✕",
+    "zh-Hant": "跳過導覽 ✕"
+  },
+  "skip": {
+    "de": "überspringen",
+    "es": "omitir",
+    "fr": "passer",
+    "ja": "スキップ",
+    "zh-Hans": "跳过",
+    "zh-Hant": "跳過"
+  },
+  "start": {
+    "de": "starten",
+    "es": "empezar",
+    "fr": "commencer",
+    "ja": "開始",
+    "zh-Hans": "开始",
+    "zh-Hant": "開始"
+  },
+  "optional": {
+    "de": "optional",
+    "es": "opcional",
+    "fr": "facultatif",
+    "ja": "省略可能",
+    "zh-Hans": "可选",
+    "zh-Hant": "選用"
+  },
+  "STEP %lld OF %lld": {
+    "de": "SCHRITT %lld VON %lld",
+    "es": "PASO %lld DE %lld",
+    "fr": "ÉTAPE %lld SUR %lld",
+    "ja": "ステップ %lld / %lld",
+    "zh-Hans": "第 %lld 步，共 %lld 步",
+    "zh-Hant": "第 %lld 步，共 %lld 步"
+  },
+  "all sessions": {
+    "de": "alle Sitzungen",
+    "es": "todas las sesiones",
+    "fr": "toutes les sessions",
+    "ja": "すべてのセッション",
+    "zh-Hans": "全部会话",
+    "zh-Hant": "全部工作階段"
+  },
+  "agent center · 3": {
+    "de": "Agent-Center · 3",
+    "es": "centro de agentes · 3",
+    "fr": "centre d'agents · 3",
+    "ja": "エージェントセンター · 3",
+    "zh-Hans": "智能体中心 · 3",
+    "zh-Hant": "智慧體中心 · 3"
+  },
+  "Files": {
+    "de": "Dateien",
+    "es": "Archivos",
+    "fr": "Fichiers",
+    "ja": "ファイル",
+    "zh-Hans": "文件",
+    "zh-Hant": "檔案"
+  },
+  "software keyboard accessory": {
+    "de": "Zubehörleiste der Bildschirmtastatur",
+    "es": "barra accesoria del teclado en pantalla",
+    "fr": "barre d'accessoires du clavier logiciel",
+    "ja": "ソフトウェアキーボードのアクセサリバー",
+    "zh-Hans": "软件键盘辅助栏",
+    "zh-Hant": "軟體鍵盤輔助列"
+  },
+  "full list in Settings → Keyboard": {
+    "de": "vollständige Liste unter Einstellungen → Tastatur",
+    "es": "lista completa en Ajustes → Teclado",
+    "fr": "liste complète dans Réglages → Clavier",
+    "ja": "一覧は「設定」→「キーボード」にあります",
+    "zh-Hans": "完整列表见「设置 → 键盘」",
+    "zh-Hant": "完整列表見「設定 → 鍵盤」"
+  },
+  "share a screenshot": {
+    "de": "Bildschirmfoto teilen",
+    "es": "compartir una captura de pantalla",
+    "fr": "partager une capture d'écran",
+    "ja": "スクリーンショットを共有",
+    "zh-Hans": "共享一张截屏",
+    "zh-Hant": "共享一張截圖"
+  },
+  "share or drop a screenshot": {
+    "de": "Bildschirmfoto teilen oder hierher ziehen",
+    "es": "comparte o suelta una captura de pantalla",
+    "fr": "partagez ou déposez une capture d'écran",
+    "ja": "スクリーンショットを共有するか、ここにドロップします",
+    "zh-Hans": "共享或拖入一张截屏",
+    "zh-Hant": "共享或拖入一張截圖"
+  },
+  "upload · type path": {
+    "de": "hochladen · Pfad eintippen",
+    "es": "subir · escribir la ruta",
+    "fr": "téléverser · saisir le chemin",
+    "ja": "アップロード · パスを入力",
+    "zh-Hans": "上传 · 输入路径",
+    "zh-Hant": "上傳 · 輸入路徑"
+  },
+  "uploads to ~/.cache/tessera/ · types the path": {
+    "de": "lädt nach ~/.cache/tessera/ hoch · tippt den Pfad ein",
+    "es": "sube a ~/.cache/tessera/ · escribe la ruta",
+    "fr": "téléverse dans ~/.cache/tessera/ · saisit le chemin",
+    "ja": "~/.cache/tessera/ にアップロードし、パスを入力します",
+    "zh-Hans": "上传到 ~/.cache/tessera/ · 并输入该路径",
+    "zh-Hant": "上傳到 ~/.cache/tessera/ · 並輸入該路徑"
+  },
+  "compare against this layout ": {
+    "de": "vergleiche mit diesem Layout ",
+    "es": "compara con esta maqueta ",
+    "fr": "compare avec cette maquette ",
+    "ja": "このレイアウトと比較して ",
+    "zh-Hans": "与这个布局对比 ",
+    "zh-Hant": "與這個版面對比 "
+  },
+  "Claude Code & Codex attach the image": {
+    "de": "Claude Code und Codex hängen das Bild an",
+    "es": "Claude Code y Codex adjuntan la imagen",
+    "fr": "Claude Code et Codex joignent l'image",
+    "ja": "Claude Code と Codex が画像を添付します",
+    "zh-Hans": "Claude Code 与 Codex 会附上该图片",
+    "zh-Hant": "Claude Code 與 Codex 會附上該圖片"
+  },
+  "Claude Code & Codex read the path and attach the image": {
+    "de": "Claude Code und Codex lesen den Pfad und hängen das Bild an",
+    "es": "Claude Code y Codex leen la ruta y adjuntan la imagen",
+    "fr": "Claude Code et Codex lisent le chemin et joignent l'image",
+    "ja": "Claude Code と Codex がそのパスを読み取り、画像を添付します",
+    "zh-Hans": "Claude Code 与 Codex 会读取该路径并附上图片",
+    "zh-Hant": "Claude Code 與 Codex 會讀取該路徑並附上圖片"
+  },
+  "preview": {
+    "de": "Vorschau",
+    "es": "vista previa",
+    "fr": "aperçu",
+    "ja": "プレビュー",
+    "zh-Hans": "预览",
+    "zh-Hant": "預覽"
+  },
+  "cursor style": {
+    "de": "Cursor-Stil",
+    "es": "estilo del cursor",
+    "fr": "style du curseur",
+    "ja": "カーソルのスタイル",
+    "zh-Hans": "光标样式",
+    "zh-Hant": "游標樣式"
+  },
+  "cursor blink": {
+    "de": "Cursor-Blinken",
+    "es": "parpadeo del cursor",
+    "fr": "clignotement du curseur",
+    "ja": "カーソルの点滅",
+    "zh-Hans": "光标闪烁",
+    "zh-Hant": "游標閃爍"
+  },
+  "blink the terminal cursor": {
+    "de": "den Terminal-Cursor blinken lassen",
+    "es": "hacer parpadear el cursor del terminal",
+    "fr": "faire clignoter le curseur du terminal",
+    "ja": "ターミナルのカーソルを点滅させます",
+    "zh-Hans": "让终端光标闪烁",
+    "zh-Hant": "讓終端機游標閃爍"
+  },
+  "smooth scrolling": {
+    "de": "weiches Scrollen",
+    "es": "desplazamiento suave",
+    "fr": "défilement fluide",
+    "ja": "スムーズスクロール",
+    "zh-Hans": "平滑滚动",
+    "zh-Hant": "平滑捲動"
+  },
+  "glide with momentum after trackpad flicks · scrollback only, apps like vim stay untouched": {
+    "de": "nach einem Wisch auf dem Trackpad mit Schwung weitergleiten · nur im Scrollback, Programme wie vim bleiben unberührt",
+    "es": "sigue deslizándose con inercia tras un gesto rápido en el trackpad · solo en el historial; apps como vim no se ven afectadas",
+    "fr": "poursuit sur l'élan après un mouvement rapide sur le trackpad · uniquement dans l'historique, les apps comme vim ne sont pas touchées",
+    "ja": "トラックパッドのフリック後に慣性で滑らかに動きます · スクロールバックのみで、vim などのアプリには影響しません",
+    "zh-Hans": "在触控板轻扫后带惯性滑行 · 仅作用于回滚缓冲，vim 等程序不受影响",
+    "zh-Hant": "在觸控式軌跡板輕掃後帶慣性滑行 · 僅作用於回捲緩衝，vim 等程式不受影響"
+  },
+  "glide speed": {
+    "de": "Gleitgeschwindigkeit",
+    "es": "velocidad de deslizamiento",
+    "fr": "vitesse de glissement",
+    "ja": "滑走の速さ",
+    "zh-Hans": "滑行速度",
+    "zh-Hant": "滑行速度"
+  },
+  "slow": {
+    "de": "langsam",
+    "es": "lenta",
+    "fr": "lente",
+    "ja": "遅い",
+    "zh-Hans": "慢",
+    "zh-Hant": "慢"
+  },
+  "fast": {
+    "de": "schnell",
+    "es": "rápida",
+    "fr": "rapide",
+    "ja": "速い",
+    "zh-Hans": "快",
+    "zh-Hant": "快"
+  },
+  "scrollback lines · %lld": {
+    "de": "Scrollback-Zeilen · %lld",
+    "es": "líneas de historial · %lld",
+    "fr": "lignes d'historique · %lld",
+    "ja": "スクロールバックの行数 · %lld",
+    "zh-Hans": "回滚行数 · %lld",
+    "zh-Hant": "回捲行數 · %lld"
+  },
+  "sound": {
+    "de": "Ton",
+    "es": "sonido",
+    "fr": "son",
+    "ja": "サウンド",
+    "zh-Hans": "声音",
+    "zh-Hant": "聲音"
+  },
+  "soft tink when the terminal emits BEL · mixes with music": {
+    "de": "leises Klicken, wenn das Terminal BEL sendet · mischt sich mit der Musik",
+    "es": "un tintineo suave cuando el terminal emite BEL · se mezcla con la música",
+    "fr": "un léger tintement lorsque le terminal émet BEL · se mêle à la musique",
+    "ja": "ターミナルが BEL を出したときに小さな音を鳴らします · 音楽と重ねて再生されます",
+    "zh-Hans": "终端发出 BEL 时轻响一声 · 与音乐叠加播放",
+    "zh-Hant": "終端機發出 BEL 時輕響一聲 · 與音樂疊加播放"
+  },
+  "visual flash": {
+    "de": "visuelles Blinken",
+    "es": "destello visual",
+    "fr": "flash visuel",
+    "ja": "画面のフラッシュ",
+    "zh-Hans": "视觉闪烁",
+    "zh-Hant": "視覺閃爍"
+  },
+  "accent glow + dot on the tmux tab pill that bell'd": {
+    "de": "Akzentleuchten und Punkt auf dem tmux-Tab, der BEL gesendet hat",
+    "es": "resplandor de acento y punto en la pestaña de tmux que emitió el aviso",
+    "fr": "halo d'accent et point sur l'onglet tmux qui a sonné",
+    "ja": "BEL を鳴らした tmux タブにアクセントの光とドットを表示します",
+    "zh-Hans": "在发出响铃的 tmux 标签上显示强调光晕和圆点",
+    "zh-Hant": "在發出響鈴的 tmux 標籤上顯示強調光暈和圓點"
+  },
+  "notify when backgrounded": {
+    "de": "im Hintergrund benachrichtigen",
+    "es": "avisar cuando esté en segundo plano",
+    "fr": "notifier en arrière-plan",
+    "ja": "バックグラウンド時に通知",
+    "zh-Hans": "在后台时通知",
+    "zh-Hant": "在背景時通知"
+  },
+  "banner when any program emits terminal BEL while tessera isn't focused": {
+    "de": "Banner, wenn ein Programm ein Terminal-BEL sendet, während Tessera nicht im Vordergrund ist",
+    "es": "un aviso cuando algún programa emite BEL mientras tessera no está en primer plano",
+    "fr": "une bannière lorsqu'un programme émet un BEL alors que tessera n'est pas au premier plan",
+    "ja": "tessera がフォアグラウンドにないときに、いずれかのプログラムが BEL を出すとバナーを表示します",
+    "zh-Hans": "当 tessera 不在前台时，任何程序发出终端 BEL 都会弹出横幅",
+    "zh-Hant": "當 tessera 不在前景時，任何程式發出終端機 BEL 都會彈出橫幅"
+  },
+  "test bell": {
+    "de": "Glocke testen",
+    "es": "probar el aviso",
+    "fr": "tester la sonnerie",
+    "ja": "ベルをテスト",
+    "zh-Hans": "测试响铃",
+    "zh-Hant": "測試響鈴"
+  },
+  "notifications denied": {
+    "de": "Mitteilungen abgelehnt",
+    "es": "notificaciones denegadas",
+    "fr": "notifications refusées",
+    "ja": "通知が許可されていません",
+    "zh-Hans": "通知已被拒绝",
+    "zh-Hant": "通知已被拒絕"
+  },
+  "open settings": {
+    "de": "Einstellungen öffnen",
+    "es": "abrir Ajustes",
+    "fr": "ouvrir Réglages",
+    "ja": "「設定」を開く",
+    "zh-Hans": "打开设置",
+    "zh-Hant": "打開設定"
+  },
+  "not now": {
+    "de": "jetzt nicht",
+    "es": "ahora no",
+    "fr": "pas maintenant",
+    "ja": "今はしない",
+    "zh-Hans": "以后再说",
+    "zh-Hant": "稍後再說"
+  },
+  "previous connections": {
+    "de": "frühere Verbindungen",
+    "es": "conexiones anteriores",
+    "fr": "connexions précédentes",
+    "ja": "以前の接続",
+    "zh-Hans": "先前的连接",
+    "zh-Hant": "先前的連線"
+  },
+  "restore on launch": {
+    "de": "beim Start wiederherstellen",
+    "es": "restaurar al abrir",
+    "fr": "restaurer au lancement",
+    "ja": "起動時に復元",
+    "zh-Hans": "启动时恢复",
+    "zh-Hant": "啟動時回復"
+  },
+  "ask before reopening saved-host sessions on fresh launch": {
+    "de": "beim Neustart fragen, bevor Sitzungen zu gesicherten Hosts wieder geöffnet werden",
+    "es": "preguntar antes de reabrir sesiones de hosts guardados al iniciar de nuevo",
+    "fr": "demander avant de rouvrir les sessions d'hôtes enregistrés au prochain lancement",
+    "ja": "新しく起動したときに、保存済みホストのセッションを再開する前に確認します",
+    "zh-Hans": "重新启动时，在重新打开已保存主机的会话前先询问",
+    "zh-Hant": "重新啟動時，在重新打開已儲存主機的工作階段前先詢問"
+  },
+  "reopen restorable saved-host sessions automatically": {
+    "de": "wiederherstellbare Sitzungen zu gesicherten Hosts automatisch wieder öffnen",
+    "es": "reabrir automáticamente las sesiones restaurables de hosts guardados",
+    "fr": "rouvrir automatiquement les sessions restaurables des hôtes enregistrés",
+    "ja": "復元可能な保存済みホストのセッションを自動的に再開します",
+    "zh-Hans": "自动重新打开可恢复的已保存主机会话",
+    "zh-Hant": "自動重新打開可回復的已儲存主機工作階段"
+  },
+  "reopen restorable saved-host sessions without prompting": {
+    "de": "wiederherstellbare Sitzungen zu gesicherten Hosts ohne Nachfrage wieder öffnen",
+    "es": "reabrir las sesiones restaurables de hosts guardados sin preguntar",
+    "fr": "rouvrir les sessions restaurables des hôtes enregistrés sans demander",
+    "ja": "確認なしで、復元可能な保存済みホストのセッションを再開します",
+    "zh-Hans": "无需询问，直接重新打开可恢复的已保存主机会话",
+    "zh-Hant": "無需詢問，直接重新打開可回復的已儲存主機工作階段"
+  },
+  "do not remember previous saved-host sessions": {
+    "de": "frühere Sitzungen zu gesicherten Hosts nicht merken",
+    "es": "no recordar las sesiones anteriores de hosts guardados",
+    "fr": "ne pas retenir les sessions précédentes des hôtes enregistrés",
+    "ja": "保存済みホストの以前のセッションを記憶しません",
+    "zh-Hans": "不记住已保存主机的先前会话",
+    "zh-Hant": "不記住已儲存主機的先前工作階段"
+  },
+  "tmux": {
+    "de": "tmux",
+    "es": "tmux",
+    "fr": "tmux",
+    "ja": "tmux",
+    "zh-Hans": "tmux",
+    "zh-Hant": "tmux"
+  },
+  "New tmux window": {
+    "de": "Neues tmux-Fenster",
+    "es": "Ventana de tmux nueva",
+    "fr": "Nouvelle fenêtre tmux",
+    "ja": "新規 tmux ウインドウ",
+    "zh-Hans": "新建 tmux 窗口",
+    "zh-Hant": "新增 tmux 視窗"
+  },
+  "New window": {
+    "de": "Neues Fenster",
+    "es": "Ventana nueva",
+    "fr": "Nouvelle fenêtre",
+    "ja": "新規ウインドウ",
+    "zh-Hans": "新建窗口",
+    "zh-Hant": "新增視窗"
+  },
+  "Close window": {
+    "de": "Fenster schließen",
+    "es": "Cerrar la ventana",
+    "fr": "Fermer la fenêtre",
+    "ja": "ウインドウを閉じる",
+    "zh-Hans": "关闭窗口",
+    "zh-Hant": "關閉視窗"
+  },
+  "Close tmux window?": {
+    "de": "tmux-Fenster schließen?",
+    "es": "¿Cerrar la ventana de tmux?",
+    "fr": "Fermer la fenêtre tmux ?",
+    "ja": "tmux ウインドウを閉じますか？",
+    "zh-Hans": "要关闭 tmux 窗口吗？",
+    "zh-Hant": "要關閉 tmux 視窗嗎？"
+  },
+  "Close %@ tmux window": {
+    "de": "tmux-Fenster %@ schließen",
+    "es": "Cerrar la ventana de tmux %@",
+    "fr": "Fermer la fenêtre tmux %@",
+    "ja": "tmux ウインドウ %@ を閉じる",
+    "zh-Hans": "关闭 tmux 窗口 %@",
+    "zh-Hant": "關閉 tmux 視窗 %@"
+  },
+  "Show all windows": {
+    "de": "Alle Fenster anzeigen",
+    "es": "Mostrar todas las ventanas",
+    "fr": "Afficher toutes les fenêtres",
+    "ja": "すべてのウインドウを表示",
+    "zh-Hans": "显示全部窗口",
+    "zh-Hant": "顯示全部視窗"
+  },
+  "Connection status": {
+    "de": "Verbindungsstatus",
+    "es": "Estado de la conexión",
+    "fr": "État de la connexion",
+    "ja": "接続状況",
+    "zh-Hans": "连接状态",
+    "zh-Hant": "連線狀態"
+  },
+  "Dismiss banner": {
+    "de": "Banner ausblenden",
+    "es": "Descartar el aviso",
+    "fr": "Masquer la bannière",
+    "ja": "バナーを閉じる",
+    "zh-Hans": "关闭横幅",
+    "zh-Hant": "關閉橫幅"
+  },
+  "Shows agents that need attention": {
+    "de": "Zeigt Agenten, die Aufmerksamkeit brauchen",
+    "es": "Muestra los agentes que requieren atención",
+    "fr": "Affiche les agents qui réclament votre attention",
+    "ja": "対応が必要なエージェントを表示します",
+    "zh-Hans": "显示需要关注的智能体",
+    "zh-Hant": "顯示需要關注的智慧體"
+  },
+  "Shows the safe action for this terminal": {
+    "de": "Zeigt die sichere Aktion für dieses Terminal",
+    "es": "Muestra la acción segura para este terminal",
+    "fr": "Affiche l'action sûre pour ce terminal",
+    "ja": "このターミナルで安全に行える操作を表示します",
+    "zh-Hans": "显示此终端的安全操作",
+    "zh-Hant": "顯示此終端機的安全操作"
+  },
+  "Unavailable while tmux sync is offline": {
+    "de": "Nicht verfügbar, solange die tmux-Synchronisierung offline ist",
+    "es": "No disponible mientras la sincronización de tmux esté desconectada",
+    "fr": "Indisponible tant que la synchronisation tmux est hors ligne",
+    "ja": "tmux の同期がオフラインの間は利用できません",
+    "zh-Hans": "tmux 同步离线期间不可用",
+    "zh-Hant": "tmux 同步離線期間不可用"
+  },
+  "sync offline": {
+    "de": "Synchronisierung offline",
+    "es": "sincronización desconectada",
+    "fr": "synchronisation hors ligne",
+    "ja": "同期オフライン",
+    "zh-Hans": "同步离线",
+    "zh-Hant": "同步離線"
+  },
+  "tmux control reconnecting - shortcut not sent": {
+    "de": "tmux-Steuerung verbindet neu – Kurzbefehl nicht gesendet",
+    "es": "el control de tmux se está reconectando: no se envió el atajo",
+    "fr": "reconnexion du contrôle tmux — raccourci non envoyé",
+    "ja": "tmux コントロールを再接続中です。ショートカットは送信されていません",
+    "zh-Hans": "tmux 控制正在重连 —— 快捷键未发送",
+    "zh-Hant": "tmux 控制正在重新連線 —— 快速鍵未傳送"
+  },
+  "Fixing agent integration": {
+    "de": "Agenten-Integration wird repariert",
+    "es": "Reparando la integración del agente",
+    "fr": "Réparation de l'intégration de l'agent",
+    "ja": "エージェント統合を修復中",
+    "zh-Hans": "正在修复智能体集成",
+    "zh-Hant": "正在修復智慧體整合"
+  },
+  "agent active": {
+    "de": "Agent aktiv",
+    "es": "agente activo",
+    "fr": "agent actif",
+    "ja": "エージェント稼働中",
+    "zh-Hans": "智能体运行中",
+    "zh-Hant": "智慧體執行中"
+  },
+  "agent needs input": {
+    "de": "Agent braucht Eingabe",
+    "es": "el agente necesita entrada",
+    "fr": "l'agent attend une saisie",
+    "ja": "エージェントが入力待ち",
+    "zh-Hans": "智能体等待输入",
+    "zh-Hant": "智慧體等待輸入"
+  },
+  "agent just finished": {
+    "de": "Agent gerade fertig",
+    "es": "el agente acaba de terminar",
+    "fr": "l'agent vient de terminer",
+    "ja": "エージェントが完了しました",
+    "zh-Hans": "智能体刚刚完成",
+    "zh-Hant": "智慧體剛剛完成"
+  },
+  "working…": {
+    "de": "arbeitet…",
+    "es": "trabajando…",
+    "fr": "en cours…",
+    "ja": "処理中…",
+    "zh-Hans": "处理中…",
+    "zh-Hant": "處理中…"
+  },
+  "%@ is working — scrolling is temporarily disabled": {
+    "de": "%@ arbeitet – Scrollen ist vorübergehend deaktiviert",
+    "es": "%@ está trabajando: el desplazamiento está desactivado temporalmente",
+    "fr": "%@ travaille — le défilement est temporairement désactivé",
+    "ja": "%@ の処理中です。スクロールは一時的に無効になっています",
+    "zh-Hans": "%@ 正在运行 —— 滚动暂时停用",
+    "zh-Hant": "%@ 正在執行 —— 捲動暫時停用"
+  },
+  "%@ is working. Scrolling is temporarily disabled.": {
+    "de": "%@ arbeitet. Scrollen ist vorübergehend deaktiviert.",
+    "es": "%@ está trabajando. El desplazamiento está desactivado temporalmente.",
+    "fr": "%@ travaille. Le défilement est temporairement désactivé.",
+    "ja": "%@ の処理中です。スクロールは一時的に無効になっています。",
+    "zh-Hans": "%@ 正在运行。滚动暂时停用。",
+    "zh-Hant": "%@ 正在執行。捲動暫時停用。"
+  },
+  "visible": {
+    "de": "sichtbar",
+    "es": "visible",
+    "fr": "visible",
+    "ja": "表示中",
+    "zh-Hans": "可见",
+    "zh-Hant": "可見"
+  },
+  "hidden": {
+    "de": "ausgeblendet",
+    "es": "oculto",
+    "fr": "masqué",
+    "ja": "非表示",
+    "zh-Hans": "已隐藏",
+    "zh-Hant": "已隱藏"
+  },
+  "arm background completion": {
+    "de": "Hintergrund-Abschluss scharfschalten",
+    "es": "preparar la finalización en segundo plano",
+    "fr": "armer la fin en arrière-plan",
+    "ja": "バックグラウンド完了を準備",
+    "zh-Hans": "启用后台完成检测",
+    "zh-Hant": "啟用背景完成偵測"
+  },
+  "Simulate device orientation noise": {
+    "de": "Störungen der Geräteausrichtung simulieren",
+    "es": "Simular ruido de orientación del dispositivo",
+    "fr": "Simuler du bruit d'orientation de l'appareil",
+    "ja": "デバイスの向きのノイズをシミュレート",
+    "zh-Hans": "模拟设备方向噪声",
+    "zh-Hant": "模擬裝置方向雜訊"
+  }
+}

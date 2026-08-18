@@ -15,7 +15,7 @@ private enum TransferQueueExecutionError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingHomeDirectory:
-            return "Home directory is unavailable for paste upload."
+            return String(localized: "Home directory is unavailable for paste upload.")
         }
     }
 }

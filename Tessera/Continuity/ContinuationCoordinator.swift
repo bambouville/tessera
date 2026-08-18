@@ -106,7 +106,7 @@ final class ContinuationCoordinator {
     @discardableResult
     func receive(data: Data, isLocked: Bool) -> Bool {
         guard ready == nil, stashedWhileLocked == nil, active == nil else {
-            lastFailure = "Finish the current continuation before opening another."
+            lastFailure = String(localized: "Finish the current continuation before opening another.")
             DiagnosticLogStore.appendApp("continuity receive result=rejected-busy")
             return false
         }

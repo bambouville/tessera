@@ -21,25 +21,25 @@ enum ShellIntegrationInstallError: LocalizedError, Equatable, Sendable {
     var errorDescription: String? {
         switch self {
         case .authentication(let message):
-            return message.isEmpty ? "Authentication failed" : message
+            return message.isEmpty ? String(localized: "Authentication failed", comment: "SSH auth failure") : message
         case .network(let message):
             let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return "Network unreachable" }
-            return "Network unreachable: \(trimmed)"
+            return String(localized: "Network unreachable: \(trimmed)")
         case .hostKeyRejected:
-            return "Host key was not trusted. Connect once first to review it, then retry."
+            return String(localized: "Host key was not trusted. Connect once first to review it, then retry.")
         case .remoteCommandFailed(let stderr):
             let trimmed = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
-                return "Could not install Tessera shell integration."
+                return String(localized: "Could not install Tessera shell integration.")
             }
-            return "Could not install Tessera shell integration: \(trimmed)"
+            return String(localized: "Could not install Tessera shell integration: \(trimmed)")
         case .verificationFailed(let stderr):
             let trimmed = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
-                return "Could not verify Tessera shell integration."
+                return String(localized: "Could not verify Tessera shell integration.")
             }
-            return "Could not verify Tessera shell integration: \(trimmed)"
+            return String(localized: "Could not verify Tessera shell integration: \(trimmed)")
         }
     }
 }
@@ -266,29 +266,29 @@ __tessera_osc7
             return .hostKeyRejected
 
         case let error as AuthResolutionError:
-            return .authentication(error.errorDescription ?? "Authentication failed")
+            return .authentication(error.errorDescription ?? String(localized: "Authentication failed", comment: "SSH auth failure"))
 
         case is AuthenticationFailed:
-            return .authentication("Authentication failed")
+            return .authentication(String(localized: "Authentication failed", comment: "SSH auth failure"))
 
         case let error as SSHClientError:
             switch error {
             case .unsupportedPasswordAuthentication:
-                return .authentication("The server does not accept password authentication.")
+                return .authentication(String(localized: "The server does not accept password authentication.", comment: "SSH auth failure"))
             case .unsupportedPrivateKeyAuthentication:
-                return .authentication("The server does not accept public-key authentication.")
+                return .authentication(String(localized: "The server does not accept public-key authentication.", comment: "SSH auth failure"))
             case .unsupportedHostBasedAuthentication:
-                return .authentication("The server does not accept host-based authentication.")
+                return .authentication(String(localized: "The server does not accept host-based authentication.", comment: "SSH auth failure"))
             case .allAuthenticationOptionsFailed:
-                return .authentication("Authentication failed")
+                return .authentication(String(localized: "Authentication failed", comment: "SSH auth failure"))
             case .channelCreationFailed:
-                return .network("Failed to open the SSH exec channel.")
+                return .network(String(localized: "Failed to open the SSH exec channel.", comment: "SSH channel failure"))
             }
 
         case let error as CitadelError:
             switch error {
             case .unauthorized:
-                return .authentication("Authentication failed")
+                return .authentication(String(localized: "Authentication failed", comment: "SSH auth failure"))
             default:
                 return .network(describeSSHError(error))
             }
@@ -300,7 +300,7 @@ __tessera_osc7
 
     private static func commandFailureMessage(_ error: Error) -> String {
         if let commandFailed = error as? SSHClient.CommandFailed {
-            return "Remote command failed with exit status \(commandFailed.exitCode)."
+            return String(localized: "Remote command failed with exit status \(commandFailed.exitCode).", comment: "Remote command failure; the argument is a shell exit status")
         }
         return describeSSHError(error)
     }

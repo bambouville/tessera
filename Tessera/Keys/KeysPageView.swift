@@ -26,7 +26,7 @@ struct PublicKeyCopyPayload: Equatable {
 
     init(publicKey: String) {
         pasteboardValue = publicKey
-        feedback = "Public key copied"
+        feedback = String(localized: "Public key copied")
     }
 }
 
@@ -330,7 +330,7 @@ struct KeysPageView: View {
 
                     if !orphanedKeyIDs.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("\(orphanedKeyIDs.count) orphaned Keychain item\(orphanedKeyIDs.count == 1 ? "" : "s")")
+                            Text("\(orphanedKeyIDs.count) orphaned Keychain items")
                                 .font(Typography.tesseraMono(size: 11, weight: .medium))
                                 .foregroundStyle(T.red)
                             Text("Private material exists without matching key metadata.")
@@ -404,7 +404,7 @@ struct KeysPageView: View {
 
                 if !orphanedKeyIDs.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("\(orphanedKeyIDs.count) orphaned Keychain item\(orphanedKeyIDs.count == 1 ? "" : "s")")
+                        Text("\(orphanedKeyIDs.count) orphaned Keychain items")
                             .font(Typography.tesseraMono(size: 11, weight: .medium))
                             .foregroundStyle(T.red)
                         Text("Private material exists without matching key metadata.")
@@ -472,7 +472,7 @@ struct KeysPageView: View {
                 }
 
                 HStack(spacing: 6) {
-                    Text("\(key.algorithm.displayName) · \(relativeDate(key.createdAt))")
+                    Text(verbatim: "\(key.algorithm.displayName) · \(relativeDate(key.createdAt))")
                         .font(Typography.tesseraMono(size: 11))
                         .foregroundStyle(T.fgDim)
                         .lineLimit(1)
@@ -525,13 +525,13 @@ struct KeysPageView: View {
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(T.accent)
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(item.peerDeviceName ?? "other device")
+                                Text(item.peerDeviceName ?? String(localized: "other device"))
                                     .font(Typography.tesseraMono(size: 11.5, weight: .medium))
                                     .foregroundStyle(T.fg)
-                                Text("\(deviceAccessDirectionLabel(item.direction)) · \(item.hostLabel)")
+                                Text(verbatim: "\(deviceAccessDirectionLabel(item.direction)) · \(item.hostLabel)")
                                     .font(Typography.tesseraMono(size: 9.5))
                                     .foregroundStyle(T.fgMuted)
-                                Text("\(item.endpoint) · \(item.flow.rawValue)")
+                                Text(verbatim: "\(item.endpoint) · \(item.flow.rawValue)")
                                     .font(Typography.tesseraMono(size: 9))
                                     .foregroundStyle(T.fgDim)
                                     .lineLimit(2)
@@ -552,7 +552,7 @@ struct KeysPageView: View {
                             .disabled(revokingDeviceAccessID != nil)
                         }
                         if let fingerprint = item.publicKeyFingerprint {
-                            Text(fingerprint)
+                            Text(verbatim: fingerprint)
                                 .font(Typography.tesseraMono(size: 8.5))
                                 .foregroundStyle(T.fgDim)
                                 .lineLimit(1)
@@ -577,9 +577,9 @@ struct KeysPageView: View {
         _ direction: KeySecurityRecord.RemoteAccessDirection
     ) -> String {
         switch direction {
-        case .localInstallation: return "installed here"
-        case .grantedToPeer: return "granted from this device"
-        case .receivedFromPeer: return "received for this device"
+        case .localInstallation: return String(localized: "installed here")
+        case .grantedToPeer: return String(localized: "granted from this device")
+        case .receivedFromPeer: return String(localized: "received for this device")
         }
     }
 
@@ -604,7 +604,7 @@ struct KeysPageView: View {
                 on: hostSnapshot
             )
         } catch {
-            showToast(error.localizedDescription)
+            showToast(verbatim: error.localizedDescription)
             return
         }
 
@@ -673,7 +673,7 @@ struct KeysPageView: View {
             keyBadges(for: key)
                 .padding(.bottom, 8)
 
-            Text(keyUsageSummary(for: key))
+            Text(verbatim: keyUsageSummary(for: key))
                 .font(Typography.tesseraMono(size: 13))
                 .foregroundStyle(T.fgDim)
                 .padding(.bottom, 28)
@@ -712,7 +712,7 @@ struct KeysPageView: View {
                 }
 
                 if let toastText {
-                    Text(toastText)
+                    Text(verbatim: toastText)
                         .font(Typography.tesseraMono(size: 11))
                         .foregroundStyle(T.fgDim)
                         .padding(.top, 8)
@@ -836,7 +836,7 @@ struct KeysPageView: View {
                 payload.pasteboardValue,
                 forPasteboardType: UTType.utf8PlainText.identifier
             )
-            showToast(payload.feedback.lowercased())
+            showToast(verbatim: payload.feedback.lowercased())
             UIAccessibility.post(
                 notification: .announcement,
                 argument: payload.feedback
@@ -873,7 +873,7 @@ struct KeysPageView: View {
     }
 
     private func staticValue(_ text: String, size: CGFloat, color: Color) -> some View {
-        Text(text)
+        Text(verbatim: text)
             .font(Typography.tesseraMono(size: size))
             .foregroundStyle(color)
             .padding(.vertical, 10)
@@ -891,7 +891,7 @@ struct KeysPageView: View {
     private func keyBadges(for key: StoredKey) -> some View {
         HStack(spacing: 8) {
             keyBadge(
-                text: badgeAlgorithmName(for: key.algorithm),
+                verbatimText: badgeAlgorithmName(for: key.algorithm),
                 background: T.inputBg,
                 border: T.border,
                 foreground: T.fg
@@ -979,12 +979,33 @@ struct KeysPageView: View {
     }
 
     private func keyBadge(
-        text: String,
+        text: LocalizedStringKey,
         background: Color,
         border: Color,
         foreground: Color
     ) -> some View {
-        Text(text.uppercased())
+        keyBadge(label: Text(text), background: background, border: border, foreground: foreground)
+    }
+
+    /// The algorithm badge. `ed25519` / `rsa` read the same in every language.
+    private func keyBadge(
+        verbatimText: String,
+        background: Color,
+        border: Color,
+        foreground: Color
+    ) -> some View {
+        keyBadge(label: Text(verbatim: verbatimText), background: background, border: border, foreground: foreground)
+    }
+
+    private func keyBadge(
+        label: Text,
+        background: Color,
+        border: Color,
+        foreground: Color
+    ) -> some View {
+        label
+            // Locale-aware, unlike `String.uppercased()`.
+            .textCase(.uppercase)
             .font(Typography.tesseraMono(size: 10))
             .tracking(0.6)
             .foregroundStyle(foreground)
@@ -998,7 +1019,7 @@ struct KeysPageView: View {
             )
     }
 
-    private func enclaveNote(_ text: String) -> some View {
+    private func enclaveNote(_ text: LocalizedStringKey) -> some View {
         Text(text)
             .font(Typography.tesseraMono(size: 11))
             .foregroundStyle(T.fgDim)
@@ -1149,7 +1170,7 @@ struct KeysPageView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func placeholder(text: String) -> some View {
+    private func placeholder(text: LocalizedStringKey) -> some View {
         VStack {
             Spacer()
             Text(text)
@@ -1282,7 +1303,10 @@ struct KeysPageView: View {
                         throw AuthResolutionError.biometricCancelled
                     case .unavailable:
                         throw AuthResolutionError.biometricFailed(
-                            reason: "Device owner authentication is unavailable."
+                            reason: String(
+                                localized: "Device owner authentication is unavailable.",
+                                comment: "Face ID / passcode cannot be used on this device"
+                            )
                         )
                     case .failed(let reason):
                         throw AuthResolutionError.biometricFailed(reason: reason)
@@ -1350,7 +1374,7 @@ struct KeysPageView: View {
                 showToast("private key restored")
             }
         } catch {
-            showToast(error.localizedDescription)
+            showToast(verbatim: error.localizedDescription)
         }
     }
 
@@ -1379,7 +1403,7 @@ struct KeysPageView: View {
                 recoveryPassphraseAction = .restore(keyID: keyID, data: data)
             }
         } catch {
-            showToast(error.localizedDescription)
+            showToast(verbatim: error.localizedDescription)
         }
     }
 
@@ -1446,7 +1470,7 @@ struct KeysPageView: View {
             keyMaterialRevision += 1
             materialIntegrity.removeValue(forKey: key.id)
             if remotelyRevokedCount > 0 {
-                showToast("local private key deleted after revoking \(remotelyRevokedCount) tracked remote authorization\(remotelyRevokedCount == 1 ? "" : "s")")
+                showToast("local private key deleted after revoking \(remotelyRevokedCount) tracked remote authorizations")
             } else if priorRemoteRevocation {
                 showToast("local private key deleted; earlier tracked remote revocation was preserved")
             } else {
@@ -1459,7 +1483,7 @@ struct KeysPageView: View {
             if case .deletionPending = error as? KeyLifecycleError {
                 selectedID = nil
                 materialIntegrity.removeValue(forKey: key.id)
-                showToast(error.localizedDescription)
+                showToast(verbatim: error.localizedDescription)
             } else {
                 showToast("Local key deletion failed; private material was not touched: \(error.localizedDescription)")
             }
@@ -1821,12 +1845,12 @@ struct KeysPageView: View {
     }
 
     private func displayName(for key: StoredKey) -> String {
-        key.name.isEmpty ? "unnamed key" : key.name
+        key.name.isEmpty ? String(localized: "unnamed key") : key.name
     }
 
     private func relativeDate(_ date: Date) -> String {
         if Calendar.current.isDateInToday(date) {
-            return "today"
+            return String(localized: "today")
         }
         return date.formatted(.dateTime.month(.abbreviated).day())
     }
@@ -1835,15 +1859,24 @@ struct KeysPageView: View {
         date.formatted(.dateTime.year().month(.abbreviated).day())
     }
 
+    /// One sentence per case rather than a shared "created …" stem plus a
+    /// suffix: the two halves agree differently once the date moves, and the
+    /// separator itself is punctuation a translator may want to place.
     private func keyUsageSummary(for key: StoredKey) -> String {
-        let created = "created \(detailDate(key.createdAt))"
+        let created = detailDate(key.createdAt)
         guard let lastUsed = connectionActivity.lastUsedAt(for: key.id) else {
-            return "\(created)  ·  last used on this device not recorded"
+            return String(
+                localized: "created \(created)  ·  last used on this device not recorded",
+                comment: "Key detail line. The argument is a formatted date."
+            )
         }
         let used = lastUsed.formatted(
             .dateTime.year().month(.abbreviated).day().hour().minute()
         )
-        return "\(created)  ·  last used on this device \(used)"
+        return String(
+            localized: "created \(created)  ·  last used on this device \(used)",
+            comment: "Key detail line. Both arguments are formatted dates."
+        )
     }
 
     private func applyInitialSelectionIfNeeded() {
@@ -1867,7 +1900,16 @@ struct KeysPageView: View {
         }
     }
 
-    private func showToast(_ text: String) {
+    /// Takes a `LocalizedStringResource` so every literal at a call site is
+    /// extracted and translated.
+    private func showToast(_ text: LocalizedStringResource) {
+        showToast(verbatim: String(localized: text))
+    }
+
+    /// Text that is already resolved and must be shown as-is: a thrown
+    /// error's `localizedDescription` (the error type localizes itself) or
+    /// feedback produced by the remote host.
+    private func showToast(verbatim text: String) {
         toastText = text
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
             if toastText == text {
@@ -1895,7 +1937,7 @@ private struct FlowTags: View {
     @ViewBuilder
     private var tagContent: some View {
         ForEach(names, id: \.self) { name in
-            Tag(text: name)
+            Tag(verbatim: name)
         }
     }
 }
@@ -1928,20 +1970,20 @@ private enum RecoveryPassphrasePurpose {
 
     var title: String {
         switch self {
-        case .export: return "protect recovery key"
-        case .verify: return "verify recovery file"
-        case .restore: return "restore private key"
+        case .export: return String(localized: "protect recovery key")
+        case .verify: return String(localized: "verify recovery file")
+        case .restore: return String(localized: "restore private key")
         }
     }
 
     var explanation: String {
         switch self {
         case .export:
-            return "Tessera will create a standard passphrase-encrypted OpenSSH private-key file. Tessera cannot recover this passphrase. No plaintext key file is created."
+            return String(localized: "Tessera will create a standard passphrase-encrypted OpenSSH private-key file. Tessera cannot recover this passphrase. No plaintext key file is created.")
         case .verify:
-            return "The file will be decrypted in memory and its public fingerprint compared with this key. It will not replace the live key."
+            return String(localized: "The file will be decrypted in memory and its public fingerprint compared with this key. It will not replace the live key.")
         case .restore:
-            return "The file will be decrypted in memory, fingerprint-matched, and restored under the existing key identity so host references remain intact."
+            return String(localized: "The file will be decrypted in memory, fingerprint-matched, and restored under the existing key identity so host references remain intact.")
         }
     }
 }
@@ -1999,7 +2041,7 @@ private struct RecoveryPassphraseModal: View {
                     .font(Typography.sheetTitle)
                     .foregroundStyle(T.fg)
 
-                Text(keyName)
+                Text(verbatim: keyName)
                     .font(Typography.tesseraMono(size: 12))
                     .foregroundStyle(T.fgMuted)
 
@@ -2019,7 +2061,7 @@ private struct RecoveryPassphraseModal: View {
                 }
 
                 if let validationError {
-                    Text(validationError)
+                    Text(verbatim: validationError)
                         .font(Typography.tesseraMono(size: 11))
                         .foregroundStyle(T.red)
                 }
@@ -2071,7 +2113,7 @@ private struct RecoveryPassphraseModal: View {
         .onDisappear(perform: clearSecrets)
     }
 
-    private var submitTitle: String {
+    private var submitTitle: LocalizedStringKey {
         switch purpose {
         case .export: return "export encrypted file…"
         case .verify: return "verify"
@@ -2081,16 +2123,16 @@ private struct RecoveryPassphraseModal: View {
 
     private func submit() {
         guard !passphrase.isEmpty else {
-            validationError = "A passphrase is required."
+            validationError = String(localized: "A passphrase is required.")
             return
         }
         if purpose == .export {
             guard passphrase.count >= 8 else {
-                validationError = "Use at least 8 characters."
+                validationError = String(localized: "Use at least 8 characters.")
                 return
             }
             guard passphrase == confirmation else {
-                validationError = "Passphrases do not match."
+                validationError = String(localized: "Passphrases do not match.")
                 return
             }
         }
@@ -2132,7 +2174,7 @@ private struct KeyRiskAcknowledgementModal: View {
                     .font(Typography.sheetTitle)
                     .foregroundStyle(T.fg)
 
-                Text(fingerprint)
+                Text(verbatim: fingerprint)
                     .font(Typography.tesseraMono(size: 11))
                     .foregroundStyle(T.fgMuted)
 
@@ -2203,16 +2245,18 @@ private struct KeyDeletionConfirmationModal: View {
                     .font(Typography.sheetTitle)
                     .foregroundStyle(T.red)
 
-                Text(fingerprint)
+                Text(verbatim: fingerprint)
                     .font(Typography.tesseraMono(size: 11))
                     .foregroundStyle(T.fgMuted)
 
-                Text(backupDescription)
+                Text(verbatim: backupDescription)
                     .font(Typography.tesseraMono(size: 11))
                     .foregroundStyle(T.fgDim)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("Local references: \(identityCount) identit\(identityCount == 1 ? "y" : "ies") and \(hostNames.count) host\(hostNames.count == 1 ? "" : "s"). They will be detached before deletion.")
+                // Two independently pluralized counts in one sentence; the
+                // String Catalog carries a substitution for each.
+                Text("Local references: \(identityCount) identities and \(hostNames.count) hosts. They will be detached before deletion.")
                     .font(Typography.tesseraMono(size: 11))
                     .foregroundStyle(T.fgDim)
 
@@ -2233,7 +2277,7 @@ private struct KeyDeletionConfirmationModal: View {
                         } else {
                             if eligibleRemoteRevocationCount > 0 {
                                 Btn(
-                                    "revoke on \(eligibleRemoteRevocationCount) tracked host\(eligibleRemoteRevocationCount == 1 ? "" : "s") & delete",
+                                    "revoke on \(eligibleRemoteRevocationCount) tracked hosts & delete",
                                     style: .primary,
                                     full: true,
                                     action: onRevokeAndConfirm
@@ -2255,7 +2299,7 @@ private struct KeyDeletionConfirmationModal: View {
                         } else {
                             if eligibleRemoteRevocationCount > 0 {
                                 Btn(
-                                    "revoke on \(eligibleRemoteRevocationCount) tracked host\(eligibleRemoteRevocationCount == 1 ? "" : "s") & delete",
+                                    "revoke on \(eligibleRemoteRevocationCount) tracked hosts & delete",
                                     style: .primary,
                                     compact: true,
                                     action: onRevokeAndConfirm
@@ -2281,12 +2325,12 @@ private struct KeyDeletionConfirmationModal: View {
 
     private var backupDescription: String {
         if key.isSecureEnclave {
-            return "This Secure Enclave key is permanently unrecoverable after deletion."
+            return String(localized: "This Secure Enclave key is permanently unrecoverable after deletion.")
         }
         if let date = securityRecord.backupExportedAt {
-            return "A recovery export was recorded \(date.formatted(.dateTime.year().month().day())). Confirm that you still possess its passphrase before deleting."
+            return String(localized: "A recovery export was recorded \(date.formatted(.dateTime.year().month().day())). Confirm that you still possess its passphrase before deleting.")
         }
-        return "No recovery export is recorded. Deletion may be permanent."
+        return String(localized: "No recovery export is recorded. Deletion may be permanent.")
     }
 }
 
@@ -2310,21 +2354,21 @@ private struct OrphanedKeyCleanupModal: View {
                     .font(Typography.sheetTitle)
                     .foregroundStyle(T.red)
 
-                Text("Tessera found \(count) Keychain item\(count == 1 ? "" : "s") with no matching key metadata. They cannot be selected, authenticated with, exported, or associated with a host. This removes only those inaccessible orphaned items.")
+                Text("Tessera found \(count) Keychain items with no matching key metadata. They cannot be selected, authenticated with, exported, or associated with a host. This removes only those inaccessible orphaned items.")
                     .font(Typography.tesseraMono(size: 11))
                     .foregroundStyle(T.fgDim)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if isPhone {
                     VStack(spacing: 8) {
-                        Btn("delete \(count) orphaned item\(count == 1 ? "" : "s")", style: .danger, full: true, action: onConfirm)
+                        Btn("delete \(count) orphaned items", style: .danger, full: true, action: onConfirm)
                         Btn("cancel", full: true, action: onCancel)
                     }
                 } else {
                     HStack(spacing: 10) {
                         Btn("cancel", compact: true, action: onCancel)
                         Spacer()
-                        Btn("delete \(count) orphaned item\(count == 1 ? "" : "s")", style: .danger, compact: true, action: onConfirm)
+                        Btn("delete \(count) orphaned items", style: .danger, compact: true, action: onConfirm)
                     }
                 }
             }
@@ -2346,6 +2390,6 @@ private enum KeyRecoverySurfaceError: LocalizedError {
     case fileTooLarge
 
     var errorDescription: String? {
-        "The recovery file is empty or exceeds the 1 MB safety limit."
+        String(localized: "The recovery file is empty or exceeds the 1 MB safety limit.")
     }
 }

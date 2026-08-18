@@ -12,6 +12,31 @@ public enum SessionState: Equatable, Sendable {
     case connected
     case disconnected
     case failed(String)
+
+    /// The case name alone — the only form of this value that may reach the
+    /// diagnostics log.
+    ///
+    /// `String(describing:)` renders `.failed`'s payload, which is
+    /// `describeSSHError(_:)` and falls through to `String(describing: error)`
+    /// for anything that is neither a `LocalizedError` nor POSIX — NIO's
+    /// connection errors among them. The sanitizer's only guard is
+    /// `failed\([^)]*\)`, and `[^)]*` stops at the **first** `)`. NIO reports one
+    /// `SingleConnectionFailure` per resolved address, so on a host with more
+    /// than one A/AAAA record every address after the first sits outside the
+    /// match and survives verbatim into a file the user is invited to send to a
+    /// developer (`LaunchDiagnosticsPrivacyTests` pins that leak).
+    ///
+    /// Nothing diagnostic is lost by dropping the payload here: the reason is
+    /// already logged, redacted, as `error='…'` by the transport.
+    public var diagnosticName: String {
+        switch self {
+        case .idle:         return "idle"
+        case .connecting:   return "connecting"
+        case .connected:    return "connected"
+        case .disconnected: return "disconnected"
+        case .failed:       return "failed"
+        }
+    }
 }
 
 /// Transport-agnostic API surface for a live terminal session.

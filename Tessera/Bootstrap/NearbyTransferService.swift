@@ -11,11 +11,11 @@ public enum NearbyTransferServiceError: Error, Equatable, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .alreadyStarted: return "Nearby transfer is already running."
-        case .notStarted: return "Nearby transfer is not running."
-        case .peerUnavailable: return "The nearby peer is no longer available."
-        case .invalidFrameLength(let length): return "Invalid nearby frame length \(length)."
-        case .connectionClosed: return "The nearby connection closed."
+        case .alreadyStarted: return String(localized: "Nearby transfer is already running.")
+        case .notStarted: return String(localized: "Nearby transfer is not running.")
+        case .peerUnavailable: return String(localized: "The nearby peer is no longer available.")
+        case .invalidFrameLength(let length): return String(localized: "Invalid nearby frame length \(length).")
+        case .connectionClosed: return String(localized: "The nearby connection closed.")
         case .network(let message): return message
         }
     }

@@ -14,8 +14,8 @@ public enum NearbyHandshakeRole: String, Codable, CaseIterable, Sendable {
 }
 
 enum NearbyDeviceLabel {
-    static let generic = "Nearby Tessera device"
-    static let serviceFallback = "Tessera device"
+    static let generic = String(localized: "Nearby Tessera device")
+    static let serviceFallback = String(localized: "Tessera device")
 
     static func sanitized(
         _ rawValue: String?,
@@ -373,63 +373,60 @@ public enum NearbyHandshakeError: Error, Equatable, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .unsupportedVersion(let version):
-            return "Unsupported nearby-handshake version \(version)."
+            return String(localized: "Unsupported nearby-handshake version \(version).")
         case .incompatiblePeerVersion(let info, _):
             let release = info.appVersion.map { " (\($0))" } ?? ""
             if info.version > NearbyBootstrapProtocol.version {
-                return "The other device is running a newer version of Tessera\(release). "
-                    + "Update Tessera on this device, then try again."
+                return String(localized: "The other device is running a newer version of Tessera\(release). Update Tessera on this device, then try again.")
             }
-            return "The other device is running an older version of Tessera\(release). "
-                + "Update Tessera on the other device, then try again."
+            return String(localized: "The other device is running an older version of Tessera\(release). Update Tessera on the other device, then try again.")
         case .unsupportedFrameVersion(let version):
-            return "The encrypted channel used an unsupported frame version (\(version)). "
-                + "Both devices must run compatible versions of Tessera."
-        case .invalidPrivateKey: return "Invalid ephemeral private key."
-        case .invalidPublicKey: return "Invalid ephemeral public key."
+            return String(localized: "The encrypted channel used an unsupported frame version (\(version)). Both devices must run compatible versions of Tessera.")
+        case .invalidPrivateKey: return String(localized: "Invalid ephemeral private key.")
+        case .invalidPublicKey: return String(localized: "Invalid ephemeral public key.")
         case .unexpectedPeerRole(let expected, let actual):
-            return "Expected peer role \(expected.rawValue), got \(actual.rawValue)."
-        case .reflectedPublicKey: return "The peer reflected the local public key."
-        case .attemptAlreadyConsumed: return "This handshake attempt has already been consumed."
+            return String(localized: "Expected peer role \(expected.rawValue), got \(actual.rawValue).")
+        case .reflectedPublicKey: return String(localized: "The peer reflected the local public key.")
+        case .attemptAlreadyConsumed: return String(localized: "This handshake attempt has already been consumed.")
         case .recipientCommitmentRequired:
-            return "Publish the recipient commitment before completing the handshake."
-        case .invalidCommitment: return "Invalid nearby-handshake commitment."
-        case .commitmentMismatch: return "The recipient hello does not match its commitment."
-        case .invalidSAS: return "Invalid short authentication string."
-        case .sasAlreadyDecided: return "The code comparison has already been decided."
-        case .sasMismatch: return "The codes did not match; start a fresh transfer."
-        case .transferAborted: return "This transfer was aborted; start a fresh transfer."
-        case .sasNotConfirmed: return "Confirm the code before continuing."
-        case .originAuthorizationRequired: return "Origin authorization is required."
-        case .originAuthorizationAlreadyDecided: return "Origin authorization has already been decided."
-        case .originAuthorizationDenied: return "The origin denied this transfer."
-        case .originOnlyOperation: return "Only the origin may perform this operation."
-        case .recipientOnlyOperation: return "Only the recipient may perform this operation."
-        case .authorizationProofRequired: return "Authorization proof must precede the manifest."
-        case .authorizationProofAlreadySent: return "Authorization proof has already been sent."
-        case .recipientPublicKeyRequired: return "The recipient public key is required."
-        case .recipientPublicKeyAlreadySent: return "The recipient public key was already transferred."
-        case .manifestAlreadyTransferred: return "The manifest was already transferred."
+            return String(localized: "Publish the recipient commitment before completing the handshake.")
+        case .invalidCommitment: return String(localized: "Invalid nearby-handshake commitment.")
+        case .commitmentMismatch: return String(localized: "The recipient hello does not match its commitment.")
+        case .invalidSAS: return String(localized: "Invalid short authentication string.")
+        case .sasAlreadyDecided: return String(localized: "The code comparison has already been decided.")
+        case .sasMismatch: return String(localized: "The codes did not match; start a fresh transfer.")
+        case .transferAborted: return String(localized: "This transfer was aborted; start a fresh transfer.")
+        case .sasNotConfirmed: return String(localized: "Confirm the code before continuing.")
+        case .originAuthorizationRequired: return String(localized: "Origin authorization is required.")
+        case .originAuthorizationAlreadyDecided: return String(localized: "Origin authorization has already been decided.")
+        case .originAuthorizationDenied: return String(localized: "The origin denied this transfer.")
+        case .originOnlyOperation: return String(localized: "Only the origin may perform this operation.")
+        case .recipientOnlyOperation: return String(localized: "Only the recipient may perform this operation.")
+        case .authorizationProofRequired: return String(localized: "Authorization proof must precede the manifest.")
+        case .authorizationProofAlreadySent: return String(localized: "Authorization proof has already been sent.")
+        case .recipientPublicKeyRequired: return String(localized: "The recipient public key is required.")
+        case .recipientPublicKeyAlreadySent: return String(localized: "The recipient public key was already transferred.")
+        case .manifestAlreadyTransferred: return String(localized: "The manifest was already transferred.")
         case .importAcceptanceRequired:
-            return "The recipient must acknowledge imported hosts before key grants begin."
+            return String(localized: "The recipient must acknowledge imported hosts before key grants begin.")
         case .importAcceptanceAlreadyTransferred:
-            return "The manifest import acknowledgement was already transferred."
+            return String(localized: "The manifest import acknowledgement was already transferred.")
         case .invalidImportAcceptance:
-            return "The manifest import acknowledgement is invalid."
-        case .grantReceiptRequired: return "The grant receipt must follow the manifest."
-        case .grantReceiptAlreadyTransferred: return "The grant receipt was already transferred."
+            return String(localized: "The manifest import acknowledgement is invalid.")
+        case .grantReceiptRequired: return String(localized: "The grant receipt must follow the manifest.")
+        case .grantReceiptAlreadyTransferred: return String(localized: "The grant receipt was already transferred.")
         case .completionAcknowledgementRequired:
-            return "The completion acknowledgement must follow the grant receipt."
+            return String(localized: "The completion acknowledgement must follow the grant receipt.")
         case .completionAcknowledgementAlreadyTransferred:
-            return "The completion acknowledgement was already transferred."
-        case .invalidGrantReceipt: return "The host-grant receipt is invalid."
-        case .unexpectedMessage: return "Unexpected encrypted message."
-        case .invalidFrame: return "Invalid encrypted frame."
-        case .wrongDirection: return "Encrypted frame has the wrong direction."
+            return String(localized: "The completion acknowledgement was already transferred.")
+        case .invalidGrantReceipt: return String(localized: "The host-grant receipt is invalid.")
+        case .unexpectedMessage: return String(localized: "Unexpected encrypted message.")
+        case .invalidFrame: return String(localized: "Invalid encrypted frame.")
+        case .wrongDirection: return String(localized: "Encrypted frame has the wrong direction.")
         case .outOfOrder(let expected, let actual):
-            return "Expected frame \(expected), got \(actual)."
-        case .sequenceExhausted: return "Encrypted-channel sequence is exhausted."
-        case .authenticationFailed: return "Encrypted-frame authentication failed."
+            return String(localized: "Expected frame \(expected), got \(actual).")
+        case .sequenceExhausted: return String(localized: "Encrypted-channel sequence is exhausted.")
+        case .authenticationFailed: return String(localized: "Encrypted-frame authentication failed.")
         }
     }
 }

@@ -1,0 +1,746 @@
+{
+  "**%@.**\n%@": {
+    "de": "**%@.**\n%@",
+    "es": "**%@.**\n%@",
+    "fr": "**%@.**\n%@",
+    "ja": "**%@.**\n%@",
+    "zh-Hans": "**%@.**\n%@",
+    "zh-Hant": "**%@.**\n%@"
+  },
+  "**already used by \"%@\".**\nsaving takes it — %@ becomes unbound until you give it another.": {
+    "de": "**bereits von „%@“ belegt.**\nBeim Sichern geht der Kurzbefehl über — %@ ist dann ohne Zuweisung, bis du ihm einen neuen gibst.",
+    "es": "**ya lo usa «%@».**\nal guardar se lo quedas — %@ se queda sin atajo hasta que le asignes otro.",
+    "fr": "**déjà utilisé par « %@ ».**\nenregistrer vous l'attribue — %@ n'aura plus de raccourci jusqu'à ce que vous lui en donniez un autre.",
+    "ja": "**すでに「%@」が使用中です。**\n保存するとこちらに移り、%@ は別の割り当てを行うまで未設定になります。",
+    "zh-Hans": "**「%@」已在使用。**\n保存后将由此项占用，%@ 在你另行指定前将处于未绑定状态。",
+    "zh-Hant": "**「%@」已在使用。**\n儲存後將由此項占用，%@ 在你另行指定前將處於未綁定狀態。"
+  },
+  "**free.** nothing else in Tessera uses it, and iPadOS lets it through.": {
+    "de": "**frei.** Nichts anderes in Tessera nutzt ihn, und iPadOS lässt ihn durch.",
+    "es": "**libre.** nada más en Tessera lo usa y iPadOS lo deja pasar.",
+    "fr": "**libre.** rien d'autre dans Tessera ne l'utilise, et iPadOS le laisse passer.",
+    "ja": "**空いています。** Tessera 内で他に使っているものはなく、iPadOS も通してくれます。",
+    "zh-Hans": "**可用。** Tessera 中没有其他功能占用它，iPadOS 也会放行。",
+    "zh-Hant": "**可用。** Tessera 中沒有其他功能占用它，iPadOS 也會放行。"
+  },
+  "**nothing arrived.**\nif you pressed a key with that modifier, iPadOS or the focus engine is keeping it — try a letter or punctuation key with ⌘.": {
+    "de": "**nichts angekommen.**\nWenn du eine Taste mit diesem Modifier gedrückt hast, behält iPadOS oder die Focus-Engine sie — probiere einen Buchstaben oder ein Satzzeichen mit ⌘.",
+    "es": "**no llegó nada.**\nsi pulsaste una tecla con ese modificador, iPadOS o el motor de foco se la queda — prueba con una letra o un signo de puntuación junto a ⌘.",
+    "fr": "**rien n'est arrivé.**\nsi vous avez appuyé sur une touche avec ce modificateur, iPadOS ou le moteur de focus la retient — essayez une lettre ou une ponctuation avec ⌘.",
+    "ja": "**何も届きませんでした。**\nその修飾キーと組み合わせて押した場合、iPadOS またはフォーカスエンジンが横取りしています。⌘ と文字キーや記号キーの組み合わせを試してください。",
+    "zh-Hans": "**没有收到任何按键。**\n如果你按下的是带该修饰键的组合，说明 iPadOS 或焦点引擎截走了它 —— 试试用 ⌘ 搭配字母键或标点键。",
+    "zh-Hant": "**沒有收到任何按鍵。**\n如果你按下的是帶該修飾鍵的組合，表示 iPadOS 或焦點引擎攔截了它 —— 試試用 ⌘ 搭配字母鍵或標點鍵。"
+  },
+  "Command": {
+    "de": "Befehlstaste",
+    "es": "Comando",
+    "fr": "Commande",
+    "ja": "コマンド",
+    "zh-Hans": "Command 键",
+    "zh-Hant": "Command 鍵"
+  },
+  "Control": {
+    "de": "Control-Taste",
+    "es": "Control",
+    "fr": "Contrôle",
+    "ja": "コントロール",
+    "zh-Hans": "Control 键",
+    "zh-Hant": "Control 鍵"
+  },
+  "Option": {
+    "de": "Wahltaste",
+    "es": "Opción",
+    "fr": "Option",
+    "ja": "オプション",
+    "zh-Hans": "Option 键",
+    "zh-Hant": "Option 鍵"
+  },
+  "Shift": {
+    "de": "Umschalttaste",
+    "es": "Mayúsculas",
+    "fr": "Majuscule",
+    "ja": "シフト",
+    "zh-Hans": "Shift 键",
+    "zh-Hant": "Shift 鍵"
+  },
+  "Escape": {
+    "de": "Esc-Taste",
+    "es": "Escape",
+    "fr": "Échap",
+    "ja": "エスケープ",
+    "zh-Hans": "Esc 键",
+    "zh-Hant": "Esc 鍵"
+  },
+  "Tab": {
+    "de": "Tabulatortaste",
+    "es": "Tabulador",
+    "fr": "Tabulation",
+    "ja": "タブ",
+    "zh-Hans": "Tab 键",
+    "zh-Hant": "Tab 鍵"
+  },
+  "Up arrow": {
+    "de": "Pfeil nach oben",
+    "es": "Flecha arriba",
+    "fr": "Flèche haut",
+    "ja": "上矢印",
+    "zh-Hans": "上箭头",
+    "zh-Hant": "上方向鍵"
+  },
+  "Down arrow": {
+    "de": "Pfeil nach unten",
+    "es": "Flecha abajo",
+    "fr": "Flèche bas",
+    "ja": "下矢印",
+    "zh-Hans": "下箭头",
+    "zh-Hant": "下方向鍵"
+  },
+  "Left arrow": {
+    "de": "Pfeil nach links",
+    "es": "Flecha izquierda",
+    "fr": "Flèche gauche",
+    "ja": "左矢印",
+    "zh-Hans": "左箭头",
+    "zh-Hant": "左方向鍵"
+  },
+  "Right arrow": {
+    "de": "Pfeil nach rechts",
+    "es": "Flecha derecha",
+    "fr": "Flèche droite",
+    "ja": "右矢印",
+    "zh-Hans": "右箭头",
+    "zh-Hant": "右方向鍵"
+  },
+  "Page up": {
+    "de": "Bild auf",
+    "es": "Retroceder página",
+    "fr": "Page précédente",
+    "ja": "ページアップ",
+    "zh-Hans": "上翻页",
+    "zh-Hant": "上一頁"
+  },
+  "Page down": {
+    "de": "Bild ab",
+    "es": "Avanzar página",
+    "fr": "Page suivante",
+    "ja": "ページダウン",
+    "zh-Hans": "下翻页",
+    "zh-Hant": "下一頁"
+  },
+  "Control-C": {
+    "de": "Control-C",
+    "es": "Control-C",
+    "fr": "Contrôle-C",
+    "ja": "コントロール-C",
+    "zh-Hans": "Control-C",
+    "zh-Hant": "Control-C"
+  },
+  "Control-J": {
+    "de": "Control-J",
+    "es": "Control-J",
+    "fr": "Contrôle-J",
+    "ja": "コントロール-J",
+    "zh-Hans": "Control-J",
+    "zh-Hant": "Control-J"
+  },
+  "Enter Full Screen": {
+    "de": "Vollbild aktivieren",
+    "es": "Entrar en pantalla completa",
+    "fr": "Activer le plein écran",
+    "ja": "フルスクリーンにする",
+    "zh-Hans": "进入全屏",
+    "zh-Hant": "進入全螢幕"
+  },
+  "Exit Full Screen": {
+    "de": "Vollbild beenden",
+    "es": "Salir de pantalla completa",
+    "fr": "Quitter le plein écran",
+    "ja": "フルスクリーンを解除",
+    "zh-Hans": "退出全屏",
+    "zh-Hant": "結束全螢幕"
+  },
+  "Stage Manager closes the window on ⌘W. Tessera uses ⇧⌘W to close a tmux window for exactly this reason.": {
+    "de": "Stage Manager schließt mit ⌘W das Fenster. Genau deshalb nutzt Tessera ⇧⌘W zum Schließen eines tmux-Fensters.",
+    "es": "Stage Manager cierra la ventana con ⌘W. Justo por eso Tessera usa ⇧⌘W para cerrar una ventana de tmux.",
+    "fr": "Stage Manager ferme la fenêtre avec ⌘W. C'est exactement pour cela que Tessera utilise ⇧⌘W pour fermer une fenêtre tmux.",
+    "ja": "Stage Manager では ⌘W がウインドウを閉じます。まさにこの理由から、Tessera は tmux ウインドウを閉じるのに ⇧⌘W を使います。",
+    "zh-Hans": "台前调度会用 ⌘W 关闭窗口。正因如此，Tessera 用 ⇧⌘W 关闭 tmux 窗口。",
+    "zh-Hant": "幕前調度會用 ⌘W 關閉視窗。正因如此，Tessera 用 ⇧⌘W 關閉 tmux 視窗。"
+  },
+  "⌘W is claimed by Stage Manager, so the default is ⇧⌘W": {
+    "de": "⌘W ist von Stage Manager belegt, daher ist ⇧⌘W die Vorgabe",
+    "es": "Stage Manager reclama ⌘W, así que el valor por omisión es ⇧⌘W",
+    "fr": "⌘W est réservé par Stage Manager, la valeur par défaut est donc ⇧⌘W",
+    "ja": "⌘W は Stage Manager が使うため、既定は ⇧⌘W です",
+    "zh-Hans": "⌘W 已被台前调度占用，因此默认使用 ⇧⌘W",
+    "zh-Hant": "⌘W 已被幕前調度占用，因此預設使用 ⇧⌘W"
+  },
+  "⇧⌘3 takes a screenshot.": {
+    "de": "⇧⌘3 macht ein Bildschirmfoto.",
+    "es": "⇧⌘3 hace una captura de pantalla.",
+    "fr": "⇧⌘3 prend une capture d'écran.",
+    "ja": "⇧⌘3 はスクリーンショットを撮ります。",
+    "zh-Hans": "⇧⌘3 用于截屏。",
+    "zh-Hant": "⇧⌘3 用於截圖。"
+  },
+  "⇧⌘4 takes a screenshot.": {
+    "de": "⇧⌘4 macht ein Bildschirmfoto.",
+    "es": "⇧⌘4 hace una captura de pantalla.",
+    "fr": "⇧⌘4 prend une capture d'écran.",
+    "ja": "⇧⌘4 はスクリーンショットを撮ります。",
+    "zh-Hans": "⇧⌘4 用于截屏。",
+    "zh-Hant": "⇧⌘4 用於截圖。"
+  },
+  "⌘H goes to the Home screen.": {
+    "de": "⌘H wechselt zum Home-Bildschirm.",
+    "es": "⌘H va a la pantalla de inicio.",
+    "fr": "⌘H revient à l'écran d'accueil.",
+    "ja": "⌘H はホーム画面に戻ります。",
+    "zh-Hans": "⌘H 会回到主屏幕。",
+    "zh-Hant": "⌘H 會回到主畫面。"
+  },
+  "⌘space opens Spotlight before Tessera is asked.": {
+    "de": "⌘Leertaste öffnet Spotlight, bevor Tessera überhaupt gefragt wird.",
+    "es": "⌘espacio abre Spotlight antes de que se consulte a Tessera.",
+    "fr": "⌘espace ouvre Spotlight avant même que Tessera soit sollicitée.",
+    "ja": "⌘スペースは、Tessera に届く前に Spotlight を開きます。",
+    "zh-Hans": "⌘空格会在 Tessera 收到之前先打开聚焦搜索。",
+    "zh-Hant": "⌘空白鍵會在 Tessera 收到之前先開啟 Spotlight。"
+  },
+  "⌘tab is the app switcher.": {
+    "de": "⌘Tabulator ist der App-Umschalter.",
+    "es": "⌘tabulador es el selector de apps.",
+    "fr": "⌘tabulation ouvre le sélecteur d'apps.",
+    "ja": "⌘タブ は App スイッチャーです。",
+    "zh-Hans": "⌘Tab 是应用切换器。",
+    "zh-Hant": "⌘Tab 是 App 切換器。"
+  },
+  "⌘⌥D shows and hides the Dock.": {
+    "de": "⌘⌥D blendet das Dock ein und aus.",
+    "es": "⌘⌥D muestra y oculta el Dock.",
+    "fr": "⌘⌥D affiche et masque le Dock.",
+    "ja": "⌘⌥D は Dock の表示と非表示を切り替えます。",
+    "zh-Hans": "⌘⌥D 用于显示和隐藏程序坞。",
+    "zh-Hant": "⌘⌥D 用於顯示和隱藏 Dock。"
+  },
+  "⌥ changes this key": {
+    "de": "⌥ verändert diese Taste",
+    "es": "⌥ cambia esta tecla",
+    "fr": "⌥ modifie cette touche",
+    "ja": "⌥ はこのキーを変えます",
+    "zh-Hans": "⌥ 会改变这个键",
+    "zh-Hant": "⌥ 會改變這個鍵"
+  },
+  "holding ⌥ makes this key produce a different character, so the shortcut would never match. try it without ⌥, or pick a letter.": {
+    "de": "Mit gedrückter ⌥-Taste erzeugt diese Taste ein anderes Zeichen, der Kurzbefehl würde also nie greifen. Probiere es ohne ⌥ oder wähle einen Buchstaben.",
+    "es": "manteniendo ⌥ esta tecla produce otro carácter, así que el atajo nunca coincidiría. pruébalo sin ⌥ o elige una letra.",
+    "fr": "en maintenant ⌥, cette touche produit un autre caractère : le raccourci ne correspondrait jamais. essayez sans ⌥, ou choisissez une lettre.",
+    "ja": "⌥ を押しながらだと、このキーは別の文字を出すため、ショートカットが一致することはありません。⌥ なしで試すか、文字キーを選んでください。",
+    "zh-Hans": "按住 ⌥ 时这个键会输出别的字符，所以该快捷键永远不会匹配。请去掉 ⌥ 再试，或换一个字母键。",
+    "zh-Hant": "按住 ⌥ 時這個鍵會輸出別的字元，所以該快捷鍵永遠不會相符。請去掉 ⌥ 再試，或換一個字母鍵。"
+  },
+  "iPadOS keeps this one": {
+    "de": "iPadOS behält diesen",
+    "es": "iPadOS se queda con este",
+    "fr": "iPadOS garde celui-ci",
+    "ja": "これは iPadOS が使います",
+    "zh-Hans": "这个由 iPadOS 占用",
+    "zh-Hant": "這個由 iPadOS 占用"
+  },
+  "iPadOS's focus engine claims the Tab key app-wide, so this never reaches Tessera.": {
+    "de": "Die Focus-Engine von iPadOS beansprucht die Tabulatortaste app-weit, daher erreicht dies Tessera nie.",
+    "es": "El motor de foco de iPadOS reclama la tecla Tabulador en toda la app, así que esto nunca llega a Tessera.",
+    "fr": "Le moteur de focus d'iPadOS s'approprie la touche Tabulation dans toute l'app, donc ceci n'atteint jamais Tessera.",
+    "ja": "iPadOS のフォーカスエンジンがタブキーをアプリ全体で使うため、これが Tessera に届くことはありません。",
+    "zh-Hans": "iPadOS 的焦点引擎在整个应用范围内占用 Tab 键，因此它永远不会传到 Tessera。",
+    "zh-Hant": "iPadOS 的焦點引擎在整個 App 範圍內占用 Tab 鍵，因此它永遠不會傳到 Tessera。"
+  },
+  "the terminal's text input claims the arrow keys first. try a letter or a punctuation key.": {
+    "de": "Die Texteingabe des Terminals beansprucht die Pfeiltasten zuerst. Probiere einen Buchstaben oder ein Satzzeichen.",
+    "es": "la entrada de texto del terminal reclama primero las teclas de flecha. prueba con una letra o un signo de puntuación.",
+    "fr": "la saisie de texte du terminal s'approprie d'abord les touches fléchées. essayez une lettre ou une ponctuation.",
+    "ja": "ターミナルのテキスト入力が矢印キーを先に受け取ります。文字キーか記号キーを試してください。",
+    "zh-Hans": "终端的文本输入会先占用方向键。请改用字母键或标点键。",
+    "zh-Hant": "終端機的文字輸入會先占用方向鍵。請改用字母鍵或標點鍵。"
+  },
+  "can't be captured here": {
+    "de": "hier nicht erfassbar",
+    "es": "no se puede capturar aquí",
+    "fr": "impossible à capturer ici",
+    "ja": "ここでは取得できません",
+    "zh-Hans": "无法在此捕获",
+    "zh-Hant": "無法在此擷取"
+  },
+  "needs ⌘": {
+    "de": "braucht ⌘",
+    "es": "necesita ⌘",
+    "fr": "nécessite ⌘",
+    "ja": "⌘ が必要です",
+    "zh-Hans": "需要 ⌘",
+    "zh-Hant": "需要 ⌘"
+  },
+  "the terminal owns them — that's why app shortcuts must include ⌘": {
+    "de": "Das Terminal beansprucht sie — deshalb müssen App-Kurzbefehle ⌘ enthalten",
+    "es": "las reclama el terminal — por eso los atajos de la app deben incluir ⌘",
+    "fr": "le terminal se les approprie — c'est pourquoi les raccourcis de l'app doivent inclure ⌘",
+    "ja": "ターミナルが受け取ります — だからアプリのショートカットには ⌘ が必要です",
+    "zh-Hans": "它们归终端所有 —— 所以应用快捷键必须带 ⌘",
+    "zh-Hant": "它們歸終端機所有 —— 所以 App 快捷鍵必須帶 ⌘"
+  },
+  "without it the terminal loses this key — ^E is end-of-line in every shell.": {
+    "de": "Ohne ⌘ verliert das Terminal diese Taste — ^E ist in jeder Shell das Zeilenende.",
+    "es": "sin él, el terminal pierde esta tecla — ^E es el fin de línea en cualquier shell.",
+    "fr": "sans lui, le terminal perd cette touche — ^E correspond à la fin de ligne dans tous les shells.",
+    "ja": "これがないとターミナルはこのキーを失います — ^E はどのシェルでも行末への移動です。",
+    "zh-Hans": "少了它，终端就会失去这个键 —— ^E 在任何 shell 中都是行尾。",
+    "zh-Hant": "少了它，終端機就會失去這個鍵 —— ^E 在任何 shell 中都是行尾。"
+  },
+  "press the keys you want.\nthey won't reach the terminal while recording.": {
+    "de": "Drücke die gewünschten Tasten.\nWährend der Aufnahme erreichen sie das Terminal nicht.",
+    "es": "pulsa las teclas que quieras.\nmientras se graba no llegan al terminal.",
+    "fr": "appuyez sur les touches voulues.\npendant l'enregistrement, elles n'atteignent pas le terminal.",
+    "ja": "使いたいキーを押してください。\n記録中、キーはターミナルには届きません。",
+    "zh-Hans": "按下你想要的按键。\n记录期间它们不会传到终端。",
+    "zh-Hant": "按下你想要的按鍵。\n記錄期間它們不會傳到終端機。"
+  },
+  "connect a hardware keyboard to record a chord. the chip below works without one.": {
+    "de": "Verbinde eine Hardware-Tastatur, um einen Akkord aufzunehmen. Der Chip unten funktioniert auch ohne.",
+    "es": "conecta un teclado físico para grabar una combinación. el chip de abajo funciona sin él.",
+    "fr": "connectez un clavier physique pour enregistrer un accord. la puce ci-dessous fonctionne sans.",
+    "ja": "コードを記録するにはハードウェアキーボードを接続してください。下のチップはなくても使えます。",
+    "zh-Hans": "连接硬件键盘以记录组合键。下方的小按钮不需要键盘也能用。",
+    "zh-Hant": "連接硬體鍵盤以記錄組合鍵。下方的小按鈕不需要鍵盤也能用。"
+  },
+  "record again": {
+    "de": "erneut aufnehmen",
+    "es": "grabar otra vez",
+    "fr": "réenregistrer",
+    "ja": "もう一度記録",
+    "zh-Hans": "重新记录",
+    "zh-Hant": "重新記錄"
+  },
+  "also the VoiceOver label for its chip.": {
+    "de": "zugleich die VoiceOver-Beschriftung seines Chips.",
+    "es": "también es la etiqueta de VoiceOver de su chip.",
+    "fr": "sert aussi d'étiquette VoiceOver pour sa puce.",
+    "ja": "そのチップの VoiceOver ラベルにもなります。",
+    "zh-Hans": "同时也是该小按钮的 VoiceOver 标签。",
+    "zh-Hant": "同時也是該小按鈕的 VoiceOver 標籤。"
+  },
+  "navigation": {
+    "de": "Navigation",
+    "es": "navegación",
+    "fr": "navigation",
+    "ja": "ナビゲーション",
+    "zh-Hans": "导航",
+    "zh-Hant": "導覽"
+  },
+  "panes": {
+    "de": "Bereiche",
+    "es": "paneles",
+    "fr": "volets",
+    "ja": "ペイン",
+    "zh-Hans": "窗格",
+    "zh-Hant": "窗格"
+  },
+  "text editing": {
+    "de": "Textbearbeitung",
+    "es": "edición de texto",
+    "fr": "édition de texte",
+    "ja": "テキスト編集",
+    "zh-Hans": "文本编辑",
+    "zh-Hant": "文字編輯"
+  },
+  "function keys": {
+    "de": "Funktionstasten",
+    "es": "teclas de función",
+    "fr": "touches de fonction",
+    "ja": "ファンクションキー",
+    "zh-Hans": "功能键",
+    "zh-Hant": "功能鍵"
+  },
+  "modifiers": {
+    "de": "Modifier",
+    "es": "modificadores",
+    "fr": "modificateurs",
+    "ja": "修飾キー",
+    "zh-Hans": "修饰键",
+    "zh-Hant": "修飾鍵"
+  },
+  "symbols": {
+    "de": "Symbole",
+    "es": "símbolos",
+    "fr": "symboles",
+    "ja": "記号",
+    "zh-Hans": "符号",
+    "zh-Hant": "符號"
+  },
+  "control shortcuts": {
+    "de": "Control-Kurzbefehle",
+    "es": "atajos con Control",
+    "fr": "raccourcis Contrôle",
+    "ja": "コントロールのショートカット",
+    "zh-Hans": "Control 快捷键",
+    "zh-Hant": "Control 快捷鍵"
+  },
+  "global": {
+    "de": "global",
+    "es": "global",
+    "fr": "global",
+    "ja": "グローバル",
+    "zh-Hans": "全局",
+    "zh-Hant": "全域"
+  },
+  "close find bar": {
+    "de": "Suchleiste schließen",
+    "es": "cerrar la barra de búsqueda",
+    "fr": "fermer la barre de recherche",
+    "ja": "検索バーを閉じる",
+    "zh-Hans": "关闭查找栏",
+    "zh-Hant": "關閉尋找列"
+  },
+  "open find bar": {
+    "de": "Suchleiste öffnen",
+    "es": "abrir la barra de búsqueda",
+    "fr": "ouvrir la barre de recherche",
+    "ja": "検索バーを開く",
+    "zh-Hans": "打开查找栏",
+    "zh-Hant": "開啟尋找列"
+  },
+  "close pane / window": {
+    "de": "Bereich / Fenster schließen",
+    "es": "cerrar panel / ventana",
+    "fr": "fermer le volet / la fenêtre",
+    "ja": "ペイン／ウインドウを閉じる",
+    "zh-Hans": "关闭窗格 / 窗口",
+    "zh-Hant": "關閉窗格 / 視窗"
+  },
+  "delete to start of line": {
+    "de": "bis zum Zeilenanfang löschen",
+    "es": "borrar hasta el inicio de la línea",
+    "fr": "supprimer jusqu'au début de la ligne",
+    "ja": "行頭まで削除",
+    "zh-Hans": "删除到行首",
+    "zh-Hant": "刪除到行首"
+  },
+  "delete word left": {
+    "de": "Wort links löschen",
+    "es": "borrar la palabra a la izquierda",
+    "fr": "supprimer le mot à gauche",
+    "ja": "左の単語を削除",
+    "zh-Hans": "删除左侧单词",
+    "zh-Hant": "刪除左側單字"
+  },
+  "start / end of line": {
+    "de": "Zeilenanfang / -ende",
+    "es": "inicio / fin de línea",
+    "fr": "début / fin de ligne",
+    "ja": "行頭／行末",
+    "zh-Hans": "行首 / 行尾",
+    "zh-Hant": "行首 / 行尾"
+  },
+  "previous / next word": {
+    "de": "vorheriges / nächstes Wort",
+    "es": "palabra anterior / siguiente",
+    "fr": "mot précédent / suivant",
+    "ja": "前／次の単語",
+    "zh-Hans": "上一个 / 下一个单词",
+    "zh-Hant": "上一個 / 下一個單字"
+  },
+  "jump to any session or host": {
+    "de": "zu einer beliebigen Sitzung oder einem Host springen",
+    "es": "saltar a cualquier sesión o host",
+    "fr": "aller à n'importe quelle session ou hôte",
+    "ja": "任意のセッションやホストへ移動",
+    "zh-Hans": "跳转到任意会话或主机",
+    "zh-Hant": "跳至任一工作階段或主機"
+  },
+  "jump to window 1–9": {
+    "de": "zu Fenster 1–9 springen",
+    "es": "saltar a la ventana 1–9",
+    "fr": "aller à la fenêtre 1–9",
+    "ja": "ウインドウ 1〜9 へ移動",
+    "zh-Hans": "跳转到窗口 1–9",
+    "zh-Hant": "跳至視窗 1–9"
+  },
+  "next / previous match": {
+    "de": "nächster / vorheriger Treffer",
+    "es": "coincidencia siguiente / anterior",
+    "fr": "correspondance suivante / précédente",
+    "ja": "次／前の一致",
+    "zh-Hans": "下一个 / 上一个匹配",
+    "zh-Hant": "下一個 / 上一個相符項"
+  },
+  "next / previous match (while searching)": {
+    "de": "nächster / vorheriger Treffer (während der Suche)",
+    "es": "coincidencia siguiente / anterior (durante la búsqueda)",
+    "fr": "correspondance suivante / précédente (pendant la recherche)",
+    "ja": "次／前の一致（検索中）",
+    "zh-Hans": "下一个 / 上一个匹配（搜索时）",
+    "zh-Hant": "下一個 / 上一個相符項（搜尋時）"
+  },
+  "next match": {
+    "de": "nächster Treffer",
+    "es": "coincidencia siguiente",
+    "fr": "correspondance suivante",
+    "ja": "次の一致",
+    "zh-Hans": "下一个匹配",
+    "zh-Hant": "下一個相符項"
+  },
+  "previous match": {
+    "de": "vorheriger Treffer",
+    "es": "coincidencia anterior",
+    "fr": "correspondance précédente",
+    "ja": "前の一致",
+    "zh-Hans": "上一个匹配",
+    "zh-Hant": "上一個相符項"
+  },
+  "next pane": {
+    "de": "nächster Bereich",
+    "es": "panel siguiente",
+    "fr": "volet suivant",
+    "ja": "次のペイン",
+    "zh-Hans": "下一个窗格",
+    "zh-Hant": "下一個窗格"
+  },
+  "previous pane": {
+    "de": "vorheriger Bereich",
+    "es": "panel anterior",
+    "fr": "volet précédent",
+    "ja": "前のペイン",
+    "zh-Hans": "上一个窗格",
+    "zh-Hant": "上一個窗格"
+  },
+  "previous / next pane": {
+    "de": "vorheriger / nächster Bereich",
+    "es": "panel anterior / siguiente",
+    "fr": "volet précédent / suivant",
+    "ja": "前／次のペイン",
+    "zh-Hans": "上一个 / 下一个窗格",
+    "zh-Hant": "上一個 / 下一個窗格"
+  },
+  "next session": {
+    "de": "nächste Sitzung",
+    "es": "sesión siguiente",
+    "fr": "session suivante",
+    "ja": "次のセッション",
+    "zh-Hans": "下一个会话",
+    "zh-Hant": "下一個工作階段"
+  },
+  "previous session": {
+    "de": "vorherige Sitzung",
+    "es": "sesión anterior",
+    "fr": "session précédente",
+    "ja": "前のセッション",
+    "zh-Hans": "上一个会话",
+    "zh-Hant": "上一個工作階段"
+  },
+  "previous / next session": {
+    "de": "vorherige / nächste Sitzung",
+    "es": "sesión anterior / siguiente",
+    "fr": "session précédente / suivante",
+    "ja": "前／次のセッション",
+    "zh-Hans": "上一个 / 下一个会话",
+    "zh-Hant": "上一個 / 下一個工作階段"
+  },
+  "next window": {
+    "de": "nächstes Fenster",
+    "es": "ventana siguiente",
+    "fr": "fenêtre suivante",
+    "ja": "次のウインドウ",
+    "zh-Hans": "下一个窗口",
+    "zh-Hant": "下一個視窗"
+  },
+  "previous window": {
+    "de": "vorheriges Fenster",
+    "es": "ventana anterior",
+    "fr": "fenêtre précédente",
+    "ja": "前のウインドウ",
+    "zh-Hans": "上一个窗口",
+    "zh-Hant": "上一個視窗"
+  },
+  "previous / next window": {
+    "de": "vorheriges / nächstes Fenster",
+    "es": "ventana anterior / siguiente",
+    "fr": "fenêtre précédente / suivante",
+    "ja": "前／次のウインドウ",
+    "zh-Hans": "上一个 / 下一个窗口",
+    "zh-Hant": "上一個 / 下一個視窗"
+  },
+  "split side-by-side": {
+    "de": "nebeneinander teilen",
+    "es": "dividir en paralelo",
+    "fr": "diviser côte à côte",
+    "ja": "左右に分割",
+    "zh-Hans": "左右分割",
+    "zh-Hant": "左右分割"
+  },
+  "split stacked": {
+    "de": "übereinander teilen",
+    "es": "dividir en horizontal",
+    "fr": "diviser l'un au-dessus de l'autre",
+    "ja": "上下に分割",
+    "zh-Hans": "上下分割",
+    "zh-Hant": "上下分割"
+  },
+  "split side-by-side / stacked": {
+    "de": "nebeneinander / übereinander teilen",
+    "es": "dividir en paralelo / en horizontal",
+    "fr": "diviser côte à côte / l'un au-dessus de l'autre",
+    "ja": "左右／上下に分割",
+    "zh-Hans": "左右 / 上下分割",
+    "zh-Hant": "左右 / 上下分割"
+  },
+  "zoom pane": {
+    "de": "Bereich zoomen",
+    "es": "ampliar el panel",
+    "fr": "agrandir le volet",
+    "ja": "ペインをズーム",
+    "zh-Hans": "缩放窗格",
+    "zh-Hant": "縮放窗格"
+  },
+  "refresh terminal": {
+    "de": "Terminal aktualisieren",
+    "es": "actualizar el terminal",
+    "fr": "actualiser le terminal",
+    "ja": "ターミナルを再描画",
+    "zh-Hans": "刷新终端",
+    "zh-Hant": "重新整理終端機"
+  },
+  "toggle agent center": {
+    "de": "Agentenzentrale ein-/ausblenden",
+    "es": "mostrar u ocultar el centro de agentes",
+    "fr": "afficher ou masquer le centre des agents",
+    "ja": "エージェントセンターの表示を切り替え",
+    "zh-Hans": "显示或隐藏智能体中心",
+    "zh-Hant": "顯示或隱藏智能體中心"
+  },
+  "toggle files panel": {
+    "de": "Dateibereich ein-/ausblenden",
+    "es": "mostrar u ocultar el panel de archivos",
+    "fr": "afficher ou masquer le panneau de fichiers",
+    "ja": "ファイルパネルの表示を切り替え",
+    "zh-Hans": "显示或隐藏文件面板",
+    "zh-Hant": "顯示或隱藏檔案面板"
+  },
+  "toggle hidden files": {
+    "de": "unsichtbare Dateien ein-/ausblenden",
+    "es": "mostrar u ocultar los archivos ocultos",
+    "fr": "afficher ou masquer les fichiers cachés",
+    "ja": "不可視ファイルの表示を切り替え",
+    "zh-Hans": "显示或隐藏隐藏文件",
+    "zh-Hant": "顯示或隱藏隱藏檔案"
+  },
+  "add host & connect": {
+    "de": "Host hinzufügen & verbinden",
+    "es": "añadir host y conectar",
+    "fr": "ajouter un hôte et se connecter",
+    "ja": "ホストを追加して接続",
+    "zh-Hans": "添加主机并连接",
+    "zh-Hant": "新增主機並連線"
+  },
+  "new session": {
+    "de": "neue Sitzung",
+    "es": "sesión nueva",
+    "fr": "nouvelle session",
+    "ja": "新規セッション",
+    "zh-Hans": "新建会话",
+    "zh-Hant": "新增工作階段"
+  },
+  "new window": {
+    "de": "neues Fenster",
+    "es": "ventana nueva",
+    "fr": "nouvelle fenêtre",
+    "ja": "新規ウインドウ",
+    "zh-Hans": "新建窗口",
+    "zh-Hant": "新增視窗"
+  },
+  "quick-switch palette": {
+    "de": "Schnellwechsel-Palette",
+    "es": "paleta de cambio rápido",
+    "fr": "palette de bascule rapide",
+    "ja": "クイック切り替えパレット",
+    "zh-Hans": "快速切换面板",
+    "zh-Hant": "快速切換面板"
+  },
+  "opens the host editor from anywhere": {
+    "de": "öffnet den Host-Editor von überall",
+    "es": "abre el editor de hosts desde cualquier lugar",
+    "fr": "ouvre l'éditeur d'hôtes depuis n'importe où",
+    "ja": "どこからでもホストエディタを開きます",
+    "zh-Hans": "可在任何位置打开主机编辑器",
+    "zh-Hant": "可在任何位置開啟主機編輯器"
+  },
+  "works with the find bar closed": {
+    "de": "funktioniert auch bei geschlossener Suchleiste",
+    "es": "funciona con la barra de búsqueda cerrada",
+    "fr": "fonctionne même avec la barre de recherche fermée",
+    "ja": "検索バーを閉じたままでも使えます",
+    "zh-Hans": "查找栏关闭时也可用",
+    "zh-Hant": "尋找列關閉時也可用"
+  },
+  "— live once a window holds more than one pane": {
+    "de": "— aktiv, sobald ein Fenster mehr als einen Bereich enthält",
+    "es": "— activo en cuanto una ventana tiene más de un panel",
+    "fr": "— actif dès qu'une fenêtre contient plus d'un volet",
+    "ja": "— ウインドウに複数のペインがあるときに有効",
+    "zh-Hans": "—— 当窗口包含多个窗格时生效",
+    "zh-Hant": "—— 當視窗包含多個窗格時生效"
+  },
+  "— live only while a tmux session is attached": {
+    "de": "— nur aktiv, solange eine tmux-Sitzung angehängt ist",
+    "es": "— activo solo mientras hay una sesión de tmux conectada",
+    "fr": "— actif uniquement tant qu'une session tmux est attachée",
+    "ja": "— tmux セッションにアタッチしている間だけ有効",
+    "zh-Hans": "—— 仅在接入 tmux 会话时生效",
+    "zh-Hant": "—— 僅在接入 tmux 工作階段時生效"
+  },
+  "every bare and ⌃-prefixed key": {
+    "de": "jede Taste einzeln und mit ⌃-Präfix",
+    "es": "todas las teclas sueltas y con prefijo ⌃",
+    "fr": "toutes les touches seules et préfixées par ⌃",
+    "ja": "単独のキーと ⌃ 付きのキーのすべて",
+    "zh-Hans": "所有单独按键以及带 ⌃ 前缀的按键",
+    "zh-Hant": "所有單獨按鍵以及帶 ⌃ 前綴的按鍵"
+  },
+  "a nine-key block sharing one action — remapping changes the modifier, not the digits": {
+    "de": "ein Block aus neun Tasten mit einer gemeinsamen Aktion — beim Neubelegen ändert sich der Modifier, nicht die Ziffern",
+    "es": "un bloque de nueve teclas con una sola acción — reasignarlo cambia el modificador, no los dígitos",
+    "fr": "un bloc de neuf touches partageant une action — le réassigner change le modificateur, pas les chiffres",
+    "ja": "1 つの操作を共有する 9 キーのまとまり — 割り当てを変えると修飾キーが変わり、数字は変わりません",
+    "zh-Hans": "共用一个操作的九个按键 —— 重新映射改变的是修饰键，而不是数字",
+    "zh-Hant": "共用一個操作的九個按鍵 —— 重新對應改變的是修飾鍵，而不是數字"
+  },
+  "natural text editing writes these to the remote — the app never sees them": {
+    "de": "Natürliche Textbearbeitung schreibt diese an die Gegenstelle — die App sieht sie nie",
+    "es": "la edición de texto natural las envía al equipo remoto — la app nunca las ve",
+    "fr": "l'édition de texte naturelle les envoie à la machine distante — l'app ne les voit jamais",
+    "ja": "自然なテキスト編集ではこれらはリモートに送られ、アプリが受け取ることはありません",
+    "zh-Hans": "自然文本编辑会把这些直接写给远程 —— 应用永远看不到它们",
+    "zh-Hant": "自然文字編輯會把這些直接寫給遠端 —— App 永遠看不到它們"
+  },
+  "case sensitive": {
+    "de": "Groß-/Kleinschreibung beachten",
+    "es": "distinguir mayúsculas",
+    "fr": "respecter la casse",
+    "ja": "大文字と小文字を区別",
+    "zh-Hans": "区分大小写",
+    "zh-Hant": "區分大小寫"
+  },
+  "whole word": {
+    "de": "ganzes Wort",
+    "es": "palabra completa",
+    "fr": "mot entier",
+    "ja": "単語単位",
+    "zh-Hans": "全字匹配",
+    "zh-Hant": "全字相符"
+  },
+  "regex": {
+    "de": "Regex",
+    "es": "regex",
+    "fr": "regex",
+    "ja": "正規表現",
+    "zh-Hans": "正则表达式",
+    "zh-Hant": "正規表達式"
+  }
+}

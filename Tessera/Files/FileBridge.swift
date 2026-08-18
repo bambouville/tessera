@@ -355,7 +355,7 @@ final class FileBridge: FileBridging {
         }
 
         guard let connectedChain else {
-            let mapped = FileBridgeError.network("SSH connection did not produce a client.")
+            let mapped = FileBridgeError.network(String(localized: "SSH connection did not produce a client.", comment: "SSH connection failure"))
             applyConnectFailure(mapped, generation: generation)
             throw mapped
         }
@@ -574,26 +574,26 @@ final class FileBridge: FileBridging {
             return .authenticationFailed(error.errorDescription ?? describeSSHError(error))
 
         case is AuthenticationFailed:
-            return .authenticationFailed("Authentication failed.")
+            return .authenticationFailed(String(localized: "Authentication failed.", comment: "SSH auth failure"))
 
         case let error as SSHClientError:
             switch error {
             case .unsupportedPasswordAuthentication:
-                return .authenticationFailed("The server does not accept password authentication.")
+                return .authenticationFailed(String(localized: "The server does not accept password authentication.", comment: "SSH auth failure"))
             case .unsupportedPrivateKeyAuthentication:
-                return .authenticationFailed("The server does not accept public-key authentication.")
+                return .authenticationFailed(String(localized: "The server does not accept public-key authentication.", comment: "SSH auth failure"))
             case .unsupportedHostBasedAuthentication:
-                return .authenticationFailed("The server does not accept host-based authentication.")
+                return .authenticationFailed(String(localized: "The server does not accept host-based authentication.", comment: "SSH auth failure"))
             case .allAuthenticationOptionsFailed:
-                return .authenticationFailed("Authentication failed.")
+                return .authenticationFailed(String(localized: "Authentication failed.", comment: "SSH auth failure"))
             case .channelCreationFailed:
-                return .network("Failed to open the SSH channel.")
+                return .network(String(localized: "Failed to open the SSH channel.", comment: "SSH channel failure"))
             }
 
         case let error as CitadelError:
             switch error {
             case .unauthorized:
-                return .authenticationFailed("Authentication failed.")
+                return .authenticationFailed(String(localized: "Authentication failed.", comment: "SSH auth failure"))
             default:
                 return .network(describeSSHError(error))
             }
@@ -623,7 +623,7 @@ final class FileBridge: FileBridging {
             }
         }
         if let commandFailed = error as? SSHClient.CommandFailed {
-            return "Remote command failed with exit status \(commandFailed.exitCode)."
+            return String(localized: "Remote command failed with exit status \(commandFailed.exitCode).", comment: "Remote command failure; the argument is a shell exit status")
         }
         return describeSSHError(error)
     }

@@ -113,9 +113,9 @@ struct LockScreenView: View {
         guard let result = controller.lastAuthError else { return nil }
         switch result {
         case .failed:
-            return "face id didn't match. tap to try again or use device passcode."
+            return String(localized: "face id didn't match. tap to try again or use device passcode.")
         case .unavailable:
-            return "biometric authentication is unavailable. tap to use device passcode."
+            return String(localized: "biometric authentication is unavailable. tap to use device passcode.")
         case .authenticated, .userCancelled:
             return nil
         }

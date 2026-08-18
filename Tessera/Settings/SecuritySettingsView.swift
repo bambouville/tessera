@@ -5,18 +5,18 @@ struct SecuritySettingsView: View {
     @Environment(\.designTokens) private var T
     @Environment(AppearancePreferences.self) private var appearance
 
-    private let autoLockOptions: [(label: String, minutes: Int)] = [
-        ("Never", 0),
-        ("1 Minute", 1),
-        ("5 Minutes", 5),
-        ("15 Minutes", 15),
-        ("1 Hour", 60)
-    ]
+    private let autoLockOptions: [Int] = [0, 1, 5, 15, 60]
 
-    private var autoLockDisplayLabel: String {
-        let minutes = appearance.autoLockMinutes
-        return autoLockOptions.first(where: { $0.minutes == minutes })?.label
-            ?? "\(minutes) min"
+    /// Built from the number rather than stored as fixed English strings —
+    /// the minute count needs each language's own plural agreement, and the
+    /// fallback for a value outside the list needs the same treatment.
+    private func autoLockLabel(minutes: Int) -> String {
+        switch minutes {
+        case 0:  return String(localized: "Never", comment: "Auto-lock delay: never lock")
+        case 1:  return String(localized: "1 minute", comment: "Auto-lock delay")
+        case 60: return String(localized: "1 hour", comment: "Auto-lock delay")
+        default: return String(localized: "\(minutes) minutes", comment: "Auto-lock delay: two or more minutes")
+        }
     }
 
     private var backgroundLockBinding: Binding<Bool> {
@@ -41,12 +41,14 @@ struct SecuritySettingsView: View {
 
             Field(label: "auto-lock after idle") {
                 Menu {
-                    ForEach(autoLockOptions, id: \.minutes) { option in
-                        Button(option.label) { appearance.autoLockMinutes = option.minutes }
+                    ForEach(autoLockOptions, id: \.self) { minutes in
+                        Button(autoLockLabel(minutes: minutes)) {
+                            appearance.autoLockMinutes = minutes
+                        }
                     }
                 } label: {
                     HStack(spacing: 6) {
-                        Text(autoLockDisplayLabel)
+                        Text(verbatim: autoLockLabel(minutes: appearance.autoLockMinutes))
                             .font(Typography.tesseraMono(size: 13))
                             .foregroundStyle(T.fg)
                         Spacer()

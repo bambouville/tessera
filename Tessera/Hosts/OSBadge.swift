@@ -37,7 +37,7 @@ struct OSBadge: View {
             // accent color shows through as the badge background.
             logo.foregroundStyle(.white)
         } else {
-            Text("?")
+            Text(verbatim: "?")
                 .font(Typography.tesseraMono(size: size * 0.52, weight: .semibold))
                 .foregroundStyle(.white)
         }

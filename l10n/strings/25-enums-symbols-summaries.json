@@ -1,0 +1,331 @@
+{
+  "Never": {
+    "de": "Nie",
+    "es": "Nunca",
+    "fr": "Jamais",
+    "ja": "しない",
+    "zh-Hans": "从不",
+    "zh-Hant": "永不"
+  },
+  "1 minute": {
+    "de": "1 Minute",
+    "es": "1 minuto",
+    "fr": "1 minute",
+    "ja": "1 分",
+    "zh-Hans": "1 分钟",
+    "zh-Hant": "1 分鐘"
+  },
+  "%lld minutes": {
+    "de": "%lld Minuten",
+    "es": "%lld minutos",
+    "fr": "%lld minutes",
+    "ja": "%lld 分",
+    "zh-Hans": "%lld 分钟",
+    "zh-Hant": "%lld 分鐘"
+  },
+  "1 hour": {
+    "de": "1 Stunde",
+    "es": "1 hora",
+    "fr": "1 heure",
+    "ja": "1 時間",
+    "zh-Hans": "1 小时",
+    "zh-Hant": "1 小時"
+  },
+  "%lld d": {
+    "de": "%lld T.",
+    "es": "%lld d",
+    "fr": "%lld j",
+    "ja": "%lld 日",
+    "zh-Hans": "%lld 天",
+    "zh-Hant": "%lld 天"
+  },
+
+  "Home": {
+    "de": "Pos1",
+    "es": "Inicio",
+    "fr": "Début",
+    "ja": "Home キー",
+    "zh-Hans": "Home 键",
+    "zh-Hant": "Home 鍵"
+  },
+  "End": {
+    "de": "Ende",
+    "es": "Fin",
+    "fr": "Fin",
+    "ja": "End キー",
+    "zh-Hans": "End 键",
+    "zh-Hant": "End 鍵"
+  },
+  "Vertical bar": {
+    "de": "Senkrechter Strich",
+    "es": "Barra vertical",
+    "fr": "Barre verticale",
+    "ja": "縦棒",
+    "zh-Hans": "竖线",
+    "zh-Hant": "直線"
+  },
+  "Tilde": {
+    "de": "Tilde",
+    "es": "Virgulilla",
+    "fr": "Tilde",
+    "ja": "チルダ",
+    "zh-Hans": "波浪号",
+    "zh-Hant": "波浪號"
+  },
+  "Slash": {
+    "de": "Schrägstrich",
+    "es": "Barra inclinada",
+    "fr": "Barre oblique",
+    "ja": "スラッシュ",
+    "zh-Hans": "斜杠",
+    "zh-Hant": "斜線"
+  },
+  "Backslash": {
+    "de": "Umgekehrter Schrägstrich",
+    "es": "Barra invertida",
+    "fr": "Barre oblique inverse",
+    "ja": "バックスラッシュ",
+    "zh-Hans": "反斜杠",
+    "zh-Hant": "反斜線"
+  },
+  "Dollar sign": {
+    "de": "Dollarzeichen",
+    "es": "Signo de dólar",
+    "fr": "Signe dollar",
+    "ja": "ドル記号",
+    "zh-Hans": "美元符号",
+    "zh-Hant": "美元符號"
+  },
+  "Left brace": {
+    "de": "Geschweifte Klammer auf",
+    "es": "Llave de apertura",
+    "fr": "Accolade ouvrante",
+    "ja": "左中かっこ",
+    "zh-Hans": "左花括号",
+    "zh-Hant": "左大括號"
+  },
+  "Right brace": {
+    "de": "Geschweifte Klammer zu",
+    "es": "Llave de cierre",
+    "fr": "Accolade fermante",
+    "ja": "右中かっこ",
+    "zh-Hans": "右花括号",
+    "zh-Hant": "右大括號"
+  },
+  "Left bracket": {
+    "de": "Eckige Klammer auf",
+    "es": "Corchete de apertura",
+    "fr": "Crochet ouvrant",
+    "ja": "左大かっこ",
+    "zh-Hans": "左方括号",
+    "zh-Hant": "左方括號"
+  },
+  "Right bracket": {
+    "de": "Eckige Klammer zu",
+    "es": "Corchete de cierre",
+    "fr": "Crochet fermant",
+    "ja": "右大かっこ",
+    "zh-Hans": "右方括号",
+    "zh-Hant": "右方括號"
+  },
+  "Less-than sign": {
+    "de": "Kleiner-als-Zeichen",
+    "es": "Signo menor que",
+    "fr": "Signe inférieur à",
+    "ja": "小なり記号",
+    "zh-Hans": "小于号",
+    "zh-Hant": "小於號"
+  },
+  "Greater-than sign": {
+    "de": "Größer-als-Zeichen",
+    "es": "Signo mayor que",
+    "fr": "Signe supérieur à",
+    "ja": "大なり記号",
+    "zh-Hans": "大于号",
+    "zh-Hant": "大於號"
+  },
+
+  "MISMATCH": {
+    "de": "ABWEICHUNG",
+    "es": "DISCREPANCIA",
+    "fr": "DIVERGENCE",
+    "ja": "不一致",
+    "zh-Hans": "不匹配",
+    "zh-Hant": "不相符"
+  },
+  "Imported %lld added, %lld replaced, %lld unchanged": {
+    "de": "Import abgeschlossen: %1$lld hinzugefügt, %2$lld ersetzt, %3$lld unverändert",
+    "es": "Importación completada: %1$lld añadidos, %2$lld reemplazados, %3$lld sin cambios",
+    "fr": "Import terminé : %1$lld ajoutés, %2$lld remplacés, %3$lld inchangés",
+    "ja": "インポート完了: 追加 %1$lld 件、置換 %2$lld 件、変更なし %3$lld 件",
+    "zh-Hans": "导入完成：新增 %1$lld 项，替换 %2$lld 项，未更改 %3$lld 项",
+    "zh-Hant": "匯入完成：新增 %1$lld 項、取代 %2$lld 項、未變更 %3$lld 項"
+  },
+  "Imported %lld added, %lld replaced, %lld unchanged, %lld skipped because Known Hosts changed during review": {
+    "de": "Import abgeschlossen: %1$lld hinzugefügt, %2$lld ersetzt, %3$lld unverändert, %4$lld übersprungen, weil sich die bekannten Hosts während der Prüfung geändert haben",
+    "es": "Importación completada: %1$lld añadidos, %2$lld reemplazados, %3$lld sin cambios, %4$lld omitidos porque los hosts conocidos cambiaron durante la revisión",
+    "fr": "Import terminé : %1$lld ajoutés, %2$lld remplacés, %3$lld inchangés, %4$lld ignorés car les hôtes connus ont changé pendant la vérification",
+    "ja": "インポート完了: 追加 %1$lld 件、置換 %2$lld 件、変更なし %3$lld 件、確認中に既知のホストが変更されたため %4$lld 件をスキップ",
+    "zh-Hans": "导入完成：新增 %1$lld 项，替换 %2$lld 项，未更改 %3$lld 项，%4$lld 项因审核期间已知主机发生变化而跳过",
+    "zh-Hant": "匯入完成：新增 %1$lld 項、取代 %2$lld 項、未變更 %3$lld 項、%4$lld 項因審核期間已知主機變更而略過"
+  },
+  "Import was not saved and Known Hosts was not changed: %@": {
+    "de": "Der Import wurde nicht gesichert, die bekannten Hosts blieben unverändert: %@",
+    "es": "La importación no se guardó y los hosts conocidos no cambiaron: %@",
+    "fr": "L'import n'a pas été enregistré et les hôtes connus n'ont pas changé : %@",
+    "ja": "インポートは保存されず、既知のホストは変更されていません: %@",
+    "zh-Hans": "导入未保存，已知主机未更改：%@",
+    "zh-Hant": "匯入未儲存，已知主機未變更：%@"
+  },
+
+  "created %@  ·  last used on this device %@": {
+    "de": "erstellt %1$@  ·  zuletzt auf diesem Gerät verwendet %2$@",
+    "es": "creada %1$@  ·  usada por última vez en este dispositivo %2$@",
+    "fr": "créée %1$@  ·  dernière utilisation sur cet appareil %2$@",
+    "ja": "作成 %1$@  ·  この端末での最終使用 %2$@",
+    "zh-Hans": "创建于 %1$@  ·  本设备最后使用 %2$@",
+    "zh-Hant": "建立於 %1$@  ·  本裝置最後使用 %2$@"
+  },
+  "created %@  ·  last used on this device not recorded": {
+    "de": "erstellt %@  ·  keine Verwendung auf diesem Gerät erfasst",
+    "es": "creada %@  ·  sin uso registrado en este dispositivo",
+    "fr": "créée %@  ·  aucune utilisation enregistrée sur cet appareil",
+    "ja": "作成 %@  ·  この端末での使用履歴なし",
+    "zh-Hans": "创建于 %@  ·  本设备无使用记录",
+    "zh-Hant": "建立於 %@  ·  本裝置無使用紀錄"
+  },
+
+  "advanced": {
+    "de": "erweitert",
+    "es": "avanzado",
+    "fr": "avancé",
+    "ja": "詳細",
+    "zh-Hans": "高级",
+    "zh-Hant": "進階"
+  },
+  "forwarding": {
+    "de": "Weiterleitung",
+    "es": "reenvío",
+    "fr": "redirection",
+    "ja": "転送",
+    "zh-Hans": "转发",
+    "zh-Hant": "轉發"
+  },
+  "snippets": {
+    "de": "Snippets",
+    "es": "fragmentos",
+    "fr": "extraits",
+    "ja": "スニペット",
+    "zh-Hans": "命令片段",
+    "zh-Hant": "指令片段"
+  },
+
+  "blue": {
+    "de": "Blau",
+    "es": "azul",
+    "fr": "bleu",
+    "ja": "ブルー",
+    "zh-Hans": "蓝色",
+    "zh-Hant": "藍色"
+  },
+  "green": {
+    "de": "Grün",
+    "es": "verde",
+    "fr": "vert",
+    "ja": "グリーン",
+    "zh-Hans": "绿色",
+    "zh-Hant": "綠色"
+  },
+  "amber": {
+    "de": "Bernstein",
+    "es": "ámbar",
+    "fr": "ambre",
+    "ja": "アンバー",
+    "zh-Hans": "琥珀色",
+    "zh-Hant": "琥珀色"
+  },
+
+  "system": {
+    "de": "System",
+    "es": "sistema",
+    "fr": "système",
+    "ja": "システム",
+    "zh-Hans": "跟随系统",
+    "zh-Hant": "跟隨系統"
+  },
+  "dark": {
+    "de": "dunkel",
+    "es": "oscuro",
+    "fr": "sombre",
+    "ja": "ダーク",
+    "zh-Hans": "深色",
+    "zh-Hant": "深色"
+  },
+  "light": {
+    "de": "hell",
+    "es": "claro",
+    "fr": "clair",
+    "ja": "ライト",
+    "zh-Hans": "浅色",
+    "zh-Hant": "淺色"
+  },
+
+  "block": {
+    "de": "Block",
+    "es": "bloque",
+    "fr": "bloc",
+    "ja": "ブロック",
+    "zh-Hans": "方块",
+    "zh-Hant": "方塊"
+  },
+  "bar": {
+    "de": "Balken",
+    "es": "barra",
+    "fr": "barre",
+    "ja": "バー",
+    "zh-Hans": "竖线",
+    "zh-Hant": "直線"
+  },
+  "underline": {
+    "de": "Unterstrich",
+    "es": "subrayado",
+    "fr": "soulignement",
+    "ja": "アンダーライン",
+    "zh-Hans": "下划线",
+    "zh-Hant": "底線"
+  },
+
+  "ask": {
+    "de": "fragen",
+    "es": "preguntar",
+    "fr": "demander",
+    "ja": "確認",
+    "zh-Hans": "询问",
+    "zh-Hant": "詢問"
+  },
+
+  "macro": {
+    "de": "Makro",
+    "es": "macro",
+    "fr": "macro",
+    "ja": "マクロ",
+    "zh-Hans": "宏",
+    "zh-Hant": "巨集"
+  },
+  "dictation": {
+    "de": "Diktat",
+    "es": "dictado",
+    "fr": "dictée",
+    "ja": "音声入力",
+    "zh-Hans": "听写",
+    "zh-Hant": "聽寫"
+  },
+  "move": {
+    "de": "bewegen",
+    "es": "mover",
+    "fr": "déplacer",
+    "ja": "移動",
+    "zh-Hans": "移动",
+    "zh-Hant": "移動"
+  }
+}

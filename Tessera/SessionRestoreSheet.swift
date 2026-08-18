@@ -1,18 +1,23 @@
 import SwiftUI
 
 struct SessionRestorePrompt: Identifiable {
-    let id = UUID()
+    let id: UUID
     let document: SessionRestoreDocument
     let hostNames: [String]
     let skippedCount: Int
     let preserveSnapshotLiveIDs: Bool
 
     init(
+        id: UUID = UUID(),
         document: SessionRestoreDocument,
         hostNames: [String],
         skippedCount: Int,
         preserveSnapshotLiveIDs: Bool = true
     ) {
+        // Carrying the identity forward lets a presented sheet absorb a
+        // larger snapshot set in place; `.sheet(item:)` would otherwise
+        // dismiss and re-present it.
+        self.id = id
         self.document = document
         self.hostNames = hostNames
         self.skippedCount = skippedCount
@@ -37,7 +42,7 @@ struct SessionRestoreSheet: View {
                     .font(Typography.sheetTitle)
                     .foregroundStyle(T.fg)
 
-                Text(summaryText)
+                Text(verbatim: summaryText)
                     .font(Typography.tesseraMono(size: 13))
                     .foregroundStyle(T.fgMuted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -56,7 +61,7 @@ struct SessionRestoreSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 if prompt.skippedCount > 0 {
-                    Text(skippedText)
+                    Text(verbatim: skippedText)
                         .font(Typography.tesseraMono(size: 11))
                         .foregroundStyle(T.fgDim)
                         .fixedSize(horizontal: false, vertical: true)
@@ -102,15 +107,22 @@ struct SessionRestoreSheet: View {
         )
     }
 
+    // Whole sentences, pluralized by the String Catalog rather than by
+    // swapping a noun in English. Picking "connection"/"connections" here
+    // only works for languages with two forms and no agreement elsewhere in
+    // the sentence; the catalog carries a variant per language's own rules.
     private var summaryText: String {
-        let count = prompt.hostNames.count
-        let noun = count == 1 ? "connection" : "connections"
-        return "\(count) saved-host \(noun) can be reopened."
+        String(
+            localized: "\(prompt.hostNames.count) saved-host connections can be reopened.",
+            comment: "Session restore sheet summary. Pluralized on the connection count."
+        )
     }
 
     private var skippedText: String {
-        let noun = prompt.skippedCount == 1 ? "connection was" : "connections were"
-        return "\(prompt.skippedCount) previous \(noun) skipped because the saved host or credentials changed."
+        String(
+            localized: "\(prompt.skippedCount) previous connections were skipped because the saved host or credentials changed.",
+            comment: "Session restore sheet note. Pluralized on the skipped count."
+        )
     }
 
     private var maximumVisibleHostCount: Int {

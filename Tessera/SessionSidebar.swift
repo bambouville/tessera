@@ -80,7 +80,7 @@ struct SessionSidebar: View {
             HStack(spacing: 8) {
                 TesseraLogo(size: 18)
 
-                Text("Tessera")
+                Text(verbatim: "Tessera")
                     .font(Typography.tesseraMono(size: 17, weight: .medium))
                     .foregroundStyle(T.fg)
             }
@@ -244,7 +244,7 @@ struct SessionSidebar: View {
 }
 
 private struct SidebarSection<Content: View>: View {
-    let label: String
+    let label: LocalizedStringKey
     @ViewBuilder var content: Content
 
     @Environment(\.designTokens) private var T
@@ -333,13 +333,13 @@ private struct ActiveSessionRowBody<S: ObservableObject & TerminalSession>: View
         }
     }
 
-    private func label(for state: SessionState) -> String {
+    private func label(for state: SessionState) -> LocalizedStringResource {
         switch state {
-        case .idle:         return "idle"
-        case .connecting:   return "connecting…"
-        case .connected:    return "connected"
-        case .disconnected: return "disconnected"
-        case .failed:       return "failed"
+        case .idle:         return LocalizedStringResource("idle", comment: "Session state in the sidebar")
+        case .connecting:   return LocalizedStringResource("connecting…", comment: "Session state in the sidebar")
+        case .connected:    return LocalizedStringResource("connected", comment: "Session state in the sidebar")
+        case .disconnected: return LocalizedStringResource("disconnected", comment: "Session state in the sidebar")
+        case .failed:       return LocalizedStringResource("failed", comment: "Session state in the sidebar")
         }
     }
 
@@ -381,7 +381,7 @@ private struct ActiveSessionRowBody<S: ObservableObject & TerminalSession>: View
                                 .lineLimit(1)
 
                             if live.autoTmux {
-                                Text(" · tmux")
+                                Text(verbatim: " · tmux")
                                     .font(Typography.tesseraMono(size: 13))
                                     .foregroundStyle(T.fgDim)
                                     .lineLimit(1)
@@ -426,12 +426,11 @@ private struct ActiveSessionRowBody<S: ObservableObject & TerminalSession>: View
                                 : "display"))
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(T.fgMuted)
-                            .accessibilityLabel(
-                                "continued on "
-                                    + (sameDeviceClass
-                                        ? "another \(authorityPeerName)"
-                                        : authorityPeerName)
-                            )
+                            // One whole sentence per case: "another iPad"
+                            // does not survive as a separable fragment.
+                            .accessibilityLabel(sameDeviceClass
+                                ? String(localized: "continued on another \(authorityPeerName)")
+                                : String(localized: "continued on \(authorityPeerName)"))
                     }
 
                     Spacer(minLength: 0)
@@ -453,7 +452,7 @@ private struct ActiveSessionRowBody<S: ObservableObject & TerminalSession>: View
             RowActionButton(
                 systemName: "xmark",
                 tint: T.red,
-                accessibilityLabel: "disconnect \(live.hostName)"
+                accessibilityLabel: String(localized: "disconnect \(live.hostName)")
             ) {
                 confirmingDisconnect = true
             }
@@ -505,12 +504,12 @@ private struct HostRow: View {
                         .padding(.trailing, 12)
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(title)
+                        Text(verbatim: title)
                             .font(Typography.tesseraMono(size: 13))
                             .foregroundStyle(T.fg)
                             .lineLimit(1)
 
-                        Text(subtitle)
+                        Text(verbatim: subtitle)
                             .font(Typography.tesseraMono(size: 11))
                             .foregroundStyle(T.fgMuted)
                             .lineLimit(1)
@@ -529,7 +528,7 @@ private struct HostRow: View {
             RowActionButton(
                 systemName: "trash",
                 tint: T.red,
-                accessibilityLabel: "delete \(title)"
+                accessibilityLabel: String(localized: "delete \(title)")
             ) {
                 confirmingDelete = true
             }
@@ -559,6 +558,7 @@ private struct HostRow: View {
 private struct RowActionButton: View {
     let systemName: String
     let tint: Color
+    /// Resolved by the caller — every one of them names the row it acts on.
     let accessibilityLabel: String
     let action: () -> Void
 
@@ -608,26 +608,20 @@ enum AgentSidebarBadgeFactory {
                     id: "needs-input",
                     count: waitingCount,
                     tone: .needsInput,
-                    accessibilityLabel: waitingCount == 1
-                        ? "1 agent needs input"
-                        : "\(waitingCount) agents need input"
+                    accessibilityLabel: String(localized: "\(waitingCount) agents need input")
                 ) : nil,
             justFinishedCount > 0
                 ? BottomNavigationBadge(
                     id: "just-finished",
                     count: justFinishedCount,
                     tone: .justFinished,
-                    accessibilityLabel: justFinishedCount == 1
-                        ? "1 agent just finished"
-                        : "\(justFinishedCount) agents just finished"
+                    accessibilityLabel: String(localized: "\(justFinishedCount) agents just finished")
                 ) : nil,
             BottomNavigationBadge(
                 id: "total",
                 count: totalCount,
                 tone: .neutral,
-                accessibilityLabel: totalCount == 1
-                    ? "1 agent total"
-                    : "\(totalCount) agents total"
+                accessibilityLabel: String(localized: "\(totalCount) agents total")
             ),
         ].compactMap { $0 }
     }
@@ -636,7 +630,7 @@ enum AgentSidebarBadgeFactory {
 struct BottomNavigationRow: View {
     let item: SidebarItem
     let systemName: String
-    let label: String
+    let label: LocalizedStringKey
     var badges: [BottomNavigationBadge] = []
     let isSelected: Bool
     let action: () -> Void
@@ -659,7 +653,7 @@ struct BottomNavigationRow: View {
                 HStack(spacing: 4) {
                     ForEach(badges) { badge in
                         let tint = badgeTint(badge.tone)
-                        Text("\(badge.count)")
+                        Text(verbatim: "\(badge.count)")
                             .font(Typography.tesseraMono(size: 9, weight: .medium))
                             .foregroundStyle(tint)
                             .frame(minWidth: 17, minHeight: 17)
@@ -687,9 +681,7 @@ struct BottomNavigationRow: View {
             badges.map(\.accessibilityLabel).joined(separator: ", ")
         )
         .accessibilityIdentifier(
-            item == .agents
-                ? "agent-sidebar-row"
-                : "sidebar-navigation-\(label.replacingOccurrences(of: " ", with: "-"))"
+            item == .agents ? "agent-sidebar-row" : "sidebar-navigation-\(item.identifier)"
         )
         .onAppear { updateAttentionPulse() }
         .onChange(of: badges) { _, _ in updateAttentionPulse() }
@@ -722,7 +714,7 @@ struct BottomNavigationRow: View {
 
 private struct SidebarIconButton: View {
     let systemName: String
-    let accessibilityLabel: String
+    let accessibilityLabel: LocalizedStringKey
     let action: () -> Void
 
     @Environment(\.designTokens) private var T
@@ -779,4 +771,18 @@ enum SidebarItem: Hashable, Equatable {
     case knownHosts
     case tunnels
     case settings
+
+    /// Stable accessibility token. Derived from the case, never from the
+    /// row's visible label, which changes with the language.
+    var identifier: String {
+        switch self {
+        case .session(let id):  return "session-\(id)"
+        case .host(let id):     return "host-\(id)"
+        case .agents:           return "agents"
+        case .keys:             return "keys"
+        case .knownHosts:       return "known-hosts"
+        case .tunnels:          return "tunnels"
+        case .settings:         return "settings"
+        }
+    }
 }

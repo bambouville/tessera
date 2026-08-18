@@ -15,6 +15,131 @@ private var integrationScrollHarnessSuppressesFirstResponder: Bool {
 #endif
 }
 
+/// Keeps SwiftTerm's grid geometry stable while the software keyboard moves.
+///
+/// SwiftUI normally proposes a shorter height when the keyboard appears, which
+/// immediately reflows SwiftTerm and propagates a transport resize. In the
+/// default mode we retain the full window-bottom height and translate the whole
+/// composed session by the docked keyboard's overlap, so SSH, SSH+tmux, mosh,
+/// and mosh+tmux keep one shared row count throughout the animation.
+///
+/// The lift is read straight off the height SwiftUI proposes rather than
+/// replayed from `UIKeyboardWillChangeFrameNotification`. SwiftUI already
+/// applies its keyboard safe-area change inside the system's own animation
+/// transaction, so every geometry value derived from the proposal interpolates
+/// on the keyboard's exact curve. Rebuilding that curve is not possible:
+/// `UIResponder.keyboardAnimationCurveUserInfoKey` reports the private curve 7,
+/// and `UICubicTimingParameters(animationCurve:)` answers identity control
+/// points for it — replaying that yields a linear ramp that trails the keyboard
+/// by ~190pt mid-transition and lands ~60ms late (measured on iOS 26).
+///
+/// The GeometryReader ignores the container's bottom safe area so the resting
+/// proposal already reaches the window bottom; what remains of the shrink is
+/// exactly the docked-keyboard overlap. Floating/undocked keyboards do not
+/// inset the bottom edge and therefore do not move the session.
+private struct TerminalKeyboardLayoutModifier: ViewModifier {
+    let resizesTerminal: Bool
+
+    func body(content: Content) -> some View {
+        GeometryReader { proxy in
+            let proposedSize = proxy.size
+            let globalFrame = proxy.frame(in: .global)
+            let retainedHeight = fullHeight(
+                proposedHeight: proposedSize.height,
+                globalMinY: globalFrame.minY
+            )
+            let lift = resizesTerminal
+                ? 0
+                : max(0, retainedHeight - proposedSize.height)
+            let contentHeight = resizesTerminal
+                ? proposedSize.height
+                : retainedHeight
+
+            content
+                .environment(\.softwareKeyboardLift, lift)
+                .frame(
+                    width: proposedSize.width,
+                    height: contentHeight,
+                    alignment: .top
+                )
+                // `position` top-aligns a fixed-height child even when the
+                // GeometryReader itself receives the shorter keyboard proposal.
+                .position(
+                    x: proposedSize.width / 2,
+                    y: contentHeight / 2
+                )
+                .offset(y: -lift)
+        }
+        // Keeps the resting proposal at the window bottom (the session roots
+        // deliberately ignore this inset) while still receiving `.keyboard`.
+        .ignoresSafeArea(.container, edges: .bottom)
+    }
+
+    private func fullHeight(
+        proposedHeight: CGFloat,
+        globalMinY: CGFloat
+    ) -> CGFloat {
+        guard let window = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .flatMap(\.windows)
+            .first(where: { $0.isKeyWindow })
+        else { return proposedHeight }
+        // Session roots deliberately ignore the container's bottom safe area,
+        // so the window bottom is the stable lower edge in every keyboard state.
+        return max(proposedHeight, window.bounds.maxY - globalMinY)
+    }
+}
+
+private extension View {
+    func terminalKeyboardLayout(resizesTerminal: Bool) -> some View {
+        modifier(TerminalKeyboardLayoutModifier(resizesTerminal: resizesTerminal))
+    }
+}
+
+/// Keeps the session's top chrome — top bar and find bar — in the window's
+/// coordinate space while `TerminalKeyboardLayoutModifier` translates the
+/// composed session up behind the docked software keyboard.
+///
+/// The whole-session translation is deliberate *for the terminal*: it holds one
+/// row count across the keyboard animation instead of reflowing SwiftTerm and
+/// pushing a SIGWINCH into whatever is running remotely. Losing the top bar off
+/// the top of the screen came along for the ride, and for the terminal itself
+/// that was an acceptable trade — the user is looking at the rows near the
+/// prompt, not at the chrome.
+///
+/// Find is the case the trade does not cover. `FindBar` focuses a `TextField` —
+/// that focus is what raises the software keyboard in the first place — so
+/// without this the user types a query, and reads a match counter, in a field
+/// sitting ~336 pt above the top of the screen.
+///
+/// `offset` rather than a frame or padding change, for the same reason the
+/// accessory bar uses one: the terminal's layout must not move, or the grid
+/// reflows and the translation has bought nothing. The lift it cancels is read
+/// off SwiftUI's own animated keyboard inset, so the chrome holds still through
+/// the transition instead of chasing the keyboard on a rebuilt curve.
+///
+/// Cost, stated: with the keyboard up the chrome covers the topmost ~2 rows of
+/// the visible terminal region (4 with the find bar open) rather than sliding
+/// away from them. That is the same band of the screen chrome always occupies.
+private struct KeyboardLiftExemptChrome<Content: View>: View {
+    private let content: Content
+    @Environment(\.softwareKeyboardLift) private var keyboardLift
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    /// Its own `VStack` so the group stays one vertical strip: a bare
+    /// `ViewBuilder` tuple lifted out of the enclosing stack would lay the top
+    /// bar and the find bar on top of each other.
+    var body: some View {
+        VStack(spacing: 0) {
+            content
+        }
+        .offset(y: keyboardLift)
+    }
+}
+
 private enum TesseraTerminalFont {
     static func mono(size: CGFloat) -> UIFont {
         let base = UIFont(name: "JetBrainsMono-Regular", size: size)
@@ -69,6 +194,13 @@ struct SessionView: View {
     /// SIGWINCH to background TUIs when the sidebar toggles or the
     /// device rotates.
     var isActive: Bool
+    /// Other sessions still awaiting a verdict in the same restore window.
+    var reconnectingElsewhere: Int = 0
+    /// The user closed this session on purpose. Distinct from
+    /// `onSessionEnded`, which also fires for a transport death and a clean
+    /// remote exit — the restore window must reopen those and must not reopen
+    /// this.
+    var onUserClosedSession: () -> Void = {}
     /// Toggles the sidebar visibility from within the session.
     var onToggleSidebar: () -> Void
     /// Whether the sidebar is currently shown — drives the top-bar
@@ -114,7 +246,10 @@ struct SessionView: View {
     /// `ESC P 1 0 0 0 p` prologue appears in the output stream the
     /// controller swaps modes, parses control-mode messages, and
     /// wraps typed keystrokes in `send-keys` commands.
-    @State private var tmux = TmuxController(clientSizePolicy: .resizeTmux)
+    @State private var tmux = TmuxController(
+        clientSizePolicy: .resizeTmux,
+        separatorProbeEnabled: true
+    )
     @State private var shellIntegration = SwipePadShellIntegrationTracker()
     @State private var swipePadOutputActivityToken = 0
     @State private var swipePadOutputActivityTask: Task<Void, Never>?
@@ -131,8 +266,38 @@ struct SessionView: View {
     /// the auto-tmux script's failure path's sentinel byte sequence
     /// shows up in the SSH output stream. Dismissable.
     @State private var noTmuxBannerVisible = false
+    @State private var noTmuxBannerReason: TmuxLaunchDegradeReason = .unavailable
     @State private var noTmuxScanner = AutoTmuxSentinelScanner()
     @State private var dismissedWSLTailscaleMTUWarning = false
+
+    /// Number of pre-control-mode output chunks already traced into the
+    /// diagnostics log. Bounded so a stuck launch records the remote's
+    /// first words without flooding the ring buffer.
+    @State private var launchChunkTraceCount = 0
+
+    /// Watchdog that refuses to let a tmux launch hang forever. Armed when
+    /// the launch command goes out, cancelled the moment control mode
+    /// engages (or the session ends).
+    @State private var tmuxLaunchWatchdog: Task<Void, Never>?
+
+    /// Second-stage watchdog for the window the first one cannot see: the
+    /// DCS arrived (control mode engaged, launch watchdog disarmed) but
+    /// attach hydration never reported the initial render. Observed in the
+    /// field on a host whose tmux mangles capture metadata: every
+    /// authoritative repaint fails and a quiet re-attached pane emits no
+    /// `%output` to latch, so `tmux.isInitialRenderReady` never fires and
+    /// the overlay used to sit until the stall notice. Armed on control-mode
+    /// entry, cancelled by readiness or session end.
+    @State private var tmuxHydrationWatchdog: Task<Void, Never>?
+
+    /// When the launch command was written, so the trace can report how
+    /// long each milestone took rather than making the reader subtract
+    /// timestamps.
+    @State private var autoTmuxSentAt: Date?
+
+    /// The launch one-liner as sent. Used to recognise the host echoing it
+    /// back in the output trace; never written to the log itself.
+    @State private var lastAutoTmuxCommand: String?
 
     /// Full terminal-area loading shield shown from connect-start until
     /// the session is ready: `.connected` for `.customCommand`; first
@@ -243,6 +408,31 @@ struct SessionView: View {
     private var activeWindow: TmuxController.WindowInfo? {
         guard let id = tmux.activeWindowId else { return nil }
         return tmux.windows.first(where: { $0.id == id })
+    }
+
+    /// Foreground command of the focused tmux pane, for program-scoped custom
+    /// shortcuts. nil in passthrough: there is no cheap process source without
+    /// tmux, and `ShortcutScopeEvaluator` deliberately fails closed rather than
+    /// firing a scoped shortcut into an unknown shell.
+    private var activePaneCurrentCommand: String? {
+        guard tmux.mode != .passthrough, let paneID = tmux.activePaneId else { return nil }
+        for window in tmux.windows {
+            if let pane = window.panes.first(where: { $0.id == paneID }) {
+                return pane.currentCommand
+            }
+        }
+        return nil
+    }
+
+    /// Whether a user-defined shortcut applies to this session right now.
+    /// Extracted from the call site so the enclosing view body stays inside
+    /// the type checker's budget.
+    private func shouldFire(_ shortcut: CustomShortcut) -> Bool {
+        ShortcutScopeEvaluator.applies(
+            shortcut.scope,
+            hostID: session.host.id,
+            processName: activePaneCurrentCommand
+        )
     }
 
     /// The active window iff it must render as a multi-pane grid. `nil` keeps
@@ -419,6 +609,216 @@ struct SessionView: View {
 
     private var showsLaunchOverlay: Bool { launchOverlayVisible }
 
+    /// One line shape for the whole launch path, so a user's diagnostics
+    /// file can be read as a single timeline.
+    ///
+    /// The session id is the third token on purpose: `DiagnosticLogStore`
+    /// rate-limits by the first four tokens with digits masked, so tagging
+    /// each session gives every launch attempt its own budget instead of
+    /// letting one reconnect-happy minute suppress the next attempt's
+    /// evidence.
+    ///
+    /// `nameHash=` is appended here rather than written at call sites so every
+    /// launch line — past and future — carries it and no new site can forget:
+    /// `sid=` is per *view*, so it cannot link a reconnect to the attempt before
+    /// it, and the hashed tmux session name is the only stable identity in play.
+    /// It goes at the *end* of the line, not beside `sid=`, because the
+    /// rate-limit signature is the first four tokens: keeping the detail's
+    /// leading token (`stage=probe`, `reason=…`) inside the signature preserves
+    /// one bucket per launch stage. Never rename it to `name=` or `session=` —
+    /// the sanitizer redacts both, and a redacted correlator is no correlator.
+    private func logLaunch(_ event: String, _ detail: String) {
+        let nameHash = resolvedTmuxSessionName.map(AutoTmuxScript.sessionNameDigest) ?? "none"
+        DiagnosticLogStore.appendSSH(
+            "launch \(event) sid=\(liveSessionID.uuidString.prefix(8)) \(detail) nameHash=\(nameHash)"
+        )
+    }
+
+    /// Milliseconds since the launch command went out, for trace lines.
+    private var sinceAutoTmuxSend: String {
+        guard let autoTmuxSentAt else { return "n/a" }
+        return String(Int(Date().timeIntervalSince(autoTmuxSentAt) * 1_000))
+    }
+
+    /// How long a tmux launch may stay silent before we show the shell.
+    /// The first stage is generous enough for a cold `tmux` server start
+    /// over a slow link; the second covers a re-sent command.
+    private static let tmuxLaunchProbeDelay: Duration = .seconds(8)
+    private static let tmuxLaunchGiveUpDelay: Duration = .seconds(8)
+
+    /// Hand the terminal back to the user when tmux is not going to take
+    /// over. Stops suppressing passthrough output (so whatever the remote
+    /// actually said becomes visible), drops the launch shield, and marks
+    /// the live session as a plain shell so the sidebar and restore
+    /// snapshots stop advertising tmux.
+    private func degradeTmuxLaunchToPlainShell(reason: TmuxLaunchDegradeReason) {
+        tmuxLaunchWatchdog?.cancel()
+        tmuxLaunchWatchdog = nil
+        tmuxHydrationWatchdog?.cancel()
+        tmuxHydrationWatchdog = nil
+        guard !noTmuxBannerVisible, tmux.mode != .tmuxControl else { return }
+        logLaunch(
+            "degrade",
+            "reason=\(reason.diagnosticName) mode=\(session.host.launchMode.rawValue) overlay=\(launchOverlayVisible) sinceSendMs=\(sinceAutoTmuxSend) chunks=\(launchChunkTraceCount)"
+        )
+        launchOverlayVisible = false
+        tmux.suppressPassthroughOutputUntilControlMode = false
+        noTmuxScanner.reset()
+        noTmuxBannerReason = reason
+        noTmuxBannerVisible = true
+        onEffectiveLaunchModeChanged(.customCommand)
+    }
+
+    /// Arm the launch watchdog after writing the tmux one-liner.
+    ///
+    /// Stage 1 (`tmuxLaunchProbeDelay`): still no DCS. Ask the host over a
+    /// side channel whether the session exists. If it does, tmux is simply
+    /// slow — keep waiting rather than typing into a live client. If it
+    /// doesn't, the command never ran (a login shell that was still
+    /// starting when the bytes arrived and dropped them, a dotfile that
+    /// took over the terminal first), so re-send it now that the shell is
+    /// certainly reading.
+    ///
+    /// Stage 2 (`tmuxLaunchGiveUpDelay`): still nothing — stop hiding the
+    /// terminal and let the user see the host's own error text.
+    private func armTmuxLaunchWatchdog(sessionName: String, command: String) {
+        tmuxLaunchWatchdog?.cancel()
+        tmuxLaunchWatchdog = Task { @MainActor in
+            try? await Task.sleep(for: Self.tmuxLaunchProbeDelay)
+            guard !Task.isCancelled, tmux.mode == .passthrough else { return }
+            guard case .connected = session.state else { return }
+
+            let exists = await remoteTmuxSessionExists(named: sessionName)
+            logLaunch(
+                "watchdog",
+                "stage=probe remoteSessionExists=\(exists.map(String.init) ?? "unknown") sinceSendMs=\(sinceAutoTmuxSend) chunks=\(launchChunkTraceCount)"
+            )
+            guard !Task.isCancelled, tmux.mode == .passthrough else { return }
+
+            if exists == false {
+                logLaunch(
+                    "auto-tmux-resend",
+                    "bytes=\(command.utf8.count)"
+                )
+                session.send(Array(command.utf8))
+            }
+
+            try? await Task.sleep(for: Self.tmuxLaunchGiveUpDelay)
+            guard !Task.isCancelled, tmux.mode == .passthrough else { return }
+            guard case .connected = session.state else { return }
+            degradeTmuxLaunchToPlainShell(reason: .noHandshake)
+        }
+    }
+
+    /// How long attach hydration may stay silent after the DCS before the
+    /// app intervenes. Nudge + reveal total 10s — deliberately inside the
+    /// overlay's 12s stall notice, so automatic recovery runs before the
+    /// user is offered abandon-ship actions.
+    private static let tmuxHydrationNudgeDelay: Duration = .seconds(5)
+    private static let tmuxHydrationRevealDelay: Duration = .seconds(5)
+
+    /// Arm the hydration watchdog on control-mode entry.
+    ///
+    /// Stage 1 (`tmuxHydrationNudgeDelay`): control mode is up but no
+    /// initial render — re-run the authoritative refresh with a fresh retry
+    /// budget and allow the first `%output` to latch ungated
+    /// (`forceInitialRenderRecovery`).
+    ///
+    /// Stage 2 (`tmuxHydrationRevealDelay` later): still nothing — the
+    /// attach is live underneath, so reveal the terminal rather than degrade:
+    /// drop the overlay and raise the hydration banner. The user's first
+    /// keystroke produces `%output`, which the ungated latch paints.
+    /// Metadata refreshes are deferred while the app is inactive, so the
+    /// reveal waits for an active app before judging silence.
+    private func armTmuxHydrationWatchdog() {
+        tmuxHydrationWatchdog?.cancel()
+        guard launchOverlayVisible else { return }
+        tmuxHydrationWatchdog = Task { @MainActor in
+            try? await Task.sleep(for: Self.tmuxHydrationNudgeDelay)
+            guard !Task.isCancelled, launchOverlayVisible,
+                  tmux.mode == .tmuxControl, !tmux.isInitialRenderReady
+            else { return }
+            guard case .connected = session.state else { return }
+            logLaunch(
+                "hydration",
+                "stage=nudge sinceSendMs=\(sinceAutoTmuxSend)"
+            )
+            tmux.forceInitialRenderRecovery(reason: "launch-hydration-nudge")
+
+            try? await Task.sleep(for: Self.tmuxHydrationRevealDelay)
+            while !appPhase.isActive, !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+            }
+            guard !Task.isCancelled, launchOverlayVisible,
+                  tmux.mode == .tmuxControl, !tmux.isInitialRenderReady
+            else { return }
+            guard case .connected = session.state else { return }
+            logLaunch(
+                "hydration",
+                "stage=reveal sinceSendMs=\(sinceAutoTmuxSend)"
+            )
+            launchOverlayVisible = false
+            noTmuxBannerReason = .hydrationStalled
+            noTmuxBannerVisible = true
+        }
+    }
+
+    /// `true` / `false` when the host answered, `nil` when the probe could
+    /// not run (transport error, or a login shell that never returns).
+    /// Runs without a login shell so a host whose dotfiles start tmux
+    /// can't hijack the probe channel.
+    private func remoteTmuxSessionExists(named name: String) async -> Bool? {
+        let marker = "TESSERA_TMUX_PROBE"
+        let command = "tmux has-session -t \(name) 2>/dev/null "
+            + "&& printf '\(marker)=yes\\n' || printf '\(marker)=no\\n'"
+        return await withTaskGroup(of: Bool?.self) { group in
+            group.addTask { @MainActor in
+                do {
+                    let output = try await session.executeConnectedCommand(
+                        command,
+                        inShell: false
+                    )
+                    if output.contains("\(marker)=yes") { return true }
+                    if output.contains("\(marker)=no") { return false }
+                    logLaunch(
+                        "watchdog",
+                        "stage=probe-unparsed bytes=\(output.utf8.count)"
+                    )
+                    return nil
+                } catch {
+                    logLaunch(
+                        "watchdog",
+                        "stage=probe-failed errorType=\(String(describing: type(of: error)))"
+                    )
+                    return nil
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(6))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+    }
+
+    /// Printable, bounded rendering of a raw output chunk for the launch
+    /// trace. Control bytes become `\xNN` so the log stays single-line.
+    static func launchTracePreview(_ chunk: [UInt8], limit: Int = 160) -> String {
+        var out = ""
+        for byte in chunk.prefix(limit) {
+            switch byte {
+            case 0x20...0x26, 0x28...0x5B, 0x5D...0x7E:
+                out.append(Character(UnicodeScalar(byte)))
+            default:
+                out += String(format: "\\x%02x", byte)
+            }
+        }
+        if chunk.count > limit { out += "…" }
+        return out
+    }
+
     /// Caption shown by the launch overlay. Phases map 1:1 to
     /// observable transitions in `session.state` + `tmux.mode` +
     /// `tmux.isInitialRenderReady`; no aspirational steps. Plain SSH
@@ -492,7 +892,7 @@ struct SessionView: View {
             let requireBiometric = session.requireBiometric
             let isSecureEnclave = session.isSecureEnclave
             filesPanel.onInstallShellIntegration = { [filesPanel] in
-                filesPanel.infoMessage = "Installing shell integration…"
+                filesPanel.infoMessage = String(localized: "Installing shell integration…")
                 Task { @MainActor in
                     do {
                         let report = try await RemoteShellIntegrationInstaller.install(
@@ -500,7 +900,10 @@ struct SessionView: View {
                             requireBiometric: requireBiometric,
                             isSecureEnclave: isSecureEnclave
                         )
-                        filesPanel.infoMessage = "Installed (\(report.rcFilesUpdated.joined(separator: ", "))). Takes effect on the next shell login — run exec $SHELL or reconnect."
+                        filesPanel.infoMessage = String(
+                            localized: "Installed (\(report.rcFilesUpdated.joined(separator: ", "))). Takes effect on the next shell login — run exec $SHELL or reconnect.",
+                            comment: "Shell integration installed; the argument lists the startup files that were edited"
+                        )
                     } catch {
                         filesPanel.infoMessage = nil
                         filesPanel.lastError = error.localizedDescription
@@ -637,45 +1040,53 @@ struct SessionView: View {
             }
 
             VStack(spacing: 0) {
-                SessionTopBar(
-                    state: session.state,
-                    host: session.host,
-                    sessionID: liveSessionID,
-                    sessionIsActive: isActive,
-                    tmux: tmux,
-                    tmuxIsDegraded: false,
-                    connectionStatus: .ssh(state: session.state),
-                    onToggleSidebar: onToggleSidebar,
-                    sidebarVisible: sidebarVisible,
-                    onBack: {
-                        terminalBox.dismissTransientInteractions()
-                        onBack()
-                    },
-                    onDisconnect: {
-                        terminalBox.dismissTransientInteractions()
-                        session.disconnect()
-                    },
-                    findController: findController,
-                    filesPanelOpen: filesPanel.isOpen,
-                    onToggleFiles: toggleFilesPanel,
-                    bellController: bellController,
-                    forwarderManager: session.portForwarderManager,
-                    T: themeChromeTokens
-                )
-                .frame(height: SessionTopBar.reservedHeight(
-                    pillHeight: appearance.topBarHeight,
-                    compact: isPhone
-                ))
-                .zIndex(2)
-
-                if findController.isOpen {
-                    FindBar(
-                        controller: findController,
-                        horizontalInset: isPhone ? 10 : Self.cornerInset,
+                // Top bar + find bar stay in the window's coordinate space while
+                // the keyboard lifts the rest of the session — the find query
+                // field is an input the user has to read while typing into it.
+                KeyboardLiftExemptChrome {
+                    SessionTopBar(
+                        state: session.state,
+                        host: session.host,
+                        sessionID: liveSessionID,
+                        sessionIsActive: isActive,
+                        tmux: tmux,
+                        tmuxIsDegraded: false,
+                        connectionStatus: .ssh(state: session.state),
+                        onToggleSidebar: onToggleSidebar,
+                        sidebarVisible: sidebarVisible,
+                        onBack: {
+                            terminalBox.dismissTransientInteractions()
+                            onBack()
+                        },
+                        onDisconnect: {
+                            terminalBox.dismissTransientInteractions()
+                            onUserClosedSession()
+                            session.disconnect()
+                        },
+                        findController: findController,
+                        filesPanelOpen: filesPanel.isOpen,
+                        onToggleFiles: toggleFilesPanel,
+                        bellController: bellController,
+                        forwarderManager: session.portForwarderManager,
                         T: themeChromeTokens
                     )
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .frame(height: SessionTopBar.reservedHeight(
+                        pillHeight: appearance.topBarHeight,
+                        compact: isPhone
+                    ))
+
+                    if findController.isOpen {
+                        FindBar(
+                            controller: findController,
+                            horizontalInset: isPhone ? 10 : Self.cornerInset,
+                            T: themeChromeTokens
+                        )
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
                 }
+                // Carries the top bar's former zIndex: the chrome group draws
+                // above the terminal, which it now overlaps while lifted.
+                .zIndex(2)
 
                 // Terminal content. Horizontal inset clears the bottom
                 // rounded corners (iPadOS's safeAreaInsets has no
@@ -811,6 +1222,13 @@ struct SessionView: View {
                             appLockController.notifyUserActivity()
                             toggleFilesPanel()
                         },
+                        onCustomShortcut: { shortcut in
+                            guard !showsLaunchOverlay, !tmux.gridAuthority.isPeer else { return }
+                            guard shouldFire(shortcut) else { return }
+                            appLockController.notifyUserActivity()
+                            let cursor = terminalBox.view?.getTerminal().applicationCursor ?? false
+                            tmux.sendInput(shortcut.encoded(applicationCursor: cursor))
+                        },
                         onSelectionPathAction: { action, text in
                             handleSelectionPathAction(action, text: text)
                         },
@@ -938,7 +1356,16 @@ struct SessionView: View {
                             failureReason: launchFailureReason,
                             onEditHost: onEditHost,
                             onRetry: onRetry,
-                            onBack: onSessionEnded
+                            onBack: {
+                                // The stall notice puts this button up while
+                                // the connect is still running, so leaving has
+                                // to tear it down: the run task holds the
+                                // session alive and would finish unseen.
+                                onUserClosedSession()
+                                onSessionEnded()
+                                session.disconnect()
+                            },
+                            reconnectingElsewhere: reconnectingElsewhere
                         )
                         .transition(.opacity)
                         .zIndex(1)
@@ -989,17 +1416,15 @@ struct SessionView: View {
                     handle: handleTerminalDrop
                 ))
                 // §3 terminal Quick Look with the panel closed: the
-                // panel hosts presentedPreview's sheet only while open,
-                // so this fallback presents it otherwise. The binding
-                // nils itself while the panel is open — exactly one
-                // host at a time by construction.
-                .sheet(item: Binding(
+                // panel hosts presentedPreview only while open, so this
+                // fallback presents it otherwise. The binding nils itself
+                // while the panel is open — exactly one host at a time by
+                // construction. Size (sheet vs full screen) is the user's
+                // persisted choice, applied identically on both hosts.
+                .quickLookPreview(item: Binding(
                     get: { filesPanel.isOpen ? nil : filesPanel.presentedPreview },
                     set: { filesPanel.presentedPreview = $0 }
-                )) { request in
-                    QuickLookPresenter(fileURL: request.localURL, displayTitle: request.title)
-                        .ignoresSafeArea()
-                }
+                ))
                 .sheet(isPresented: compactFilesBinding) {
                     FilesPanelView(
                         controller: filesPanel,
@@ -1061,7 +1486,8 @@ struct SessionView: View {
                                 paneID: activeAgentScrollPaneID
                             )
                             return true
-                        }
+                        },
+                        customShortcutApplies: shouldFire
                     )
                     .allowsHitTesting(!tmux.gridAuthority.isPeer)
                     .opacity(tmux.gridAuthority.isPeer ? 0.45 : 1)
@@ -1078,7 +1504,10 @@ struct SessionView: View {
             {
                 VStack(spacing: 8) {
                     if noTmuxBannerVisible {
-                        NoTmuxBanner(onDismiss: { noTmuxBannerVisible = false })
+                        NoTmuxBanner(
+                            reason: noTmuxBannerReason,
+                            onDismiss: { noTmuxBannerVisible = false }
+                        )
                     }
                     if !showsLaunchOverlay,
                        !dismissedWSLTailscaleMTUWarning,
@@ -1202,6 +1631,9 @@ struct SessionView: View {
         .animation(.easeInOut(duration: 0.2), value: paneCommandToast)
         .animation(.easeInOut(duration: 0.18), value: agentScrollNotice.prevention)
         .ignoresSafeArea(.container, edges: .bottom)
+        .terminalKeyboardLayout(
+            resizesTerminal: appearance.resizeTerminalWithKeyboard
+        )
         .onChange(of: activeGridWindow?.id) { oldValue, newValue in
             reconcileAgentScrollNotice()
             if oldValue == nil, newValue != nil {
@@ -1530,6 +1962,23 @@ struct SessionView: View {
 
             session.connect()
             for await chunk in session.outputStream {
+                // Launch-path forensics: while the overlay is still up and we
+                // haven't reached control mode, record what the remote sent so
+                // a stuck "starting tmux" can be diagnosed from a user's log.
+                if launchOverlayVisible,
+                   tmux.mode == .passthrough,
+                   launchChunkTraceCount < 16 {
+                    launchChunkTraceCount += 1
+                    let n = launchChunkTraceCount
+                    let shape = AutoTmuxLaunchDiagnostics.classify(
+                        chunk: chunk,
+                        launchCommand: lastAutoTmuxCommand
+                    )
+                    logLaunch(
+                        "passthrough-chunk",
+                        "n=\(n) bytes=\(chunk.count) sent=\(sentAutoTmuxCommand) sinceSendMs=\(sinceAutoTmuxSend) \(shape.logDescription)"
+                    )
+                }
                 // Process the chunk FIRST so any DCS in it has already
                 // flipped tmux.mode → .tmuxControl by the time we check.
                 // This stops the auto-tmux failure scanner from racing
@@ -1572,29 +2021,50 @@ struct SessionView: View {
                 if !noTmuxBannerVisible
                     && sentAutoTmuxCommand
                     && session.host.launchMode != .customCommand
-                    && tmux.mode == .passthrough
-                    && noTmuxScanner.feed(chunk)
+                    && tmux.mode == .passthrough,
+                   let failure = noTmuxScanner.feedForFailure(chunk)
                 {
-                    launchOverlayVisible = false
-                    tmux.suppressPassthroughOutputUntilControlMode = false
-                    noTmuxScanner.reset()
-                    noTmuxBannerVisible = true
-                    HostRuntimeStateStore.recordTmuxUnavailable(for: session.host)
-                    onEffectiveLaunchModeChanged(.customCommand)
+                    switch failure {
+                    case .unavailable:
+                        // Only "tmux is not installed" is a durable fact about
+                        // the host. A failed server start is usually transient
+                        // (bad config, full disk) and must not poison the
+                        // host list's tmux badge.
+                        HostRuntimeStateStore.recordTmuxUnavailable(for: session.host)
+                        degradeTmuxLaunchToPlainShell(reason: .unavailable)
+                    case .startFailed:
+                        degradeTmuxLaunchToPlainShell(reason: .startFailed)
+                    case .nested:
+                        degradeTmuxLaunchToPlainShell(reason: .nested)
+                    }
                 }
             }
         }
         .onChange(of: session.state) { _, newState in
+            logLaunch(
+                "state-change",
+                // `newState.diagnosticName`, never `String(describing:)` — see
+                // `SessionState.diagnosticName` for what the payload leaks.
+                "to=\(newState.diagnosticName) mode=\(session.host.launchMode.rawValue) sent=\(sentAutoTmuxCommand) tmuxMode=\(String(describing: tmux.mode)) overlay=\(launchOverlayVisible)"
+            )
             // Clean disconnect (e.g. Ctrl+D) returns to the host list
             // without an error banner. .failed stays put so the user
             // can read the reason before tapping back.
             if newState == .disconnected {
+                tmuxLaunchWatchdog?.cancel()
+                tmuxLaunchWatchdog = nil
+                tmuxHydrationWatchdog?.cancel()
+                tmuxHydrationWatchdog = nil
                 launchOverlayVisible = false
                 tmux.suppressPassthroughOutputUntilControlMode = false
                 noTmuxScanner.reset()
                 onSessionEnded()
             }
             if case .failed = newState {
+                tmuxLaunchWatchdog?.cancel()
+                tmuxLaunchWatchdog = nil
+                tmuxHydrationWatchdog?.cancel()
+                tmuxHydrationWatchdog = nil
                 // Keep the launch overlay UP to host the error state +
                 // recovery actions (edit host / retry / back), rather than
                 // dismissing to a dead shell with a red top-bar string.
@@ -1629,13 +2099,23 @@ struct SessionView: View {
                     // existing handler for `tmux.isInitialRenderReady` drops it.
                     tmux.suppressPassthroughOutputUntilControlMode = true
                     noTmuxScanner.reset()
+                    // Captured before the assignment below: reading the state
+                    // afterwards can only ever answer "state".
+                    let resolvedFrom = resolvedTmuxSessionName == nil ? "store" : "state"
                     let name = resolvedTmuxSessionName
                         ?? HostRuntimeStateStore.sessionName(for: session.host)
                     resolvedTmuxSessionName = name
                     let cmd = prologue + AutoTmuxScript.command(
                         sessionName: name
                     )
+                    autoTmuxSentAt = Date()
+                    lastAutoTmuxCommand = cmd
+                    logLaunch(
+                        "auto-tmux-send",
+                        "bytes=\(cmd.utf8.count) prologueBytes=\(prologue.utf8.count) resolvedFrom=\(resolvedFrom)"
+                    )
                     session.send(Array(cmd.utf8))
+                    armTmuxLaunchWatchdog(sessionName: name, command: cmd)
                 case .customCommand:
                     let raw = session.host.launchCommand ?? ""
                     let trimmed = raw.trimmingCharacters(in: .whitespaces)
@@ -1762,6 +2242,23 @@ struct SessionView: View {
             // Successful control mode supersedes a prior "tmux unavailable"
             // discovery. Auto mode also remembers the resolved rendezvous name.
             if case .tmuxControl = newMode {
+                // The handshake landed — disarm the watchdog and retract a
+                // banner a slow launch may already have raised. Logged so a
+                // report can separate "the DCS never arrived" from "the DCS
+                // arrived and hydration stalled afterwards".
+                logLaunch(
+                    "control-mode",
+                    "sinceSendMs=\(sinceAutoTmuxSend) chunks=\(launchChunkTraceCount) overlay=\(launchOverlayVisible)"
+                )
+                tmuxLaunchWatchdog?.cancel()
+                tmuxLaunchWatchdog = nil
+                // The DCS is not the finish line: hand the wait over to the
+                // hydration watchdog so a stalled attach cannot strand the
+                // overlay in the gap the launch watchdog just vacated.
+                armTmuxHydrationWatchdog()
+                if noTmuxBannerVisible, noTmuxBannerReason != .unavailable {
+                    noTmuxBannerVisible = false
+                }
                 if session.host.launchMode == .autoTmux,
                    let name = resolvedTmuxSessionName {
                     HostRuntimeStateStore.recordSessionUsed(name, for: session.host)
@@ -1775,8 +2272,19 @@ struct SessionView: View {
                 "tmux-initial-render-ready ready=\(isReady) position=\(describeScrollPosition(for: terminalBox.view))"
             )
             if isReady {
+                logLaunch(
+                    "ready",
+                    "sinceSendMs=\(sinceAutoTmuxSend) chunks=\(launchChunkTraceCount)"
+                )
+                tmuxHydrationWatchdog?.cancel()
+                tmuxHydrationWatchdog = nil
                 launchOverlayVisible = false
                 noTmuxScanner.reset()
+                // A late render (the user's keystroke woke the latch) makes
+                // the hydration banner stale — retract it.
+                if noTmuxBannerVisible, noTmuxBannerReason == .hydrationStalled {
+                    noTmuxBannerVisible = false
+                }
             }
         }
         .onChange(of: scrollDiagnosticsEnabled) { _, enabled in
@@ -2178,6 +2686,13 @@ struct MoshSessionView: View {
     @StateObject var session: MoshSession
     var liveSessionID: UUID
     var isActive: Bool
+    /// Other sessions still awaiting a verdict in the same restore window.
+    var reconnectingElsewhere: Int = 0
+    /// The user closed this session on purpose. Distinct from
+    /// `onSessionEnded`, which also fires for a transport death and a clean
+    /// remote exit — the restore window must reopen those and must not reopen
+    /// this.
+    var onUserClosedSession: () -> Void = {}
     var onToggleSidebar: () -> Void
     var sidebarVisible: Bool
     var onBack: () -> Void
@@ -2200,7 +2715,8 @@ struct MoshSessionView: View {
     @State private var filesPanel = FilesPanelController()
     @State private var tmux = TmuxController(
         controlPath: .sideChannel,
-        clientSizePolicy: .resizeTmux
+        clientSizePolicy: .resizeTmux,
+        separatorProbeEnabled: true
     )
     @State private var tmuxTerminalQueryResponder = TerminalOSCColorQueryResponder()
     @State private var modifierState = ModifierState()
@@ -2320,6 +2836,15 @@ struct MoshSessionView: View {
     /// control mode sets `isInitialRenderReady` immediately on DCS, so
     /// we can't rely on that alone here).
     @State private var hasReceivedFirstOutput = false
+
+    /// Bounds the overlay's wait for the side-channel `-CC` attach. The
+    /// visible mosh client runs a plain `tmux new -A`, so once the main
+    /// stream is painting, the terminal underneath is fully usable — only
+    /// window management rides the side channel. If that channel hasn't
+    /// attached within the budget (auth mismatch on the second SSH leg,
+    /// MaxSessions, a flaky path), reveal the working terminal and let the
+    /// reconnect loop keep trying behind it instead of spinning the shield.
+    @State private var moshControlAttachWatchdog: Task<Void, Never>?
 
     @Environment(AppearancePreferences.self) private var appearance
     @Environment(AppLockController.self) private var appLockController
@@ -2454,7 +2979,7 @@ struct MoshSessionView: View {
             let requireBiometric = session.requireBiometric
             let isSecureEnclave = session.isSecureEnclave
             filesPanel.onInstallShellIntegration = { [filesPanel] in
-                filesPanel.infoMessage = "Installing shell integration…"
+                filesPanel.infoMessage = String(localized: "Installing shell integration…")
                 Task { @MainActor in
                     do {
                         let report = try await RemoteShellIntegrationInstaller.install(
@@ -2462,7 +2987,10 @@ struct MoshSessionView: View {
                             requireBiometric: requireBiometric,
                             isSecureEnclave: isSecureEnclave
                         )
-                        filesPanel.infoMessage = "Installed (\(report.rcFilesUpdated.joined(separator: ", "))). Takes effect on the next shell login — run exec $SHELL or reconnect."
+                        filesPanel.infoMessage = String(
+                            localized: "Installed (\(report.rcFilesUpdated.joined(separator: ", "))). Takes effect on the next shell login — run exec $SHELL or reconnect.",
+                            comment: "Shell integration installed; the argument lists the startup files that were edited"
+                        )
                     } catch {
                         filesPanel.infoMessage = nil
                         filesPanel.lastError = error.localizedDescription
@@ -2630,6 +3158,7 @@ struct MoshSessionView: View {
             },
             onDisconnect: {
                 terminalBox.dismissTransientInteractions()
+                onUserClosedSession()
                 session.disconnect()
             },
             findController: findController,
@@ -2656,16 +3185,23 @@ struct MoshSessionView: View {
             }
 
             VStack(spacing: 0) {
-                moshSessionTopBar
+                // See `KeyboardLiftExemptChrome`: the find query field has to
+                // stay readable while the software keyboard lifts the session.
+                KeyboardLiftExemptChrome {
+                    moshSessionTopBar
 
-                if findController.isOpen {
-                    FindBar(
-                        controller: findController,
-                        horizontalInset: isPhone ? 10 : SessionView.cornerInset,
-                        T: activeTheme.chromeTokens(applying: appearance)
-                    )
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    if findController.isOpen {
+                        FindBar(
+                            controller: findController,
+                            horizontalInset: isPhone ? 10 : SessionView.cornerInset,
+                            T: activeTheme.chromeTokens(applying: appearance)
+                        )
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
                 }
+                // Carries `moshSessionTopBar`'s own zIndex out to this level:
+                // the chrome group draws above the terminal it now overlaps.
+                .zIndex(2)
 
                 ZStack {
                     moshTerminalSurface
@@ -2829,7 +3365,17 @@ struct MoshSessionView: View {
                             failureReason: launchFailureReason,
                             onEditHost: onEditHost,
                             onRetry: onRetry,
-                            onBack: onSessionEnded
+                            onBack: {
+                                // The stall notice puts this button up while
+                                // the bootstrap is still running, so leaving
+                                // has to tear it down: a bootstrap left to
+                                // finish has already spawned a `mosh-server`
+                                // on the host with nothing left to reach it.
+                                onUserClosedSession()
+                                onSessionEnded()
+                                session.disconnect()
+                            },
+                            reconnectingElsewhere: reconnectingElsewhere
                         )
                         .transition(.opacity)
                         .zIndex(1)
@@ -2877,17 +3423,15 @@ struct MoshSessionView: View {
                     handle: handleTerminalDrop
                 ))
                 // §3 terminal Quick Look with the panel closed: the
-                // panel hosts presentedPreview's sheet only while open,
-                // so this fallback presents it otherwise. The binding
-                // nils itself while the panel is open — exactly one
-                // host at a time by construction.
-                .sheet(item: Binding(
+                // panel hosts presentedPreview only while open, so this
+                // fallback presents it otherwise. The binding nils itself
+                // while the panel is open — exactly one host at a time by
+                // construction. Size (sheet vs full screen) is the user's
+                // persisted choice, applied identically on both hosts.
+                .quickLookPreview(item: Binding(
                     get: { filesPanel.isOpen ? nil : filesPanel.presentedPreview },
                     set: { filesPanel.presentedPreview = $0 }
-                )) { request in
-                    QuickLookPresenter(fileURL: request.localURL, displayTitle: request.title)
-                        .ignoresSafeArea()
-                }
+                ))
                 .sheet(isPresented: compactMoshFilesBinding) {
                     FilesPanelView(
                         controller: filesPanel,
@@ -2949,7 +3493,8 @@ struct MoshSessionView: View {
                                 paneID: activeAgentScrollPaneID
                             )
                             return true
-                        }
+                        },
+                        customShortcutApplies: shouldFire
                     )
                     .allowsHitTesting(!tmux.gridAuthority.isPeer)
                     .opacity(tmux.gridAuthority.isPeer ? 0.45 : 1)
@@ -3147,6 +3692,9 @@ struct MoshSessionView: View {
             handleCompactTmuxFocusRequest()
         }
         .ignoresSafeArea(.container, edges: .bottom)
+        .terminalKeyboardLayout(
+            resizesTerminal: appearance.resizeTerminalWithKeyboard
+        )
         .statusBarHidden(true)
         .persistentSystemOverlays(isPhone ? .automatic : .hidden)
         .onAppear {
@@ -3806,6 +4354,8 @@ struct MoshSessionView: View {
         .onDisappear {
             stopTmuxControlChannel()
             moshOverlayPrefetchTask?.cancel()
+            moshControlAttachWatchdog?.cancel()
+            moshControlAttachWatchdog = nil
             swipePadOutputActivityTask?.cancel()
             swipePadOutputActivityTask = nil
         }
@@ -3835,8 +4385,43 @@ struct MoshSessionView: View {
         }
         if ready {
             MoshDiagnostics.log("mosh launch overlay dismissed reason=\(reason)")
+            moshControlAttachWatchdog?.cancel()
+            moshControlAttachWatchdog = nil
             launchOverlayVisible = false
+        } else if hasReceivedFirstOutput, session.host.launchMode != .customCommand {
+            // The mosh stream is live and only the side-channel attach is
+            // missing — bound that wait.
+            armMoshControlAttachWatchdog()
         }
+    }
+
+    /// How long the overlay may wait on the side-channel attach once the
+    /// main mosh stream is already painting. Inside the overlay's 12s stall
+    /// notice so the automatic reveal wins over abandon-ship actions.
+    private static let moshControlAttachRevealDelay: Duration = .seconds(10)
+
+    private func armMoshControlAttachWatchdog() {
+        guard moshControlAttachWatchdog == nil else { return }
+        moshControlAttachWatchdog = Task { @MainActor in
+            try? await Task.sleep(for: Self.moshControlAttachRevealDelay)
+            guard !Task.isCancelled else { return }
+            revealMoshLaunchOverlay(reason: "control-attach-timeout")
+        }
+    }
+
+    /// Drop the launch shield onto the already-working plain-tmux terminal
+    /// while the side channel keeps reconnecting behind it. Also the exit
+    /// for a reconnect loop that ends `.degraded` with the overlay still up.
+    private func revealMoshLaunchOverlay(reason: String) {
+        moshControlAttachWatchdog?.cancel()
+        moshControlAttachWatchdog = nil
+        guard launchOverlayVisible, session.state == .connected,
+              tmux.mode != .tmuxControl, hasReceivedFirstOutput
+        else { return }
+        MoshDiagnostics.log(
+            "mosh launch overlay degraded-reveal reason=\(reason) sideChannel=\(tmuxSideChannelState.logDescription)"
+        )
+        launchOverlayVisible = false
     }
 
     private var shouldMaintainTmuxControlChannel: Bool {
@@ -4173,6 +4758,10 @@ struct MoshSessionView: View {
                 MoshDiagnostics.log(
                     "mosh tmux sidechannel reconnect loop ended degraded generation=\(generation) session=\(sessionName) reason=\(lastReason ?? "unknown")"
                 )
+                // The loop gave up while the launch shield could still be
+                // waiting on control mode — reveal the working terminal
+                // rather than leaving the spinner to the stall notice.
+                revealMoshLaunchOverlay(reason: "sidechannel-degraded")
             } else {
                 tmuxSideChannelState = .idle
                 tmux.reset()
@@ -4245,6 +4834,31 @@ struct MoshSessionView: View {
     private var moshActiveWindow: TmuxController.WindowInfo? {
         guard let id = tmux.activeWindowId else { return nil }
         return tmux.windows.first(where: { $0.id == id })
+    }
+
+    /// Foreground command of the focused tmux pane, for program-scoped custom
+    /// shortcuts. nil in passthrough: there is no cheap process source without
+    /// tmux, and `ShortcutScopeEvaluator` deliberately fails closed rather than
+    /// firing a scoped shortcut into an unknown shell.
+    private var activePaneCurrentCommand: String? {
+        guard tmux.mode != .passthrough, let paneID = tmux.activePaneId else { return nil }
+        for window in tmux.windows {
+            if let pane = window.panes.first(where: { $0.id == paneID }) {
+                return pane.currentCommand
+            }
+        }
+        return nil
+    }
+
+    /// Whether a user-defined shortcut applies to this session right now.
+    /// Extracted from the call site so the enclosing view body stays inside
+    /// the type checker's budget.
+    private func shouldFire(_ shortcut: CustomShortcut) -> Bool {
+        ShortcutScopeEvaluator.applies(
+            shortcut.scope,
+            hostID: session.host.id,
+            processName: activePaneCurrentCommand
+        )
     }
 
     private var compactMoshLayout: WindowLayout? {
@@ -6474,6 +7088,16 @@ struct MoshSessionView: View {
                 appLockController.notifyUserActivity()
                 toggleFilesPanel()
             },
+            onCustomShortcut: { shortcut in
+                guard !showsLaunchOverlay, !tmux.gridAuthority.isPeer else { return }
+                guard shouldFire(shortcut) else { return }
+                appLockController.notifyUserActivity()
+                let cursor = terminalBox.view?.getTerminal().applicationCursor ?? false
+                let bytes = shortcut.encoded(applicationCursor: cursor)
+                invalidateMoshScrollbackForTerminalInput(reason: "custom-shortcut")
+                noteMoshAgentInput(bytes)
+                session.send(bytes)
+            },
             onSelectionPathAction: { action, text in
                 handleSelectionPathAction(action, text: text)
             },
@@ -7786,17 +8410,6 @@ private enum MoshTcpControlStatus: Equatable {
     case connected
     case retrying
     case disconnected
-
-    var text: String {
-        switch self {
-        case .connected:
-            return "connected"
-        case .retrying:
-            return "retrying"
-        case .disconnected:
-            return "disconnected"
-        }
-    }
 }
 
 private enum SessionConnectionStatus: Equatable {
@@ -7838,22 +8451,45 @@ private enum SessionConnectionStatus: Equatable {
         }
     }
 
+    /// One whole sentence per transport rather than a `"<label>: <state>"`
+    /// template — the state word inflects with the label in several
+    /// languages, and the punctuation itself differs (CJK uses a full-width
+    /// colon).
     var lines: [String] {
         switch self {
         case .ssh(let state):
-            return ["ssh: \(Self.binaryTransportText(for: state))"]
+            return [Self.isConnected(state)
+                ? String(localized: "ssh: connected")
+                : String(localized: "ssh: disconnected")]
         case .mosh(let sessionState, let transportState, let tcpControl):
-            var lines = [
-                "mosh: \(Self.binaryMoshText(for: transportState, sessionState: sessionState))",
-            ]
+            let moshConnected = Self.isConnected(sessionState) && transportState == .connected
+            var lines = [moshConnected
+                ? String(localized: "mosh: connected")
+                : String(localized: "mosh: disconnected")]
             if let tcpControl {
-                let controlText = Self.binaryTransportText(for: sessionState) == "connected"
-                    ? tcpControl.text
-                    : "disconnected"
-                lines.append("tcp control: \(controlText)")
+                lines.append(Self.controlLine(for: tcpControl, sessionState: sessionState))
             }
             return lines
         }
+    }
+
+    private static func controlLine(
+        for tcpControl: MoshTcpControlStatus,
+        sessionState: SessionState
+    ) -> String {
+        guard isConnected(sessionState) else {
+            return String(localized: "tcp control: disconnected")
+        }
+        switch tcpControl {
+        case .connected:    return String(localized: "tcp control: connected")
+        case .retrying:     return String(localized: "tcp control: retrying")
+        case .disconnected: return String(localized: "tcp control: disconnected")
+        }
+    }
+
+    private static func isConnected(_ state: SessionState) -> Bool {
+        if case .connected = state { return true }
+        return false
     }
 
     private static func dotColor(for state: SessionState) -> SwiftUI.Color {
@@ -7869,20 +8505,6 @@ private enum SessionConnectionStatus: Equatable {
         }
     }
 
-    private static func binaryTransportText(for state: SessionState) -> String {
-        if case .connected = state {
-            return "connected"
-        }
-        return "disconnected"
-    }
-
-    private static func binaryMoshText(
-        for transportState: MoshTransportState,
-        sessionState: SessionState
-    ) -> String {
-        guard case .connected = sessionState else { return "disconnected" }
-        return transportState == .connected ? "connected" : "disconnected"
-    }
 }
 
 /// 600 ms accent stroke fade — attached to a tmux tab pill the moment its
@@ -7967,7 +8589,7 @@ private struct TmuxTabCloseButton: View {
     let windowID: Int
     let isActive: Bool
     let isAvailable: Bool
-    let accessibilityHint: String
+    let accessibilityHint: LocalizedStringKey
     let scale: CGFloat
     let T: DesignTokens
     /// Accessibility-identifier namespace. The overflow window list renders a
@@ -8106,7 +8728,6 @@ private struct SessionTopBar: View {
     @State private var integrationConfirmationVisible = false
     @State private var pendingIntegrationAction: AgentIntegrationFixAction?
     @State private var pendingWindowClose: PendingTmuxWindowClose?
-    @State private var compactUtilitiesVisible = false
     /// Close confirmation staged by the window-list popover, held until the
     /// popover's content reports `onDisappear` (dismissal actually complete)
     /// before it becomes `pendingWindowClose`.
@@ -8185,7 +8806,15 @@ private struct SessionTopBar: View {
     /// room and the veil itself is the signal there.
     private func continuedElsewhereChip(peerName: String) -> some View {
         let selfName = GridAuthorityDeviceIdentity.selfDisplayName
-        let label = peerName == selfName ? "on another \(peerName)" : "on \(peerName)"
+        let label = peerName == selfName
+            ? String(
+                localized: "on another \(peerName)",
+                comment: "Chip: the shared grid is held by a second device of the same kind, e.g. 'on another iPhone'"
+            )
+            : String(
+                localized: "on \(peerName)",
+                comment: "Chip: the shared grid is held by another device, e.g. 'on iPhone'"
+            )
         return HStack(spacing: 5 * scale) {
             Image(systemName: peerName == "iPhone" ? "iphone" : "ipad.landscape")
                 .font(.system(size: 10 * scale, weight: .medium))
@@ -8283,14 +8912,6 @@ private struct SessionTopBar: View {
                !agentCenter.sortedUnreadAttentions.isEmpty {
                 agentAttentionButton
             }
-
-            chromeIconButton(
-                systemName: "arrow.clockwise",
-                action: requestTerminalForceRefresh
-            )
-            .disabled(state != .connected || !sessionIsActive || tmux.gridAuthority.isPeer)
-            .opacity(tmux.gridAuthority.isPeer ? 0.45 : 1)
-            .accessibilityLabel("Refresh terminal")
 
             // Home — returns to the host landing. Mirrors the leading
             // sidebar toggle's icon-button style for visual symmetry,
@@ -8410,7 +9031,7 @@ private struct SessionTopBar: View {
         .sheet(isPresented: $integrationHelpVisible) {
             AgentLifecycleIntegrationHelpView()
         }
-        .alert(integrationConfirmationTitle, isPresented: $integrationConfirmationVisible) {
+        .alert(Text(integrationConfirmationTitle), isPresented: $integrationConfirmationVisible) {
             Button("Cancel", role: .cancel) {
                 pendingIntegrationAction = nil
             }
@@ -8421,7 +9042,7 @@ private struct SessionTopBar: View {
                     integrationHelpVisible = true
                 }
             }
-            Button(integrationConfirmationLabel) {
+            Button(String(localized: integrationConfirmationLabel)) {
                 let requestedAction = pendingIntegrationAction
                 pendingIntegrationAction = nil
                 guard currentIntegrationState.supports(requestedAction) else { return }
@@ -8526,19 +9147,10 @@ private struct SessionTopBar: View {
     }
 
     private var compactBarCore: some View {
-        // Keep Files + Refresh inline whenever the host switcher still has a
-        // usable floor. Display Zoom can reduce a supported iPhone to a
-        // 320pt-wide layout; with tmux + forwarding active, seven fixed 40pt
-        // controls leave only 10pt for the switcher. The fallback collapses
-        // those two utilities behind one popover without shrinking touch
-        // targets or dropping either action.
-        ViewThatFits(in: .horizontal) {
-            compactBarContent(collapsesUtilities: false)
-            compactBarContent(collapsesUtilities: true)
-        }
+        compactBarContent
     }
 
-    private func compactBarContent(collapsesUtilities: Bool) -> some View {
+    private var compactBarContent: some View {
         // Spacing 0 — each icon button's 40pt full-pitch hit frame carries
         // 1pt of the old 2pt gap on each side, so glyph centers stay put
         // while the hit frames meet edge-to-edge.
@@ -8602,35 +9214,13 @@ private struct SessionTopBar: View {
             }
             .disabled(tmux.gridAuthority.isPeer)
             .opacity(tmux.gridAuthority.isPeer ? 0.45 : 1)
-            if collapsesUtilities {
-                compactIconButton(
-                    systemName: "ellipsis",
-                    label: "More terminal actions",
-                    isToggled: filesPanelOpen,
-                    action: { compactUtilitiesVisible = true }
-                )
-                .popover(isPresented: $compactUtilitiesVisible, arrowEdge: .top) {
-                    compactUtilityActions
-                        .presentationCompactAdaptation(.popover)
-                }
-            } else {
-                compactIconButton(
-                    systemName: "folder",
-                    label: "Files",
-                    isToggled: filesPanelOpen,
-                    action: onToggleFiles
-                )
-            }
+            compactIconButton(
+                systemName: "folder",
+                label: "Files",
+                isToggled: filesPanelOpen,
+                action: onToggleFiles
+            )
             CompactForwardingStatusButton(manager: forwarderManager, T: T)
-            if !collapsesUtilities {
-                compactIconButton(
-                    systemName: "arrow.clockwise",
-                    label: "Refresh terminal",
-                    action: requestTerminalForceRefresh
-                )
-                .disabled(state != .connected || !sessionIsActive || tmux.gridAuthority.isPeer)
-                .opacity(tmux.gridAuthority.isPeer ? 0.45 : 1)
-            }
             compactIconButton(
                 systemName: "xmark",
                 label: "Disconnect",
@@ -8640,52 +9230,9 @@ private struct SessionTopBar: View {
         }
     }
 
-    private var compactUtilityActions: some View {
-        VStack(spacing: 0) {
-            compactUtilityAction(
-                systemName: "folder",
-                title: filesPanelOpen ? "Close Files" : "Files"
-            ) {
-                compactUtilitiesVisible = false
-                onToggleFiles()
-            }
-            compactUtilityAction(
-                systemName: "arrow.clockwise",
-                title: "Refresh terminal"
-            ) {
-                compactUtilitiesVisible = false
-                requestTerminalForceRefresh()
-            }
-            .disabled(state != .connected || !sessionIsActive || tmux.gridAuthority.isPeer)
-            .opacity(tmux.gridAuthority.isPeer ? 0.45 : 1)
-        }
-        .padding(6)
-        .frame(width: 210)
-        .background(T.presentationBg)
-    }
-
-    private func compactUtilityAction(
-        systemName: String,
-        title: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: systemName)
-                .font(Typography.tesseraMono(size: 12, weight: .medium))
-                .foregroundStyle(T.fg)
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func requestTerminalForceRefresh() {
-        NotificationCenter.default.post(name: .tesseraForceRefreshTerminal, object: nil)
-    }
-
     private func compactIconButton(
         systemName: String,
-        label: String,
+        label: LocalizedStringKey,
         isToggled: Bool = false,
         tint: SwiftUI.Color? = nil,
         action: @escaping () -> Void
@@ -8750,17 +9297,22 @@ private struct SessionTopBar: View {
               state == .connected,
               currentIntegrationState.showsWarning else { return nil }
         return CommandPaletteNotice(
-            title: currentIntegrationState.title,
-            message: currentIntegrationState.message,
-            actionLabel: currentIntegrationState.actionLabel
+            title: String(localized: currentIntegrationState.title),
+            message: String(localized: currentIntegrationState.message),
+            actionLabel: currentIntegrationState.actionLabel.map { String(localized: $0) }
         )
     }
 
     private var compactSwitcherAccessibilityLabel: String {
         guard let notice = compactIntegrationNotice else {
-            return "Switch session, window, or pane"
+            return String(localized: "Switch session, window, or pane")
         }
-        return "Switch session, window, or pane. \(notice.title)"
+        // Spelled out rather than appended to the plain label: a language
+        // that puts the verb last has nowhere to hang the notice.
+        return String(
+            localized: "Switch session, window, or pane. \(notice.title)",
+            comment: "VoiceOver label for the compact switcher. The argument is an agent-integration notice."
+        )
     }
 
     private func handleCompactIntegrationNotice() {
@@ -8788,7 +9340,12 @@ private struct SessionTopBar: View {
     private func closeConfirmationActionLabel(
         for window: TmuxController.WindowInfo
     ) -> String {
-        window.paneCount > 1 ? "Close all \(window.paneCount) panes" : "Close window"
+        window.paneCount > 1
+            ? String(
+                localized: "Close all \(window.paneCount) panes",
+                comment: "Destructive confirm button when the tmux window holds several panes"
+            )
+            : String(localized: "Close window", comment: "Destructive confirm button for a single-pane tmux window")
     }
 
     private func closeConfirmationMessage(
@@ -8799,10 +9356,15 @@ private struct SessionTopBar: View {
             // the pane count is still a guess (link-window/move-window can
             // add an already-split window), so the close fails closed with
             // a generic confirmation instead of a promptless kill.
-            return "“\(window.name)” is still syncing its pane layout. "
-                + "Closing this window will close every pane it contains."
+            return String(
+                localized: "“\(window.name)” is still syncing its pane layout. Closing this window will close every pane it contains.",
+                comment: "Close confirmation while the pane count is still unknown."
+            )
         }
-        return "“\(window.name)” contains \(window.paneCount) panes. Closing this window will close every pane in it."
+        return String(
+            localized: "“\(window.name)” contains \(window.paneCount) panes. Closing this window will close every pane in it.",
+            comment: "Close confirmation. Pluralized on the pane count."
+        )
     }
 
     private var currentIntegrationState: AgentIntegrationWarningState {
@@ -8859,7 +9421,7 @@ private struct SessionTopBar: View {
             HStack(spacing: 5 * scale) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 10 * scale, weight: .semibold))
-                Text(agentAttentionSummary)
+                Text(verbatim: agentAttentionSummary)
                     .font(Typography.tesseraMono(size: 10 * scale, weight: .medium))
                     .lineLimit(1)
             }
@@ -8895,10 +9457,16 @@ private struct SessionTopBar: View {
         let finished = attentions.count { $0.kind == .justFinished }
         var parts: [String] = []
         if needsInput > 0 {
-            parts.append(needsInput == 1 ? "1 agent needs input" : "\(needsInput) agents need input")
+            parts.append(String(
+                localized: "\(needsInput) agents need input",
+                comment: "Agent status summary. Pluralized on the number of agents waiting for input."
+            ))
         }
         if finished > 0 {
-            parts.append(finished == 1 ? "1 agent finished" : "\(finished) agents finished")
+            parts.append(String(
+                localized: "\(finished) agents finished",
+                comment: "Agent status summary. Pluralized on the number of agents that finished."
+            ))
         }
         return parts.joined(separator: " · ")
     }
@@ -8948,7 +9516,7 @@ private struct SessionTopBar: View {
         }
     }
 
-    private var integrationConfirmationTitle: String {
+    private var integrationConfirmationTitle: LocalizedStringResource {
         switch pendingIntegrationAction {
         case .installAndApply: "Install and enable integration?"
         case .installOnly: "Install agent integration?"
@@ -8960,7 +9528,7 @@ private struct SessionTopBar: View {
         }
     }
 
-    private var integrationConfirmationMessage: String {
+    private var integrationConfirmationMessage: LocalizedStringResource {
         switch pendingIntegrationAction {
         case .installAndApply:
             "Writes Tessera hook files, edits bash/zsh startup files, then types one source command so agents launched here report precise status. Continue only at an empty bash/zsh prompt."
@@ -8979,7 +9547,7 @@ private struct SessionTopBar: View {
         }
     }
 
-    private var integrationConfirmationLabel: String {
+    private var integrationConfirmationLabel: LocalizedStringResource {
         switch pendingIntegrationAction {
         case .installAndApply: "Install and enable"
         case .installOnly: "Install"
@@ -9044,7 +9612,7 @@ private struct SessionTopBar: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
 
-                if !detailText.isEmpty {
+                if let detailText {
                     Text(detailText)
                         .font(Typography.tesseraMono(size: 12 * scale))
                         .foregroundStyle(detailColor)
@@ -9077,7 +9645,7 @@ private struct SessionTopBar: View {
                     .font(Typography.tesseraMono(size: 12 * scale, weight: .medium))
                     .foregroundStyle(T.fg)
                     .lineLimit(1)
-                Text("·")
+                Text(verbatim: "·")
                     .font(Typography.tesseraMono(size: 11 * scale))
                     .foregroundStyle(T.fgDim)
                 Text("tmux")
@@ -9283,7 +9851,7 @@ private struct SessionTopBar: View {
                                     : (agentHasUnreadFinished ? "agent just finished" : "agent active")
                             )
                     }
-                    Text(name)
+                    Text(verbatim: name)
                         .font(Typography.tesseraMono(size: 12 * scale, weight: isActive ? .medium : .regular))
                         .foregroundStyle(
                             agentHasUnreadFinished && !isDegraded
@@ -9297,7 +9865,8 @@ private struct SessionTopBar: View {
                     // suppress the hint past 9 rather than mislead with a
                     // shortcut that doesn't fire.
                     if number <= 9 {
-                        Text("⌘\(number)")
+                        Text(Chord([.command], .character(Character("\(number)")))
+                                .rendered(appearance.modifierNotation))
                             .font(Typography.tesseraMono(size: 10.5 * scale))
                             .foregroundStyle(
                                 isActive
@@ -9318,7 +9887,9 @@ private struct SessionTopBar: View {
             .buttonStyle(.plain)
             .disabled(isDegraded || tmux.gridAuthority.isPeer)
             .accessibilityHint(
-                isDegraded ? "Unavailable while tmux sync is offline" : ""
+                isDegraded
+                    ? LocalizedStringKey("Unavailable while tmux sync is offline")
+                    : ""
             )
             .accessibilityIdentifier("tmux-window-\(windowID)-tab")
 
@@ -9580,16 +10151,16 @@ private struct SessionTopBar: View {
     }
 
     /// Extra text after the host label describing the session state.
-    /// Empty when connected — the green dot alone conveys that and
+    /// Nil when connected — the green dot alone conveys that and
     /// the space is more valuable than the redundant word "connected".
-    private var detailText: String {
+    private var detailText: LocalizedStringResource? {
         if tmuxIsDegraded, state == .connected {
             return "tmux sync offline"
         }
         switch state {
         case .idle:               return "idle"
         case .connecting:         return "connecting…"
-        case .connected:          return ""
+        case .connected:          return nil
         case .disconnected:       return "disconnected"
         // The full reason + recovery actions live in the launch overlay's
         // error state now; the top bar just keeps a short red marker.
@@ -9616,6 +10187,31 @@ private struct SessionTopBar: View {
 /// with 40pt pitch for comfortable touch targets. Unscaled: popover content
 /// floats outside the bar, so the `topBarHeight` slider doesn't apply.
 private struct TmuxWindowListPopover: View {
+    /// VoiceOver label for one window row.
+    ///
+    /// Each agent state is a whole sentence rather than a suffix appended to
+    /// the window name: the states inflect differently across languages, and
+    /// a language that puts the verb last has nowhere to append.
+    private func windowRowAccessibilityLabel(
+        name: String,
+        number: Int,
+        hasAgent: Bool,
+        needsInput: Bool,
+        justFinished: Bool
+    ) -> String {
+        guard hasAgent else {
+            return String(localized: "\(name), window \(number)")
+        }
+        if needsInput {
+            return String(localized: "\(name), window \(number), agent needs input")
+        }
+        if justFinished {
+            return String(localized: "\(name), window \(number), agent just finished")
+        }
+        return String(localized: "\(name), window \(number), agent active")
+    }
+
+    @Environment(AppearancePreferences.self) private var appearance
     let tmux: TmuxController
     let sessionID: UUID
     let isDegraded: Bool
@@ -9687,7 +10283,9 @@ private struct TmuxWindowListPopover: View {
             .opacity(isDegraded ? 0.45 : 1)
             .accessibilityLabel("New tmux window")
             .accessibilityHint(
-                isDegraded ? "Unavailable while tmux sync is offline" : ""
+                isDegraded
+                    ? LocalizedStringKey("Unavailable while tmux sync is offline")
+                    : ""
             )
             .accessibilityIdentifier("tmux-window-list-new")
             .padding(.bottom, 5)
@@ -9718,7 +10316,7 @@ private struct TmuxWindowListPopover: View {
         return HStack(spacing: 0) {
             Button(action: { onSelect(number) }) {
                 HStack(spacing: 8) {
-                    Text("\(number)")
+                    Text(verbatim: "\(number)")
                         .font(Typography.tesseraMono(size: 10.5))
                         .foregroundStyle(T.fgFaint)
                         .frame(width: 16, alignment: .trailing)
@@ -9749,7 +10347,8 @@ private struct TmuxWindowListPopover: View {
                     // Same 1-9 cutoff as the strip: no hint for windows
                     // without a live ⌘N shortcut.
                     if number <= 9 {
-                        Text("⌘\(number)")
+                        Text(Chord([.command], .character(Character("\(number)")))
+                                .rendered(appearance.modifierNotation))
                             .font(Typography.tesseraMono(size: 10.5))
                             .foregroundStyle(
                                 isActive
@@ -9765,20 +10364,20 @@ private struct TmuxWindowListPopover: View {
             .buttonStyle(.plain)
             .disabled(isDegraded)
             .accessibilityHint(
-                isDegraded ? "Unavailable while tmux sync is offline" : ""
+                isDegraded
+                    ? LocalizedStringKey("Unavailable while tmux sync is offline")
+                    : ""
             )
             // Explicit label replaces child aggregation, so fold the agent
             // sparkle's state back in — a VoiceOver user scanning the list
             // for the window whose agent needs attention has no other signal.
-            .accessibilityLabel(
-                "\(window.name), window \(number)"
-                    + (hasAgent
-                        ? (agentNeedsInput ? ", agent needs input"
-                            : (agentHasUnreadFinished
-                                ? ", agent just finished"
-                                : ", agent active"))
-                        : "")
-            )
+            .accessibilityLabel(windowRowAccessibilityLabel(
+                name: window.name,
+                number: number,
+                hasAgent: hasAgent,
+                needsInput: agentNeedsInput,
+                justFinished: agentHasUnreadFinished
+            ))
             .accessibilityAddTraits(isActive ? .isSelected : [])
             .accessibilityIdentifier("tmux-window-list-\(windowID)-row")
 
@@ -9881,7 +10480,7 @@ private struct AgentIntegrationWarningPopover: View {
     }
 
     private func actionButton(
-        _ title: String,
+        _ title: LocalizedStringResource,
         primary: Bool,
         action: @escaping () -> Void
     ) -> some View {
@@ -9915,9 +10514,24 @@ struct IPhoneKeyboardHarnessView: View {
     @State private var viewportRows = 0
     @State private var viewportLayoutGeneration = -1
     @State private var lastHarnessViewportSize = CGSize.zero
+    @State private var findController = FindController()
 
     var body: some View {
         VStack(spacing: 0) {
+            // Same chrome group the sessions mount, for the same reason: the
+            // find query field is an input the user reads while typing into it,
+            // so it must not ride the keyboard translation off the screen top.
+            KeyboardLiftExemptChrome {
+                if findController.isOpen {
+                    FindBar(
+                        controller: findController,
+                        horizontalInset: 10,
+                        T: DesignTokens.make(mode: .dark, accent: .blue)
+                    )
+                }
+            }
+            .zIndex(2)
+
             TerminalSurfaceBound(
                 initialData: Self.fixtureBytes,
                 onMade: { view in
@@ -9959,9 +10573,13 @@ struct IPhoneKeyboardHarnessView: View {
         }
         .background(Color.black)
         .preferredColorScheme(.dark)
+        .ignoresSafeArea(.container, edges: .bottom)
+        .terminalKeyboardLayout(
+            resizesTerminal: appearance.resizeTerminalWithKeyboard
+        )
         .statusBarHidden(true)
         .overlay(alignment: .topLeading) {
-            Text("keyboard \(oracle.isVisible ? "visible" : "hidden")")
+            Text(verbatim: "keyboard \(oracle.isVisible ? "visible" : "hidden")")
                 .font(Typography.tesseraMono(size: 11, weight: .medium))
                 .foregroundStyle(Color.white.opacity(0.01))
                 .accessibilityIdentifier("iphone-keyboard-state")
@@ -9971,7 +10589,7 @@ struct IPhoneKeyboardHarnessView: View {
             let measuredRows = viewportLayoutGeneration == oracle.frameGeneration
                 ? String(viewportRows)
                 : "pending"
-            Text("viewport rows \(measuredRows)")
+            Text(verbatim: "viewport rows \(measuredRows)")
                 .foregroundStyle(Color.white.opacity(0.01))
                 .accessibilityIdentifier("iphone-terminal-viewport-rows")
                 .accessibilityValue(measuredRows)
@@ -9995,8 +10613,20 @@ struct IPhoneKeyboardHarnessView: View {
             .accessibilityLabel("Simulate device orientation noise")
             .accessibilityIdentifier("iphone-keyboard-orientation-noise")
         }
+        .overlay(alignment: .bottomLeading) {
+            // Outside `terminalKeyboardLayout` on purpose: this is the test's
+            // own control, not session chrome, so it must stay tappable
+            // regardless of what the translation is doing to the session.
+            Button {
+                findController.open()
+            } label: {
+                Color.clear.frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("Open find")
+            .accessibilityIdentifier("iphone-keyboard-open-find")
+        }
         .overlay(alignment: .topLeading) {
-            Text("keyboard hides \(oracle.hideCount)")
+            Text(verbatim: "keyboard hides \(oracle.hideCount)")
                 .foregroundStyle(Color.white.opacity(0.01))
                 .accessibilityIdentifier("iphone-keyboard-hide-count")
                 .accessibilityValue(String(oracle.hideCount))
@@ -10007,6 +10637,9 @@ struct IPhoneKeyboardHarnessView: View {
             appearance.fontSize = 13
             appearance.cursorBlink = false
             appearance.showAccessoryBar = true
+            appearance.resizeTerminalWithKeyboard = ProcessInfo.processInfo.environment[
+                "TESSERA_KEYBOARD_RESIZE_HARNESS"
+            ] == "1"
             appearance.accessoryBarKeys = AccessoryChip.defaultBarOrder.map(\.rawValue)
             oracle.start()
         }
@@ -10256,16 +10889,16 @@ struct IPhoneCompanionHarnessView: View {
     private var fakeTerminal: some View {
         GeometryReader { proxy in
             VStack(alignment: .leading, spacing: 4) {
-                Text("pane %21 · zsh · full-screen local view")
+                Text(verbatim: "pane %21 · zsh · full-screen local view")
                     .foregroundStyle(chrome.accent)
-                Text("$ git status --short")
-                Text(" M Tessera/SessionView.swift")
-                Text("$ swift test")
-                Text("Building for debugging…")
-                Text("Test Suite 'TmuxControlTests' passed")
+                Text(verbatim: "$ git status --short")
+                Text(verbatim: " M Tessera/SessionView.swift")
+                Text(verbatim: "$ swift test")
+                Text(verbatim: "Building for debugging…")
+                Text(verbatim: "Test Suite 'TmuxControlTests' passed")
                     .foregroundStyle(chrome.green)
                 Spacer()
-                Text("zeus ~/projects/tessera $ _")
+                Text(verbatim: "zeus ~/projects/tessera $ _")
             }
             .font(Typography.tesseraMono(size: 12))
             .foregroundStyle(Color.white.opacity(0.84))
@@ -10410,9 +11043,9 @@ struct AgentIntegrationWarningHarnessView: View {
                 sessions: [],
                 includesHome: true,
                 notice: CommandPaletteNotice(
-                    title: state.title,
-                    message: state.message,
-                    actionLabel: state.actionLabel
+                    title: String(localized: state.title),
+                    message: String(localized: state.message),
+                    actionLabel: state.actionLabel.map { String(localized: $0) }
                 )
             )
         }
@@ -10554,7 +11187,7 @@ struct AgentAttentionHarnessView: View {
                     compact: CompactLayout.isPhone(horizontalSizeClass)
                 ))
 
-                Text("Visible finished · hidden input · hidden finished")
+                Text(verbatim: "Visible finished · hidden input · hidden finished")
                     .font(Typography.tesseraMono(size: 13, weight: .medium))
                     .foregroundStyle(Color.white.opacity(0.72))
                     .padding(.top, 28)
@@ -10610,11 +11243,11 @@ struct AgentNotificationDeliveryHarnessView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("agent notification delivery")
+            Text(verbatim: "agent notification delivery")
                 .font(Typography.tesseraMono(size: 20, weight: .semibold))
                 .foregroundStyle(T.fg)
 
-            Text("authorization=\(authorization)")
+            Text(verbatim: "authorization=\(authorization)")
                 .font(Typography.tesseraMono(size: 13))
                 .foregroundStyle(T.fgMuted)
                 .accessibilityIdentifier("agent-notification-authorization")
@@ -10631,7 +11264,7 @@ struct AgentNotificationDeliveryHarnessView: View {
                 .foregroundStyle(T.green)
                 .accessibilityIdentifier("agent-notification-verification")
 
-            Text("The synthetic Stop is emitted two seconds after arming. Background Tessera immediately.")
+            Text(verbatim: "The synthetic Stop is emitted two seconds after arming. Background Tessera immediately.")
                 .font(Typography.tesseraMono(size: 11))
                 .foregroundStyle(T.fgDim)
         }
@@ -10795,7 +11428,7 @@ struct TmuxWindowCloseHarnessView: View {
                     compact: CompactLayout.isPhone(horizontalSizeClass)
                 ))
 
-                Text("Single pane · split panes · zoomed split")
+                Text(verbatim: "Single pane · split panes · zoomed split")
                     .font(Typography.tesseraMono(size: 13, weight: .medium))
                     .foregroundStyle(Color.white.opacity(0.72))
                     .padding(.top, 28)
@@ -10916,7 +11549,7 @@ struct TmuxWindowListHarnessView: View {
                     compact: CompactLayout.isPhone(horizontalSizeClass)
                 ))
 
-                Text("Overflowing strip · window list popover")
+                Text(verbatim: "Overflowing strip · window list popover")
                     .font(Typography.tesseraMono(size: 13, weight: .medium))
                     .foregroundStyle(Color.white.opacity(0.72))
                     .padding(.top, 28)
@@ -11017,6 +11650,9 @@ struct TerminalSurfaceBound: UIViewRepresentable {
     /// ⌘⇧E — toggle the Remote Files panel. Registered on the container
     /// alongside the find/switcher chords.
     var onFilesShortcut: (() -> Void)? = nil
+    /// Invoked when a user-defined shortcut's chord fires; the session encodes
+    /// its tokens and writes them to the remote, exactly as a bar chip does.
+    var onCustomShortcut: ((CustomShortcut) -> Void)? = nil
     /// §3 selection-menu path actions ("Quick Look" / "Reveal in
     /// Files") — raw selected text in, resolution happens in the owner.
     var onSelectionPathAction: ((TesseraTerminalSelectionPathAction, String) -> Void)? = nil
@@ -11070,6 +11706,11 @@ struct TerminalSurfaceBound: UIViewRepresentable {
     /// settings (font size, cursor, scrollback) when the user changes them.
     @Environment(AppearancePreferences.self) private var appearance
 
+    /// User keymap overrides and custom shortcuts. `keyCommands` is rebuilt on
+    /// every responder query, so an edit in Settings applies to the next
+    /// keystroke without re-mounting the terminal.
+    @Environment(ShortcutStore.self) private var shortcutStore
+
     func makeCoordinator() -> Coordinator {
         Coordinator(
             onReady: onReady,
@@ -11105,6 +11746,9 @@ struct TerminalSurfaceBound: UIViewRepresentable {
         container.onAgentScrollBlocked = onAgentScrollBlocked
         container.onFilesShortcut = onFilesShortcut
         container.onSelectionPathAction = onSelectionPathAction
+        container.shortcutStore = shortcutStore
+        container.onCustomShortcut = onCustomShortcut
+        context.coordinator.shortcutStore = shortcutStore
         context.coordinator.naturalTextEditingEnabled = appearance.naturalTextEditingEnabled
         context.coordinator.smoothScrollingEnabled = appearance.smoothScrollingEnabled
         context.coordinator.smoothScrollingSpeed = appearance.smoothScrollingSpeed
@@ -11312,6 +11956,8 @@ struct TerminalSurfaceBound: UIViewRepresentable {
         container.terminalView.onAgentScrollBlocked = onAgentScrollBlocked
         container.onFilesShortcut = onFilesShortcut
         container.onSelectionPathAction = onSelectionPathAction
+        container.shortcutStore = shortcutStore
+        container.onCustomShortcut = onCustomShortcut
         context.coordinator.onHostDirectory = onHostDirectory
         context.coordinator.onUserActivity = onUserActivity
         context.coordinator.onPrimaryScrollbackDelta = onPrimaryScrollbackDelta
@@ -11325,6 +11971,7 @@ struct TerminalSurfaceBound: UIViewRepresentable {
         context.coordinator.mouseReportingImpliesAltScreen = mouseReportingImpliesAltScreen
         context.coordinator.suppressDirectColorQueryResponses = suppressDirectColorQueryResponses
         context.coordinator.softwareModifierState = softwareModifierState
+        context.coordinator.shortcutStore = shortcutStore
         context.coordinator.naturalTextEditingEnabled = appearance.naturalTextEditingEnabled
         context.coordinator.smoothScrollingEnabled = appearance.smoothScrollingEnabled
         context.coordinator.smoothScrollingSpeed = appearance.smoothScrollingSpeed
@@ -11486,6 +12133,8 @@ struct TerminalSurfaceBound: UIViewRepresentable {
         var mouseReportingImpliesAltScreen: Bool
         var suppressDirectColorQueryResponses: Bool
         var softwareModifierState: ModifierState?
+        /// Needed to resolve an on-screen ⌘ chord against the user's keymap.
+        var shortcutStore: ShortcutStore?
         let onHardwareKey: ((TesseraTerminalHardwareKey) -> Void)?
         var onTerminalScrolled: ((TerminalView) -> Void)?
         private var scrollRetentionID: String?
@@ -11940,6 +12589,18 @@ struct TerminalSurfaceBound: UIViewRepresentable {
                 commandKeyActive: hardwareCommandKeyActive
             )
             if !normalized.isEmpty {
+                // ⌘ armed on the accessory bar makes the next typed key an app
+                // shortcut rather than terminal input — the only way to reach
+                // ⌘K / ⌘⇧E on a device with no hardware keyboard. Checked
+                // before the wire-modifier path because ⌘ has no encoding.
+                if !Self.isTerminalAutoReply(data),
+                   !Self.isMouseReport(data),
+                   let softwareModifierState,
+                   softwareModifierState.armed.cmd,
+                   let store = shortcutStore,
+                   softwareModifierState.consumeCommandChord(normalized, store: store) {
+                    return
+                }
                 let outgoing: [UInt8]
                 if !Self.isTerminalAutoReply(data),
                    !Self.isMouseReport(data),
@@ -12826,7 +13487,56 @@ struct AgentScrollPreventionNotice: View {
 /// Slim banner shown when the auto-tmux script's "tmux not available"
 /// sentinel is detected on the SSH output stream. Sits below the
 /// session top bar; dismissable via the trailing X.
+/// Why an auto-tmux / pinned-tmux launch fell back to the plain shell.
+/// Each case maps to a distinct remote condition so the banner tells the
+/// user something actionable instead of a generic failure.
+enum TmuxLaunchDegradeReason: Equatable {
+    /// `tmux` is not installed on the host.
+    case unavailable
+    /// tmux is installed but the session could not be created — the
+    /// server refused to start.
+    case startFailed
+    /// The launch command produced no tmux handshake at all within the
+    /// watchdog window (a login shell that never ran it, a tmux that
+    /// never finished starting, a host that swallowed the command).
+    case noHandshake
+    /// The host's login dotfiles already started tmux, so the terminal is
+    /// inside a client that control mode cannot nest into.
+    case nested
+    /// tmux attached in control mode but never delivered the first render
+    /// (capture metadata failing, quiet pane with no output to latch). The
+    /// session is live — this reveals it instead of degrading it, so the
+    /// wording asks for a keystroke rather than announcing a plain shell.
+    case hydrationStalled
+
+    var bannerText: LocalizedStringResource {
+        switch self {
+        case .unavailable:
+            return "tmux not available on remote host — multi-window features disabled"
+        case .startFailed:
+            return "tmux could not start a session on this host — showing the plain shell"
+        case .noHandshake:
+            return "tmux never started — showing the plain shell (the terminal below has the details)"
+        case .nested:
+            return "this host starts its own tmux at login — showing that session as a plain terminal"
+        case .hydrationStalled:
+            return "tmux is attached but the screen has not painted — press any key to wake it"
+        }
+    }
+
+    var diagnosticName: String {
+        switch self {
+        case .unavailable: return "unavailable"
+        case .startFailed: return "start-failed"
+        case .noHandshake: return "no-handshake"
+        case .nested: return "nested"
+        case .hydrationStalled: return "hydration-stalled"
+        }
+    }
+}
+
 private struct NoTmuxBanner: View {
+    var reason: TmuxLaunchDegradeReason = .unavailable
     let onDismiss: () -> Void
 
     var body: some View {
@@ -12835,7 +13545,7 @@ private struct NoTmuxBanner: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.yellow.opacity(0.85))
 
-            Text("tmux not available on remote host — multi-window features disabled")
+            Text(reason.bannerText)
                 .font(Typography.tesseraMono(size: 13))
                 .foregroundStyle(.white.opacity(0.85))
                 .lineLimit(2)

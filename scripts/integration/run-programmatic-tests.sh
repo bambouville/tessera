@@ -32,6 +32,7 @@ cleanup_programmatic_simulator() {
   for udid_file in \
     "$SIMULATOR_STATE/simulator_udid" \
     "$SIMULATOR_STATE/iphone_keyboard_simulator_udid" \
+    "$SIMULATOR_STATE/ipad_keyboard_simulator_udid" \
     "$SIMULATOR_STATE/continuity_iphone_simulator_udid" \
     "$SIMULATOR_STATE/touch_simulator_udid"; do
     delete_owned_test_simulator "$udid_file" || true

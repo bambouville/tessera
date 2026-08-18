@@ -475,7 +475,13 @@ public final class SwipePadActiveProfileResolver {
     /// Match a profile against a (lowercased, trimmed) process name. Two
     /// matcher forms — see `SwipePadProfile.matchProcess` docs.
     nonisolated static func matches(profile: SwipePadProfile, processName: String) -> Bool {
-        let spec = profile.matchProcess
+        matches(spec: profile.matchProcess, processName: processName)
+    }
+
+    /// The matcher itself, over a bare spec string. Split out so custom
+    /// shortcuts scoped to a program use the identical semantics rather than a
+    /// second implementation that drifts.
+    nonisolated static func matches(spec: String, processName: String) -> Bool {
         guard !spec.isEmpty else { return false }
 
         let normalizedProcessName = processName

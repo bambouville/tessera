@@ -1,0 +1,50 @@
+{
+  "agent scroll lock": {
+    "de": "Agent-Scrollsperre",
+    "es": "bloqueo de desplazamiento del agente",
+    "fr": "verrouillage du défilement des agents",
+    "ja": "エージェント実行中のスクロールロック",
+    "zh-Hans": "智能体滚动锁定",
+    "zh-Hant": "智慧體捲動鎖定"
+  },
+  "hold the terminal still while an agent is working, so streaming output stays put. requires agent center.": {
+    "de": "Hält das Terminal still, während ein Agent arbeitet, damit die laufende Ausgabe an ihrem Platz bleibt. Erfordert das Agent-Center.",
+    "es": "mantiene el terminal quieto mientras un agente trabaja, para que la salida en curso no se mueva. requiere el centro de agentes.",
+    "fr": "maintient le terminal immobile pendant qu'un agent travaille, pour que la sortie en cours reste en place. nécessite le centre d'agents.",
+    "ja": "エージェントの作業中はターミナルを固定し、流れ続ける出力が動かないようにします。エージェントセンターが必要です。",
+    "zh-Hans": "在智能体工作时固定终端画面，让持续输出停留在原处。需要启用智能体中心。",
+    "zh-Hant": "在智慧體工作時固定終端機畫面，讓持續輸出停留在原處。需要啟用智慧體中心。"
+  },
+  "claude code": {
+    "de": "claude code",
+    "es": "claude code",
+    "fr": "claude code",
+    "ja": "claude code",
+    "zh-Hans": "claude code",
+    "zh-Hant": "claude code"
+  },
+  "freeze scrolling while claude code is working": {
+    "de": "Scrollen einfrieren, während Claude Code arbeitet",
+    "es": "congela el desplazamiento mientras Claude Code trabaja",
+    "fr": "fige le défilement pendant que Claude Code travaille",
+    "ja": "Claude Code の作業中はスクロールを固定します",
+    "zh-Hans": "Claude Code 工作时冻结滚动",
+    "zh-Hant": "Claude Code 工作時凍結捲動"
+  },
+  "codex": {
+    "de": "codex",
+    "es": "codex",
+    "fr": "codex",
+    "ja": "codex",
+    "zh-Hans": "codex",
+    "zh-Hant": "codex"
+  },
+  "freeze scrolling while codex is working": {
+    "de": "Scrollen einfrieren, während Codex arbeitet",
+    "es": "congela el desplazamiento mientras Codex trabaja",
+    "fr": "fige le défilement pendant que Codex travaille",
+    "ja": "Codex の作業中はスクロールを固定します",
+    "zh-Hans": "Codex 工作时冻结滚动",
+    "zh-Hant": "Codex 工作時凍結捲動"
+  }
+}

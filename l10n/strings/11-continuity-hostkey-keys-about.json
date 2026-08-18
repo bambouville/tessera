@@ -1,0 +1,466 @@
+{
+  "continuity": {
+    "de": "Kontinuität",
+    "es": "continuidad",
+    "fr": "continuité",
+    "ja": "連係",
+    "zh-Hans": "接力",
+    "zh-Hant": "接續互通"
+  },
+  "hand off sessions": {
+    "de": "Sitzungen übergeben",
+    "es": "traspasar sesiones",
+    "fr": "transférer les sessions",
+    "ja": "セッションを引き継ぐ",
+    "zh-Hans": "接力会话",
+    "zh-Hant": "接續工作階段"
+  },
+  "focused session appears in the App Switcher or Dock on your other devices": {
+    "de": "Die aktive Sitzung erscheint auf deinen anderen Geräten im App-Umschalter oder im Dock",
+    "es": "la sesión en primer plano aparece en el selector de apps o en el Dock de tus otros dispositivos",
+    "fr": "la session active apparaît dans le sélecteur d'apps ou le Dock de vos autres appareils",
+    "ja": "現在のセッションが、ほかのデバイスの App スイッチャーや Dock に表示されます",
+    "zh-Hans": "当前会话会出现在你其他设备的应用切换器或程序坞中",
+    "zh-Hant": "目前的工作階段會出現在你其他裝置的 App 切換器或 Dock 中"
+  },
+  "Requires the same Apple Account on both devices, Bluetooth and Wi-Fi, and Handoff enabled in System Settings. Carries a pointer to the session — never a password or private key.": {
+    "de": "Erfordert dasselbe Apple-Konto auf beiden Geräten, Bluetooth und WLAN sowie aktiviertes Handoff in den Systemeinstellungen. Übertragen wird nur ein Verweis auf die Sitzung – nie ein Passwort oder ein privater Key.",
+    "es": "Requiere la misma cuenta de Apple en ambos dispositivos, Bluetooth y wifi, y Handoff activado en Ajustes del sistema. Transporta un puntero a la sesión, nunca una contraseña ni una clave privada.",
+    "fr": "Nécessite le même compte Apple sur les deux appareils, le Bluetooth et le Wi-Fi, et Handoff activé dans Réglages système. Transporte un pointeur vers la session — jamais un mot de passe ni une clé privée.",
+    "ja": "両方のデバイスで同じ Apple アカウント、Bluetooth と Wi-Fi、そしてシステム設定で Handoff が有効になっている必要があります。運ばれるのはセッションへのポインタだけで、パスワードや秘密鍵が送られることはありません。",
+    "zh-Hans": "需要两台设备使用同一 Apple 账户，开启蓝牙和无线局域网，并在系统设置中启用「接力」。仅传递指向会话的指针 —— 绝不传递密码或私钥。",
+    "zh-Hant": "需要兩台裝置使用同一 Apple 帳戶，開啟藍牙和 Wi-Fi，並在系統設定中啟用「接續互通」。僅傳遞指向工作階段的指標 —— 絕不傳遞密碼或私密金鑰。"
+  },
+  "nearby setup": {
+    "de": "Einrichtung in der Nähe",
+    "es": "configuración cercana",
+    "fr": "configuration à proximité",
+    "ja": "近くのデバイスからのセットアップ",
+    "zh-Hans": "附近设置",
+    "zh-Hant": "鄰近設定"
+  },
+  "send setup to nearby device": {
+    "de": "Einrichtung an Gerät in der Nähe senden",
+    "es": "enviar la configuración a un dispositivo cercano",
+    "fr": "envoyer la configuration à un appareil proche",
+    "ja": "近くのデバイスにセットアップを送る",
+    "zh-Hans": "将设置发送到附近设备",
+    "zh-Hant": "將設定傳送到鄰近裝置"
+  },
+  "receive setup from nearby device": {
+    "de": "Einrichtung von Gerät in der Nähe empfangen",
+    "es": "recibir la configuración de un dispositivo cercano",
+    "fr": "recevoir la configuration d'un appareil proche",
+    "ja": "近くのデバイスからセットアップを受け取る",
+    "zh-Hans": "从附近设备接收设置",
+    "zh-Hant": "從鄰近裝置接收設定"
+  },
+  "Choose send on the device that already has your setup, and receive on the device inheriting it. Both are visible only while the setup screen is open. The devices compare a fresh six-digit code before Face ID can approve an encrypted transfer.": {
+    "de": "Wähle „Senden“ auf dem Gerät, das deine Einrichtung bereits hat, und „Empfangen“ auf dem Gerät, das sie übernimmt. Beide sind nur sichtbar, solange der Einrichtungsbildschirm offen ist. Die Geräte vergleichen einen frischen sechsstelligen Code, bevor Face ID eine verschlüsselte Übertragung freigeben kann.",
+    "es": "Elige enviar en el dispositivo que ya tiene tu configuración y recibir en el que la hereda. Ambos solo son visibles mientras la pantalla de configuración esté abierta. Los dispositivos comparan un código nuevo de seis dígitos antes de que Face ID pueda aprobar una transferencia cifrada.",
+    "fr": "Choisissez envoyer sur l'appareil qui possède déjà votre configuration, et recevoir sur celui qui en hérite. Les deux ne sont visibles que tant que l'écran de configuration est ouvert. Les appareils comparent un code à six chiffres fraîchement généré avant que Face ID puisse approuver un transfert chiffré.",
+    "ja": "すでにセットアップがあるデバイスで「送信」を、それを引き継ぐデバイスで「受信」を選びます。どちらもセットアップ画面を開いている間だけ表示されます。デバイス同士が新しい 6 桁のコードを突き合わせたうえで、Face ID が暗号化された転送を承認できるようになります。",
+    "zh-Hans": "在已有配置的设备上选择「发送」，在接收配置的设备上选择「接收」。两者仅在设置界面打开时可见。两台设备会先核对一组新的六位代码，Face ID 才能批准加密传输。",
+    "zh-Hant": "在已有設定的裝置上選擇「傳送」，在接收設定的裝置上選擇「接收」。兩者僅在設定畫面打開時可見。兩台裝置會先核對一組新的六位代碼，Face ID 才能核准加密傳輸。"
+  },
+  "unknown host": {
+    "de": "unbekannter Host",
+    "es": "host desconocido",
+    "fr": "hôte inconnu",
+    "ja": "不明なホスト",
+    "zh-Hans": "未知主机",
+    "zh-Hant": "未知主機"
+  },
+  "host key changed": {
+    "de": "Host-Key geändert",
+    "es": "la clave del host cambió",
+    "fr": "clé d'hôte modifiée",
+    "ja": "ホストキーが変更されました",
+    "zh-Hans": "主机密钥已变更",
+    "zh-Hant": "主機金鑰已變更"
+  },
+  "WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!": {
+    "de": "WARNUNG: DIE IDENTIFIKATION DES ENTFERNTEN HOSTS HAT SICH GEÄNDERT!",
+    "es": "ADVERTENCIA: ¡LA IDENTIFICACIÓN DEL HOST REMOTO HA CAMBIADO!",
+    "fr": "AVERTISSEMENT : L'IDENTIFICATION DE L'HÔTE DISTANT A CHANGÉ !",
+    "ja": "警告: リモートホストの識別情報が変更されました。",
+    "zh-Hans": "警告：远程主机的标识已改变！",
+    "zh-Hant": "警告：遠端主機的識別資訊已改變！"
+  },
+  "The host key for this server has changed since the last connection. This could indicate a man-in-the-middle attack, or the server was reinstalled.": {
+    "de": "Der Host-Key dieses Servers hat sich seit der letzten Verbindung geändert. Das kann auf einen Man-in-the-Middle-Angriff hindeuten oder darauf, dass der Server neu aufgesetzt wurde.",
+    "es": "La clave de host de este servidor ha cambiado desde la última conexión. Podría indicar un ataque de intermediario, o que el servidor se reinstaló.",
+    "fr": "La clé d'hôte de ce serveur a changé depuis la dernière connexion. Cela peut indiquer une attaque de l'intercepteur, ou une réinstallation du serveur.",
+    "ja": "このサーバーのホストキーが前回の接続以降に変更されました。中間者攻撃の可能性、あるいはサーバーが再インストールされた可能性があります。",
+    "zh-Hans": "此服务器的主机密钥自上次连接以来已改变。这可能意味着中间人攻击，也可能是服务器被重装了。",
+    "zh-Hant": "此伺服器的主機金鑰自上次連線以來已改變。這可能意味著中間人攻擊，也可能是伺服器被重裝了。"
+  },
+  "Trust": {
+    "de": "Vertrauen",
+    "es": "Confiar",
+    "fr": "Approuver",
+    "ja": "信頼",
+    "zh-Hans": "信任",
+    "zh-Hant": "信任"
+  },
+  "Trust & Connect": {
+    "de": "Vertrauen und verbinden",
+    "es": "Confiar y conectar",
+    "fr": "Approuver et se connecter",
+    "ja": "信頼して接続",
+    "zh-Hans": "信任并连接",
+    "zh-Hant": "信任並連線"
+  },
+  "Trust Anyway": {
+    "de": "Trotzdem vertrauen",
+    "es": "Confiar de todos modos",
+    "fr": "Approuver quand même",
+    "ja": "それでも信頼する",
+    "zh-Hans": "仍然信任",
+    "zh-Hant": "仍然信任"
+  },
+  "Don't Connect": {
+    "de": "Nicht verbinden",
+    "es": "No conectar",
+    "fr": "Ne pas se connecter",
+    "ja": "接続しない",
+    "zh-Hans": "不要连接",
+    "zh-Hant": "不要連線"
+  },
+  "import OpenSSH key": {
+    "de": "OpenSSH-Key importieren",
+    "es": "importar clave de OpenSSH",
+    "fr": "importer une clé OpenSSH",
+    "ja": "OpenSSH キーを読み込む",
+    "zh-Hans": "导入 OpenSSH 密钥",
+    "zh-Hant": "輸入 OpenSSH 金鑰"
+  },
+  "imported key": {
+    "de": "importierter Key",
+    "es": "clave importada",
+    "fr": "clé importée",
+    "ja": "読み込んだキー",
+    "zh-Hans": "已导入的密钥",
+    "zh-Hant": "已輸入的金鑰"
+  },
+  "private-key file": {
+    "de": "Datei mit privatem Key",
+    "es": "archivo de clave privada",
+    "fr": "fichier de clé privée",
+    "ja": "秘密鍵ファイル",
+    "zh-Hans": "私钥文件",
+    "zh-Hant": "私密金鑰檔案"
+  },
+  "private-key import hidden": {
+    "de": "Import privater Keys ausgeblendet",
+    "es": "importación de clave privada oculta",
+    "fr": "import de clé privée masqué",
+    "ja": "秘密鍵の読み込みを非表示",
+    "zh-Hans": "已隐藏私钥导入",
+    "zh-Hant": "已隱藏私密金鑰輸入"
+  },
+  "choose file…": {
+    "de": "Datei wählen…",
+    "es": "elegir archivo…",
+    "fr": "choisir un fichier…",
+    "ja": "ファイルを選択…",
+    "zh-Hans": "选择文件…",
+    "zh-Hant": "選擇檔案…"
+  },
+  "source-file passphrase (optional)": {
+    "de": "Passphrase der Quelldatei (optional)",
+    "es": "frase de contraseña del archivo de origen (opcional)",
+    "fr": "phrase secrète du fichier source (facultative)",
+    "ja": "元ファイルのパスフレーズ（省略可能）",
+    "zh-Hans": "源文件的密码短语（可选）",
+    "zh-Hant": "來源檔案的密碼短語（選用）"
+  },
+  "The key body is never displayed or sent through a keyboard input surface.": {
+    "de": "Der Key-Inhalt wird nie angezeigt und nie über eine Tastatureingabe geleitet.",
+    "es": "El cuerpo de la clave nunca se muestra ni pasa por una superficie de entrada de teclado.",
+    "fr": "Le corps de la clé n'est jamais affiché ni transmis via une surface de saisie clavier.",
+    "ja": "キー本体が表示されたり、キーボード入力の経路を通ったりすることはありません。",
+    "zh-Hans": "密钥主体绝不会被显示，也不会经由键盘输入界面传递。",
+    "zh-Hant": "金鑰主體絕不會被顯示，也不會經由鍵盤輸入介面傳遞。"
+  },
+  "This passphrase is used once to decrypt the selected file and is not retained. Tessera stores the imported key under the iOS protection selected below.": {
+    "de": "Diese Passphrase wird einmal zum Entschlüsseln der gewählten Datei verwendet und nicht behalten. Tessera sichert den importierten Key mit dem unten gewählten iOS-Schutz.",
+    "es": "Esta frase de contraseña se usa una sola vez para descifrar el archivo seleccionado y no se conserva. Tessera guarda la clave importada con la protección de iOS elegida abajo.",
+    "fr": "Cette phrase secrète sert une seule fois à déchiffrer le fichier sélectionné et n'est pas conservée. Tessera stocke la clé importée avec la protection iOS choisie ci-dessous.",
+    "ja": "このパスフレーズは、選択したファイルを復号するために一度だけ使われ、保持されません。読み込んだキーは、下で選んだ iOS の保護設定で保存されます。",
+    "zh-Hans": "此密码短语只用于解密所选文件一次，不会被保留。Tessera 会按下方选择的 iOS 保护级别存储导入的密钥。",
+    "zh-Hant": "此密碼短語只用於解密所選檔案一次，不會被保留。Tessera 會按下方選擇的 iOS 保護等級儲存輸入的金鑰。"
+  },
+  "generate": {
+    "de": "erzeugen",
+    "es": "generar",
+    "fr": "générer",
+    "ja": "生成",
+    "zh-Hans": "生成",
+    "zh-Hant": "產生"
+  },
+  "generate key": {
+    "de": "Key erzeugen",
+    "es": "generar clave",
+    "fr": "générer une clé",
+    "ja": "キーを生成",
+    "zh-Hans": "生成密钥",
+    "zh-Hant": "產生金鑰"
+  },
+  "my new key": {
+    "de": "mein neuer Key",
+    "es": "mi clave nueva",
+    "fr": "ma nouvelle clé",
+    "ja": "新しいキー",
+    "zh-Hans": "我的新密钥",
+    "zh-Hant": "我的新金鑰"
+  },
+  "algorithm": {
+    "de": "Algorithmus",
+    "es": "algoritmo",
+    "fr": "algorithme",
+    "ja": "アルゴリズム",
+    "zh-Hans": "算法",
+    "zh-Hant": "演算法"
+  },
+  "Ed25519 keys are stored in the iOS Keychain and can be exported as a passphrase-encrypted standard OpenSSH recovery file.": {
+    "de": "Ed25519-Keys werden im iOS-Schlüsselbund gesichert und lassen sich als passphrasenverschlüsselte OpenSSH-Standard-Wiederherstellungsdatei exportieren.",
+    "es": "Las claves Ed25519 se guardan en el llavero de iOS y se pueden exportar como un archivo de recuperación OpenSSH estándar cifrado con una frase de contraseña.",
+    "fr": "Les clés Ed25519 sont stockées dans le trousseau iOS et peuvent être exportées sous forme de fichier de récupération OpenSSH standard chiffré par phrase secrète.",
+    "ja": "Ed25519 キーは iOS のキーチェーンに保存され、パスフレーズで暗号化した標準の OpenSSH 復旧ファイルとして書き出せます。",
+    "zh-Hans": "Ed25519 密钥保存在 iOS 钥匙串中，可导出为使用密码短语加密的标准 OpenSSH 恢复文件。",
+    "zh-Hant": "Ed25519 金鑰儲存在 iOS 鑰匙圈中，可輸出為使用密碼短語加密的標準 OpenSSH 回復檔案。"
+  },
+  "This protection is enforced by iOS at the key boundary. It is separate from the recovery-file passphrase.": {
+    "de": "Diesen Schutz erzwingt iOS direkt am Key. Er ist unabhängig von der Passphrase der Wiederherstellungsdatei.",
+    "es": "iOS aplica esta protección en el propio límite de la clave. Es independiente de la frase de contraseña del archivo de recuperación.",
+    "fr": "Cette protection est imposée par iOS au niveau de la clé elle-même. Elle est distincte de la phrase secrète du fichier de récupération.",
+    "ja": "この保護は、キーの境界で iOS が強制します。復旧ファイルのパスフレーズとは別のものです。",
+    "zh-Hans": "此保护由 iOS 在密钥边界处强制执行，与恢复文件的密码短语是两回事。",
+    "zh-Hant": "此保護由 iOS 在金鑰邊界處強制執行，與回復檔案的密碼短語是兩回事。"
+  },
+  "The key remains hardware-bound. Tessera enforces this authentication setting before key use, so you can change it later.": {
+    "de": "Der Key bleibt hardwaregebunden. Tessera erzwingt diese Authentifizierungseinstellung vor jeder Nutzung, du kannst sie also später ändern.",
+    "es": "La clave sigue vinculada al hardware. Tessera aplica este ajuste de autenticación antes de usarla, así que puedes cambiarlo más adelante.",
+    "fr": "La clé reste liée au matériel. Tessera applique ce réglage d'authentification avant chaque utilisation, vous pourrez donc le modifier plus tard.",
+    "ja": "キーはハードウェアに固定されたままです。Tessera はキーを使う前にこの認証設定を適用するため、あとから変更できます。",
+    "zh-Hans": "该密钥仍绑定硬件。Tessera 会在使用密钥前应用此认证设置，因此你之后仍可更改。",
+    "zh-Hant": "該金鑰仍綁定硬體。Tessera 會在使用金鑰前套用此驗證設定，因此你之後仍可更改。"
+  },
+  "copy key to host": {
+    "de": "Key auf Host kopieren",
+    "es": "copiar la clave al host",
+    "fr": "copier la clé vers l'hôte",
+    "ja": "キーをホストにコピー",
+    "zh-Hans": "将密钥拷贝到主机",
+    "zh-Hant": "將金鑰拷貝到主機"
+  },
+  "About to install %@ on %@": {
+    "de": "%@ wird gleich auf %@ installiert",
+    "es": "Se va a instalar %@ en %@",
+    "fr": "Sur le point d'installer %@ sur %@",
+    "ja": "%2$@ に %1$@ を設置しようとしています",
+    "zh-Hans": "即将在 %2$@ 上安装 %1$@",
+    "zh-Hant": "即將在 %2$@ 上安裝 %1$@"
+  },
+  "installing key": {
+    "de": "Key wird installiert",
+    "es": "instalando la clave",
+    "fr": "installation de la clé",
+    "ja": "キーを設置中",
+    "zh-Hans": "正在安装密钥",
+    "zh-Hant": "正在安裝金鑰"
+  },
+  "install": {
+    "de": "installieren",
+    "es": "instalar",
+    "fr": "installer",
+    "ja": "設置",
+    "zh-Hans": "安装",
+    "zh-Hant": "安裝"
+  },
+  "no saved hosts": {
+    "de": "keine gesicherten Hosts",
+    "es": "no hay hosts guardados",
+    "fr": "aucun hôte enregistré",
+    "ja": "保存済みのホストがありません",
+    "zh-Hans": "没有已保存的主机",
+    "zh-Hant": "沒有已儲存的主機"
+  },
+  "back": {
+    "de": "zurück",
+    "es": "atrás",
+    "fr": "retour",
+    "ja": "戻る",
+    "zh-Hans": "返回",
+    "zh-Hant": "返回"
+  },
+  "retry": {
+    "de": "erneut versuchen",
+    "es": "reintentar",
+    "fr": "réessayer",
+    "ja": "再試行",
+    "zh-Hans": "重试",
+    "zh-Hant": "重試"
+  },
+  "license": {
+    "de": "Lizenz",
+    "es": "licencia",
+    "fr": "licence",
+    "ja": "ライセンス",
+    "zh-Hans": "许可证",
+    "zh-Hant": "授權條款"
+  },
+  "tessera is free software, distributed under the GNU General Public License v3. you may use, study, share, and modify it under the terms of that license.": {
+    "de": "Tessera ist freie Software und wird unter der GNU General Public License v3 verteilt. Du darfst sie im Rahmen dieser Lizenz verwenden, untersuchen, weitergeben und verändern.",
+    "es": "tessera es software libre, distribuido bajo la GNU General Public License v3. puedes usarlo, estudiarlo, compartirlo y modificarlo según los términos de esa licencia.",
+    "fr": "tessera est un logiciel libre, distribué sous la GNU General Public License v3. vous pouvez l'utiliser, l'étudier, le partager et le modifier selon les termes de cette licence.",
+    "ja": "tessera はフリーソフトウェアであり、GNU General Public License v3 のもとで配布されています。同ライセンスの条件に従って、使用・研究・共有・改変ができます。",
+    "zh-Hans": "tessera 是自由软件，依据 GNU General Public License v3 发布。你可以在该许可证的条款下使用、研究、分享和修改它。",
+    "zh-Hant": "tessera 是自由軟體，依據 GNU General Public License v3 發布。你可以在該授權條款下使用、研究、分享和修改它。"
+  },
+  "app store exception (COPYING.iOS)": {
+    "de": "App-Store-Ausnahme (COPYING.iOS)",
+    "es": "excepción para el app store (COPYING.iOS)",
+    "fr": "exception app store (COPYING.iOS)",
+    "ja": "App Store 例外条項 (COPYING.iOS)",
+    "zh-Hans": "app store 例外条款 (COPYING.iOS)",
+    "zh-Hant": "app store 例外條款 (COPYING.iOS)"
+  },
+  "third-party licenses & notices": {
+    "de": "Lizenzen und Hinweise Dritter",
+    "es": "licencias y avisos de terceros",
+    "fr": "licences et mentions de tiers",
+    "ja": "サードパーティのライセンスと表示",
+    "zh-Hans": "第三方许可证与声明",
+    "zh-Hant": "第三方授權條款與聲明"
+  },
+  "acknowledgments": {
+    "de": "Danksagungen",
+    "es": "agradecimientos",
+    "fr": "remerciements",
+    "ja": "謝辞",
+    "zh-Hans": "致谢",
+    "zh-Hant": "致謝"
+  },
+  "replay walkthrough": {
+    "de": "Rundgang erneut ansehen",
+    "es": "repetir el recorrido",
+    "fr": "revoir la visite guidée",
+    "ja": "チュートリアルをもう一度見る",
+    "zh-Hans": "重新观看导览",
+    "zh-Hant": "重新觀看導覽"
+  },
+  "reconnecting from your other device": {
+    "de": "wird von deinem anderen Gerät aus neu verbunden",
+    "es": "reconectando desde tu otro dispositivo",
+    "fr": "reconnexion depuis votre autre appareil",
+    "ja": "もう一方のデバイスから再接続中",
+    "zh-Hans": "正从你的另一台设备重新连接",
+    "zh-Hant": "正從你的另一台裝置重新連線"
+  },
+  "preparing to reconnect from your other device": {
+    "de": "Neuverbinden von deinem anderen Gerät wird vorbereitet",
+    "es": "preparando la reconexión desde tu otro dispositivo",
+    "fr": "préparation de la reconnexion depuis votre autre appareil",
+    "ja": "もう一方のデバイスからの再接続を準備中",
+    "zh-Hans": "正在准备从你的另一台设备重新连接",
+    "zh-Hant": "正在準備從你的另一台裝置重新連線"
+  },
+  "reconnected on this device": {
+    "de": "auf diesem Gerät neu verbunden",
+    "es": "reconectado en este dispositivo",
+    "fr": "reconnecté sur cet appareil",
+    "ja": "このデバイスで再接続しました",
+    "zh-Hans": "已在本设备上重新连接",
+    "zh-Hant": "已在本裝置上重新連線"
+  },
+  "take back control": {
+    "de": "Steuerung zurückholen",
+    "es": "recuperar el control",
+    "fr": "reprendre la main",
+    "ja": "操作を取り戻す",
+    "zh-Hans": "取回控制权",
+    "zh-Hant": "取回控制權"
+  },
+  "taking back control…": {
+    "de": "Steuerung wird zurückgeholt…",
+    "es": "recuperando el control…",
+    "fr": "reprise de la main…",
+    "ja": "操作を取り戻しています…",
+    "zh-Hans": "正在取回控制权…",
+    "zh-Hant": "正在取回控制權…"
+  },
+  "tap anywhere": {
+    "de": "irgendwo tippen",
+    "es": "toca en cualquier parte",
+    "fr": "touchez n'importe où",
+    "ja": "どこでもタップ",
+    "zh-Hans": "轻点任意位置",
+    "zh-Hant": "點一下任意位置"
+  },
+  "tap anywhere · or press any key": {
+    "de": "irgendwo tippen · oder eine beliebige Taste drücken",
+    "es": "toca en cualquier parte · o pulsa cualquier tecla",
+    "fr": "touchez n'importe où · ou appuyez sur n'importe quelle touche",
+    "ja": "どこでもタップ · または任意のキーを押してください",
+    "zh-Hans": "轻点任意位置 · 或按任意键",
+    "zh-Hant": "點一下任意位置 · 或按任意鍵"
+  },
+  "first time on this device": {
+    "de": "erstes Mal auf diesem Gerät",
+    "es": "primera vez en este dispositivo",
+    "fr": "première fois sur cet appareil",
+    "ja": "このデバイスでは初めてです",
+    "zh-Hans": "在本设备上首次使用",
+    "zh-Hant": "在本裝置上首次使用"
+  },
+  "authenticate to %@": {
+    "de": "bei %@ authentifizieren",
+    "es": "autenticarse en %@",
+    "fr": "s'authentifier auprès de %@",
+    "ja": "%@ に認証する",
+    "zh-Hans": "向 %@ 认证",
+    "zh-Hant": "向 %@ 驗證"
+  },
+  "authorize this device from your other device": {
+    "de": "dieses Gerät von deinem anderen Gerät aus autorisieren",
+    "es": "autoriza este dispositivo desde tu otro dispositivo",
+    "fr": "autorisez cet appareil depuis votre autre appareil",
+    "ja": "もう一方のデバイスから、このデバイスを認可します",
+    "zh-Hans": "在你的另一台设备上授权本设备",
+    "zh-Hant": "在你的另一台裝置上授權本裝置"
+  },
+  "installs this device's public key over the session already open there — no password moves between devices": {
+    "de": "installiert den Public Key dieses Geräts über die dort bereits offene Sitzung – zwischen den Geräten wandert kein Passwort",
+    "es": "instala la clave pública de este dispositivo a través de la sesión que ya está abierta allí: ninguna contraseña pasa de un dispositivo a otro",
+    "fr": "installe la clé publique de cet appareil via la session déjà ouverte là-bas — aucun mot de passe ne circule entre les appareils",
+    "ja": "向こうですでに開いているセッションを通じて、このデバイスの公開鍵を設置します。デバイス間でパスワードが移動することはありません",
+    "zh-Hans": "通过那边已打开的会话安装本设备的公钥 —— 设备之间不传递任何密码",
+    "zh-Hant": "透過那邊已打開的工作階段安裝本裝置的公開金鑰 —— 裝置之間不傳遞任何密碼"
+  },
+  "after this, continuing is one tap": {
+    "de": "danach genügt zum Fortsetzen ein Tippen",
+    "es": "después de esto, continuar es cuestión de un toque",
+    "fr": "ensuite, poursuivre ne demande qu'un seul appui",
+    "ja": "これ以降は、タップ 1 回で続けられます",
+    "zh-Hans": "此后只需轻点一下即可继续",
+    "zh-Hant": "此後只需點一下即可繼續"
+  },
+  "stored only in this device's keychain — never synced and never sent to the other device": {
+    "de": "nur im Schlüsselbund dieses Geräts gesichert – wird nie synchronisiert und nie an das andere Gerät gesendet",
+    "es": "se guarda solo en el llavero de este dispositivo: nunca se sincroniza ni se envía al otro dispositivo",
+    "fr": "conservé uniquement dans le trousseau de cet appareil — jamais synchronisé ni envoyé à l'autre appareil",
+    "ja": "このデバイスのキーチェーンにのみ保存され、同期されることも、もう一方のデバイスに送られることもありません",
+    "zh-Hans": "仅保存在本设备的钥匙串中 —— 绝不同步，也绝不发送到另一台设备",
+    "zh-Hant": "僅儲存在本裝置的鑰匙圈中 —— 絕不同步，也絕不傳送到另一台裝置"
+  },
+  "or": {
+    "de": "oder",
+    "es": "o",
+    "fr": "ou",
+    "ja": "または",
+    "zh-Hans": "或",
+    "zh-Hant": "或"
+  }
+}

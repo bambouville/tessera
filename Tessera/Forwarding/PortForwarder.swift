@@ -190,11 +190,17 @@ public final class PortForwarder: Identifiable {
     private func describe(_ error: PortListenerError) -> String {
         switch error {
         case .portInUse(let port):
-            return "Port \(port) is already in use."
+            return String(
+                localized: "Port \(port) is already in use.",
+                comment: "Port forwarding failure; the argument is a TCP port number"
+            )
         case .bindFailed(let reason):
-            return "Bind failed: \(reason)"
+            return String(
+                localized: "Bind failed: \(reason)",
+                comment: "Port forwarding failure; the argument is a system error"
+            )
         case .cancelled:
-            return "Listener cancelled."
+            return String(localized: "Listener cancelled.")
         }
     }
 

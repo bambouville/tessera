@@ -170,7 +170,7 @@ struct AppearanceSettingsView: View {
         let preview = previewColors(for: mode)
         return Button(action: action) {
             VStack(alignment: .leading, spacing: 16) {
-                Text("$ whoami\nuser\n$ _")
+                Text(verbatim: "$ whoami\nuser\n$ _")
                     .font(Typography.tesseraMono(size: 9))
                     .foregroundStyle(preview.fg)
                     .lineSpacing(2)
@@ -179,7 +179,7 @@ struct AppearanceSettingsView: View {
                     .background(preview.bg)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
 
-                Text(mode.rawValue)
+                Text(mode.displayName)
                     .font(Typography.tesseraMono(size: 12))
                     .foregroundStyle(selected ? T.accent : T.fg)
             }
@@ -220,7 +220,7 @@ struct AppearanceSettingsView: View {
     /// so the preview is faithful.
     private var fontSizePreview: some View {
         let preview = previewColors(for: appearance.mode)
-        return Text("$ ls projects/\ntessera/  notes.md")
+        return Text(verbatim: "$ ls projects/\ntessera/  notes.md")
             .font(Typography.tesseraMono(size: appearance.fontSize))
             .foregroundStyle(preview.fg)
             .lineSpacing(2)
@@ -249,7 +249,7 @@ struct AppearanceSettingsView: View {
                         .fill(swatchColor(for: accent))
                         .frame(width: 24, height: 24)
 
-                    Text(accent.rawValue)
+                    Text(accent.displayName)
                         .font(Typography.tesseraMono(size: 11))
                         .foregroundStyle(selected ? T.accent : T.fgMuted)
                 }
@@ -392,7 +392,7 @@ private struct TopBarHeightPreview: View {
             // device frame rather than a floating bar — same bg as the
             // chrome, so the seam between them is invisible until the
             // border above kicks in.
-            Text("(base) user@ipad ~ %")
+            Text(verbatim: "(base) user@ipad ~ %")
                 .font(Typography.tesseraMono(size: max(9, 11 * scale)))
                 .foregroundStyle(theme.fg.opacity(0.85))
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -419,10 +419,10 @@ private struct TopBarHeightPreview: View {
             Circle()
                 .fill(T.green)
                 .frame(width: 7 * scale, height: 7 * scale)
-            Text("Local Mac")
+            Text(verbatim: "Local Mac")
                 .font(Typography.tesseraMono(size: 12 * scale, weight: .medium))
                 .foregroundStyle(T.fg)
-            Text("·")
+            Text(verbatim: "·")
                 .font(Typography.tesseraMono(size: 11 * scale))
                 .foregroundStyle(T.fgDim)
             Text("tmux")
@@ -440,12 +440,14 @@ private struct TopBarHeightPreview: View {
         }
     }
 
+    /// Sample window names in the tab-bar preview — not copy.
     private func previewTab(name: String, number: Int, isActive: Bool) -> some View {
         HStack(spacing: 6) {
-            Text(name)
+            Text(verbatim: name)
                 .font(Typography.tesseraMono(size: 12 * scale, weight: isActive ? .medium : .regular))
                 .foregroundStyle(isActive ? T.fg : T.fgMuted)
-            Text("⌘\(number)")
+            Text(Chord([.command], .character(Character("\(number)")))
+                    .rendered(appearance.modifierNotation))
                 .font(Typography.tesseraMono(size: 10.5 * scale))
                 .foregroundStyle(isActive ? T.accent : T.fgFaint)
         }

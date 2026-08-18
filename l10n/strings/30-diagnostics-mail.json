@@ -1,0 +1,34 @@
+{
+  "send to developer": {
+    "de": "an den Entwickler senden",
+    "es": "enviar al desarrollador",
+    "fr": "envoyer au développeur",
+    "ja": "開発者に送る",
+    "zh-Hans": "发送给开发者",
+    "zh-Hant": "傳送給開發者"
+  },
+  "mail not set up": {
+    "de": "Mail nicht eingerichtet",
+    "es": "correo no configurado",
+    "fr": "messagerie non configurée",
+    "ja": "メールが未設定",
+    "zh-Hans": "未设置邮件账户",
+    "zh-Hant": "未設定郵件帳號"
+  },
+  "Tessera can't open a message because this device has no mail account. Use “export log” to save the diagnostics log, then send the file from any mail app to this address:": {
+    "de": "Tessera kann keine Nachricht öffnen, weil auf diesem Gerät kein Mail-Konto eingerichtet ist. Sichere das Diagnose-Log mit „Log exportieren“ und sende die Datei aus einer beliebigen Mail-App an diese Adresse:",
+    "es": "Tessera no puede abrir un mensaje porque este dispositivo no tiene ninguna cuenta de correo. Usa «exportar el registro» para guardar el registro de diagnóstico y envía el archivo desde cualquier app de correo a esta dirección:",
+    "fr": "Tessera ne peut pas ouvrir de message, car cet appareil n'a aucun compte de messagerie. Utilisez « exporter le journal » pour enregistrer le journal de diagnostic, puis envoyez le fichier depuis n'importe quelle app de messagerie à cette adresse :",
+    "ja": "このデバイスにメールアカウントが設定されていないため、Tessera はメッセージを開けません。「ログを書き出す」で診断ログを保存し、任意のメールアプリから次のアドレスに送ってください：",
+    "zh-Hans": "此设备未设置邮件账户，因此 Tessera 无法打开邮件。请用「导出日志」保存诊断日志，然后用任意邮件应用发送到以下地址：",
+    "zh-Hant": "此裝置未設定郵件帳號，因此 Tessera 無法開啟郵件。請用「輸出日誌」儲存診斷日誌，然後用任何郵件 App 傳送到以下地址："
+  },
+  "Describe what happened above this line.": {
+    "de": "Beschreibe oberhalb dieser Zeile, was passiert ist.",
+    "es": "describe encima de esta línea qué ha ocurrido.",
+    "fr": "décrivez au-dessus de cette ligne ce qui s'est passé.",
+    "ja": "この行より上に、何が起きたかを記入してください。",
+    "zh-Hans": "请在此行上方描述发生了什么。",
+    "zh-Hant": "請在此行上方描述發生了什麼。"
+  }
+}

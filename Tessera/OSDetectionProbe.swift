@@ -12,7 +12,10 @@ struct WSLTailscaleMTUWarning: Codable, Equatable, Sendable {
     let tailscaleInterfaceMTU: Int
 
     var detail: String {
-        "WSL2 reports an outer MTU of \(defaultInterfaceMTU) while tailscale0 uses \(tailscaleInterfaceMTU). Larger SSH replies may stall."
+        String(
+            localized: "WSL2 reports an outer MTU of \(defaultInterfaceMTU) while tailscale0 uses \(tailscaleInterfaceMTU). Larger SSH replies may stall.",
+            comment: "Path-MTU warning; the arguments are byte counts for two network interfaces"
+        )
     }
 }
 

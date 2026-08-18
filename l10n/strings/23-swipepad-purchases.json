@@ -1,0 +1,538 @@
+{
+  "Swipe pad": {
+    "de": "Swipe-Pad",
+    "es": "Panel táctil",
+    "fr": "Pavé tactile",
+    "ja": "スワイプパッド",
+    "zh-Hans": "滑动板",
+    "zh-Hant": "滑動板"
+  },
+  "Swipe pad · %@": {
+    "de": "Swipe-Pad · %@",
+    "es": "Panel táctil · %@",
+    "fr": "Pavé tactile · %@",
+    "ja": "スワイプパッド · %@",
+    "zh-Hans": "滑动板 · %@",
+    "zh-Hant": "滑動板 · %@"
+  },
+  "Swipe pad · matched %@": {
+    "de": "Swipe-Pad · passt zu %@",
+    "es": "Panel táctil · coincide con %@",
+    "fr": "Pavé tactile · correspond à %@",
+    "ja": "スワイプパッド · %@ に一致",
+    "zh-Hans": "滑动板 · 匹配到 %@",
+    "zh-Hant": "滑動板 · 符合 %@"
+  },
+  "Swipe pad · %@ idle, swipe up to switch mode": {
+    "de": "Swipe-Pad · %@ im Leerlauf, nach oben wischen zum Moduswechsel",
+    "es": "Panel táctil · %@ inactivo, desliza hacia arriba para cambiar de modo",
+    "fr": "Pavé tactile · %@ au repos, balayez vers le haut pour changer de mode",
+    "ja": "スワイプパッド · %@ は待機中、上にスワイプでモード切り替え",
+    "zh-Hans": "滑动板 · %@ 空闲中，向上滑动可切换模式",
+    "zh-Hant": "滑動板 · %@ 閒置中，向上滑動可切換模式"
+  },
+  "Swipe pad · %@ waiting for input": {
+    "de": "Swipe-Pad · %@ wartet auf Eingabe",
+    "es": "Panel táctil · %@ espera entrada",
+    "fr": "Pavé tactile · %@ attend une saisie",
+    "ja": "スワイプパッド · %@ が入力待ち",
+    "zh-Hans": "滑动板 · %@ 正在等待输入",
+    "zh-Hant": "滑動板 · %@ 正在等待輸入"
+  },
+  "Swipe pad · %@ working, swipe left to interrupt or up to switch mode": {
+    "de": "Swipe-Pad · %@ arbeitet, nach links wischen zum Unterbrechen oder nach oben zum Moduswechsel",
+    "es": "Panel táctil · %@ trabajando, desliza a la izquierda para interrumpir o hacia arriba para cambiar de modo",
+    "fr": "Pavé tactile · %@ travaille, balayez vers la gauche pour interrompre ou vers le haut pour changer de mode",
+    "ja": "スワイプパッド · %@ が処理中、左スワイプで中断、上スワイプでモード切り替え",
+    "zh-Hans": "滑动板 · %@ 正在运行，向左滑动可中断，向上滑动可切换模式",
+    "zh-Hant": "滑動板 · %@ 正在執行，向左滑動可中斷，向上滑動可切換模式"
+  },
+  "Swipe pad · %@ finished, swipe up to switch mode": {
+    "de": "Swipe-Pad · %@ ist fertig, nach oben wischen zum Moduswechsel",
+    "es": "Panel táctil · %@ terminó, desliza hacia arriba para cambiar de modo",
+    "fr": "Pavé tactile · %@ a terminé, balayez vers le haut pour changer de mode",
+    "ja": "スワイプパッド · %@ が完了、上にスワイプでモード切り替え",
+    "zh-Hans": "滑动板 · %@ 已完成，向上滑动可切换模式",
+    "zh-Hant": "滑動板 · %@ 已完成，向上滑動可切換模式"
+  },
+  "Swipe pad · %@ finished, tap to acknowledge or swipe up to switch mode": {
+    "de": "Swipe-Pad · %@ ist fertig, tippen zum Bestätigen oder nach oben wischen zum Moduswechsel",
+    "es": "Panel táctil · %@ terminó, toca para darte por enterado o desliza hacia arriba para cambiar de modo",
+    "fr": "Pavé tactile · %@ a terminé, touchez pour prendre acte ou balayez vers le haut pour changer de mode",
+    "ja": "スワイプパッド · %@ が完了、タップで確認、上にスワイプでモード切り替え",
+    "zh-Hans": "滑动板 · %@ 已完成，轻点确认或向上滑动切换模式",
+    "zh-Hant": "滑動板 · %@ 已完成，輕點確認或向上滑動切換模式"
+  },
+  "Moving swipe pad": {
+    "de": "Swipe-Pad wird verschoben",
+    "es": "Moviendo el panel táctil",
+    "fr": "Déplacement du pavé tactile",
+    "ja": "スワイプパッドを移動中",
+    "zh-Hans": "正在移动滑动板",
+    "zh-Hant": "正在移動滑動板"
+  },
+  "Dictation active": {
+    "de": "Diktat aktiv",
+    "es": "Dictado activo",
+    "fr": "Dictée active",
+    "ja": "音声入力中",
+    "zh-Hans": "听写进行中",
+    "zh-Hant": "聽寫進行中"
+  },
+  "Show all options": {
+    "de": "Alle Optionen anzeigen",
+    "es": "Mostrar todas las opciones",
+    "fr": "Afficher toutes les options",
+    "ja": "すべての選択肢を表示",
+    "zh-Hans": "显示全部选项",
+    "zh-Hant": "顯示全部選項"
+  },
+  "switch mode": {
+    "de": "Modus wechseln",
+    "es": "cambiar de modo",
+    "fr": "changer de mode",
+    "ja": "モードを切り替え",
+    "zh-Hans": "切换模式",
+    "zh-Hant": "切換模式"
+  },
+  "double tap": {
+    "de": "Doppeltippen",
+    "es": "doble toque",
+    "fr": "double touche",
+    "ja": "ダブルタップ",
+    "zh-Hans": "轻点两下",
+    "zh-Hant": "輕點兩下"
+  },
+  "long press": {
+    "de": "langes Drücken",
+    "es": "pulsación larga",
+    "fr": "appui long",
+    "ja": "長押し",
+    "zh-Hans": "长按",
+    "zh-Hant": "長按"
+  },
+  "tap, hold & drag": {
+    "de": "tippen, halten & ziehen",
+    "es": "tocar, mantener y arrastrar",
+    "fr": "toucher, maintenir et faire glisser",
+    "ja": "タップ、長押ししてドラッグ",
+    "zh-Hans": "轻点、按住并拖移",
+    "zh-Hant": "輕點、按住並拖移"
+  },
+  "opens the radial · drag to a direction and release to fire that macro · release in the dead-zone to cancel": {
+    "de": "öffnet das Radialmenü · in eine Richtung ziehen und loslassen, um das Makro auszulösen · in der Totzone loslassen zum Abbrechen",
+    "es": "abre el menú radial · arrastra en una dirección y suelta para lanzar esa macro · suelta en la zona muerta para cancelar",
+    "fr": "ouvre le menu radial · faites glisser dans une direction et relâchez pour déclencher la macro · relâchez dans la zone morte pour annuler",
+    "ja": "放射メニューを開きます · 方向にドラッグして離すとそのマクロを実行 · デッドゾーンで離すとキャンセル",
+    "zh-Hans": "打开环形菜单 · 朝某个方向拖移并松开即可触发该宏 · 在中心死区松开则取消",
+    "zh-Hant": "開啟環形選單 · 朝某個方向拖移並放開即可觸發該巨集 · 在中心死區放開則取消"
+  },
+  "picks up the puck for relocation · drag to any spot and release · snaps to nearest edge": {
+    "de": "nimmt den Puck zum Verschieben auf · an eine beliebige Stelle ziehen und loslassen · rastet an der nächsten Kante ein",
+    "es": "levanta el disco para moverlo · arrástralo a cualquier punto y suelta · se ajusta al borde más cercano",
+    "fr": "saisit le palet pour le déplacer · faites-le glisser où vous voulez et relâchez · il s'aimante au bord le plus proche",
+    "ja": "パックをつかんで移動できます · 好きな位置にドラッグして離します · 最も近い端に吸着します",
+    "zh-Hans": "拿起圆钮进行移动 · 拖到任意位置后松开 · 会吸附到最近的边缘",
+    "zh-Hant": "拿起圓鈕進行移動 · 拖到任意位置後放開 · 會吸附到最近的邊緣"
+  },
+  "starts on-device dictation · puck morphs into a live waveform · tap again or pause to commit": {
+    "de": "startet das Diktat auf dem Gerät · der Puck wird zu einer Live-Wellenform · erneut tippen oder pausieren zum Übernehmen",
+    "es": "inicia el dictado en el dispositivo · el disco se convierte en una onda en vivo · toca otra vez o haz una pausa para confirmar",
+    "fr": "démarre la dictée sur l'appareil · le palet se transforme en forme d'onde en direct · touchez de nouveau ou marquez une pause pour valider",
+    "ja": "デバイス上の音声入力を開始します · パックがリアルタイムの波形に変わります · もう一度タップするか、間を置くと確定します",
+    "zh-Hans": "启动设备端听写 · 圆钮会变成实时波形 · 再次轻点或停顿即可提交",
+    "zh-Hant": "啟動裝置端聽寫 · 圓鈕會變成即時波形 · 再次輕點或停頓即可提交"
+  },
+  "new profile": {
+    "de": "neues Profil",
+    "es": "perfil nuevo",
+    "fr": "nouveau profil",
+    "ja": "新規プロファイル",
+    "zh-Hans": "新建配置",
+    "zh-Hant": "新增設定檔"
+  },
+  "match the foreground process": {
+    "de": "auf den Vordergrundprozess abstimmen",
+    "es": "coincidir con el proceso en primer plano",
+    "fr": "faire correspondre le processus au premier plan",
+    "ja": "フォアグラウンドのプロセスに一致させる",
+    "zh-Hans": "匹配前台进程",
+    "zh-Hant": "比對前景行程"
+  },
+  "match: process %@": {
+    "de": "Treffer: Prozess %@",
+    "es": "coincidencia: proceso %@",
+    "fr": "correspondance : processus %@",
+    "ja": "一致: プロセス %@",
+    "zh-Hans": "匹配：进程 %@",
+    "zh-Hant": "相符：行程 %@"
+  },
+  "match: process matches regex /%@/": {
+    "de": "Treffer: Prozess passt auf Regex /%@/",
+    "es": "coincidencia: el proceso concuerda con la regex /%@/",
+    "fr": "correspondance : le processus correspond à la regex /%@/",
+    "ja": "一致: プロセスが正規表現 /%@/ に一致",
+    "zh-Hans": "匹配：进程符合正则 /%@/",
+    "zh-Hant": "相符：行程符合正規表達式 /%@/"
+  },
+  "catch-all · used whenever no profile above matches the foreground process. all directions unbound by default — bind any to use the puck outside an agent prompt.": {
+    "de": "Auffangprofil · greift, wenn kein Profil darüber zum Vordergrundprozess passt. Alle Richtungen sind standardmäßig ohne Zuweisung — belege eine, um den Puck außerhalb einer Agentenabfrage zu nutzen.",
+    "es": "comodín · se usa cuando ningún perfil de arriba coincide con el proceso en primer plano. todas las direcciones están sin asignar por omisión — asigna alguna para usar el disco fuera de un prompt de agente.",
+    "fr": "profil fourre-tout · utilisé lorsqu'aucun profil ci-dessus ne correspond au processus au premier plan. toutes les directions sont non assignées par défaut — assignez-en une pour utiliser le palet hors d'une invite d'agent.",
+    "ja": "汎用プロファイル · 上のどのプロファイルもフォアグラウンドのプロセスに一致しないときに使われます。既定ではどの方向も未割り当てです — いずれかを割り当てると、エージェントのプロンプト以外でもパックを使えます。",
+    "zh-Hans": "兜底配置 · 当上面所有配置都不匹配前台进程时使用。默认所有方向均未绑定 —— 绑定任意方向即可在智能体提示之外使用圆钮。",
+    "zh-Hant": "兜底設定檔 · 當上面所有設定檔都不符合前景行程時使用。預設所有方向均未綁定 —— 綁定任一方向即可在智能體提示之外使用圓鈕。"
+  },
+  "literal process name, or a `regex:` prefix — the same matcher swipe-pad profiles use, so an \"approve\" shortcut exists only while an agent is in the foreground.": {
+    "de": "wörtlicher Prozessname oder ein `regex:`-Präfix — derselbe Abgleich wie bei Swipe-Pad-Profilen, sodass ein „Zustimmen“-Kurzbefehl nur existiert, solange ein Agent im Vordergrund ist.",
+    "es": "nombre literal del proceso, o un prefijo `regex:` — el mismo comparador que usan los perfiles del panel táctil, así que un atajo de «aprobar» solo existe mientras un agente está en primer plano.",
+    "fr": "nom de processus littéral, ou un préfixe `regex:` — le même comparateur que celui des profils du pavé tactile, si bien qu'un raccourci « approuver » n'existe que lorsqu'un agent est au premier plan.",
+    "ja": "プロセス名そのもの、または `regex:` プレフィックス — スワイプパッドのプロファイルと同じ照合方法なので、「承認」ショートカットはエージェントがフォアグラウンドにある間だけ存在します。",
+    "zh-Hans": "进程名原文，或加 `regex:` 前缀 —— 与滑动板配置使用同一套匹配规则，因此「批准」快捷键只在智能体处于前台时才存在。",
+    "zh-Hant": "行程名原文，或加 `regex:` 前綴 —— 與滑動板設定檔使用同一套比對規則，因此「批准」快捷鍵只在智能體處於前景時才存在。"
+  },
+  "trigger": {
+    "de": "Auslöser",
+    "es": "activador",
+    "fr": "déclencheur",
+    "ja": "トリガー",
+    "zh-Hans": "触发方式",
+    "zh-Hant": "觸發方式"
+  },
+  "at least one trigger is required — a shortcut with neither can never run.": {
+    "de": "mindestens ein Auslöser ist erforderlich — ein Kurzbefehl ohne beide kann nie ausgeführt werden.",
+    "es": "se necesita al menos un activador — un atajo sin ninguno nunca podrá ejecutarse.",
+    "fr": "au moins un déclencheur est requis — un raccourci sans aucun ne pourra jamais s'exécuter.",
+    "ja": "トリガーは少なくとも 1 つ必要です — どちらもないショートカットは実行されません。",
+    "zh-Hans": "至少需要一个触发方式 —— 两者都没有的快捷方式永远不会运行。",
+    "zh-Hant": "至少需要一個觸發方式 —— 兩者都沒有的快捷方式永遠不會執行。"
+  },
+  "runs immediately": {
+    "de": "läuft sofort",
+    "es": "se ejecuta de inmediato",
+    "fr": "s'exécute immédiatement",
+    "ja": "すぐに実行",
+    "zh-Hans": "立即运行",
+    "zh-Hant": "立即執行"
+  },
+  "runs immediately when triggered.": {
+    "de": "läuft sofort, sobald ausgelöst.",
+    "es": "se ejecuta de inmediato al activarse.",
+    "fr": "s'exécute immédiatement au déclenchement.",
+    "ja": "トリガーされるとすぐに実行されます。",
+    "zh-Hans": "触发后立即运行。",
+    "zh-Hant": "觸發後立即執行。"
+  },
+  "custom macro": {
+    "de": "eigenes Makro",
+    "es": "macro personalizada",
+    "fr": "macro personnalisée",
+    "ja": "カスタムマクロ",
+    "zh-Hans": "自定宏",
+    "zh-Hant": "自訂巨集"
+  },
+  "not bound": {
+    "de": "nicht belegt",
+    "es": "sin asignar",
+    "fr": "non assigné",
+    "ja": "未割り当て",
+    "zh-Hans": "未绑定",
+    "zh-Hant": "未綁定"
+  },
+  "where it applies": {
+    "de": "wo es gilt",
+    "es": "dónde se aplica",
+    "fr": "où cela s'applique",
+    "ja": "適用範囲",
+    "zh-Hans": "适用范围",
+    "zh-Hant": "適用範圍"
+  },
+  "pick the hosts it applies to": {
+    "de": "wähle die Hosts, für die es gilt",
+    "es": "elige los hosts a los que se aplica",
+    "fr": "choisissez les hôtes concernés",
+    "ja": "適用するホストを選びます",
+    "zh-Hans": "选择它适用的主机",
+    "zh-Hant": "選擇它適用的主機"
+  },
+  "this host": {
+    "de": "dieser Host",
+    "es": "este host",
+    "fr": "cet hôte",
+    "ja": "このホスト",
+    "zh-Hans": "此主机",
+    "zh-Hant": "此主機"
+  },
+  "these hosts": {
+    "de": "diese Hosts",
+    "es": "estos hosts",
+    "fr": "ces hôtes",
+    "ja": "これらのホスト",
+    "zh-Hans": "这些主机",
+    "zh-Hant": "這些主機"
+  },
+  "approve": {
+    "de": "zustimmen",
+    "es": "aprobar",
+    "fr": "approuver",
+    "ja": "承認",
+    "zh-Hans": "批准",
+    "zh-Hant": "批准"
+  },
+  "deny": {
+    "de": "ablehnen",
+    "es": "denegar",
+    "fr": "refuser",
+    "ja": "拒否",
+    "zh-Hans": "拒绝",
+    "zh-Hant": "拒絕"
+  },
+  "always allow": {
+    "de": "immer erlauben",
+    "es": "permitir siempre",
+    "fr": "toujours autoriser",
+    "ja": "常に許可",
+    "zh-Hans": "始终允许",
+    "zh-Hant": "一律允許"
+  },
+  "take it": {
+    "de": "übernehmen",
+    "es": "quedártelo",
+    "fr": "le prendre",
+    "ja": "こちらに割り当てる",
+    "zh-Hans": "占用它",
+    "zh-Hant": "占用它"
+  },
+  "— yours": {
+    "de": "— deine",
+    "es": "— tuyos",
+    "fr": "— les vôtres",
+    "ja": "— 自分のもの",
+    "zh-Hans": "—— 你的",
+    "zh-Hant": "—— 你的"
+  },
+  "needs input waiting blocked": {
+    "de": "braucht Eingabe wartet blockiert Rückfrage",
+    "es": "necesita entrada esperando bloqueado pendiente",
+    "fr": "attend une saisie en attente bloqué",
+    "ja": "入力待ち 待機 ブロック 要入力",
+    "zh-Hans": "等待输入 待输入 阻塞 需要输入",
+    "zh-Hant": "等待輸入 待輸入 阻塞 需要輸入"
+  },
+  "working running": {
+    "de": "arbeitet läuft aktiv",
+    "es": "trabajando ejecutando activo",
+    "fr": "en cours en train de tourner actif",
+    "ja": "実行中 稼働中 処理中",
+    "zh-Hans": "运行中 处理中 执行中",
+    "zh-Hant": "執行中 處理中 運行中"
+  },
+  "just finished completed done feedback": {
+    "de": "gerade fertig abgeschlossen erledigt Rückmeldung",
+    "es": "recién terminado completado hecho resultado",
+    "fr": "vient de terminer terminé fini retour",
+    "ja": "完了 終了 完了直後 結果",
+    "zh-Hans": "刚完成 已完成 完成 结果",
+    "zh-Hant": "剛完成 已完成 完成 結果"
+  },
+  "Tessera can't notify you when an off-screen agent finishes or needs input while the app is backgrounded. Turn notifications on in Settings, then come back.": {
+    "de": "Tessera kann dich nicht benachrichtigen, wenn ein Agent außerhalb des Bildschirms fertig wird oder eine Eingabe braucht, während die App im Hintergrund ist. Aktiviere Mitteilungen in den Einstellungen und komm dann zurück.",
+    "es": "Tessera no puede avisarte cuando un agente fuera de pantalla termina o necesita entrada mientras la app está en segundo plano. Activa las notificaciones en Ajustes y vuelve.",
+    "fr": "Tessera ne peut pas vous prévenir lorsqu'un agent hors écran termine ou attend une saisie pendant que l'app est en arrière-plan. Activez les notifications dans Réglages, puis revenez.",
+    "ja": "アプリがバックグラウンドにある間、画面外のエージェントが完了したり入力を求めたりしても、Tessera はお知らせできません。「設定」で通知をオンにしてから戻ってきてください。",
+    "zh-Hans": "当应用在后台时，Tessera 无法在屏幕外的智能体完成或需要输入时通知你。请在“设置”中开启通知后再回来。",
+    "zh-Hant": "當 App 在背景時，Tessera 無法在畫面外的智能體完成或需要輸入時通知你。請在「設定」中開啟通知後再回來。"
+  },
+  "Tessera can't send terminal-bell banners while iOS notifications are off. Turn notifications on in Settings, then come back.": {
+    "de": "Tessera kann keine Banner für den Terminal-Signalton senden, solange iOS-Mitteilungen aus sind. Aktiviere Mitteilungen in den Einstellungen und komm dann zurück.",
+    "es": "Tessera no puede enviar avisos de la campana del terminal mientras las notificaciones de iOS están desactivadas. Actívalas en Ajustes y vuelve.",
+    "fr": "Tessera ne peut pas envoyer de bannières pour la cloche du terminal tant que les notifications iOS sont désactivées. Activez-les dans Réglages, puis revenez.",
+    "ja": "iOS の通知がオフの間、Tessera はターミナルのベル通知を送れません。「設定」で通知をオンにしてから戻ってきてください。",
+    "zh-Hans": "在 iOS 通知关闭时，Tessera 无法发送终端响铃横幅。请在“设置”中开启通知后再回来。",
+    "zh-Hant": "在 iOS 通知關閉時，Tessera 無法傳送終端機響鈴橫幅。請在「設定」中開啟通知後再回來。"
+  },
+  "Enabling precise agent alerts automatically turns off terminal-bell background notifications once. You can override that later under Terminal. Without a notification server, completions after iPadOS suspends Tessera are recovered when you return.": {
+    "de": "Beim Aktivieren präziser Agentenhinweise werden Hintergrundmitteilungen für den Terminal-Signalton einmalig ausgeschaltet. Du kannst das später unter „Terminal“ überstimmen. Ohne Benachrichtigungsserver werden Abschlüsse, die nach dem Anhalten von Tessera durch iPadOS eintreten, bei deiner Rückkehr nachgeholt.",
+    "es": "Activar los avisos precisos de agentes desactiva una vez las notificaciones en segundo plano de la campana del terminal. Puedes cambiarlo después en Terminal. Sin un servidor de notificaciones, las finalizaciones que ocurran tras la suspensión de Tessera por parte de iPadOS se recuperan cuando vuelvas.",
+    "fr": "Activer les alertes d'agent précises désactive une fois les notifications d'arrière-plan de la cloche du terminal. Vous pourrez le rétablir plus tard sous Terminal. Sans serveur de notifications, les fins de tâche survenues après la suspension de Tessera par iPadOS sont récupérées à votre retour.",
+    "ja": "精密なエージェント通知を有効にすると、ターミナルのベルによるバックグラウンド通知が一度だけオフになります。後で「ターミナル」から変更できます。通知サーバーがない場合、iPadOS が Tessera を停止させた後に完了した処理は、戻ってきたときにまとめて反映されます。",
+    "zh-Hans": "启用精确的智能体提醒会一次性关闭终端响铃的后台通知。你之后可以在“终端”中改回来。若没有通知服务器，在 iPadOS 挂起 Tessera 之后完成的任务会在你返回时补上。",
+    "zh-Hant": "啟用精確的智能體提醒會一次性關閉終端機響鈴的背景通知。你之後可以在「終端機」中改回來。若沒有通知伺服器，在 iPadOS 暫停 Tessera 之後完成的任務會在你返回時補上。"
+  },
+  "Terminal-bell background notifications are also enabled by your override. They can duplicate alerts and are less precise because any program can ring BEL. Without a notification server, completions after iPadOS suspends Tessera are recovered when you return.": {
+    "de": "Durch deine Übersteuerung sind auch Hintergrundmitteilungen für den Terminal-Signalton aktiv. Sie können Hinweise doppeln und sind ungenauer, weil jedes Programm BEL auslösen kann. Ohne Benachrichtigungsserver werden Abschlüsse, die nach dem Anhalten von Tessera durch iPadOS eintreten, bei deiner Rückkehr nachgeholt.",
+    "es": "Tu ajuste manual también deja activas las notificaciones en segundo plano de la campana del terminal. Pueden duplicar avisos y son menos precisas, porque cualquier programa puede hacer sonar BEL. Sin un servidor de notificaciones, las finalizaciones que ocurran tras la suspensión de Tessera por parte de iPadOS se recuperan cuando vuelvas.",
+    "fr": "Votre réglage manuel active aussi les notifications d'arrière-plan de la cloche du terminal. Elles peuvent faire doublon et sont moins précises, car n'importe quel programme peut déclencher BEL. Sans serveur de notifications, les fins de tâche survenues après la suspension de Tessera par iPadOS sont récupérées à votre retour.",
+    "ja": "あなたの上書き設定により、ターミナルのベルによるバックグラウンド通知も有効になっています。通知が重複することがあり、どのプログラムでも BEL を鳴らせるため精度も低くなります。通知サーバーがない場合、iPadOS が Tessera を停止させた後に完了した処理は、戻ってきたときにまとめて反映されます。",
+    "zh-Hans": "你的手动设置同时启用了终端响铃的后台通知。它们可能与提醒重复，而且精确度较低，因为任何程序都能触发 BEL。若没有通知服务器，在 iPadOS 挂起 Tessera 之后完成的任务会在你返回时补上。",
+    "zh-Hant": "你的手動設定同時啟用了終端機響鈴的背景通知。它們可能與提醒重複，而且精確度較低，因為任何程式都能觸發 BEL。若沒有通知伺服器，在 iPadOS 暫停 Tessera 之後完成的任務會在你返回時補上。"
+  },
+  "waiting for approval. you can close this and keep using tessera.": {
+    "de": "warte auf Freigabe. Du kannst das schließen und Tessera weiter nutzen.",
+    "es": "esperando la aprobación. puedes cerrar esto y seguir usando Tessera.",
+    "fr": "en attente d'approbation. vous pouvez fermer cette fenêtre et continuer à utiliser Tessera.",
+    "ja": "承認を待っています。これを閉じて Tessera を使い続けても大丈夫です。",
+    "zh-Hans": "正在等待批准。你可以关闭这里，继续使用 Tessera。",
+    "zh-Hant": "正在等待批准。你可以關閉這裡，繼續使用 Tessera。"
+  },
+  "unlock unlimited hosts": {
+    "de": "unbegrenzte Hosts freischalten",
+    "es": "desbloquear hosts ilimitados",
+    "fr": "débloquer les hôtes illimités",
+    "ja": "ホスト数無制限を解除",
+    "zh-Hans": "解锁无限主机",
+    "zh-Hant": "解鎖無限主機"
+  },
+  "unlock unlimited hosts · %@": {
+    "de": "unbegrenzte Hosts freischalten · %@",
+    "es": "desbloquear hosts ilimitados · %@",
+    "fr": "débloquer les hôtes illimités · %@",
+    "ja": "ホスト数無制限を解除 · %@",
+    "zh-Hans": "解锁无限主机 · %@",
+    "zh-Hant": "解鎖無限主機 · %@"
+  },
+  "free · 1 saved host": {
+    "de": "kostenlos · 1 gesicherter Host",
+    "es": "gratis · 1 host guardado",
+    "fr": "gratuit · 1 hôte enregistré",
+    "ja": "無料 · 保存できるホスト 1 台",
+    "zh-Hans": "免费 · 1 台已保存主机",
+    "zh-Hant": "免費 · 1 台已儲存主機"
+  },
+  "included": {
+    "de": "enthalten",
+    "es": "incluido",
+    "fr": "inclus",
+    "ja": "含まれます",
+    "zh-Hans": "已包含",
+    "zh-Hant": "已包含"
+  },
+  "features on every allowed host": {
+    "de": "Funktionen auf jedem erlaubten Host",
+    "es": "funciones en todos los hosts permitidos",
+    "fr": "fonctionnalités sur tous les hôtes autorisés",
+    "ja": "許可されたすべてのホストで使える機能",
+    "zh-Hans": "在每台允许的主机上都可用的功能",
+    "zh-Hant": "在每台允許的主機上都可用的功能"
+  },
+  "iphone + ipad": {
+    "de": "iPhone + iPad",
+    "es": "iPhone + iPad",
+    "fr": "iPhone + iPad",
+    "ja": "iPhone + iPad",
+    "zh-Hans": "iPhone + iPad",
+    "zh-Hant": "iPhone + iPad"
+  },
+  "subscription or tessera account": {
+    "de": "Abo oder Tessera-Account",
+    "es": "suscripción o cuenta de Tessera",
+    "fr": "abonnement ou compte Tessera",
+    "ja": "サブスクリプションや Tessera アカウント",
+    "zh-Hans": "订阅或 Tessera 账户",
+    "zh-Hant": "訂閱或 Tessera 帳號"
+  },
+  "checking…": {
+    "de": "prüfe …",
+    "es": "comprobando…",
+    "fr": "vérification…",
+    "ja": "確認中…",
+    "zh-Hans": "正在检查…",
+    "zh-Hant": "正在檢查…"
+  },
+  "checking purchase status": {
+    "de": "prüfe den Kaufstatus",
+    "es": "comprobando el estado de la compra",
+    "fr": "vérification de l'état de l'achat",
+    "ja": "購入状況を確認中",
+    "zh-Hans": "正在检查购买状态",
+    "zh-Hant": "正在檢查購買狀態"
+  },
+  "checking the app store for product and purchase status…": {
+    "de": "frage den App Store nach Produkt- und Kaufstatus ab …",
+    "es": "consultando en la App Store el producto y el estado de la compra…",
+    "fr": "consultation de l'App Store pour le produit et l'état de l'achat…",
+    "ja": "App Store で製品と購入状況を確認しています…",
+    "zh-Hans": "正在向 App Store 查询商品与购买状态…",
+    "zh-Hant": "正在向 App Store 查詢商品與購買狀態…"
+  },
+  "checking the app store for the localized product and price…": {
+    "de": "frage den App Store nach lokalisiertem Produkt und Preis ab …",
+    "es": "consultando en la App Store el producto y el precio localizados…",
+    "fr": "consultation de l'App Store pour le produit et le prix localisés…",
+    "ja": "App Store でローカライズされた製品と価格を確認しています…",
+    "zh-Hans": "正在向 App Store 查询本地化的商品与价格…",
+    "zh-Hant": "正在向 App Store 查詢在地化的商品與價格…"
+  },
+  "ssh, mosh, tmux, files, forwarding, and every other tessera feature are included. the one-time purchase changes only how many hosts tessera remembers.": {
+    "de": "SSH, mosh, tmux, Dateien, Weiterleitung und jede andere Tessera-Funktion sind enthalten. Der einmalige Kauf ändert nur, wie viele Hosts sich Tessera merkt.",
+    "es": "SSH, mosh, tmux, archivos, redirección y todas las demás funciones de Tessera están incluidas. la compra única solo cambia cuántos hosts recuerda Tessera.",
+    "fr": "SSH, mosh, tmux, les fichiers, la redirection et toutes les autres fonctionnalités de Tessera sont incluses. l'achat unique ne change que le nombre d'hôtes que Tessera mémorise.",
+    "ja": "SSH、mosh、tmux、ファイル、ポート転送など、Tessera のすべての機能が含まれます。買い切りで変わるのは、Tessera が記憶できるホストの数だけです。",
+    "zh-Hans": "SSH、mosh、tmux、文件、端口转发以及 Tessera 的其他所有功能都已包含。一次性购买只改变 Tessera 能记住多少台主机。",
+    "zh-Hant": "SSH、mosh、tmux、檔案、連接埠轉發以及 Tessera 的其他所有功能都已包含。一次性購買只改變 Tessera 能記住多少台主機。"
+  },
+  "your free host is already saved. unlock unlimited saved hosts with one purchase — every tessera feature stays included either way.": {
+    "de": "Dein kostenloser Host ist bereits gesichert. Schalte mit einem Kauf unbegrenzt viele gesicherte Hosts frei — alle Tessera-Funktionen bleiben so oder so enthalten.",
+    "es": "tu host gratuito ya está guardado. desbloquea hosts guardados ilimitados con una sola compra — todas las funciones de Tessera siguen incluidas en cualquier caso.",
+    "fr": "votre hôte gratuit est déjà enregistré. débloquez un nombre illimité d'hôtes enregistrés avec un seul achat — toutes les fonctionnalités de Tessera restent incluses dans les deux cas.",
+    "ja": "無料枠のホストはすでに保存済みです。1 回の購入で、保存できるホスト数を無制限にできます — どちらの場合も Tessera の全機能が使えます。",
+    "zh-Hans": "你的免费主机已保存。一次购买即可解锁无限的已保存主机 —— 无论如何，Tessera 的所有功能都始终包含在内。",
+    "zh-Hant": "你的免費主機已儲存。一次購買即可解鎖無限的已儲存主機 —— 無論如何，Tessera 的所有功能都始終包含在內。"
+  },
+  "unlimited saved hosts are active on this apple account and available on your iphone and ipad.": {
+    "de": "Unbegrenzt gesicherte Hosts sind für diesen Apple Account aktiv und auf deinem iPhone und iPad verfügbar.",
+    "es": "los hosts guardados ilimitados están activos en esta cuenta de Apple y disponibles en tu iPhone y iPad.",
+    "fr": "les hôtes enregistrés illimités sont actifs sur ce compte Apple et disponibles sur votre iPhone et votre iPad.",
+    "ja": "保存できるホスト数の無制限は、この Apple アカウントで有効になっており、iPhone と iPad の両方で利用できます。",
+    "zh-Hans": "无限已保存主机已在此 Apple 账户上生效，并可在你的 iPhone 和 iPad 上使用。",
+    "zh-Hant": "無限已儲存主機已在此 Apple 帳號上生效，並可在你的 iPhone 和 iPad 上使用。"
+  },
+  "unlimited hosts are included with your original paid tessera purchase. thank you for supporting the app early.": {
+    "de": "Unbegrenzte Hosts sind in deinem ursprünglichen Kauf von Tessera enthalten. Danke, dass du die App früh unterstützt hast.",
+    "es": "los hosts ilimitados están incluidos en tu compra original de pago de Tessera. gracias por apoyar la app desde el principio.",
+    "fr": "les hôtes illimités sont inclus dans votre achat initial payant de Tessera. merci d'avoir soutenu l'app dès le début.",
+    "ja": "ホスト数無制限は、最初に有料購入いただいた Tessera に含まれています。早くからのご支援ありがとうございます。",
+    "zh-Hans": "无限主机已包含在你最初付费购买的 Tessera 中。感谢你早期对这款应用的支持。",
+    "zh-Hant": "無限主機已包含在你最初付費購買的 Tessera 中。感謝你早期對這款 App 的支持。"
+  },
+  "tessera could not confirm your existing purchase status yet. retry or restore purchases before saving another host.": {
+    "de": "Tessera konnte deinen bestehenden Kaufstatus noch nicht bestätigen. Versuche es erneut oder stelle Käufe wieder her, bevor du einen weiteren Host sicherst.",
+    "es": "Tessera todavía no ha podido confirmar el estado de tus compras. reinténtalo o restaura las compras antes de guardar otro host.",
+    "fr": "Tessera n'a pas encore pu confirmer l'état de vos achats. réessayez ou restaurez les achats avant d'enregistrer un autre hôte.",
+    "ja": "Tessera はまだ既存の購入状況を確認できていません。別のホストを保存する前に、再試行するか購入を復元してください。",
+    "zh-Hans": "Tessera 尚未确认你已有的购买状态。请在保存另一台主机前重试或恢复购买。",
+    "zh-Hant": "Tessera 尚未確認你既有的購買狀態。請在儲存另一台主機前重試或回復購買。"
+  },
+  "the App Store could not complete the request. your saved host is unchanged.": {
+    "de": "Der App Store konnte die Anfrage nicht abschließen. Dein gesicherter Host bleibt unverändert.",
+    "es": "la App Store no pudo completar la solicitud. tu host guardado no ha cambiado.",
+    "fr": "l'App Store n'a pas pu terminer la demande. votre hôte enregistré est inchangé.",
+    "ja": "App Store がリクエストを完了できませんでした。保存済みのホストは変わっていません。",
+    "zh-Hans": "App Store 未能完成该请求。你已保存的主机没有变化。",
+    "zh-Hant": "App Store 未能完成該請求。你已儲存的主機沒有變化。"
+  },
+  "the app store could not complete the request. your saved host is unchanged.": {
+    "de": "Der App Store konnte die Anfrage nicht abschließen. Dein gesicherter Host bleibt unverändert.",
+    "es": "la app store no pudo completar la solicitud. tu host guardado no ha cambiado.",
+    "fr": "l'app store n'a pas pu terminer la demande. votre hôte enregistré est inchangé.",
+    "ja": "App Store がリクエストを完了できませんでした。保存済みのホストは変わっていません。",
+    "zh-Hans": "app store 未能完成该请求。你已保存的主机没有变化。",
+    "zh-Hant": "app store 未能完成該請求。你已儲存的主機沒有變化。"
+  },
+  "the App Store could not confirm your existing purchases. your saved hosts remain available.": {
+    "de": "Der App Store konnte deine bestehenden Käufe nicht bestätigen. Deine gesicherten Hosts bleiben verfügbar.",
+    "es": "la App Store no pudo confirmar tus compras existentes. tus hosts guardados siguen disponibles.",
+    "fr": "l'App Store n'a pas pu confirmer vos achats existants. vos hôtes enregistrés restent disponibles.",
+    "ja": "App Store が既存の購入を確認できませんでした。保存済みのホストは引き続き利用できます。",
+    "zh-Hans": "App Store 未能确认你已有的购买。你已保存的主机仍可使用。",
+    "zh-Hant": "App Store 未能確認你既有的購買。你已儲存的主機仍可使用。"
+  },
+  "the App Store could not load this purchase. existing hosts remain available.": {
+    "de": "Der App Store konnte diesen Kauf nicht laden. Bestehende Hosts bleiben verfügbar.",
+    "es": "la App Store no pudo cargar esta compra. los hosts existentes siguen disponibles.",
+    "fr": "l'App Store n'a pas pu charger cet achat. les hôtes existants restent disponibles.",
+    "ja": "App Store がこの購入を読み込めませんでした。既存のホストは引き続き利用できます。",
+    "zh-Hans": "App Store 未能加载此购买项。已有的主机仍可使用。",
+    "zh-Hant": "App Store 未能載入此購買項目。既有的主機仍可使用。"
+  }
+}

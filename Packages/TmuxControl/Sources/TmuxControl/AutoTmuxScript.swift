@@ -7,15 +7,27 @@ import CryptoKit
 /// preference enabled), Tessera sends a single shell one-liner over
 /// stdin that either:
 ///
-///   - `exec`s `tmux -CC attach -t <name>` if a session with that
-///     name already exists on the host, so the user resumes their
-///     work transparently;
-///   - `exec`s `tmux -CC new -s <name>` to create one if it doesn't,
-///     putting Tessera straight into tmux control mode without any
-///     manual `tmux -CC attach` typing; or
+///   - creates the session with a plain detached client
+///     (`tmux new-session -d -s <name>`) when it doesn't exist yet, then
+///     `exec`s `tmux -CC attach -t <name>`, so control mode always talks
+///     to a server that is already up;
+///   - `exec`s the same `tmux -CC attach -t <name>` directly when the
+///     session already exists, so the user resumes their work
+///     transparently;
+///   - prints `startFailedSentinel` if tmux is present but the session
+///     could not be created — the server failed to start; or
 ///   - prints `unavailableSentinel` if `tmux` isn't on `$PATH` at all,
 ///     which Tessera detects in the output stream and surfaces as a
 ///     dismissible "tmux not available" banner.
+///
+/// The create-then-attach split is deliberate. `tmux -CC new` has to
+/// start the server *and* speak control mode on the same client: when
+/// the server cannot come up, that client exits without ever writing the
+/// DCS prologue, and the app is left waiting for a handshake that will
+/// never arrive (the "stuck at starting tmux on a freshly added host"
+/// report — which cured itself for good once any other connection had
+/// left a server running). A plain `new-session -d` reports that failure
+/// as ordinary shell output instead.
 ///
 /// `exec` is intentional on the happy path: when tmux exits, the
 /// login shell exits with it, so disconnect becomes one clean event
@@ -73,6 +85,33 @@ public enum AutoTmuxScript {
     /// expect false positives in any real shell output either.
     public static let unavailableSentinel = "__TESSERA_NO_TMUX__"
 
+    /// Marker printed when `tmux` exists but the session could not be
+    /// brought up — the server refused to start (bad socket directory,
+    /// fatal `~/.tmux.conf` error, exhausted resources) or `new-session`
+    /// failed for any other reason.
+    ///
+    /// This exists because the control-mode client is a dead end for
+    /// diagnosis: `tmux -CC new` on a host that cannot start a server
+    /// exits without ever emitting the DCS prologue, which used to leave
+    /// the app waiting on a prologue that was never coming. Creating the
+    /// session with a *plain* client first means the failure is an
+    /// ordinary shell error we can both show and detect.
+    ///
+    /// Escaped the same way as `unavailableSentinel` so the PTY echo of
+    /// the command line cannot false-positive the scanner.
+    public static let startFailedSentinel = "__TESSERA_TMUX_START_FAILED__"
+
+    /// Marker printed when the command runs *inside* an existing tmux
+    /// client — the host's own login dotfiles ran `exec tmux` before our
+    /// one-liner reached the shell, so `$TMUX` is already set.
+    ///
+    /// Attaching in control mode from there is impossible (tmux refuses
+    /// to nest, and `exec`ing the refusal kills the login shell and the
+    /// connection with it). Reporting instead lets the app drop the
+    /// launch shield and render the session the host already started as
+    /// a normal terminal.
+    public static let nestedSentinel = "__TESSERA_TMUX_NESTED__"
+
     /// Build the one-line shell snippet to send over stdin on connect.
     ///
     /// The leading `clear` wipes the login shell's MOTD and the echoed
@@ -111,10 +150,12 @@ public enum AutoTmuxScript {
         } else {
             attachCommand = "exec tmux -CC attach -t \(s)"
         }
-        return "export COLORTERM=truecolor; clear; if command -v tmux >/dev/null 2>&1; then "
-            + "if tmux has-session -t \(s) 2>/dev/null; then "
+        return "export COLORTERM=truecolor; clear; "
+            + "if [ -n \"$TMUX\" ]; then printf '\\137\\137TESSERA_TMUX_NESTED\\137\\137\\n'; "
+            + "elif command -v tmux >/dev/null 2>&1; then "
+            + "if tmux has-session -t \(s) 2>/dev/null || tmux new-session -d -s \(s); then "
             + "\(attachCommand); "
-            + "else exec tmux -CC new -s \(s); "
+            + "else printf '\\137\\137TESSERA_TMUX_START_FAILED\\137\\137\\n'; "
             + "fi; "
             + "else printf '\\137\\137TESSERA_NO_TMUX\\137\\137\\n'; "
             + "fi\n"
@@ -141,9 +182,35 @@ public enum AutoTmuxScript {
     /// when two different host-keys collide, and the birthday-bound
     /// is ~65k pairs).
     public static func defaultSessionName(forHostKey key: String) -> String {
-        let digest = SHA256.hash(data: Data(key.utf8))
-        let hex = digest.prefix(4).map { String(format: "%02x", $0) }.joined()
-        return "tessera-\(hex)"
+        return "tessera-\(shortDigest(of: key))"
+    }
+
+    /// Log-safe token for a tmux session name: `sessionNameDigest("acme-prod")`
+    /// → `"1f3a9c02"`.
+    ///
+    /// A session name is the only stable identity in the launch path. The
+    /// per-view `sid=` correlates lines inside one launch attempt and nothing
+    /// beyond it — not a reconnect, not an app restart, not two reports from the
+    /// same user. Redacting the name would collapse every session to one token
+    /// and destroy exactly the correlation the field exists for, so it is
+    /// hashed instead: deterministic, so the same session yields the same token
+    /// everywhere; 32 bits, so the handful of sessions a user runs stay
+    /// distinguishable.
+    ///
+    /// **Every diagnostic that names a tmux session must call this.** Two
+    /// independent derivations would silently mint two tokens for one session,
+    /// which is worse than having no token at all.
+    ///
+    /// In auto mode the name is already `tessera-<8 hex of host key>`, so
+    /// hashing again is lossless for correlation and additionally keeps the
+    /// host-key digest itself out of the log.
+    public static func sessionNameDigest(_ name: String) -> String {
+        shortDigest(of: name)
+    }
+
+    private static func shortDigest(of input: String) -> String {
+        let digest = SHA256.hash(data: Data(input.utf8))
+        return digest.prefix(4).map { String(format: "%02x", $0) }.joined()
     }
 
     /// Returns true if the chunk's bytes contain the unavailable
@@ -157,7 +224,11 @@ public enum AutoTmuxScript {
     /// when scanning a byte stream where the sentinel may cross chunk
     /// boundaries.
     public static func chunkContainsSentinel(_ chunk: [UInt8]) -> Bool {
-        let needle = Array(unavailableSentinel.utf8)
+        contains(Array(unavailableSentinel.utf8), in: chunk)
+    }
+
+    /// Same naive scan, for an arbitrary marker.
+    static func contains(_ needle: [UInt8], in chunk: [UInt8]) -> Bool {
         guard !needle.isEmpty, chunk.count >= needle.count else { return false }
         outer: for i in 0...(chunk.count - needle.count) {
             for j in 0..<needle.count where chunk[i + j] != needle[j] {
@@ -169,13 +240,31 @@ public enum AutoTmuxScript {
     }
 }
 
+/// Which failure marker the auto-tmux script printed, if any.
+public enum AutoTmuxFailure: Equatable, Sendable {
+    /// `tmux` is not on the remote `$PATH`.
+    case unavailable
+    /// `tmux` exists but the session could not be created.
+    case startFailed
+    /// The host's own dotfiles already put us inside a tmux client.
+    case nested
+}
+
 /// Streaming detector for `AutoTmuxScript.unavailableSentinel`.
 ///
 /// Session output usually arrives in packet-sized chunks, but the
 /// sentinel is still allowed to straddle a chunk boundary. This scanner
 /// keeps just enough tail bytes to make the next feed boundary-safe.
 public struct AutoTmuxSentinelScanner {
-    private let needle: [UInt8] = Array(AutoTmuxScript.unavailableSentinel.utf8)
+    private let unavailableNeedle: [UInt8] = Array(
+        AutoTmuxScript.unavailableSentinel.utf8
+    )
+    private let startFailedNeedle: [UInt8] = Array(
+        AutoTmuxScript.startFailedSentinel.utf8
+    )
+    private let nestedNeedle: [UInt8] = Array(
+        AutoTmuxScript.nestedSentinel.utf8
+    )
     private var tail: [UInt8] = []
 
     public init() {}
@@ -184,18 +273,42 @@ public struct AutoTmuxSentinelScanner {
         tail.removeAll(keepingCapacity: true)
     }
 
+    /// `true` when the "tmux is not installed" marker appeared. Kept for
+    /// call sites that only care about that case.
     public mutating func feed(_ chunk: [UInt8]) -> Bool {
-        guard !needle.isEmpty else { return false }
+        feedForFailure(chunk) == .unavailable
+    }
 
+    /// Scan for either marker, reporting which one landed. The scanner
+    /// keeps the longest needle's boundary bytes so a marker split across
+    /// two SSH chunks is still detected.
+    public mutating func feedForFailure(_ chunk: [UInt8]) -> AutoTmuxFailure? {
         var haystack = tail
         haystack.append(contentsOf: chunk)
-        let found = AutoTmuxScript.chunkContainsSentinel(haystack)
-        let keepCount = max(needle.count - 1, 0)
+
+        let failure: AutoTmuxFailure?
+        if AutoTmuxScript.contains(unavailableNeedle, in: haystack) {
+            failure = .unavailable
+        } else if AutoTmuxScript.contains(startFailedNeedle, in: haystack) {
+            failure = .startFailed
+        } else if AutoTmuxScript.contains(nestedNeedle, in: haystack) {
+            failure = .nested
+        } else {
+            failure = nil
+        }
+
+        let keepCount = max(
+            max(
+                unavailableNeedle.count,
+                max(startFailedNeedle.count, nestedNeedle.count)
+            ) - 1,
+            0
+        )
         if haystack.count > keepCount {
             tail = Array(haystack.suffix(keepCount))
         } else {
             tail = haystack
         }
-        return found
+        return failure
     }
 }

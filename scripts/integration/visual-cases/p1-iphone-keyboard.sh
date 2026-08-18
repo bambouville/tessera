@@ -68,9 +68,9 @@ wait_for_phone_geometry() {
       pane_rows="${BASH_REMATCH[4]}"
       pane_count="${BASH_REMATCH[5]}"
       if ((window_cols >= 90 && window_cols <= 115
-          && window_rows >= 18 && window_rows <= 24
+          && window_rows >= 34 && window_rows <= 42
           && pane_cols >= 45 && pane_cols <= 55
-          && pane_rows >= 18 && pane_rows <= 24
+          && pane_rows >= 34 && pane_rows <= 42
           && pane_count == 2)); then
         ((stable += 1))
         if ((stable >= 5)); then
@@ -188,13 +188,13 @@ jq -n \
   --arg ipad "$ipad_geometry" \
   '{
     id: "P1-iphone-keyboard",
-    title: "iPhone presents one split tmux pane full-screen without flattening the shared layout",
+    title: "iPhone keeps a stable full-height tmux grid while presenting one split pane",
     matrix_ids: [],
     invariants: [
-      "The real 160x50 fixture keeps two side-by-side tmux panes, while the phone expands its client canvas so the focused pane itself matches the physical phone viewport.",
-      "Only the focused pane is presented on iPhone and it occupies the full terminal width with clearly readable 13 pt text while the software keyboard and accessory bar are visible.",
+      "The real 160x50 fixture keeps two side-by-side tmux panes, while the phone expands its client canvas so the focused pane keeps the physical phone viewport geometry instead of reflowing around the keyboard.",
+      "Only the focused pane is presented on iPhone; it keeps a full-width, full-height terminal grid with clearly readable 13 pt text while the composed surface is intentionally pushed behind the software keyboard and accessory bar.",
       "A later iPad attachment expands the same two-pane layout beyond the phone dimensions instead of inheriting a flattened or phone-width split.",
-      "The terminal, accessory controls, and keyboard remain complete and non-overlapping, with no clipping, stale pixels, or black rendering artifacts."
+      "Every accessory chip and the keyboard-toggle button is fully visible and entirely above the top edge of the software keyboard; no part of the 52 pt bar is covered. The visible terminal region and keyboard have no unintended clipping, stale pixels, or black rendering artifacts."
     ],
     capture_notes: "Production SSH+tmux session views connected programmatically to a disposable fixture. The same pre-existing 160x50 side-by-side htop/Vim window is captured first on a dedicated portrait iPhone with its real software keyboard, then on the integration iPad after that client expands the shared layout. simctl screenshots preserve CAMetalLayer pixels; the iPad PNG is losslessly orientation-normalized when this simulator runtime returns its landscape surface in a portrait pixel buffer. No user host or UI-driven connection is involved.",
     deterministic_precheck: {

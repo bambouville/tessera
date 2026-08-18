@@ -3,6 +3,42 @@ import Testing
 @testable import Tessera
 
 struct QuickLookPresenterTests {
+    @Test func presentationModeTogglesBetweenPopupAndFullScreen() {
+        #expect(QuickLookPresentationMode.fallback == .popup)
+        #expect(QuickLookPresentationMode.popup.toggled == .fullScreen)
+        #expect(QuickLookPresentationMode.fullScreen.toggled == .popup)
+        #expect(QuickLookPresentationMode.popup.toggleSymbolName
+            != QuickLookPresentationMode.fullScreen.toggleSymbolName)
+        #expect(QuickLookPresentationMode.popup.toggleLabel == "Enter Full Screen")
+        #expect(QuickLookPresentationMode.fullScreen.toggleLabel == "Exit Full Screen")
+        // Persisted raw values are a stored preference — renaming a case would
+        // silently reset every user's choice.
+        #expect(QuickLookPresentationMode.allCases.map(\.rawValue) == ["popup", "fullScreen"])
+    }
+
+    @Test func onlyTheContainerMatchingTheModeShowsTheRequest() {
+        let request = "preview"
+        #expect(QuickLookPresentationRouting.presentedItem(
+            request, mode: .popup, container: .popup) == request)
+        #expect(QuickLookPresentationRouting.presentedItem(
+            request, mode: .popup, container: .fullScreen) == nil)
+        #expect(QuickLookPresentationRouting.presentedItem(
+            request, mode: .fullScreen, container: .fullScreen) == request)
+        #expect(QuickLookPresentationRouting.presentedItem(
+            request, mode: .fullScreen, container: .popup) == nil)
+    }
+
+    @Test func resizingHandsTheRequestOverInsteadOfCancellingIt() {
+        // The outgoing container writes nil as it tears down, after `mode`
+        // already names the incoming one; that write must not clear the
+        // pending preview or the toggle would dismiss the file.
+        #expect(!QuickLookPresentationRouting.clearsRequest(mode: .fullScreen, container: .popup))
+        #expect(!QuickLookPresentationRouting.clearsRequest(mode: .popup, container: .fullScreen))
+        // A real dismissal comes from the container the mode points at.
+        #expect(QuickLookPresentationRouting.clearsRequest(mode: .popup, container: .popup))
+        #expect(QuickLookPresentationRouting.clearsRequest(mode: .fullScreen, container: .fullScreen))
+    }
+
     @Test func markdownDetectionUsesTitleAndStagedFilename() {
         let opaqueStagingURL = URL(fileURLWithPath: "/tmp/preview/file")
         #expect(MarkdownPreviewSupport.isMarkdown(

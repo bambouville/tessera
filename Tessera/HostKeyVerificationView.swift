@@ -135,8 +135,14 @@ struct HostKeyVerificationView: View {
         let color = matches ? T.green : T.amber
         let icon = matches ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
         let text = matches
-            ? "Matches the key \(label) trusts."
-            : "Differs from the key \(label) trusts. Verify out of band before connecting."
+            ? String(
+                localized: "Matches the key \(label) trusts.",
+                comment: "Host-key comparison against a peer device; the argument names that device"
+            )
+            : String(
+                localized: "Differs from the key \(label) trusts. Verify out of band before connecting.",
+                comment: "Host-key mismatch against a peer device; the argument names that device"
+            )
 
         return AnyView(
             HStack(alignment: .top, spacing: 9) {
@@ -160,18 +166,18 @@ struct HostKeyVerificationView: View {
         )
     }
 
-    private func fingerprintBlock(title: String, value: String) -> some View {
+    private func fingerprintBlock(title: LocalizedStringKey, value: String) -> some View {
         valueBlock(title: title, value: value)
             .textSelection(.enabled)
     }
 
-    private func valueBlock(title: String, value: String) -> some View {
+    private func valueBlock(title: LocalizedStringKey, value: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .tesseraSansScaled(size: 11, weight: .medium)
                 .foregroundStyle(T.fgDim)
 
-            Text(value)
+            Text(verbatim: value)
                 .font(Typography.tesseraMono(size: 12))
                 .foregroundStyle(T.fg)
                 .fixedSize(horizontal: false, vertical: true)

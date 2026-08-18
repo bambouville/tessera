@@ -76,8 +76,16 @@ private struct ContinuityFailureBanner: Identifiable, Equatable {
 
     var title: String {
         switch source {
-        case .incoming: "Couldn't continue session"
-        case .outgoing: "Couldn't make session available"
+        case .incoming:
+            String(
+                localized: "Couldn't continue session",
+                comment: "Alert title when taking over a session from another device fails"
+            )
+        case .outgoing:
+            String(
+                localized: "Couldn't make session available",
+                comment: "Alert title when offering a session to another device fails"
+            )
         }
     }
 }
@@ -142,6 +150,9 @@ struct ContentView: View {
     @Environment(BootstrapCoordinator.self) private var bootstrapCoordinator
     @Environment(EnrollmentCoordinator.self) private var enrollmentCoordinator
     @Environment(HostAccessStore.self) private var hostAccessStore
+    /// Optional so a view mounted outside `RootView` (previews, harnesses) falls
+    /// back to the shipped chords instead of trapping on a missing store.
+    @Environment(ShortcutStore.self) private var shortcutStore: ShortcutStore?
 
     @State private var activeSessions: [LiveSession] = []
     @State private var selectedItem: SidebarItem?
@@ -158,7 +169,23 @@ struct ContentView: View {
     @State private var onboardingMatrixTask: Task<Void, Never>?
     #endif
     @State private var hasInactivePreservedRestoreSnapshots = false
-    @State private var foregroundRestoreGraceTask: Task<Void, Never>?
+    @State private var foregroundRestoreTickTask: Task<Void, Never>?
+    /// Sessions believed alive when the app last went inactive, each awaiting a
+    /// verdict at the next foreground. Entries only ever leave — restored,
+    /// confirmed alive, or claimed by the user. Nothing is added while the
+    /// window is open, so a replacement that fails cannot re-enter as a fresh
+    /// candidate and loop.
+    @State private var foregroundRestoreCohort: [SessionRestoreSnapshot] = []
+    @State private var foregroundRestoreWindowOpenedAt: Date?
+    /// The window's own clock, charged the way the SSH handshake budget is —
+    /// in clamped steps, and only while no handshake prompt is up. Kept apart
+    /// from `foregroundRestoreWindowOpenedAt`, which stays wall time and is
+    /// only asked whether a window exists.
+    @State private var foregroundRestoreChargedSeconds: TimeInterval = 0
+    @State private var foregroundRestoreLastChargeAt: Date?
+    /// Restoring writes snapshots, and writing re-evaluates. Without this the
+    /// two would recurse through each other once per cohort entry.
+    @State private var foregroundRestoreEvaluating = false
 
     /// Host key verification request from any connecting session.
     @State private var hostKeyRequest: HostKeyVerificationRequest?
@@ -326,9 +353,14 @@ struct ContentView: View {
         .background(T.bg)
         .animation(.easeInOut(duration: 0.18), value: isCompactOverlaySelected)
         .animation(.easeInOut(duration: 0.24), value: sidebarVisible)
+        // The four chords below come from the user's keymap, not from literals:
+        // these hidden buttons are the *only* registration for ⌘N (the terminal
+        // container has no selector for it), so a literal here means the editor
+        // records a rebind that never takes effect and an unbind that releases
+        // nothing. See `storedKeyboardShortcut(_:in:)`.
         .background(
             Button("New Host", action: createAndEditNewHost)
-                .keyboardShortcut("n", modifiers: .command)
+                .storedKeyboardShortcut(.newHost, in: shortcutStore)
                 .opacity(0)
                 .frame(width: 0, height: 0)
         )
@@ -339,14 +371,14 @@ struct ContentView: View {
             // `TesseraTerminalContainer` registers its own UIKeyCommand
             // for "k" too; both routes funnel through `openPalette`.
             Button("Open Switcher", action: openPalette)
-                .keyboardShortcut("k", modifiers: .command)
+                .storedKeyboardShortcut(.quickSwitchPalette, in: shortcutStore)
                 .opacity(0)
                 .frame(width: 0, height: 0)
         )
         .background {
             if appearance.agentCenterEnabled {
                 Button("Toggle Agent Center", action: toggleAgentCenter)
-                    .keyboardShortcut("a", modifiers: [.command, .shift])
+                    .storedKeyboardShortcut(.toggleAgentCenter, in: shortcutStore)
                     .opacity(0)
                     .frame(width: 0, height: 0)
             }
@@ -359,7 +391,7 @@ struct ContentView: View {
             // `TesseraTerminalContainer` registers its own UIKeyCommand
             // for "," too; both routes funnel through `openSettings`.
             Button("Open Settings", action: openSettings)
-                .keyboardShortcut(",", modifiers: .command)
+                .storedKeyboardShortcut(.openSettings, in: shortcutStore)
                 .opacity(0)
                 .frame(width: 0, height: 0)
         )
@@ -570,6 +602,12 @@ struct ContentView: View {
         .onChange(of: appearance.agentCenterNotificationsEnabled) { _, enabled in
             if !enabled { bellController.cancelAgentNotifications() }
             updateAgentAttentionBackgroundKeepAlive(reason: "notification-setting")
+        }
+        .onChange(of: appearance.agentScrollLockClaudeCodeEnabled) { _, _ in
+            syncAgentScrollLock()
+        }
+        .onChange(of: appearance.agentScrollLockCodexEnabled) { _, _ in
+            syncAgentScrollLock()
         }
         .onChange(of: swipePadStore.profiles) { _, profiles in
             agentCenter.syncProfiles(profiles)
@@ -932,6 +970,20 @@ struct ContentView: View {
             logRestoreDiag(
                 "app-phase-changed active=\(isActive) didEvaluateStartupRestore=\(didEvaluateStartupRestore) activeCount=\(activeSessions.count) inactivePreserved=\(hasInactivePreservedRestoreSnapshots)"
             )
+            if !isActive {
+                // The window belongs to one wake. Carrying it across the
+                // background edge would leave the next foreground reusing a
+                // stale cohort against an `openedAt` from the previous visit —
+                // so the alive floor reads as long spent, entries retire on the
+                // first pass, and wake 2 gets no detection window at all. The
+                // background-edge persist re-arms the latch; the next
+                // foreground seeds a fresh window from the document it wrote.
+                cancelForegroundRestoreTick(reason: "background")
+                foregroundRestoreCohort = []
+                foregroundRestoreWindowOpenedAt = nil
+                foregroundRestoreChargedSeconds = 0
+                foregroundRestoreLastChargeAt = nil
+            }
             guard didEvaluateStartupRestore || !isActive else {
                 logRestoreDiag("app-phase-skip reason=startup-restore-not-evaluated")
                 return
@@ -972,6 +1024,7 @@ struct ContentView: View {
             )
             sessionRegistry.syncActiveSessions(activeSessions)
             agentCenter.setEnabled(appearance.agentCenterEnabled)
+            syncAgentScrollLock()
             agentCenter.setApplicationActive(appPhase.isActive)
             updateAgentAttentionBackgroundKeepAlive(reason: "content-appear")
             if !appearance.agentCenterEnabled {
@@ -1026,6 +1079,7 @@ struct ContentView: View {
                 onReopen: { reopenPreviousConnections(prompt) },
                 onNotNow: { skipPreviousConnections() }
             )
+            .interactiveDismissDisabled()
         }
         .sheet(item: $uploadRequest) { request in
             UploadSheetView(
@@ -1298,7 +1352,7 @@ struct ContentView: View {
                 through: activity,
                 for: host,
                 authorizationHostID: draft.descriptor.hostID,
-                peerDeviceName: "your other device",
+                peerDeviceName: String(localized: "your other device"),
                 in: modelContext,
                 defaultKeyUseOwnerAuthentication: appearance.requireBiometricForKeyUse
             )
@@ -1429,6 +1483,15 @@ struct ContentView: View {
                         session: sshSession,
                         liveSessionID: live.id,
                         isActive: isSelected,
+                        reconnectingElsewhere: foregroundRestoreCohort.count(
+                            where: { $0.liveSessionID != live.id }
+                        ),
+                        onUserClosedSession: {
+                            retireForegroundRestoreCohortEntry(
+                                live.id,
+                                reason: "user-closed"
+                            )
+                        },
                         onToggleSidebar: {
                             withAnimation {
                                 sidebarVisible.toggle()
@@ -1439,14 +1502,27 @@ struct ContentView: View {
                             selectedItem = nil
                             sidebarVisible = true
                         },
+                        // Both recovery actions are also reachable from the
+                        // stall notice, which fires while the connect is still
+                        // running rather than after it failed — so dropping the
+                        // tab is not enough. An un-disconnected connect keeps
+                        // its own task alive and completes invisibly, holding a
+                        // remote shell (and, on the tmux path, a second control
+                        // client alongside the retry's replacement). Retire
+                        // first, so the state change the disconnect publishes
+                        // is not read as a cohort death.
                         onEditHost: {
+                            retireForegroundRestoreCohortEntry(live.id, reason: "edit-host")
                             activeSessions.removeAll { $0.id == live.id }
+                            sshSession.disconnect()
                             selectedItem = .host(sshSession.host.id)
                             sidebarVisible = true
                         },
                         onRetry: {
+                            retireForegroundRestoreCohortEntry(live.id, reason: "retry")
                             let hostID = sshSession.host.id
                             activeSessions.removeAll { $0.id == live.id }
+                            sshSession.disconnect()
                             if let persisted = fetchHost(hostID) {
                                 connect(to: persisted)
                             }
@@ -1478,6 +1554,15 @@ struct ContentView: View {
                         session: moshSession,
                         liveSessionID: live.id,
                         isActive: isSelected,
+                        reconnectingElsewhere: foregroundRestoreCohort.count(
+                            where: { $0.liveSessionID != live.id }
+                        ),
+                        onUserClosedSession: {
+                            retireForegroundRestoreCohortEntry(
+                                live.id,
+                                reason: "user-closed"
+                            )
+                        },
                         onToggleSidebar: {
                             withAnimation {
                                 sidebarVisible.toggle()
@@ -1488,14 +1573,22 @@ struct ContentView: View {
                             selectedItem = nil
                             sidebarVisible = true
                         },
+                        // Same teardown rule as the SSH branch, and the stakes
+                        // are higher here: an orphaned bootstrap that completes
+                        // has already spawned a `mosh-server` on the host, and
+                        // nothing left on screen can reach it.
                         onEditHost: {
+                            retireForegroundRestoreCohortEntry(live.id, reason: "edit-host")
                             activeSessions.removeAll { $0.id == live.id }
+                            moshSession.disconnect()
                             selectedItem = .host(moshSession.host.id)
                             sidebarVisible = true
                         },
                         onRetry: {
+                            retireForegroundRestoreCohortEntry(live.id, reason: "retry")
                             let hostID = moshSession.host.id
                             activeSessions.removeAll { $0.id == live.id }
+                            moshSession.disconnect()
                             if let persisted = fetchHost(hostID) {
                                 connect(to: persisted)
                             }
@@ -1618,7 +1711,7 @@ struct ContentView: View {
             },
             onDelete: { dismissEditor(host: host, deleteIfDraft: false, force: true) },
             continuationSourceLabel: continuationDraft?.rootHostID == host.id
-                ? "your other device" : nil,
+                ? String(localized: "your other device") : nil,
             continuationAction: continuationDraft?.rootHostID == host.id
                 ? continuationDraft?.descriptor.continuationAction : nil,
             continuationTmuxSessionName: continuationDraft?.rootHostID == host.id
@@ -2632,7 +2725,10 @@ struct ContentView: View {
         do {
             return try modelContext.fetchCount(FetchDescriptor<PersistedHost>())
         } catch {
-            hostAdmissionFailureMessage = "tessera could not read saved hosts. nothing was changed; try again."
+            hostAdmissionFailureMessage = String(
+                localized: "tessera could not read saved hosts. nothing was changed; try again.",
+                comment: "Saved-host count could not be read, so admission was blocked"
+            )
             DiagnosticLogStore.appendApp(
                 "host admission result=blocked reason=swiftdata-count error='\(error.localizedDescription)'"
             )
@@ -2863,6 +2959,17 @@ struct ContentView: View {
         if restoreAlwaysReopen {
             appearance.sessionRestorePolicy = .always
         }
+        // The answer IS the verdict for these entries. Leaving them in the
+        // cohort would keep them `.dead` forever — the replacement carries a
+        // new liveSessionID and can never match again — so the next tick would
+        // re-raise this same sheet and a second tap would duplicate the tab.
+        // Retire while the prompt is still up (same order as the "not now"
+        // path): a sheet answered after the deadline would otherwise close the
+        // window through the backstop arm and log a drop that never happened.
+        retireForegroundRestoreCohortEntries(
+            prompt.document.sessions.map(\.liveSessionID),
+            reason: "prompt-reopen"
+        )
         restorePrompt = nil
         restorePreviousConnections(
             from: prompt.document,
@@ -2872,10 +2979,13 @@ struct ContentView: View {
 
     private func skipPreviousConnections() {
         logRestoreDiag("restore-prompt-not-now clear-store")
+        retireForegroundRestoreCohortEntries(
+            restorePrompt?.document.sessions.map(\.liveSessionID) ?? [],
+            reason: "prompt-not-now"
+        )
         restorePrompt = nil
         restoreAlwaysReopen = false
-        cancelForegroundRestoreGrace(reason: "skip-restore")
-        hasInactivePreservedRestoreSnapshots = false
+        closeForegroundRestoreWindow(reason: "skip-restore")
         sessionRestoreStore.clear()
     }
 
@@ -2884,8 +2994,22 @@ struct ContentView: View {
         preserveSnapshotLiveIDs: Bool = true,
         selectFallback: Bool = true
     ) {
-        cancelForegroundRestoreGrace(reason: "restore-begin")
-        hasInactivePreservedRestoreSnapshots = false
+        // Restoring writes snapshots, and the write re-evaluates the cohort.
+        // The guard has to live here rather than only in
+        // `attemptForegroundRestoreIfNeeded`, because `reopenPreviousConnections`
+        // reaches this directly: without it the nested evaluation sees the
+        // session being restored as still dead (its replacement carries a new
+        // liveSessionID) and restores it a second time.
+        let wasEvaluating = foregroundRestoreEvaluating
+        foregroundRestoreEvaluating = true
+        defer { foregroundRestoreEvaluating = wasEvaluating }
+
+        // Deliberately does NOT close the restore window. Restoring one entry
+        // used to clear the latch outright, which stranded every transport that
+        // reported after it; the cohort decides when the window is done.
+        if foregroundRestoreCohort.isEmpty {
+            closeForegroundRestoreWindow(reason: "restore-begin")
+        }
         let plan = restorePlan(for: document)
         logRestoreDiag(
             "restore-begin stored=\(document.sessions.count) restorable=\(plan.sessions.count) skipped=\(plan.skippedCount) selected=\(shortID(plan.selectedSnapshotID)) preserveIDs=\(preserveSnapshotLiveIDs) selectFallback=\(selectFallback)"
@@ -3001,120 +3125,323 @@ struct ContentView: View {
         persistRestoreSnapshots()
     }
 
+    /// Longest a restore window may stay open. Bounds every way a cohort
+    /// entry can fail to reach a verdict — a wedged `.connecting`, a transport
+    /// that never reports, a host the user never answers a prompt for.
+    /// Derived, not chosen: a session wedged in `.connecting` reaches a verdict
+    /// only when the SSH handshake budget fires, so a backstop shorter than that
+    /// budget would retire it unresolved and drop its snapshot.
+    private static let foregroundRestoreWindowMaxSeconds: TimeInterval =
+        SSHSession.handshakeBudgetSeconds + 20
+
+    /// Exposed so a test can assert the ordering constraint above rather than
+    /// leaving it to a comment that can drift.
+    static var foregroundRestoreWindowMaxSecondsForTesting: TimeInterval {
+        foregroundRestoreWindowMaxSeconds
+    }
+    /// Earliest a still-connected entry may be believed. `activeSessions` lags
+    /// a session's published state: in the 2026-08-17 repro two SSH transports
+    /// died 4ms apart and the summary logged one millisecond later still
+    /// printed both as connected. Plain SSH has no reachability signal to
+    /// confirm against, so this floor stands in for one. It delays only the
+    /// closing of the window — dead entries are restored the moment they are
+    /// seen, so reconnection is not held back by it.
+    private static let foregroundRestoreAliveFloorSeconds: TimeInterval = 5
+    private static let foregroundRestoreTickNanoseconds: UInt64 = 500_000_000
+    /// Longest step the window's clock may charge at once. Mirrors the SSH
+    /// handshake watchdog's own clamp: a larger gap means the process was
+    /// suspended, and a suspension is not time spent waiting on this wake.
+    private static let foregroundRestoreMaxChargeSeconds: TimeInterval = 2
+
     @discardableResult
     private func attemptForegroundRestoreIfNeeded(reason: String) -> Bool {
         guard appPhase.isActive,
               didEvaluateStartupRestore,
               hasInactivePreservedRestoreSnapshots
         else { return false }
+        guard !foregroundRestoreEvaluating else { return true }
+        let wasEvaluating = foregroundRestoreEvaluating
+        foregroundRestoreEvaluating = true
+        defer { foregroundRestoreEvaluating = wasEvaluating }
 
         guard effectiveSessionRestorePolicy != .never else {
             logRestoreDiag("foreground-restore-clear reason=policy-never trigger=\(reason)")
-            cancelForegroundRestoreGrace(reason: "policy-never")
-            hasInactivePreservedRestoreSnapshots = false
+            closeForegroundRestoreWindow(reason: "policy-never")
             sessionRestoreStore.clear()
             return true
         }
 
         guard let document = sessionRestoreStore.load() else {
             logRestoreDiag("foreground-restore-skip reason=no-document trigger=\(reason)")
-            cancelForegroundRestoreGrace(reason: "no-document")
-            hasInactivePreservedRestoreSnapshots = false
+            closeForegroundRestoreWindow(reason: "no-document")
             return false
         }
 
-        if !activeSessions.isEmpty {
-            let missingDocument = foregroundMissingRestoreDocument(from: document)
-            guard let missingDocument else {
-                logRestoreDiag(
-                    "foreground-restore-preserve reason=active-sessions-present trigger=\(reason) count=\(activeSessions.count) sessions=\(activeSessionSummary())"
-                )
-                scheduleForegroundRestoreGrace(reason: reason)
-                return true
-            }
-
-            guard !appLockController.isLocked else {
-                logRestoreDiag(
-                    "foreground-restore-preserve reason=locked-with-missing trigger=\(reason) missing=\(missingDocument.sessions.count) activeCount=\(activeSessions.count)"
-                )
-                scheduleForegroundRestoreGrace(reason: reason)
-                return true
-            }
-
-            logRestoreDiag(
-                "foreground-restore-partial trigger=\(reason) stored=\(document.sessions.count) missing=\(missingDocument.sessions.count) activeCount=\(activeSessions.count)"
-            )
-            return restoreForegroundDocument(
-                missingDocument,
-                reason: "\(reason)-partial",
-                selectFallback: document.selectedSessionID.flatMap { selected in
-                    missingDocument.sessions.contains { $0.liveSessionID == selected }
-                } ?? false
-            )
-        }
-
-        let plan = restorePlan(for: document)
-        logRestoreDiag(
-            "foreground-restore-plan trigger=\(reason) stored=\(document.sessions.count) restorable=\(plan.sessions.count) skipped=\(plan.skippedCount) selected=\(shortID(plan.selectedSnapshotID)) locked=\(appLockController.isLocked) policy=\(effectiveSessionRestorePolicy.rawValue)"
-        )
-
-        guard plan.hasRestorableSessions else {
-            logRestoreDiag("foreground-restore-clear reason=no-restorable-sessions trigger=\(reason)")
-            cancelForegroundRestoreGrace(reason: "no-restorable")
-            hasInactivePreservedRestoreSnapshots = false
-            sessionRestoreStore.clear()
-            return true
-        }
-
+        // Seeded after the lock guard on purpose: charge passes park here, so
+        // the window's clock cannot run behind a lock screen — and the persist
+        // path treats latched-but-unopened as merge-protected, so the stored
+        // document survives every write that lands before the unlock.
         guard !appLockController.isLocked else {
-            logRestoreDiag("foreground-restore-preserve reason=locked trigger=\(reason)")
-            return true
-        }
-
-        guard restorePrompt == nil else {
-            logRestoreDiag("foreground-restore-preserve reason=prompt-present trigger=\(reason)")
-            return true
-        }
-
-        switch effectiveSessionRestorePolicy {
-        case .always:
-            logRestoreDiag("foreground-restore-action restore-immediately trigger=\(reason)")
-            restoreForegroundDocument(document, reason: reason)
-        case .ask:
             logRestoreDiag(
-                "foreground-restore-action prompt trigger=\(reason) restorable=\(plan.sessions.count) skipped=\(plan.skippedCount)"
+                "foreground-restore-preserve reason=locked trigger=\(reason) cohort=\(foregroundRestoreCohort.count)"
             )
-            restoreAlwaysReopen = false
-            restorePrompt = SessionRestorePrompt(
-                document: document,
-                hostNames: plan.sessions.map(\.displayName),
-                skippedCount: plan.skippedCount,
-                preserveSnapshotLiveIDs: false
-            )
-        case .never:
-            logRestoreDiag("foreground-restore-clear reason=policy-never-switch trigger=\(reason)")
-            cancelForegroundRestoreGrace(reason: "policy-never-switch")
-            hasInactivePreservedRestoreSnapshots = false
-            sessionRestoreStore.clear()
+            scheduleForegroundRestoreTick(reason: "locked")
+            return true
         }
 
+        if foregroundRestoreWindowOpenedAt == nil {
+            // Seed from the document written at the background edge, not from
+            // `activeSessions`. The stored set is exactly the sessions whose
+            // snapshots are at risk, and it does not lag.
+            let openedAt = Date()
+            foregroundRestoreWindowOpenedAt = openedAt
+            foregroundRestoreChargedSeconds = 0
+            foregroundRestoreLastChargeAt = openedAt
+            foregroundRestoreCohort = document.sessions
+            logRestoreDiag(
+                "foreground-restore-window-open trigger=\(reason) cohort=\(foregroundRestoreCohort.count)"
+            )
+        }
+
+        // Advance the window's clock before anything reads it, so both the
+        // alive floor and the backstop below see this pass's time.
+        chargeForegroundRestoreWindow()
+
+        if activeSessions.isEmpty, foregroundRestoreCohort.count == document.sessions.count {
+            // Nothing survived the wake. Restore the document whole rather
+            // than entry-by-entry so the stored selection is honoured.
+            logRestoreDiag(
+                "foreground-restore-action restore-all trigger=\(reason) sessions=\(document.sessions.count)"
+            )
+            // Only `.always` acts now. Under `.ask` the entries keep their
+            // cohort places — and therefore their snapshots — until the user
+            // answers, or the write that follows would clear the store while
+            // the unanswered sheet holds the only copy.
+            if effectiveSessionRestorePolicy == .always {
+                foregroundRestoreCohort = []
+            }
+            restoreForegroundDocument(document, reason: reason)
+            // Falls through to settle/arm rather than returning: under `.ask`
+            // this leaves a prompt up with an empty cohort, and an early return
+            // would park the window open with no timer and no event to re-drive
+            // it — after which the next foreground persist wipes the document.
+            if closeForegroundRestoreWindowIfSettled(reason: "\(reason)-restore-all") {
+                return true
+            }
+            scheduleForegroundRestoreTick(reason: reason)
+            return true
+        }
+
+        let evaluation = ForegroundRestoreCohort.evaluate(
+            cohort: foregroundRestoreCohort,
+            live: foregroundRestoreLiveSessions(),
+            elapsedSinceWindowOpened: foregroundRestoreElapsed(),
+            aliveFloorSeconds: Self.foregroundRestoreAliveFloorSeconds,
+            retiresDeadImmediately: effectiveSessionRestorePolicy == .always
+        )
+        let dead = evaluation.dead
+        let retired = evaluation.retiredIDs
+
+        if !retired.isEmpty {
+            // Retire before restoring. An entry that has been acted on can
+            // never be reconsidered, which is what stops a replacement that
+            // fails from re-entering the cohort and looping.
+            let retiredIDs = Set(retired)
+            foregroundRestoreCohort.removeAll { retiredIDs.contains($0.liveSessionID) }
+        }
+
+        if !dead.isEmpty {
+            logRestoreDiag(
+                "foreground-restore-cohort-restore trigger=\(reason) dead=\(dead.count) remaining=\(foregroundRestoreCohort.count)"
+            )
+            let selected = document.selectedSessionID.flatMap { selected in
+                dead.contains { $0.liveSessionID == selected } ? selected : nil
+            }
+            restoreForegroundDocument(
+                SessionRestoreDocument(
+                    savedAt: document.savedAt,
+                    sessions: dead,
+                    selectedSessionID: selected
+                ),
+                reason: "\(reason)-cohort",
+                selectFallback: selected != nil,
+                isCompleteDocument: false
+            )
+        }
+
+        if closeForegroundRestoreWindowIfSettled(reason: reason) {
+            return true
+        }
+
+        scheduleForegroundRestoreTick(reason: reason)
         return true
+    }
+
+    /// Lift the live-session facts a verdict depends on out of `LiveSession`,
+    /// so the decision itself stays pure and testable.
+    private func foregroundRestoreLiveSessions() -> [ForegroundRestoreLiveSession] {
+        activeSessions.map { live in
+            let transportConfirmed: Bool?
+            if case .mosh(let mosh) = live.session {
+                transportConfirmed = mosh.transportState == .connected
+            } else {
+                // SSH reports no reachability separate from `state`.
+                transportConfirmed = nil
+            }
+            return ForegroundRestoreLiveSession(
+                liveSessionID: live.id,
+                persistedHostID: live.persistedHostID,
+                state: live.session.terminalSession.state,
+                transportConfirmed: transportConfirmed
+            )
+        }
+    }
+
+    /// Charge the window's clock for the time since the last pass.
+    ///
+    /// The lock guard in `attemptForegroundRestoreIfNeeded` returns before
+    /// this, so a re-lock mid-window costs the window at most one clamped
+    /// step however long the user stays away — deliberate, and the same shape
+    /// as the handshake watchdog's treatment of a suspended process.
+    private func chargeForegroundRestoreWindow() {
+        guard foregroundRestoreWindowOpenedAt != nil else { return }
+
+        let now = Date()
+        foregroundRestoreChargedSeconds += ForegroundRestoreCohort.chargeDelta(
+            now: now,
+            lastChargeAt: foregroundRestoreLastChargeAt,
+            isPrompting: SSHHandshakePromptGate.isPrompting,
+            maxTick: Self.foregroundRestoreMaxChargeSeconds
+        )
+        foregroundRestoreLastChargeAt = now
+    }
+
+    private func foregroundRestoreElapsed() -> TimeInterval {
+        guard foregroundRestoreWindowOpenedAt != nil else { return 0 }
+        return foregroundRestoreChargedSeconds
+    }
+
+    /// Drop an entry because the user took ownership of that session — closed
+    /// it, opened its host editor, or hit retry. Without this the window would
+    /// reopen a session the user deliberately dismissed.
+    private func retireForegroundRestoreCohortEntries(
+        _ liveSessionIDs: [UUID],
+        reason: String
+    ) {
+        guard !liveSessionIDs.isEmpty else { return }
+
+        let ids = Set(liveSessionIDs)
+        let before = foregroundRestoreCohort.count
+        foregroundRestoreCohort.removeAll { ids.contains($0.liveSessionID) }
+        guard foregroundRestoreCohort.count != before else { return }
+
+        logRestoreDiag(
+            "foreground-restore-cohort-retire count=\(before - foregroundRestoreCohort.count) reason=\(reason) remaining=\(foregroundRestoreCohort.count)"
+        )
+        closeForegroundRestoreWindowIfSettled(reason: "retire-\(reason)")
+    }
+
+    private func retireForegroundRestoreCohortEntry(
+        _ liveSessionID: UUID,
+        reason: String
+    ) {
+        guard foregroundRestoreCohort.contains(where: { $0.liveSessionID == liveSessionID })
+        else { return }
+
+        foregroundRestoreCohort.removeAll { $0.liveSessionID == liveSessionID }
+        logRestoreDiag(
+            "foreground-restore-cohort-retire live=\(shortID(liveSessionID)) reason=\(reason) remaining=\(foregroundRestoreCohort.count)"
+        )
+        closeForegroundRestoreWindowIfSettled(reason: "retire-\(reason)")
+    }
+
+    @discardableResult
+    private func closeForegroundRestoreWindowIfSettled(reason: String) -> Bool {
+        guard let openedAt = foregroundRestoreWindowOpenedAt else {
+            closeForegroundRestoreWindow(reason: "\(reason)-unopened")
+            return true
+        }
+
+        let elapsed = foregroundRestoreElapsed()
+        let wallElapsed = Date().timeIntervalSince(openedAt)
+        switch ForegroundRestoreCohort.windowClosure(
+            remainingCohortCount: foregroundRestoreCohort.count,
+            elapsedSinceWindowOpened: elapsed,
+            maxWindowSeconds: Self.foregroundRestoreWindowMaxSeconds,
+            hasUnansweredPrompt: restorePrompt != nil
+        ) {
+        case .open:
+            return false
+        case .backstop:
+            logRestoreDiag(
+                "foreground-restore-window-backstop reason=\(reason) unresolved=\(foregroundRestoreCohort.count) elapsedMs=\(Int(elapsed * 1000)) wallMs=\(Int(wallElapsed * 1000))"
+            )
+            closeForegroundRestoreWindow(reason: "backstop")
+            return true
+        case .settled:
+            logRestoreDiag(
+                "foreground-restore-window-settled reason=\(reason) elapsedMs=\(Int(elapsed * 1000)) wallMs=\(Int(wallElapsed * 1000)) activeCount=\(activeSessions.count)"
+            )
+            closeForegroundRestoreWindow(reason: "settled")
+            persistRestoreSnapshots()
+            return true
+        }
+    }
+
+    private func closeForegroundRestoreWindow(reason: String) {
+        cancelForegroundRestoreTick(reason: reason)
+        foregroundRestoreCohort = []
+        foregroundRestoreWindowOpenedAt = nil
+        foregroundRestoreChargedSeconds = 0
+        foregroundRestoreLastChargeAt = nil
+        hasInactivePreservedRestoreSnapshots = false
+    }
+
+    /// Re-evaluate on a tick as well as on session events. Some verdicts —
+    /// the alive floor, the backstop — turn on elapsed time alone and would
+    /// otherwise wait on an unrelated event to notice. `reason` documents the
+    /// arming site in call order; the tick itself logs under "tick".
+    private func scheduleForegroundRestoreTick(reason _: String) {
+        guard foregroundRestoreTickTask == nil else { return }
+
+        foregroundRestoreTickTask = Task { @MainActor in
+            try? await Task.sleep(
+                nanoseconds: ContentView.foregroundRestoreTickNanoseconds
+            )
+            guard !Task.isCancelled else { return }
+            foregroundRestoreTickTask = nil
+            guard appPhase.isActive, hasInactivePreservedRestoreSnapshots else { return }
+            attemptForegroundRestoreIfNeeded(reason: "tick")
+        }
+    }
+
+    private func cancelForegroundRestoreTick(reason: String) {
+        guard let task = foregroundRestoreTickTask else { return }
+
+        task.cancel()
+        foregroundRestoreTickTask = nil
+        logRestoreDiag("foreground-restore-tick-cancel reason=\(reason)")
     }
 
     @discardableResult
     private func restoreForegroundDocument(
         _ document: SessionRestoreDocument,
         reason: String,
-        selectFallback: Bool = true
+        selectFallback: Bool = true,
+        isCompleteDocument: Bool = true
     ) -> Bool {
         let plan = restorePlan(for: document)
         guard plan.hasRestorableSessions else {
             logRestoreDiag(
-                "foreground-restore-clear reason=no-restorable-in-document trigger=\(reason) sessions=\(document.sessions.count)"
+                "foreground-restore-clear reason=no-restorable-in-document trigger=\(reason) sessions=\(document.sessions.count) complete=\(isCompleteDocument)"
             )
-            cancelForegroundRestoreGrace(reason: "no-restorable-in-document")
-            hasInactivePreservedRestoreSnapshots = false
-            sessionRestoreStore.clear()
+            if isCompleteDocument {
+                closeForegroundRestoreWindow(reason: "no-restorable-in-document")
+                sessionRestoreStore.clear()
+            }
+            // A subset (one cohort pass) proving unrestorable — a deleted host,
+            // revoked credentials — says nothing about the other entries. Their
+            // snapshots stay, and the window closes on its own terms.
             return true
         }
 
@@ -3129,6 +3456,34 @@ struct ContentView: View {
                 selectFallback: selectFallback
             )
         case .ask:
+            if let presented = restorePrompt {
+                // A prompt on screen owns a snapshot set the user has not
+                // answered yet, and answering it acts only on that set — so a
+                // session that died after the sheet was raised would be left
+                // out. Absorb a strictly larger set in place (same identity, so
+                // the sheet updates rather than re-presents, and the user's
+                // toggle survives); leave it alone otherwise.
+                let presentedIDs = Set(presented.document.sessions.map(\.liveSessionID))
+                let proposedIDs = Set(document.sessions.map(\.liveSessionID))
+                guard proposedIDs.isStrictSuperset(of: presentedIDs) else {
+                    logRestoreDiag(
+                        "foreground-restore-preserve reason=prompt-present trigger=\(reason) presented=\(presentedIDs.count) proposed=\(proposedIDs.count)"
+                    )
+                    return true
+                }
+
+                logRestoreDiag(
+                    "foreground-restore-action prompt-extend trigger=\(reason) presented=\(presentedIDs.count) proposed=\(proposedIDs.count)"
+                )
+                restorePrompt = SessionRestorePrompt(
+                    id: presented.id,
+                    document: document,
+                    hostNames: plan.sessions.map(\.displayName),
+                    skippedCount: plan.skippedCount,
+                    preserveSnapshotLiveIDs: false
+                )
+                return true
+            }
             logRestoreDiag(
                 "foreground-restore-action prompt trigger=\(reason) restorable=\(plan.sessions.count) skipped=\(plan.skippedCount)"
             )
@@ -3141,107 +3496,11 @@ struct ContentView: View {
             )
         case .never:
             logRestoreDiag("foreground-restore-clear reason=policy-never-action trigger=\(reason)")
-            cancelForegroundRestoreGrace(reason: "policy-never-action")
-            hasInactivePreservedRestoreSnapshots = false
+            closeForegroundRestoreWindow(reason: "policy-never-action")
             sessionRestoreStore.clear()
         }
 
         return true
-    }
-
-    private func foregroundMissingRestoreDocument(
-        from document: SessionRestoreDocument
-    ) -> SessionRestoreDocument? {
-        let activeByID = Dictionary(
-            uniqueKeysWithValues: activeSessions.map { ($0.id, $0) }
-        )
-        let missing = document.sessions.filter { snapshot in
-            guard let live = activeByID[snapshot.liveSessionID],
-                  live.persistedHostID == snapshot.persistedHostID
-            else {
-                return true
-            }
-
-            switch live.session.terminalSession.state {
-            case .idle, .connecting, .connected:
-                return false
-            case .disconnected, .failed:
-                return true
-            }
-        }
-
-        guard !missing.isEmpty else { return nil }
-
-        let selected = document.selectedSessionID.flatMap { selected in
-            missing.contains { $0.liveSessionID == selected } ? selected : nil
-        }
-        return SessionRestoreDocument(
-            savedAt: document.savedAt,
-            sessions: missing,
-            selectedSessionID: selected
-        )
-    }
-
-    private func scheduleForegroundRestoreGrace(reason: String) {
-        guard foregroundRestoreGraceTask == nil else { return }
-
-        logRestoreDiag(
-            "foreground-restore-grace-start reason=\(reason) activeCount=\(activeSessions.count)"
-        )
-        foregroundRestoreGraceTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            guard !Task.isCancelled else { return }
-            foregroundRestoreGraceTask = nil
-            finishForegroundRestoreGrace(reason: reason)
-        }
-    }
-
-    private func cancelForegroundRestoreGrace(reason: String) {
-        guard let task = foregroundRestoreGraceTask else { return }
-
-        task.cancel()
-        foregroundRestoreGraceTask = nil
-        logRestoreDiag("foreground-restore-grace-cancel reason=\(reason)")
-    }
-
-    private func finishForegroundRestoreGrace(reason: String) {
-        guard appPhase.isActive,
-              hasInactivePreservedRestoreSnapshots
-        else { return }
-
-        guard let document = sessionRestoreStore.load() else {
-            logRestoreDiag("foreground-restore-grace-clear reason=no-document trigger=\(reason)")
-            hasInactivePreservedRestoreSnapshots = false
-            return
-        }
-
-        if let missingDocument = foregroundMissingRestoreDocument(from: document) {
-            guard !appLockController.isLocked else {
-                logRestoreDiag(
-                    "foreground-restore-grace-preserve reason=locked trigger=\(reason) missing=\(missingDocument.sessions.count)"
-                )
-                scheduleForegroundRestoreGrace(reason: "\(reason)-locked")
-                return
-            }
-
-            logRestoreDiag(
-                "foreground-restore-grace-restore trigger=\(reason) missing=\(missingDocument.sessions.count)"
-            )
-            restoreForegroundDocument(
-                missingDocument,
-                reason: "\(reason)-grace",
-                selectFallback: document.selectedSessionID.flatMap { selected in
-                    missingDocument.sessions.contains { $0.liveSessionID == selected }
-                } ?? false
-            )
-            return
-        }
-
-        logRestoreDiag(
-            "foreground-restore-grace-finished reason=\(reason) activeCount=\(activeSessions.count) sessions=\(activeSessionSummary())"
-        )
-        hasInactivePreservedRestoreSnapshots = false
-        persistRestoreSnapshots()
     }
 
     private func persistRestoreSnapshots() {
@@ -3253,13 +3512,15 @@ struct ContentView: View {
         }
 
         let isActive = appPhase.isActive
-        if isActive,
-           hasInactivePreservedRestoreSnapshots,
-           attemptForegroundRestoreIfNeeded(reason: "persist") {
-            return
-        }
-
-        let previousDocument = isActive ? nil : sessionRestoreStore.load()
+        let persistMode = ForegroundRestoreCohort.persistMode(
+            isActive: isActive,
+            hasPreservedSnapshots: hasInactivePreservedRestoreSnapshots,
+            isWindowOpen: foregroundRestoreWindowOpenedAt != nil,
+            hasCohortEntries: !foregroundRestoreCohort.isEmpty
+        )
+        let previousDocument = persistMode == .mergeWithStored
+            ? sessionRestoreStore.load()
+            : nil
         var skippedNoHostMarker = 0
         var skippedMissingHost = 0
         var skippedCredential = 0
@@ -3319,9 +3580,24 @@ struct ContentView: View {
         }
 
         let snapshots: [SessionRestoreSnapshot]
-        if isActive {
+        switch persistMode {
+        case .liveOnly:
             snapshots = currentSnapshots
-        } else {
+        case .keepCohort:
+            // The window is open. An entry awaiting its verdict keeps its
+            // snapshot even once its tab is gone, so a write landing
+            // mid-window cannot delete what is about to be restored.
+            let liveIDs = Set(currentSnapshots.map(\.liveSessionID))
+            snapshots = currentSnapshots + foregroundRestoreCohort.filter {
+                !liveIDs.contains($0.liveSessionID)
+            }
+        case .mergeWithStored:
+            // Whatever the store already holds outlives this write: the
+            // terminal-state skip above drops a dead session from
+            // `currentSnapshots` while the app is active, and behind an app
+            // lock that dead session is exactly the one the wake owes the
+            // user. Current wins per id; stored order leads so the pre-wake
+            // arrangement survives.
             var snapshotsByID: [UUID: SessionRestoreSnapshot] = [:]
             var orderedIDs: [UUID] = []
 
@@ -3344,8 +3620,13 @@ struct ContentView: View {
         if case .session(let id) = selectedItem,
            snapshots.contains(where: { $0.liveSessionID == id }) {
             selectedSessionID = id
-        } else if !isActive {
+        } else if persistMode == .mergeWithStored {
             selectedSessionID = previousDocument?.selectedSessionID
+        } else if persistMode == .keepCohort {
+            // The window is open, so the session the user was last looking at
+            // may be mid-reconnect and momentarily absent from `activeSessions`.
+            // Writing nil here would leave them on the host list after the wake.
+            selectedSessionID = sessionRestoreStore.load()?.selectedSessionID
         } else {
             selectedSessionID = nil
         }
@@ -3354,10 +3635,16 @@ struct ContentView: View {
             sessions: snapshots,
             selectedSessionID: selectedSessionID
         )
-        hasInactivePreservedRestoreSnapshots = !isActive && !snapshots.isEmpty
+        if !isActive {
+            hasInactivePreservedRestoreSnapshots = !snapshots.isEmpty
+        }
         logRestoreDiag(
-            "persist-finished active=\(isActive) activeCount=\(activeSessions.count) previous=\(previousDocument?.sessions.count ?? 0) current=\(currentSnapshots.count) final=\(snapshots.count) selected=\(shortID(selectedSessionID)) savedAction=\(snapshots.isEmpty ? "clear-empty" : "save") skippedNoMarker=\(skippedNoHostMarker) skippedMissingHost=\(skippedMissingHost) skippedCredential=\(skippedCredential) skippedState=\(skippedState) preservedInactiveFailure=\(preservedInactiveFailure) inactivePreserved=\(hasInactivePreservedRestoreSnapshots)"
+            "persist-finished active=\(isActive) mode=\(persistMode) activeCount=\(activeSessions.count) previous=\(previousDocument?.sessions.count ?? 0) current=\(currentSnapshots.count) final=\(snapshots.count) selected=\(shortID(selectedSessionID)) savedAction=\(snapshots.isEmpty ? "clear-empty" : "save") skippedNoMarker=\(skippedNoHostMarker) skippedMissingHost=\(skippedMissingHost) skippedCredential=\(skippedCredential) skippedState=\(skippedState) preservedInactiveFailure=\(preservedInactiveFailure) inactivePreserved=\(hasInactivePreservedRestoreSnapshots) cohort=\(foregroundRestoreCohort.count)"
         )
+
+        if isActive, hasInactivePreservedRestoreSnapshots {
+            attemptForegroundRestoreIfNeeded(reason: "persist")
+        }
     }
 
     private func isHostCredentialRestorable(_ host: PersistedHost) -> Bool {
@@ -3512,7 +3799,7 @@ struct ContentView: View {
         case .fastPath(let host), .endpointMatch(let host):
             guard let persisted = fetchHost(host.id) else {
                 continuationOverlay?.phase = .failed(
-                    "The matching saved host disappeared before the continuation could start."
+                    String(localized: "The matching saved host disappeared before the continuation could start.")
                 )
                 continuationCoordinator.consume(pending.id)
                 return
@@ -3536,7 +3823,7 @@ struct ContentView: View {
                 select: true
             ) else {
                 continuationOverlay?.phase = .failed(
-                    "Tessera could not create the requested session."
+                    String(localized: "Tessera could not create the requested session.")
                 )
                 return
             }
@@ -3578,11 +3865,11 @@ struct ContentView: View {
             }
         case .disconnected:
             continuationOverlay?.phase = .failed(
-                "The remote session disconnected before it was ready."
+                String(localized: "The remote session disconnected before it was ready.")
             )
         case .failed:
             continuationOverlay?.phase = .failed(
-                "Authentication or transport setup failed. Review this device's credential and try again."
+                String(localized: "Authentication or transport setup failed. Review this device's credential and try again.")
             )
         }
     }
@@ -3661,7 +3948,7 @@ struct ContentView: View {
             if !accepted {
                 continuationCoordinator.finishActive()
                 presentContinuityFailure(
-                    "Finish the current host setup, then try Handoff again.",
+                    String(localized: "Finish the current host setup, then try Handoff again."),
                     source: .incoming
                 )
             }
@@ -3884,19 +4171,19 @@ struct ContentView: View {
 
         switch conflict {
         case .destinationIdentifierAlreadyExists:
-            return "A saved host already uses this continuation identifier but does not match its endpoint. Review that host before reconnecting."
+            return String(localized: "A saved host already uses this continuation identifier but does not match its endpoint. Review that host before reconnecting.")
         case .endpointDiffers(let hostID):
-            guard let existing = fetchHost(hostID) else { return "A saved jump host has different connection details. Tessera did not change it." }
+            guard let existing = fetchHost(hostID) else { return String(localized: "A saved jump host has different connection details. Tessera did not change it.") }
             let existingLabel = existing.name.trimmingCharacters(
                 in: .whitespacesAndNewlines
             ).isEmpty ? existing.address : existing.name
-            return "The saved jump host \(existingLabel) has different connection details. Tessera did not change it."
+            return String(localized: "The saved jump host \(existingLabel) has different connection details. Tessera did not change it.")
         case .routeDiffers(let hostID):
-            guard let existing = fetchHost(hostID) else { return "A saved jump route differs from the other device. Tessera did not reroute it." }
+            guard let existing = fetchHost(hostID) else { return String(localized: "A saved jump route differs from the other device. Tessera did not reroute it.") }
             let existingLabel = existing.name.trimmingCharacters(
                 in: .whitespacesAndNewlines
             ).isEmpty ? existing.address : existing.name
-            return "The saved jump route for \(existingLabel) differs from the other device. Tessera did not reroute it."
+            return String(localized: "The saved jump route for \(existingLabel) differs from the other device. Tessera did not reroute it.")
         case nil:
             return nil
         }
@@ -4084,6 +4371,11 @@ struct ContentView: View {
         if selectedItem == .session(old.id) {
             selectedItem = .session(replacement.id)
         }
+        // The fallback IS this session's recovery, and the replacement carries a
+        // new liveSessionID the cohort entry can never match again. Left in, the
+        // entry would read `.dead` forever and be restored alongside the
+        // fallback — two tabs for one host.
+        retireForegroundRestoreCohortEntry(old.id, reason: "mosh-jump-fallback")
         logRestoreDiag(
             "mosh-jump-fallback live=\(shortID(old.id)) replacement=\(shortID(replacement.id)) host=\(shortID(old.persistedHostID))"
         )
@@ -4177,7 +4469,7 @@ struct ContentView: View {
                 from: continuationDescriptor,
                 for: hostDTO
             )
-            hostDTO.continuationPeerLabel = "your other device"
+            hostDTO.continuationPeerLabel = String(localized: "your other device")
         }
         // Nearby bootstrap fingerprints are absent by default. When the sender
         // opts into trusted host keys, exact non-conflicting records are
@@ -4301,6 +4593,9 @@ struct ContentView: View {
     }
 
     private func dismiss(_ live: LiveSession) {
+        // An explicit close is the user taking ownership of this session; the
+        // restore window must not reopen it.
+        retireForegroundRestoreCohortEntry(live.id, reason: "dismissed")
         let wasSelected = selectedItem == .session(live.id)
         activeSessions.removeAll { $0.id == live.id }
         if wasSelected {
@@ -4403,6 +4698,13 @@ struct ContentView: View {
             selectedItem = .agents
             sidebarVisible = true
         }
+    }
+
+    private func syncAgentScrollLock() {
+        agentCenter.setScrollLock(
+            claudeCode: appearance.agentScrollLockClaudeCodeEnabled,
+            codex: appearance.agentScrollLockCodexEnabled
+        )
     }
 
     private func updateAgentSurfaceDemand() {
@@ -4729,7 +5031,7 @@ private struct CompactSessionRowBody<S: ObservableObject & TerminalSession>: Vie
                             .foregroundStyle(T.fg)
                             .lineLimit(1)
 
-                        Text("\(transportLabel) · \(stateLabel(state))")
+                        Text(verbatim: "\(transportLabel) · \(stateLabel(state))")
                             .font(Typography.tesseraMono(size: 11))
                             .foregroundStyle(T.fgMuted)
                             .lineLimit(1)
@@ -4788,11 +5090,11 @@ private struct CompactSessionRowBody<S: ObservableObject & TerminalSession>: Vie
 
     private func stateLabel(_ state: SessionState) -> String {
         switch state {
-        case .idle: return "idle"
-        case .connecting: return "connecting…"
-        case .connected: return "connected"
-        case .disconnected: return "disconnected"
-        case .failed: return "failed"
+        case .idle: return String(localized: "idle")
+        case .connecting: return String(localized: "connecting…")
+        case .connected: return String(localized: "connected")
+        case .disconnected: return String(localized: "disconnected")
+        case .failed: return String(localized: "failed")
         }
     }
 
@@ -4807,8 +5109,8 @@ private struct CompactSessionRowBody<S: ObservableObject & TerminalSession>: Vie
 }
 
 private struct CompactViewSelector: View {
-    let leadingTitle: String
-    let trailingTitle: String
+    let leadingTitle: LocalizedStringKey
+    let trailingTitle: LocalizedStringKey
     @Binding var selection: Bool
 
     @Environment(\.designTokens) private var T
@@ -4834,7 +5136,7 @@ private struct CompactViewSelector: View {
     }
 
     private func segment(
-        _ title: String,
+        _ title: LocalizedStringKey,
         selected: Bool,
         action: @escaping () -> Void
     ) -> some View {

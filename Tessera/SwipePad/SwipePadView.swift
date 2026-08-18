@@ -380,7 +380,7 @@ struct SwipePadView: View {
                         .fixedSize(horizontal: false, vertical: true)
 
                     TimelineView(.animation(minimumInterval: 0.85)) { context in
-                        Text("|")
+                        Text(verbatim: "|")
                             .font(Typography.tesseraMono(size: 13))
                             .foregroundStyle(T.accent)
                             .opacity(caretIsVisible(at: context.date) ? 1 : 0)
@@ -557,7 +557,7 @@ struct SwipePadView: View {
     }
 
     private func accessibilityActionName(_ model: SwipePadPetalModel) -> String {
-        if model.action == .showMore { return "Show all options" }
+        if model.action == .showMore { return String(localized: "Show all options") }
         return "\(model.label) (\(displayMacro(model.caption)))"
     }
 
@@ -639,7 +639,7 @@ struct SwipePadView: View {
         SwipePadDiagnostics.log("petal-action source=a11y no-fire reason=\(reason)")
         UIAccessibility.post(
             notification: .announcement,
-            argument: "Terminal state changed, action not sent"
+            argument: String(localized: "Terminal state changed, action not sent")
         )
     }
 
@@ -693,34 +693,34 @@ struct SwipePadView: View {
     }
 
     private var accessibilityLabel: String {
-        if isDictating { return "Dictation active" }
-        if puckState == .relocating { return "Moving swipe pad" }
+        if isDictating { return String(localized: "Dictation active") }
+        if puckState == .relocating { return String(localized: "Moving swipe pad") }
         if let snapshot = hookSnapshot {
             switch snapshot.status {
             case .waitingForInput:
                 // Only a parsed prompt has a truthful option count; the
                 // unparsed fallback offers the static keymap instead.
                 if let count = snapshot.prompt?.options.count {
-                    return "Swipe pad · \(snapshot.profileName) waiting for input, \(count) options"
+                    return String(localized: "Swipe pad · \(snapshot.profileName) waiting for input, \(count) options")
                 }
-                return "Swipe pad · \(snapshot.profileName) waiting for input"
+                return String(localized: "Swipe pad · \(snapshot.profileName) waiting for input")
             case .working:
-                return "Swipe pad · \(snapshot.profileName) working, swipe left to interrupt or up to switch mode"
+                return String(localized: "Swipe pad · \(snapshot.profileName) working, swipe left to interrupt or up to switch mode")
             case .justFinished:
                 if finishedTintIsVisible {
-                    return "Swipe pad · \(snapshot.profileName) finished, tap to acknowledge or swipe up to switch mode"
+                    return String(localized: "Swipe pad · \(snapshot.profileName) finished, tap to acknowledge or swipe up to switch mode")
                 }
-                return "Swipe pad · \(snapshot.profileName) finished, swipe up to switch mode"
+                return String(localized: "Swipe pad · \(snapshot.profileName) finished, swipe up to switch mode")
             case .idle:
-                return "Swipe pad · \(snapshot.profileName) idle, swipe up to switch mode"
+                return String(localized: "Swipe pad · \(snapshot.profileName) idle, swipe up to switch mode")
             case .unavailable:
-                return "Swipe pad · \(snapshot.profileName)"
+                return String(localized: "Swipe pad · \(snapshot.profileName)")
             }
         }
         if let profile = resolver.currentProfile, !profile.matchProcess.isEmpty {
-            return "Swipe pad · matched \(profile.name)"
+            return String(localized: "Swipe pad · matched \(profile.name)")
         }
-        return "Swipe pad"
+        return String(localized: "Swipe pad")
     }
 
     private var dictationPill: some View {
@@ -1445,9 +1445,13 @@ struct SwipePadView: View {
         }
     }
 
+    /// Pretty-prints a macro spec for a petal label. Display only — the spec
+    /// language `MacroEncoder` parses is untouched, so a notation change can't
+    /// alter what a petal sends.
     private func displayMacro(_ macro: String) -> String {
-        macro
-            .replacingOccurrences(of: "shift-tab", with: "⇧ tab")
+        let shift = KeyToken.shift.rendered(appearance.modifierNotation)
+        return macro
+            .replacingOccurrences(of: "shift-tab", with: "\(shift) tab")
             .replacingOccurrences(of: "↵", with: " ↵")
     }
 

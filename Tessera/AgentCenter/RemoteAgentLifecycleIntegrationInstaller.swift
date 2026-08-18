@@ -8,8 +8,14 @@ enum AgentLifecycleIntegrationInstallError: LocalizedError {
         case .verificationFailed(let output):
             let detail = output.trimmingCharacters(in: .whitespacesAndNewlines)
             return detail.isEmpty
-                ? "Could not verify Agent Center integration."
-                : "Could not verify Agent Center integration: \(detail)"
+                ? String(
+                    localized: "Could not verify Agent Center integration.",
+                    comment: "Agent Center hook verification failed with no detail from the host"
+                )
+                : String(
+                    localized: "Could not verify Agent Center integration: \(detail)",
+                    comment: "Agent Center hook verification failed; the argument is output from the host"
+                )
         }
     }
 }
@@ -1239,7 +1245,10 @@ unset _tessera_agent_support_dir
         }
         throw AgentLifecycleIntegrationInstallError.verificationFailed(
             lastOutput.isEmpty
-                ? "Provider hook settings kept changing during installation."
+                ? String(
+                    localized: "Provider hook settings kept changing during installation.",
+                    comment: "Agent Center install gave up because the remote settings file kept moving"
+                )
                 : lastOutput
         )
     }

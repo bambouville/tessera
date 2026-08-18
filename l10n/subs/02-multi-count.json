@@ -1,0 +1,40 @@
+{
+  "Swipe pad · %@ waiting for input, %lld options": {
+    "de": {
+      "value": "Swipe-Pad · %1$@ wartet auf Eingabe, %#@options@",
+      "subs": {
+        "options": { "argNum": 2, "one": "%lld Option", "other": "%lld Optionen" }
+      }
+    },
+    "es": {
+      "value": "Panel táctil · %1$@ espera entrada, %#@options@",
+      "subs": {
+        "options": { "argNum": 2, "one": "%lld opción", "other": "%lld opciones" }
+      }
+    },
+    "fr": {
+      "value": "Pavé tactile · %1$@ attend une saisie, %#@options@",
+      "subs": {
+        "options": { "argNum": 2, "one": "%lld option", "other": "%lld options" }
+      }
+    },
+    "ja": {
+      "value": "スワイプパッド · %1$@ が入力待ち、%#@options@",
+      "subs": {
+        "options": { "argNum": 2, "other": "%lld 個の選択肢" }
+      }
+    },
+    "zh-Hans": {
+      "value": "滑动板 · %1$@ 正在等待输入，%#@options@",
+      "subs": {
+        "options": { "argNum": 2, "other": "%lld 个选项" }
+      }
+    },
+    "zh-Hant": {
+      "value": "滑動板 · %1$@ 正在等待輸入，%#@options@",
+      "subs": {
+        "options": { "argNum": 2, "other": "%lld 個選項" }
+      }
+    }
+  }
+}

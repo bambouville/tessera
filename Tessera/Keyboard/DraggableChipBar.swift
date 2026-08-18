@@ -22,11 +22,15 @@ struct DraggableChipBar<Chip: View>: View {
     @Binding var keys: [String]
     let trashEnabled: Bool
     let trashColor: Color
-    let onTap: (AccessoryChip) -> Void
-    var accessibilityValue: (AccessoryChip) -> String? = { _ in nil }
+    let onTap: (AccessoryBarItem) -> Void
+    /// Turns a stored raw ID into a bar item. Custom shortcuts live in
+    /// `ShortcutStore`, which this view deliberately does not reach into —
+    /// the settings editor and the live bar resolve from different sources.
+    var resolve: (String) -> AccessoryBarItem? = { AccessoryChip(rawValue: $0).map(AccessoryBarItem.chip) }
+    var accessibilityValue: (AccessoryBarItem) -> String? = { _ in nil }
     /// Builder for one chip view. `lifted` is true while this chip is the
     /// one being dragged — call site can highlight or scale to distinguish.
-    let chipView: (AccessoryChip, _ lifted: Bool) -> Chip
+    let chipView: (AccessoryBarItem, _ lifted: Bool) -> Chip
 
     @State private var draggingRaw: String?
     @State private var dragTranslation: CGSize = .zero
@@ -42,26 +46,28 @@ struct DraggableChipBar<Chip: View>: View {
 
     private static var coordSpace: String { "draggableChipBar" }
 
-    private var chips: [AccessoryChip] {
-        AccessoryChip.from(rawIDs: keys)
+    /// Unknown raw IDs are dropped rather than rendered as placeholders —
+    /// same `compactMap` contract the stored array has always had.
+    private var chips: [AccessoryBarItem] {
+        keys.compactMap(resolve)
     }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             HStack(spacing: 6) {
-                ForEach(chips, id: \.rawValue) { chip in
+                ForEach(chips) { chip in
                     chipView(chip, false)
                         .background(
                             GeometryReader { geo in
                                 Color.clear.preference(
                                     key: ChipFramesKey.self,
-                                    value: [chip.rawValue: geo.frame(in: .named(Self.coordSpace))]
+                                    value: [chip.rawID: geo.frame(in: .named(Self.coordSpace))]
                                 )
                             }
                         )
                         // Hide the source while it's being dragged so the
                         // floating overlay is the only visible copy.
-                        .opacity(draggingRaw == chip.rawValue ? 0 : 1)
+                        .opacity(draggingRaw == chip.rawID ? 0 : 1)
                         .overlay {
                             ChipInteractionSurface(
                                 onTap: { onTap(chip) },
@@ -89,7 +95,7 @@ struct DraggableChipBar<Chip: View>: View {
             // Floating preview of the dragged chip, anchored to the start
             // frame and translated by the cumulative drag. Stays under the
             // user's finger even as the chip's array slot moves underneath.
-            if let raw = draggingRaw, let chip = AccessoryChip(rawValue: raw) {
+            if let raw = draggingRaw, let chip = resolve(raw) {
                 chipView(chip, true)
                     .offset(
                         x: dragStartFrame.minX + dragTranslation.width,
@@ -128,18 +134,18 @@ struct DraggableChipBar<Chip: View>: View {
             .animation(.easeInOut(duration: 0.15), value: hoveringTrash)
     }
 
-    private func handleLongPress(_ phase: ChipInteractionPhase, for chip: AccessoryChip) {
+    private func handleLongPress(_ phase: ChipInteractionPhase, for chip: AccessoryBarItem) {
         switch phase {
         case .began(let localLocation, let windowLocation):
             guard draggingRaw == nil else { return }
             dragStartLocation = localLocation
             dragStartWindowLocation = windowLocation
-            draggingRaw = chip.rawValue
-            dragStartFrame = chipFrames[chip.rawValue] ?? .zero
+            draggingRaw = chip.rawID
+            dragStartFrame = chipFrames[chip.rawID] ?? .zero
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
         case .changed(let windowLocation):
-            guard draggingRaw == chip.rawValue else { return }
+            guard draggingRaw == chip.rawID else { return }
             dragTranslation = CGSize(
                 width: windowLocation.x - dragStartWindowLocation.x,
                 height: windowLocation.y - dragStartWindowLocation.y
@@ -150,8 +156,8 @@ struct DraggableChipBar<Chip: View>: View {
                 y: dragStartFrame.minY + dragStartLocation.y + dragTranslation.height
             )
 
-            if let target = chipUnderPoint(pointer), target != chip.rawValue {
-                liveReorder(chip.rawValue, toBefore: target)
+            if let target = chipUnderPoint(pointer), target != chip.rawID {
+                liveReorder(chip.rawID, toBefore: target)
             }
 
             let nowOverTrash = trashEnabled && trashFrame.contains(pointer)
@@ -163,7 +169,7 @@ struct DraggableChipBar<Chip: View>: View {
             }
 
         case .ended(let cancelled):
-            guard draggingRaw == chip.rawValue else { return }
+            guard draggingRaw == chip.rawID else { return }
             if !cancelled, hoveringTrash, let raw = draggingRaw {
                 keys.removeAll { $0 == raw }
                 UINotificationFeedbackGenerator().notificationOccurred(.success)

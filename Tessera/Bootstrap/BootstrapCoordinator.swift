@@ -30,7 +30,7 @@ struct BootstrapCredentialChecklistItem: Identifiable, Equatable, Sendable {
 
     var isGrantEligible: Bool { authenticationHint == .publicKey }
 
-    var actionLabel: String {
+    var actionLabel: LocalizedStringResource {
         switch authenticationHint {
         case .publicKey: return "authorize this device"
         case .password: return "password on first connect"
@@ -38,7 +38,7 @@ struct BootstrapCredentialChecklistItem: Identifiable, Equatable, Sendable {
         }
     }
 
-    var detail: String {
+    var detail: LocalizedStringResource {
         switch authenticationHint {
         case .publicKey:
             return "Install the other device's public key using this device's existing access."
@@ -144,25 +144,25 @@ enum BootstrapCoordinatorError: Error, Equatable, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notConfigured:
-            return "Nearby setup is not ready yet."
+            return String(localized: "Nearby setup is not ready yet.")
         case .invalidState:
-            return "Nearby setup is no longer at that step."
+            return String(localized: "Nearby setup is no longer at that step.")
         case .peerConnectionAlreadyActive:
-            return "A nearby setup connection is already active."
+            return String(localized: "A nearby setup connection is already active.")
         case .handshakeTimedOut:
-            return "The nearby device did not respond in time. Try nearby setup again."
+            return String(localized: "The nearby device did not respond in time. Try nearby setup again.")
         case .authorizationFailed(let reason):
             return reason
         case .invalidRecipientKey:
-            return "The recipient device key is invalid."
+            return String(localized: "The recipient device key is invalid.")
         case .missingHost:
-            return "A selected host is no longer available."
+            return String(localized: "A selected host is no longer available.")
         case .selectedHostChanged:
-            return "A selected host or its jump route changed. Review the grant selection again."
+            return String(localized: "A selected host or its jump route changed. Review the grant selection again.")
         case .rejectedImportedHost:
-            return "A granted host conflicted with local setup and was not imported."
+            return String(localized: "A granted host conflicted with local setup and was not imported.")
         case .completionAcknowledgementMismatch:
-            return "The other device did not acknowledge the final grant receipt."
+            return String(localized: "The other device did not acknowledge the final grant receipt.")
         }
     }
 }
@@ -270,7 +270,7 @@ final class BootstrapCoordinator {
     private var connection: (any NearbyByteConnection)?
     private var session: NearbyManifestTransferSession?
     private var role: NearbyHandshakeRole?
-    private var peerDisplayName = "Nearby Tessera device"
+    private var peerDisplayName = String(localized: "Nearby Tessera device")
     private var recipientKey: BootstrapRecipientKey?
     private var pendingOriginBatch: PendingOriginBatch?
     private var attemptIntent: AttemptIntent?
@@ -688,15 +688,19 @@ final class BootstrapCoordinator {
                 let authorization = try await grantEngine.authorize(
                     snapshots: selectedRequests.map(\.grantSnapshot)
                 ) {
+                    // Face ID reason string — iOS shows it in the system sheet.
                     let decision = await self.biometricAuthorizer(
-                        "Approve setup and \(selection.selectedCount) host key grant\(selection.selectedCount == 1 ? "" : "s") with code \(selection.code)"
+                        String(
+                            localized: "Approve setup and \(selection.selectedCount) host key grants with code \(selection.code)",
+                            comment: "Face ID prompt reason. Pluralized on the grant count; the code is a short pairing code."
+                        )
                     )
                     switch decision {
                     case .authenticated:
                         return
                     case .cancelled:
                         throw BootstrapCoordinatorError.authorizationFailed(
-                            "Nearby setup was not approved."
+                            String(localized: "Nearby setup was not approved.")
                         )
                     case .unavailable(let reason), .failed(let reason):
                         throw BootstrapCoordinatorError.authorizationFailed(reason)
@@ -1015,7 +1019,7 @@ final class BootstrapCoordinator {
                     )
                 } else {
                     failMessage(
-                        "You rejected the pairing code. No setup data was transferred."
+                        String(localized: "You rejected the pairing code. No setup data was transferred.")
                     )
                 }
             } catch is CancellationError {
@@ -1026,7 +1030,7 @@ final class BootstrapCoordinator {
                     fail(error)
                 } else {
                     failMessage(
-                        "You rejected the pairing code. No setup data was transferred."
+                        String(localized: "You rejected the pairing code. No setup data was transferred.")
                     )
                 }
             }
@@ -1271,7 +1275,7 @@ final class BootstrapCoordinator {
                 // arrives on a live task; end the attempt cleanly so the
                 // origin does not wait forever on the acceptance frame.
                 guard operationGeneration == generation, !Task.isCancelled else { return }
-                failMessage("Nearby setup was cancelled.")
+                failMessage(String(localized: "Nearby setup was cancelled."))
             } catch {
                 guard operationGeneration == generation else { return }
                 fail(error)
@@ -1391,7 +1395,7 @@ final class BootstrapCoordinator {
             )
         } catch is CancellationError {
             guard operationGeneration == generation else { return }
-            failMessage("Nearby setup was cancelled.")
+            failMessage(String(localized: "Nearby setup was cancelled."))
         } catch {
             guard operationGeneration == generation else { return }
             fail(error)
@@ -1612,7 +1616,7 @@ final class BootstrapCoordinator {
     private static func sanitizedGrantFailure(_ error: Error) -> String {
         let trimmed = error.localizedDescription
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let value = trimmed.isEmpty ? "Key installation failed." : trimmed
+        let value = trimmed.isEmpty ? String(localized: "Key installation failed.") : trimmed
         return String(value.prefix(BootstrapGrantBatchReceipt.maximumDetailLength))
     }
 
@@ -1659,7 +1663,7 @@ final class BootstrapCoordinator {
         attemptIntent = nil
         failedAttemptIntent = nil
         peerRejectionNotice = nil
-        peerDisplayName = "Nearby Tessera device"
+        peerDisplayName = String(localized: "Nearby Tessera device")
         let activeConnection = connection
         connection = nil
         Task { await activeConnection?.cancel() }
@@ -1702,30 +1706,21 @@ final class BootstrapCoordinator {
         case NearbyHandshakeError.incompatiblePeerVersion(let info, _):
             let release = info.appVersion.map { " (\($0))" } ?? ""
             if info.version > NearbyBootstrapProtocol.version {
-                return "\(peerName) is running a newer version of Tessera\(release). "
-                    + "Update Tessera on this device, then try again."
+                return String(localized: "\(peerName) is running a newer version of Tessera\(release). Update Tessera on this device, then try again.")
             }
-            return "\(peerName) is running an older version of Tessera\(release). "
-                + "Update Tessera on \(peerName), then try again."
+            return String(localized: "\(peerName) is running an older version of Tessera\(release). Update Tessera on \(peerName), then try again.")
         case NearbyHandshakeError.unsupportedFrameVersion,
              NearbyHandshakeError.unsupportedVersion:
-            return "The encrypted channel between the devices is incompatible. "
-                + "Make sure both devices run the same version of Tessera, then try again."
+            return String(localized: "The encrypted channel between the devices is incompatible. Make sure both devices run the same version of Tessera, then try again.")
         case BootstrapManifestError.unsupportedVersion(let version):
             if version > BootstrapManifest.currentVersion {
-                return "\(peerName) sent setup data from a newer version of Tessera. "
-                    + "Update Tessera on this device, then try again."
+                return String(localized: "\(peerName) sent setup data from a newer version of Tessera. Update Tessera on this device, then try again.")
             }
-            return "\(peerName) sent setup data from an older version of Tessera. "
-                + "Update Tessera on \(peerName), then try again."
+            return String(localized: "\(peerName) sent setup data from an older version of Tessera. Update Tessera on \(peerName), then try again.")
         case BootstrapManifestError.unknownField(let path, let field):
-            return "\(peerName) sent setup data with a field this version of Tessera "
-                + "does not accept (\(path).\(field)). If \(peerName) is running a newer "
-                + "version of Tessera, update this device, then try again."
+            return String(localized: "\(peerName) sent setup data with a field this version of Tessera does not accept (\(path).\(field)). If \(peerName) is running a newer version of Tessera, update this device, then try again.")
         case is DecodingError:
-            return "The devices could not understand each other's setup messages. "
-                + "Make sure both devices are running the same version of Tessera, "
-                + "then try again."
+            return String(localized: "The devices could not understand each other's setup messages. Make sure both devices are running the same version of Tessera, then try again.")
         default:
             return error.localizedDescription
         }

@@ -7,6 +7,23 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		1AFF0000000000000000001E /* AppShortcutDispatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFF0000000000000000001D /* AppShortcutDispatcher.swift */; };
+		1AFF00000000000000000020 /* StoredKeyboardShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFF0000000000000000001F /* StoredKeyboardShortcut.swift */; };
+		1AFF0000000000000000001C /* CustomShortcutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFF0000000000000000001B /* CustomShortcutTests.swift */; };
+		1AFF00000000000000000022 /* LaunchDiagnosticsPrivacyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFF00000000000000000021 /* LaunchDiagnosticsPrivacyTests.swift */; };
+		1AFF0000000000000000001A /* ShortcutScopeEvaluator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFF00000000000000000019 /* ShortcutScopeEvaluator.swift */; };
+		1AFF00000000000000000018 /* CustomShortcutEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFF00000000000000000017 /* CustomShortcutEditorView.swift */; };
+		1AFF00000000000000000016 /* ChordRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFF00000000000000000015 /* ChordRecorder.swift */; };
+		1AFF00000000000000000014 /* ShortcutsEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFF00000000000000000013 /* ShortcutsEditorView.swift */; };
+		1AFF00000000000000000012 /* AccessoryBarItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFF00000000000000000011 /* AccessoryBarItem.swift */; };
+		1AFF00000000000000000010 /* ShortcutValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFF0000000000000000000F /* ShortcutValidationTests.swift */; };
+		1AFF0000000000000000000E /* ShortcutRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFF0000000000000000000D /* ShortcutRegistryTests.swift */; };
+		1AFF0000000000000000000C /* ShortcutStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFF0000000000000000000B /* ShortcutStore.swift */; };
+		1AFF0000000000000000000A /* CustomShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFF00000000000000000009 /* CustomShortcut.swift */; };
+		1AFF00000000000000000008 /* ShortcutAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFF00000000000000000007 /* ShortcutAction.swift */; };
+		1AFF00000000000000000006 /* KeyBinding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFF00000000000000000005 /* KeyBinding.swift */; };
+		1AFF00000000000000000004 /* ModifierNotationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFF00000000000000000003 /* ModifierNotationTests.swift */; };
+		1AFF00000000000000000002 /* ModifierNotation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFF00000000000000000001 /* ModifierNotation.swift */; };
 		5B1100000000000000000010 /* HostAccessProduct.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B10000000000000000010 /* HostAccessProduct.swift */; };
 		5B1100000000000000000011 /* StoreKitClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B10000000000000000011 /* StoreKitClient.swift */; };
 		5B1100000000000000000012 /* HostAccessStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B10000000000000000012 /* HostAccessStore.swift */; };
@@ -24,6 +41,8 @@
 		1A0004000000000000000001 /* TesseraApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000001 /* TesseraApp.swift */; };
 		1A0004000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000002 /* ContentView.swift */; };
 		1A0004000000000000000003 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000003 /* Assets.xcassets */; };
+		1A0004000000000000000F10 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000F10 /* Localizable.xcstrings */; };
+		1A0004000000000000000F11 /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000F11 /* InfoPlist.xcstrings */; };
 		1A0004000000000000000005 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A000000000000000001 /* SwiftTerm */; };
 		1A0004000000000000000006 /* ScrollDispatcher in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A000000000000000002 /* ScrollDispatcher */; };
 		1A0004000000000000000007 /* TmuxControl in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A000000000000000003 /* TmuxControl */; };
@@ -53,6 +72,8 @@
 		1A0004000000000000000023 /* MoshBootstrapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000300000000000000001E /* MoshBootstrapTests.swift */; };
 		1A0004000000000000000024 /* KnownHostsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000300000000000000001F /* KnownHostsStoreTests.swift */; };
 		1A00A0000000000000000002 /* RealHostTransportIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00A0000000000000000001 /* RealHostTransportIntegrationTests.swift */; };
+		1AFE00000000000000000002 /* AutoTmuxLaunchRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFE00000000000000000001 /* AutoTmuxLaunchRegressionTests.swift */; };
+		1AFE00000000000000000004 /* AutoTmuxSessionViewLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFE00000000000000000003 /* AutoTmuxSessionViewLaunchTests.swift */; };
 		1A00A0000000000000000004 /* VisualCaptureProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00A0000000000000000003 /* VisualCaptureProbe.swift */; };
 		1A00A0000000000000000006 /* TerminalScrollbackOracleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00A0000000000000000005 /* TerminalScrollbackOracleTests.swift */; };
 		1A0004000000000000000033 /* HostKeyVerificationRequestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000033 /* HostKeyVerificationRequestTests.swift */; };
@@ -164,6 +185,7 @@
 		1A00B1000000000000000005 /* SwipePadAgentContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00B0000000000000000005 /* SwipePadAgentContext.swift */; };
 		1A00B1000000000000000006 /* AgentRegexCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00B0000000000000000006 /* AgentRegexCache.swift */; };
 		1A0034000000000000000001 /* SessionRestoreStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0033000000000000000001 /* SessionRestoreStore.swift */; };
+		1A0034000000000000000091 /* SessionRestoreCohort.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0033000000000000000091 /* SessionRestoreCohort.swift */; };
 		1A0034000000000000000002 /* SessionRestoreSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0033000000000000000002 /* SessionRestoreSheet.swift */; };
 		1A0034000000000000000003 /* SessionRestoreStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0033000000000000000003 /* SessionRestoreStoreTests.swift */; };
 		1A0061000000000000000001 /* FilesContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000001 /* FilesContracts.swift */; };
@@ -188,6 +210,7 @@
 		1A0061000000000000000012 /* RemoteCwdPoller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000012 /* RemoteCwdPoller.swift */; };
 		1A0061000000000000000013 /* RemoteCwdPollerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000013 /* RemoteCwdPollerTests.swift */; };
 		1A0034000000000000000004 /* SessionRestoreResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0033000000000000000004 /* SessionRestoreResolverTests.swift */; };
+		1A0034000000000000000092 /* ForegroundRestoreCohortTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0033000000000000000092 /* ForegroundRestoreCohortTests.swift */; };
 		1A0041000000000000000002 /* OnboardingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0040000000000000000002 /* OnboardingController.swift */; };
 		1A0041000000000000000003 /* OnboardingStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0040000000000000000003 /* OnboardingStep.swift */; };
 		1A0041000000000000000004 /* OnboardingAnchor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0040000000000000000004 /* OnboardingAnchor.swift */; };
@@ -277,6 +300,23 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		1AFF0000000000000000001D /* AppShortcutDispatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShortcutDispatcher.swift; sourceTree = "<group>"; };
+		1AFF0000000000000000001F /* StoredKeyboardShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoredKeyboardShortcut.swift; sourceTree = "<group>"; };
+		1AFF0000000000000000001B /* CustomShortcutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomShortcutTests.swift; sourceTree = "<group>"; };
+		1AFF00000000000000000021 /* LaunchDiagnosticsPrivacyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchDiagnosticsPrivacyTests.swift; sourceTree = "<group>"; };
+		1AFF00000000000000000019 /* ShortcutScopeEvaluator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutScopeEvaluator.swift; sourceTree = "<group>"; };
+		1AFF00000000000000000017 /* CustomShortcutEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomShortcutEditorView.swift; sourceTree = "<group>"; };
+		1AFF00000000000000000015 /* ChordRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChordRecorder.swift; sourceTree = "<group>"; };
+		1AFF00000000000000000013 /* ShortcutsEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutsEditorView.swift; sourceTree = "<group>"; };
+		1AFF00000000000000000011 /* AccessoryBarItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessoryBarItem.swift; sourceTree = "<group>"; };
+		1AFF0000000000000000000F /* ShortcutValidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutValidationTests.swift; sourceTree = "<group>"; };
+		1AFF0000000000000000000D /* ShortcutRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRegistryTests.swift; sourceTree = "<group>"; };
+		1AFF0000000000000000000B /* ShortcutStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutStore.swift; sourceTree = "<group>"; };
+		1AFF00000000000000000009 /* CustomShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomShortcut.swift; sourceTree = "<group>"; };
+		1AFF00000000000000000007 /* ShortcutAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutAction.swift; sourceTree = "<group>"; };
+		1AFF00000000000000000005 /* KeyBinding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyBinding.swift; sourceTree = "<group>"; };
+		1AFF00000000000000000003 /* ModifierNotationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModifierNotationTests.swift; sourceTree = "<group>"; };
+		1AFF00000000000000000001 /* ModifierNotation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModifierNotation.swift; sourceTree = "<group>"; };
 		5B10000000000000000010 /* HostAccessProduct.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostAccessProduct.swift; sourceTree = "<group>"; };
 		5B10000000000000000011 /* StoreKitClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreKitClient.swift; sourceTree = "<group>"; };
 		5B10000000000000000012 /* HostAccessStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostAccessStore.swift; sourceTree = "<group>"; };
@@ -292,6 +332,8 @@
 		1A0003000000000000000001 /* TesseraApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TesseraApp.swift; sourceTree = "<group>"; };
 		1A0003000000000000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		1A0003000000000000000003 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		1A0003000000000000000F10 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		1A0003000000000000000F11 /* InfoPlist.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = InfoPlist.xcstrings; sourceTree = "<group>"; };
 		1A0003000000000000000004 /* Tessera.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Tessera.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A0003000000000000000006 /* Host.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Host.swift; sourceTree = "<group>"; };
 		1A0003000000000000000007 /* SSHSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHSession.swift; sourceTree = "<group>"; };
@@ -318,6 +360,8 @@
 		1A000300000000000000001E /* MoshBootstrapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoshBootstrapTests.swift; sourceTree = "<group>"; };
 		1A000300000000000000001F /* KnownHostsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnownHostsStoreTests.swift; sourceTree = "<group>"; };
 		1A00A0000000000000000001 /* RealHostTransportIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealHostTransportIntegrationTests.swift; sourceTree = "<group>"; };
+		1AFE00000000000000000001 /* AutoTmuxLaunchRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoTmuxLaunchRegressionTests.swift; sourceTree = "<group>"; };
+		1AFE00000000000000000003 /* AutoTmuxSessionViewLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoTmuxSessionViewLaunchTests.swift; sourceTree = "<group>"; };
 		1A00A0000000000000000003 /* VisualCaptureProbe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VisualCaptureProbe.swift; sourceTree = "<group>"; };
 		1A00A0000000000000000005 /* TerminalScrollbackOracleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalScrollbackOracleTests.swift; sourceTree = "<group>"; };
 		1A0003000000000000000033 /* HostKeyVerificationRequestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostKeyVerificationRequestTests.swift; sourceTree = "<group>"; };
@@ -444,9 +488,11 @@
 		1A002B00000000000000000A /* ExperimentalSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExperimentalSettingsView.swift; sourceTree = "<group>"; };
 		1A002B00000000000000000B /* SwipePadPetalLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipePadPetalLayout.swift; sourceTree = "<group>"; };
 		1A0033000000000000000001 /* SessionRestoreStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRestoreStore.swift; sourceTree = "<group>"; };
+		1A0033000000000000000091 /* SessionRestoreCohort.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRestoreCohort.swift; sourceTree = "<group>"; };
 		1A0033000000000000000002 /* SessionRestoreSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRestoreSheet.swift; sourceTree = "<group>"; };
 		1A0033000000000000000003 /* SessionRestoreStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRestoreStoreTests.swift; sourceTree = "<group>"; };
 		1A0033000000000000000004 /* SessionRestoreResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRestoreResolverTests.swift; sourceTree = "<group>"; };
+		1A0033000000000000000092 /* ForegroundRestoreCohortTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForegroundRestoreCohortTests.swift; sourceTree = "<group>"; };
 		1A0040000000000000000002 /* OnboardingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingController.swift; sourceTree = "<group>"; };
 		1A0040000000000000000003 /* OnboardingStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingStep.swift; sourceTree = "<group>"; };
 		1A0040000000000000000004 /* OnboardingAnchor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingAnchor.swift; sourceTree = "<group>"; };
@@ -590,6 +636,7 @@
 				7E4A0002AA00000000000002 /* SSHConnectionChain.swift */,
 				1A000300000000000000000E /* LiveSession.swift */,
 				1A0033000000000000000001 /* SessionRestoreStore.swift */,
+				1A0033000000000000000091 /* SessionRestoreCohort.swift */,
 				1A0033000000000000000002 /* SessionRestoreSheet.swift */,
 				1A000300000000000000000F /* SessionSidebar.swift */,
 				1A0003000000000000000010 /* HostDetailView.swift */,
@@ -624,6 +671,8 @@
 				1A0012000000000000000008 /* Terminal */,
 				1A0012000000000000000003 /* Resources */,
 				1A0003000000000000000003 /* Assets.xcassets */,
+				1A0003000000000000000F10 /* Localizable.xcstrings */,
+				1A0003000000000000000F11 /* InfoPlist.xcstrings */,
 				1A00030000000000000000F0 /* PrivacyInfo.xcprivacy */,
 				1A0060000000000000000011 /* Info.plist */,
 				D7A500000000000000000012 /* Tessera.entitlements */,
@@ -662,6 +711,8 @@
 				C2000000000000000000001E /* EnrollmentContinuationStreamTransportTests.swift */,
 				C20000000000000000000020 /* EnrollmentCoordinatorTests.swift */,
 				1A00A0000000000000000001 /* RealHostTransportIntegrationTests.swift */,
+				1AFE00000000000000000001 /* AutoTmuxLaunchRegressionTests.swift */,
+				1AFE00000000000000000003 /* AutoTmuxSessionViewLaunchTests.swift */,
 				1A00A0000000000000000005 /* TerminalScrollbackOracleTests.swift */,
 				1A000300000000000000001E /* MoshBootstrapTests.swift */,
 				1A000300000000000000001F /* KnownHostsStoreTests.swift */,
@@ -681,6 +732,7 @@
 				1A002300000000000000000B /* SessionSwitcherTests.swift */,
 				1A0033000000000000000003 /* SessionRestoreStoreTests.swift */,
 				1A0033000000000000000004 /* SessionRestoreResolverTests.swift */,
+				1A0033000000000000000092 /* ForegroundRestoreCohortTests.swift */,
 				1A0040000000000000000006 /* OnboardingControllerTests.swift */,
 				1A0050000000000000000001 /* KittyWindowModeStoreTests.swift */,
 				1A0050000000000000000003 /* PaneLayoutMathTests.swift */,
@@ -698,6 +750,11 @@
 				5B10000000000000000017 /* SavedHostAdmissionPolicyTests.swift */,
 				5B10000000000000000018 /* HostAccessStoreTests.swift */,
 				5B10000000000000000019 /* StoreKitPurchaseTests.swift */,
+				1AFF00000000000000000003 /* ModifierNotationTests.swift */,
+				1AFF0000000000000000000D /* ShortcutRegistryTests.swift */,
+				1AFF0000000000000000000F /* ShortcutValidationTests.swift */,
+				1AFF0000000000000000001B /* CustomShortcutTests.swift */,
+				1AFF00000000000000000021 /* LaunchDiagnosticsPrivacyTests.swift */,
 			);
 			path = TesseraTests;
 			sourceTree = "<group>";
@@ -813,6 +870,9 @@
 				1A001300000000000000001B /* AboutSettingsView.swift */,
 				1A006000000000000000000D /* FilesSettingsView.swift */,
 				5B10000000000000000015 /* UnlimitedHostsSettingsView.swift */,
+				1AFF00000000000000000013 /* ShortcutsEditorView.swift */,
+				1AFF00000000000000000015 /* ChordRecorder.swift */,
+				1AFF00000000000000000017 /* CustomShortcutEditorView.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -960,6 +1020,15 @@
 				1A0023000000000000000003 /* ModifierState.swift */,
 				1A0023000000000000000007 /* SessionAccessoryBar.swift */,
 				1A0023000000000000000008 /* DraggableChipBar.swift */,
+				1AFF00000000000000000001 /* ModifierNotation.swift */,
+				1AFF00000000000000000005 /* KeyBinding.swift */,
+				1AFF00000000000000000007 /* ShortcutAction.swift */,
+				1AFF00000000000000000009 /* CustomShortcut.swift */,
+				1AFF0000000000000000000B /* ShortcutStore.swift */,
+				1AFF00000000000000000011 /* AccessoryBarItem.swift */,
+				1AFF00000000000000000019 /* ShortcutScopeEvaluator.swift */,
+				1AFF0000000000000000001D /* AppShortcutDispatcher.swift */,
+				1AFF0000000000000000001F /* StoredKeyboardShortcut.swift */,
 			);
 			path = Keyboard;
 			sourceTree = "<group>";
@@ -1147,6 +1216,12 @@
 			knownRegions = (
 				en,
 				Base,
+				de,
+				es,
+				fr,
+				ja,
+				"zh-Hans",
+				"zh-Hant",
 			);
 			mainGroup = 1A0002000000000000000001;
 			minimizedProjectReferenceProxies = 1;
@@ -1185,6 +1260,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				1A0004000000000000000003 /* Assets.xcassets in Resources */,
+				1A0004000000000000000F10 /* Localizable.xcstrings in Resources */,
+				1A0004000000000000000F11 /* InfoPlist.xcstrings in Resources */,
 				1A001400000000000000000B /* JetBrainsMono.ttf in Resources */,
 				1A00040000000000000000F0 /* PrivacyInfo.xcprivacy in Resources */,
 				1A00040000000000000000F1 /* LICENSE in Resources */,
@@ -1263,6 +1340,7 @@
 				1A0004000000000000000010 /* Identity.swift in Sources */,
 				1A0004000000000000000011 /* LiveSession.swift in Sources */,
 				1A0034000000000000000001 /* SessionRestoreStore.swift in Sources */,
+				1A0034000000000000000091 /* SessionRestoreCohort.swift in Sources */,
 				1A0034000000000000000002 /* SessionRestoreSheet.swift in Sources */,
 				1A0004000000000000000012 /* SessionSidebar.swift in Sources */,
 				1A0004000000000000000013 /* HostDetailView.swift in Sources */,
@@ -1371,6 +1449,18 @@
 				5B1100000000000000000013 /* SavedHostAdmissionPolicy.swift in Sources */,
 				5B1100000000000000000014 /* UnlimitedHostsSheet.swift in Sources */,
 				5B1100000000000000000015 /* UnlimitedHostsSettingsView.swift in Sources */,
+				1AFF00000000000000000002 /* ModifierNotation.swift in Sources */,
+				1AFF00000000000000000006 /* KeyBinding.swift in Sources */,
+				1AFF00000000000000000008 /* ShortcutAction.swift in Sources */,
+				1AFF0000000000000000000A /* CustomShortcut.swift in Sources */,
+				1AFF0000000000000000000C /* ShortcutStore.swift in Sources */,
+				1AFF00000000000000000012 /* AccessoryBarItem.swift in Sources */,
+				1AFF00000000000000000014 /* ShortcutsEditorView.swift in Sources */,
+				1AFF00000000000000000016 /* ChordRecorder.swift in Sources */,
+				1AFF00000000000000000018 /* CustomShortcutEditorView.swift in Sources */,
+				1AFF0000000000000000001A /* ShortcutScopeEvaluator.swift in Sources */,
+				1AFF0000000000000000001E /* AppShortcutDispatcher.swift in Sources */,
+				1AFF00000000000000000020 /* StoredKeyboardShortcut.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1393,6 +1483,8 @@
 				C1000000000000000000001E /* EnrollmentContinuationStreamTransportTests.swift in Sources */,
 				C10000000000000000000020 /* EnrollmentCoordinatorTests.swift in Sources */,
 				1A00A0000000000000000002 /* RealHostTransportIntegrationTests.swift in Sources */,
+				1AFE00000000000000000002 /* AutoTmuxLaunchRegressionTests.swift in Sources */,
+				1AFE00000000000000000004 /* AutoTmuxSessionViewLaunchTests.swift in Sources */,
 				1A00A0000000000000000006 /* TerminalScrollbackOracleTests.swift in Sources */,
 				1A0004000000000000000023 /* MoshBootstrapTests.swift in Sources */,
 				1A0004000000000000000024 /* KnownHostsStoreTests.swift in Sources */,
@@ -1412,6 +1504,7 @@
 				1A002400000000000000000B /* SessionSwitcherTests.swift in Sources */,
 				1A0034000000000000000003 /* SessionRestoreStoreTests.swift in Sources */,
 				1A0034000000000000000004 /* SessionRestoreResolverTests.swift in Sources */,
+				1A0034000000000000000092 /* ForegroundRestoreCohortTests.swift in Sources */,
 				1A0041000000000000000006 /* OnboardingControllerTests.swift in Sources */,
 				1A0050000000000000000002 /* KittyWindowModeStoreTests.swift in Sources */,
 				1A0050000000000000000004 /* PaneLayoutMathTests.swift in Sources */,
@@ -1429,6 +1522,11 @@
 				5B1100000000000000000017 /* SavedHostAdmissionPolicyTests.swift in Sources */,
 				5B1100000000000000000018 /* HostAccessStoreTests.swift in Sources */,
 				5B1100000000000000000019 /* StoreKitPurchaseTests.swift in Sources */,
+				1AFF00000000000000000004 /* ModifierNotationTests.swift in Sources */,
+				1AFF0000000000000000000E /* ShortcutRegistryTests.swift in Sources */,
+				1AFF00000000000000000010 /* ShortcutValidationTests.swift in Sources */,
+				1AFF0000000000000000001C /* CustomShortcutTests.swift in Sources */,
+				1AFF00000000000000000022 /* LaunchDiagnosticsPrivacyTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1597,7 +1695,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Tessera/Tessera.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1616,7 +1714,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.3.3;
+				MARKETING_VERSION = 0.3.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -1632,7 +1730,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Tessera/Tessera.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1651,7 +1749,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.3.3;
+				MARKETING_VERSION = 0.3.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -1665,7 +1763,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 6;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1673,7 +1771,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.3.3;
+				MARKETING_VERSION = 0.3.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -1689,7 +1787,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 6;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1697,7 +1795,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.3.3;
+				MARKETING_VERSION = 0.3.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -1749,7 +1847,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = TesseraShareExtension/TesseraShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1761,7 +1859,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.3;
+				MARKETING_VERSION = 0.3.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraApp.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1777,7 +1875,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = TesseraShareExtension/TesseraShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1789,7 +1887,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.3;
+				MARKETING_VERSION = 0.3.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraApp.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;

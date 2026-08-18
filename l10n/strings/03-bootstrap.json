@@ -1,0 +1,698 @@
+{
+  "Nearby setup is not ready yet.": {
+    "de": "Die Übertragung in der Nähe ist noch nicht bereit.",
+    "es": "La configuración cercana aún no está lista.",
+    "fr": "La configuration à proximité n'est pas encore prête.",
+    "ja": "近くのデバイスからのセットアップはまだ準備できていません。",
+    "zh-Hans": "附近设置尚未就绪。",
+    "zh-Hant": "鄰近設定尚未就緒。"
+  },
+  "Nearby setup is no longer at that step.": {
+    "de": "Die Übertragung in der Nähe befindet sich nicht mehr in diesem Schritt.",
+    "es": "La configuración cercana ya no está en ese paso.",
+    "fr": "La configuration à proximité n'en est plus à cette étape.",
+    "ja": "近くのデバイスからのセットアップは、すでにその手順を過ぎています。",
+    "zh-Hans": "附近设置已不在该步骤。",
+    "zh-Hant": "鄰近設定已不在該步驟。"
+  },
+  "A nearby setup connection is already active.": {
+    "de": "Es ist bereits eine Verbindung für die Übertragung in der Nähe aktiv.",
+    "es": "Ya hay una conexión de configuración cercana activa.",
+    "fr": "Une connexion de configuration à proximité est déjà active.",
+    "ja": "近くのデバイスとのセットアップ接続がすでに有効です。",
+    "zh-Hans": "已有一个附近设置连接处于活动状态。",
+    "zh-Hant": "已有一個鄰近設定連線處於使用中狀態。"
+  },
+  "The nearby device did not respond in time. Try nearby setup again.": {
+    "de": "Das Gerät in der Nähe hat nicht rechtzeitig geantwortet. Versuche die Übertragung erneut.",
+    "es": "El dispositivo cercano no respondió a tiempo. Vuelve a intentar la configuración cercana.",
+    "fr": "L'appareil à proximité n'a pas répondu à temps. Relancez la configuration à proximité.",
+    "ja": "近くのデバイスから時間内に応答がありませんでした。セットアップをやり直してください。",
+    "zh-Hans": "附近的设备未及时响应。请重新尝试附近设置。",
+    "zh-Hant": "鄰近的裝置未及時回應。請重新嘗試鄰近設定。"
+  },
+  "The recipient device key is invalid.": {
+    "de": "Der Key des Empfängergeräts ist ungültig.",
+    "es": "La clave del dispositivo receptor no es válida.",
+    "fr": "La clé de l'appareil destinataire n'est pas valide.",
+    "ja": "受信側デバイスのキーが無効です。",
+    "zh-Hans": "接收设备的密钥无效。",
+    "zh-Hant": "接收裝置的金鑰無效。"
+  },
+  "A selected host is no longer available.": {
+    "de": "Ein ausgewählter Host ist nicht mehr verfügbar.",
+    "es": "Un host seleccionado ya no está disponible.",
+    "fr": "Un hôte sélectionné n'est plus disponible.",
+    "ja": "選択したホストが利用できなくなりました。",
+    "zh-Hans": "所选主机已不可用。",
+    "zh-Hant": "所選主機已無法使用。"
+  },
+  "A selected host or its jump route changed. Review the grant selection again.": {
+    "de": "Ein ausgewählter Host oder seine Jump-Route hat sich geändert. Prüfe die Auswahl erneut.",
+    "es": "Un host seleccionado o su ruta de salto ha cambiado. Revisa de nuevo la selección.",
+    "fr": "Un hôte sélectionné ou sa route de rebond a changé. Vérifiez à nouveau la sélection.",
+    "ja": "選択したホストまたはその踏み台経路が変更されました。付与の選択をもう一度確認してください。",
+    "zh-Hans": "所选主机或其跳板路由已更改。请重新检查授权选择。",
+    "zh-Hant": "所選主機或其跳板路由已變更。請重新檢查授權選擇。"
+  },
+  "A granted host conflicted with local setup and was not imported.": {
+    "de": "Ein freigegebener Host stand im Konflikt mit der lokalen Konfiguration und wurde nicht importiert.",
+    "es": "Un host concedido entró en conflicto con la configuración local y no se importó.",
+    "fr": "Un hôte accordé est entré en conflit avec la configuration locale et n'a pas été importé.",
+    "ja": "付与されたホストがローカル設定と競合したため、インポートされませんでした。",
+    "zh-Hans": "某个已授权的主机与本地配置冲突，未被导入。",
+    "zh-Hant": "某個已授權的主機與本機設定衝突，未被匯入。"
+  },
+  "The other device did not acknowledge the final grant receipt.": {
+    "de": "Das andere Gerät hat die abschließende Bestätigung nicht quittiert.",
+    "es": "El otro dispositivo no confirmó el recibo final de concesión.",
+    "fr": "L'autre appareil n'a pas accusé réception du reçu final.",
+    "ja": "他のデバイスが最終的な付与レシートを確認しませんでした。",
+    "zh-Hans": "另一台设备未确认最终授权回执。",
+    "zh-Hant": "另一台裝置未確認最終授權回條。"
+  },
+  "OK": {
+    "de": "OK",
+    "es": "OK",
+    "fr": "OK",
+    "ja": "OK",
+    "zh-Hans": "好",
+    "zh-Hant": "好"
+  },
+  "Pairing rejected": {
+    "de": "Kopplung abgelehnt",
+    "es": "Emparejamiento rechazado",
+    "fr": "Association refusée",
+    "ja": "ペアリングが拒否されました",
+    "zh-Hans": "配对被拒绝",
+    "zh-Hant": "配對遭拒絕"
+  },
+  "Sending to %@. Its displayed name is never used as a security decision.": {
+    "de": "Wird an %@ gesendet. Der angezeigte Name ist nie die Grundlage einer Sicherheitsentscheidung.",
+    "es": "Enviando a %@. Su nombre visible nunca se usa como decisión de seguridad.",
+    "fr": "Envoi vers %@. Son nom affiché ne sert jamais de décision de sécurité.",
+    "ja": "%@ に送信します。表示名がセキュリティ上の判断に使われることはありません。",
+    "zh-Hans": "正在发送到 %@。其显示名称绝不会作为安全判断依据。",
+    "zh-Hant": "正在傳送到 %@。其顯示名稱絕不會作為安全判斷依據。"
+  },
+  "Setup inherited": {
+    "de": "Konfiguration übernommen",
+    "es": "Configuración heredada",
+    "fr": "Configuration héritée",
+    "ja": "セットアップを引き継ぎました",
+    "zh-Hans": "已继承设置",
+    "zh-Hant": "已繼承設定"
+  },
+  "Setup sent": {
+    "de": "Konfiguration gesendet",
+    "es": "Configuración enviada",
+    "fr": "Configuration envoyée",
+    "ja": "セットアップを送信しました",
+    "zh-Hans": "设置已发送",
+    "zh-Hant": "設定已傳送"
+  },
+  "Setup was not marked complete. Any encrypted channel is closed, and any host grant is recorded only after its remote installation succeeds; retrying nearby transfer creates fresh ephemeral keys and a new comparison code.": {
+    "de": "Die Konfiguration wurde nicht als abgeschlossen markiert. Ein verschlüsselter Kanal wird geschlossen, und eine Host-Freigabe wird erst nach erfolgreicher Installation auf der Gegenseite verbucht. Ein neuer Versuch erzeugt frische Einmal-Keys und einen neuen Vergleichscode.",
+    "es": "La configuración no se marcó como completa. Todo canal cifrado se cierra y cada concesión de host solo se registra tras instalarse correctamente en el equipo remoto; reintentar la transferencia cercana genera claves efímeras nuevas y un nuevo código de comparación.",
+    "fr": "La configuration n'a pas été marquée comme terminée. Tout canal chiffré est fermé et chaque autorisation d'hôte n'est enregistrée qu'après son installation réussie à distance ; relancer le transfert génère de nouvelles clés éphémères et un nouveau code de comparaison.",
+    "ja": "セットアップは完了として記録されませんでした。暗号化チャネルは閉じられ、ホストへの付与はリモートへのインストールが成功した後にのみ記録されます。転送をやり直すと、新しい一時キーと新しい照合コードが生成されます。",
+    "zh-Hans": "设置未标记为完成。任何加密通道都会关闭，主机授权只有在远程安装成功后才会记录；重试附近传输会生成新的临时密钥和新的比对码。",
+    "zh-Hant": "設定未標記為完成。任何加密通道都會關閉，主機授權只有在遠端安裝成功後才會記錄；重試鄰近傳輸會產生新的臨時金鑰和新的比對碼。"
+  },
+  "Software-backed simulator key. It is not protected by Secure Enclave; grant access only to test hosts you intend this simulator to use.": {
+    "de": "Software-basierter Simulator-Key. Er ist nicht durch die Secure Enclave geschützt — gib nur Testhosts frei, die dieser Simulator verwenden soll.",
+    "es": "Clave de simulador basada en software. No está protegida por Secure Enclave; concede acceso solo a hosts de prueba que quieras usar desde este simulador.",
+    "fr": "Clé de simulateur logicielle. Elle n'est pas protégée par la Secure Enclave : n'accordez l'accès qu'à des hôtes de test destinés à ce simulateur.",
+    "ja": "ソフトウェアベースのシミュレータキーです。Secure Enclave では保護されません。このシミュレータで使うテスト用ホストにのみアクセスを許可してください。",
+    "zh-Hans": "基于软件的模拟器密钥。它不受安全隔区保护；请只授权给你打算在此模拟器上使用的测试主机。",
+    "zh-Hant": "基於軟體的模擬器金鑰。它不受安全隔離區保護；請只授權給你打算在此模擬器上使用的測試主機。"
+  },
+  "TESSERA · NEARBY SETUP": {
+    "de": "TESSERA · ÜBERTRAGUNG IN DER NÄHE",
+    "es": "TESSERA · CONFIGURACIÓN CERCANA",
+    "fr": "TESSERA · CONFIGURATION À PROXIMITÉ",
+    "ja": "TESSERA・近くのデバイスからセットアップ",
+    "zh-Hans": "TESSERA · 附近设置",
+    "zh-Hant": "TESSERA · 鄰近設定"
+  },
+  "These fields may contain secrets or change first-connect trust. Select only what you intend to copy to %@.": {
+    "de": "Diese Felder können Geheimnisse enthalten oder das Vertrauen beim ersten Verbinden verändern. Wähle nur aus, was du wirklich auf %@ kopieren willst.",
+    "es": "Estos campos pueden contener secretos o alterar la confianza en la primera conexión. Selecciona solo lo que quieras copiar a %@.",
+    "fr": "Ces champs peuvent contenir des secrets ou modifier la confiance à la première connexion. Ne sélectionnez que ce que vous voulez copier vers %@.",
+    "ja": "これらの項目には機密情報が含まれる、または初回接続時の信頼に影響する可能性があります。%@ にコピーしたいものだけを選択してください。",
+    "zh-Hans": "这些字段可能包含机密信息，或改变首次连接的信任关系。请只选择你确实要复制到 %@ 的内容。",
+    "zh-Hant": "這些欄位可能包含機密資訊，或改變首次連線的信任關係。請只選擇你確實要複製到 %@ 的內容。"
+  },
+  "This is the acknowledged result for every host. Failed, skipped, and credential-ineligible hosts are never reported as authorized.": {
+    "de": "Dies ist das bestätigte Ergebnis für jeden Host. Fehlgeschlagene, übersprungene und für Anmeldedaten ungeeignete Hosts werden nie als autorisiert gemeldet.",
+    "es": "Este es el resultado confirmado de cada host. Los hosts fallidos, omitidos o no aptos por credenciales nunca se informan como autorizados.",
+    "fr": "Voici le résultat confirmé pour chaque hôte. Les hôtes en échec, ignorés ou inéligibles côté identifiants ne sont jamais signalés comme autorisés.",
+    "ja": "これは各ホストについて確認済みの結果です。失敗・スキップ・認証情報の要件を満たさないホストが承認済みとして報告されることはありません。",
+    "zh-Hans": "这是每台主机的确认结果。失败、跳过以及不符合凭据条件的主机绝不会被报告为已授权。",
+    "zh-Hant": "這是每台主機的確認結果。失敗、略過以及不符合憑證條件的主機絕不會被回報為已授權。"
+  },
+  "You’ll compare a six-digit code on both devices before the origin can approve the transfer.": {
+    "de": "Du vergleichst auf beiden Geräten einen sechsstelligen Code, bevor die Quelle die Übertragung freigeben kann.",
+    "es": "Compararás un código de seis dígitos en ambos dispositivos antes de que el origen pueda aprobar la transferencia.",
+    "fr": "Vous comparerez un code à six chiffres sur les deux appareils avant que la source puisse approuver le transfert.",
+    "ja": "送信元が転送を承認する前に、両方のデバイスで 6 桁のコードを照合します。",
+    "zh-Hans": "在来源设备批准传输之前，你需要在两台设备上比对一个六位数代码。",
+    "zh-Hant": "在來源裝置核准傳輸之前，你需要在兩台裝置上比對一個六位數代碼。"
+  },
+  "approve selected batch": {
+    "de": "Ausgewählte Auswahl freigeben",
+    "es": "aprobar el lote seleccionado",
+    "fr": "approuver la sélection",
+    "ja": "選択した一括処理を承認",
+    "zh-Hans": "批准所选批次",
+    "zh-Hant": "核准所選批次"
+  },
+  "cancel": {
+    "de": "Abbrechen",
+    "es": "cancelar",
+    "fr": "annuler",
+    "ja": "キャンセル",
+    "zh-Hans": "取消",
+    "zh-Hant": "取消"
+  },
+  "close": {
+    "de": "Schließen",
+    "es": "cerrar",
+    "fr": "fermer",
+    "ja": "閉じる",
+    "zh-Hans": "关闭",
+    "zh-Hant": "關閉"
+  },
+  "codes don’t match": {
+    "de": "Codes stimmen nicht überein",
+    "es": "los códigos no coinciden",
+    "fr": "les codes ne correspondent pas",
+    "ja": "コードが一致しません",
+    "zh-Hans": "代码不匹配",
+    "zh-Hant": "代碼不相符"
+  },
+  "codes match": {
+    "de": "Codes stimmen überein",
+    "es": "los códigos coinciden",
+    "fr": "les codes correspondent",
+    "ja": "コードが一致しました",
+    "zh-Hans": "代码匹配",
+    "zh-Hant": "代碼相符"
+  },
+  "configure later": {
+    "de": "Später konfigurieren",
+    "es": "configurar más tarde",
+    "fr": "configurer plus tard",
+    "ja": "後で設定",
+    "zh-Hans": "稍后配置",
+    "zh-Hant": "稍後設定"
+  },
+  "done": {
+    "de": "Fertig",
+    "es": "listo",
+    "fr": "terminé",
+    "ja": "完了",
+    "zh-Hans": "完成",
+    "zh-Hant": "完成"
+  },
+  "find nearby devices": {
+    "de": "Geräte in der Nähe suchen",
+    "es": "buscar dispositivos cercanos",
+    "fr": "rechercher des appareils à proximité",
+    "ja": "近くのデバイスを検索",
+    "zh-Hans": "查找附近的设备",
+    "zh-Hant": "尋找鄰近的裝置"
+  },
+  "set up as new": {
+    "de": "Als neu einrichten",
+    "es": "configurar como nuevo",
+    "fr": "configurer comme neuf",
+    "ja": "新規としてセットアップ",
+    "zh-Hans": "设置为新设备",
+    "zh-Hant": "設定為新裝置"
+  },
+  "start again": {
+    "de": "Neu beginnen",
+    "es": "empezar de nuevo",
+    "fr": "recommencer",
+    "ja": "やり直す",
+    "zh-Hans": "重新开始",
+    "zh-Hant": "重新開始"
+  },
+  "Bootstrap appearance field %@ is invalid.": {
+    "de": "Das Erscheinungsbild-Feld %@ im Bootstrap ist ungültig.",
+    "es": "El campo de apariencia %@ del bootstrap no es válido.",
+    "fr": "Le champ d'apparence %@ du bootstrap n'est pas valide.",
+    "ja": "ブートストラップの外観フィールド %@ が無効です。",
+    "zh-Hans": "引导配置中的外观字段 %@ 无效。",
+    "zh-Hant": "啟動設定中的外觀欄位 %@ 無效。"
+  },
+  "Bootstrap host %@ has an invalid %@.": {
+    "de": "Der Bootstrap-Host %@ hat ein ungültiges Feld %@.",
+    "es": "El host %@ del bootstrap tiene un %@ no válido.",
+    "fr": "L'hôte %@ du bootstrap a un %@ non valide.",
+    "ja": "ブートストラップのホスト %1$@ の %2$@ が無効です。",
+    "zh-Hans": "引导配置中的主机 %1$@ 的 %2$@ 无效。",
+    "zh-Hant": "啟動設定中的主機 %1$@ 的 %2$@ 無效。"
+  },
+  "Bootstrap identity %@ has an invalid %@.": {
+    "de": "Die Bootstrap-Identität %@ hat ein ungültiges Feld %@.",
+    "es": "La identidad %@ del bootstrap tiene un %@ no válido.",
+    "fr": "L'identité %@ du bootstrap a un %@ non valide.",
+    "ja": "ブートストラップの識別情報 %1$@ の %2$@ が無効です。",
+    "zh-Hans": "引导配置中的身份 %1$@ 的 %2$@ 无效。",
+    "zh-Hant": "啟動設定中的身分 %1$@ 的 %2$@ 無效。"
+  },
+  "Bootstrap jump chain contains a cycle at %@.": {
+    "de": "Die Bootstrap-Jump-Kette enthält bei %@ einen Zyklus.",
+    "es": "La cadena de saltos del bootstrap contiene un ciclo en %@.",
+    "fr": "La chaîne de rebonds du bootstrap contient un cycle à %@.",
+    "ja": "ブートストラップの踏み台チェーンの %@ に循環があります。",
+    "zh-Hans": "引导配置的跳板链在 %@ 处存在循环。",
+    "zh-Hant": "啟動設定的跳板鏈在 %@ 處存在循環。"
+  },
+  "Bootstrap jump chain for %@ is too deep.": {
+    "de": "Die Bootstrap-Jump-Kette für %@ ist zu tief verschachtelt.",
+    "es": "La cadena de saltos del bootstrap para %@ es demasiado profunda.",
+    "fr": "La chaîne de rebonds du bootstrap pour %@ est trop profonde.",
+    "ja": "%@ のブートストラップ踏み台チェーンが深すぎます。",
+    "zh-Hans": "%@ 的引导跳板链层级过深。",
+    "zh-Hant": "%@ 的啟動跳板鏈層級過深。"
+  },
+  "Bootstrap jump link references missing host %@.": {
+    "de": "Die Bootstrap-Jump-Verknüpfung verweist auf den fehlenden Host %@.",
+    "es": "El enlace de salto del bootstrap hace referencia al host %@, que falta.",
+    "fr": "Le lien de rebond du bootstrap référence l'hôte manquant %@.",
+    "ja": "ブートストラップの踏み台リンクが、存在しないホスト %@ を参照しています。",
+    "zh-Hans": "引导配置的跳板链接引用了缺失的主机 %@。",
+    "zh-Hant": "啟動設定的跳板連結參照了缺少的主機 %@。"
+  },
+  "Bootstrap known-host record %@ has an invalid %@.": {
+    "de": "Der Bootstrap-Known-Hosts-Eintrag %@ hat ein ungültiges Feld %@.",
+    "es": "El registro de host conocido %@ del bootstrap tiene un %@ no válido.",
+    "fr": "L'enregistrement d'hôte connu %@ du bootstrap a un %@ non valide.",
+    "ja": "ブートストラップの既知ホスト記録 %1$@ の %2$@ が無効です。",
+    "zh-Hans": "引导配置中的已知主机记录 %1$@ 的 %2$@ 无效。",
+    "zh-Hant": "啟動設定中的已知主機記錄 %1$@ 的 %2$@ 無效。"
+  },
+  "Bootstrap manifest contains unknown field %@.%@.": {
+    "de": "Das Bootstrap-Manifest enthält das unbekannte Feld %@.%@.",
+    "es": "El manifiesto del bootstrap contiene el campo desconocido %@.%@.",
+    "fr": "Le manifeste du bootstrap contient le champ inconnu %@.%@.",
+    "ja": "ブートストラップマニフェストに不明なフィールド %1$@.%2$@ が含まれています。",
+    "zh-Hans": "引导清单包含未知字段 %1$@.%2$@。",
+    "zh-Hant": "啟動清單包含未知欄位 %1$@.%2$@。"
+  },
+  "Bootstrap manifest is not a JSON object.": {
+    "de": "Das Bootstrap-Manifest ist kein JSON-Objekt.",
+    "es": "El manifiesto del bootstrap no es un objeto JSON.",
+    "fr": "Le manifeste du bootstrap n'est pas un objet JSON.",
+    "ja": "ブートストラップマニフェストが JSON オブジェクトではありません。",
+    "zh-Hans": "引导清单不是 JSON 对象。",
+    "zh-Hant": "啟動清單不是 JSON 物件。"
+  },
+  "Bootstrap manifest repeats host %@.": {
+    "de": "Das Bootstrap-Manifest führt den Host %@ mehrfach auf.",
+    "es": "El manifiesto del bootstrap repite el host %@.",
+    "fr": "Le manifeste du bootstrap répète l'hôte %@.",
+    "ja": "ブートストラップマニフェストでホスト %@ が重複しています。",
+    "zh-Hans": "引导清单中重复出现主机 %@。",
+    "zh-Hant": "啟動清單中重複出現主機 %@。"
+  },
+  "Bootstrap manifest repeats identity %@.": {
+    "de": "Das Bootstrap-Manifest führt die Identität %@ mehrfach auf.",
+    "es": "El manifiesto del bootstrap repite la identidad %@.",
+    "fr": "Le manifeste du bootstrap répète l'identité %@.",
+    "ja": "ブートストラップマニフェストで識別情報 %@ が重複しています。",
+    "zh-Hans": "引导清单中重复出现身份 %@。",
+    "zh-Hant": "啟動清單中重複出現身分 %@。"
+  },
+  "Bootstrap manifest repeats the jump link for %@.": {
+    "de": "Das Bootstrap-Manifest führt die Jump-Verknüpfung für %@ mehrfach auf.",
+    "es": "El manifiesto del bootstrap repite el enlace de salto de %@.",
+    "fr": "Le manifeste du bootstrap répète le lien de rebond de %@.",
+    "ja": "ブートストラップマニフェストで %@ の踏み台リンクが重複しています。",
+    "zh-Hans": "引导清单中重复出现 %@ 的跳板链接。",
+    "zh-Hant": "啟動清單中重複出現 %@ 的跳板連結。"
+  },
+  "Bootstrap manifest repeats the known-host record for %@.": {
+    "de": "Das Bootstrap-Manifest führt den Known-Hosts-Eintrag für %@ mehrfach auf.",
+    "es": "El manifiesto del bootstrap repite el registro de host conocido de %@.",
+    "fr": "Le manifeste du bootstrap répète l'enregistrement d'hôte connu de %@.",
+    "ja": "ブートストラップマニフェストで %@ の既知ホスト記録が重複しています。",
+    "zh-Hans": "引导清单中重复出现 %@ 的已知主机记录。",
+    "zh-Hant": "啟動清單中重複出現 %@ 的已知主機記錄。"
+  },
+  "Bootstrap optional field %@ was not approved for transfer.": {
+    "de": "Das optionale Bootstrap-Feld %@ wurde nicht zur Übertragung freigegeben.",
+    "es": "El campo opcional %@ del bootstrap no se aprobó para la transferencia.",
+    "fr": "Le champ facultatif %@ du bootstrap n'a pas été approuvé pour le transfert.",
+    "ja": "ブートストラップの任意フィールド %@ は転送を承認されていません。",
+    "zh-Hans": "引导配置的可选字段 %@ 未获准传输。",
+    "zh-Hant": "啟動設定的選用欄位 %@ 未獲准傳輸。"
+  },
+  "Bootstrap setting %@ is invalid.": {
+    "de": "Die Bootstrap-Einstellung %@ ist ungültig.",
+    "es": "El ajuste %@ del bootstrap no es válido.",
+    "fr": "Le réglage %@ du bootstrap n'est pas valide.",
+    "ja": "ブートストラップ設定 %@ が無効です。",
+    "zh-Hans": "引导设置 %@ 无效。",
+    "zh-Hant": "啟動設定 %@ 無效。"
+  },
+  "A restricted import of %@ also requires jump host %@.": {
+    "de": "Ein eingeschränkter Import von %@ erfordert zusätzlich den Jump-Host %@.",
+    "es": "Una importación restringida de %@ también requiere el host de salto %@.",
+    "fr": "Un import restreint de %@ nécessite aussi l'hôte de rebond %@.",
+    "ja": "%1$@ の制限付きインポートには、踏み台ホスト %2$@ も必要です。",
+    "zh-Hans": "受限导入 %1$@ 还需要跳板主机 %2$@。",
+    "zh-Hant": "受限匯入 %1$@ 還需要跳板主機 %2$@。"
+  },
+  "Authorization proof has already been sent.": {
+    "de": "Der Autorisierungsnachweis wurde bereits gesendet.",
+    "es": "La prueba de autorización ya se ha enviado.",
+    "fr": "La preuve d'autorisation a déjà été envoyée.",
+    "ja": "認可の証明はすでに送信されています。",
+    "zh-Hans": "授权证明已发送。",
+    "zh-Hant": "授權證明已傳送。"
+  },
+  "Authorization proof must precede the manifest.": {
+    "de": "Der Autorisierungsnachweis muss vor dem Manifest kommen.",
+    "es": "La prueba de autorización debe preceder al manifiesto.",
+    "fr": "La preuve d'autorisation doit précéder le manifeste.",
+    "ja": "認可の証明はマニフェストより前に送る必要があります。",
+    "zh-Hans": "授权证明必须先于清单发送。",
+    "zh-Hant": "授權證明必須先於清單傳送。"
+  },
+  "Confirm the code before continuing.": {
+    "de": "Bestätige den Code, bevor du fortfährst.",
+    "es": "Confirma el código antes de continuar.",
+    "fr": "Confirmez le code avant de continuer.",
+    "ja": "続ける前にコードを確認してください。",
+    "zh-Hans": "请先确认代码再继续。",
+    "zh-Hant": "請先確認代碼再繼續。"
+  },
+  "Encrypted frame has the wrong direction.": {
+    "de": "Der verschlüsselte Frame hat die falsche Richtung.",
+    "es": "La trama cifrada tiene la dirección equivocada.",
+    "fr": "La trame chiffrée a la mauvaise direction.",
+    "ja": "暗号化フレームの方向が正しくありません。",
+    "zh-Hans": "加密帧的方向不正确。",
+    "zh-Hant": "加密影格的方向不正確。"
+  },
+  "Encrypted-channel sequence is exhausted.": {
+    "de": "Die Sequenznummern des verschlüsselten Kanals sind aufgebraucht.",
+    "es": "Se ha agotado la secuencia del canal cifrado.",
+    "fr": "La séquence du canal chiffré est épuisée.",
+    "ja": "暗号化チャネルのシーケンス番号を使い切りました。",
+    "zh-Hans": "加密通道的序列号已耗尽。",
+    "zh-Hant": "加密通道的序號已耗盡。"
+  },
+  "Encrypted-frame authentication failed.": {
+    "de": "Die Authentifizierung des verschlüsselten Frames ist fehlgeschlagen.",
+    "es": "Falló la autenticación de la trama cifrada.",
+    "fr": "L'authentification de la trame chiffrée a échoué.",
+    "ja": "暗号化フレームの認証に失敗しました。",
+    "zh-Hans": "加密帧认证失败。",
+    "zh-Hant": "加密影格驗證失敗。"
+  },
+  "Expected frame %llu, got %llu.": {
+    "de": "Frame %llu erwartet, %llu erhalten.",
+    "es": "Se esperaba la trama %llu y se recibió %llu.",
+    "fr": "Trame %llu attendue, %llu reçue.",
+    "ja": "フレーム %1$llu を期待しましたが、%2$llu を受信しました。",
+    "zh-Hans": "预期帧 %1$llu，实际收到 %2$llu。",
+    "zh-Hant": "預期影格 %1$llu，實際收到 %2$llu。"
+  },
+  "Expected peer role %@, got %@.": {
+    "de": "Peer-Rolle %@ erwartet, %@ erhalten.",
+    "es": "Se esperaba el rol de par %@ y se recibió %@.",
+    "fr": "Rôle du pair %@ attendu, %@ reçu.",
+    "ja": "ピアの役割 %1$@ を期待しましたが、%2$@ でした。",
+    "zh-Hans": "预期对端角色为 %1$@，实际为 %2$@。",
+    "zh-Hant": "預期對端角色為 %1$@，實際為 %2$@。"
+  },
+  "Invalid encrypted frame.": {
+    "de": "Ungültiger verschlüsselter Frame.",
+    "es": "Trama cifrada no válida.",
+    "fr": "Trame chiffrée non valide.",
+    "ja": "暗号化フレームが無効です。",
+    "zh-Hans": "加密帧无效。",
+    "zh-Hant": "加密影格無效。"
+  },
+  "Invalid ephemeral private key.": {
+    "de": "Ungültiger privater Einmal-Key.",
+    "es": "Clave privada efímera no válida.",
+    "fr": "Clé privée éphémère non valide.",
+    "ja": "一時的な秘密鍵が無効です。",
+    "zh-Hans": "临时私钥无效。",
+    "zh-Hant": "臨時私密金鑰無效。"
+  },
+  "Invalid ephemeral public key.": {
+    "de": "Ungültiger öffentlicher Einmal-Key.",
+    "es": "Clave pública efímera no válida.",
+    "fr": "Clé publique éphémère non valide.",
+    "ja": "一時的な公開鍵が無効です。",
+    "zh-Hans": "临时公钥无效。",
+    "zh-Hant": "臨時公開金鑰無效。"
+  },
+  "Invalid nearby-handshake commitment.": {
+    "de": "Ungültige Commitment-Zusage im Nearby-Handshake.",
+    "es": "Compromiso de handshake cercano no válido.",
+    "fr": "Engagement de handshake à proximité non valide.",
+    "ja": "近距離ハンドシェイクのコミットメントが無効です。",
+    "zh-Hans": "附近握手的承诺值无效。",
+    "zh-Hant": "鄰近交握的承諾值無效。"
+  },
+  "Invalid short authentication string.": {
+    "de": "Ungültige kurze Authentifizierungszeichenfolge.",
+    "es": "Cadena corta de autenticación no válida.",
+    "fr": "Chaîne d'authentification courte non valide.",
+    "ja": "短い認証文字列が無効です。",
+    "zh-Hans": "短认证字符串无效。",
+    "zh-Hant": "短驗證字串無效。"
+  },
+  "Only the origin may perform this operation.": {
+    "de": "Nur die Quelle darf diesen Vorgang ausführen.",
+    "es": "Solo el origen puede realizar esta operación.",
+    "fr": "Seule la source peut effectuer cette opération.",
+    "ja": "この操作を実行できるのは送信元のみです。",
+    "zh-Hans": "只有来源设备可以执行此操作。",
+    "zh-Hant": "只有來源裝置可以執行此操作。"
+  },
+  "Only the recipient may perform this operation.": {
+    "de": "Nur der Empfänger darf diesen Vorgang ausführen.",
+    "es": "Solo el receptor puede realizar esta operación.",
+    "fr": "Seul le destinataire peut effectuer cette opération.",
+    "ja": "この操作を実行できるのは受信側のみです。",
+    "zh-Hans": "只有接收设备可以执行此操作。",
+    "zh-Hant": "只有接收裝置可以執行此操作。"
+  },
+  "Origin authorization has already been decided.": {
+    "de": "Über die Freigabe durch die Quelle wurde bereits entschieden.",
+    "es": "La autorización del origen ya se ha decidido.",
+    "fr": "L'autorisation de la source a déjà été tranchée.",
+    "ja": "送信元の承認はすでに決定されています。",
+    "zh-Hans": "来源授权已作出决定。",
+    "zh-Hant": "來源授權已作出決定。"
+  },
+  "Origin authorization is required.": {
+    "de": "Eine Freigabe durch die Quelle ist erforderlich.",
+    "es": "Se requiere la autorización del origen.",
+    "fr": "L'autorisation de la source est requise.",
+    "ja": "送信元の承認が必要です。",
+    "zh-Hans": "需要来源授权。",
+    "zh-Hant": "需要來源授權。"
+  },
+  "Publish the recipient commitment before completing the handshake.": {
+    "de": "Veröffentliche die Commitment-Zusage des Empfängers, bevor der Handshake abgeschlossen wird.",
+    "es": "Publica el compromiso del receptor antes de completar el handshake.",
+    "fr": "Publiez l'engagement du destinataire avant de terminer le handshake.",
+    "ja": "ハンドシェイクを完了する前に、受信側のコミットメントを公開してください。",
+    "zh-Hans": "请在完成握手前发布接收方的承诺值。",
+    "zh-Hant": "請在完成交握前發布接收方的承諾值。"
+  },
+  "The code comparison has already been decided.": {
+    "de": "Über den Codevergleich wurde bereits entschieden.",
+    "es": "La comparación de códigos ya se ha decidido.",
+    "fr": "La comparaison des codes a déjà été tranchée.",
+    "ja": "コードの照合はすでに決定されています。",
+    "zh-Hans": "代码比对已作出决定。",
+    "zh-Hant": "代碼比對已作出決定。"
+  },
+  "The codes did not match; start a fresh transfer.": {
+    "de": "Die Codes stimmten nicht überein — starte eine neue Übertragung.",
+    "es": "Los códigos no coincidieron; inicia una transferencia nueva.",
+    "fr": "Les codes ne correspondaient pas ; lancez un nouveau transfert.",
+    "ja": "コードが一致しませんでした。転送をやり直してください。",
+    "zh-Hans": "代码不匹配；请重新开始传输。",
+    "zh-Hant": "代碼不相符；請重新開始傳輸。"
+  },
+  "The completion acknowledgement must follow the grant receipt.": {
+    "de": "Die Abschlussbestätigung muss nach der Freigabequittung kommen.",
+    "es": "La confirmación de finalización debe ir después del recibo de concesión.",
+    "fr": "L'accusé de fin doit suivre le reçu d'autorisation.",
+    "ja": "完了確認は付与レシートの後に送る必要があります。",
+    "zh-Hans": "完成确认必须在授权回执之后。",
+    "zh-Hant": "完成確認必須在授權回條之後。"
+  },
+  "The completion acknowledgement was already transferred.": {
+    "de": "Die Abschlussbestätigung wurde bereits übertragen.",
+    "es": "La confirmación de finalización ya se transfirió.",
+    "fr": "L'accusé de fin a déjà été transféré.",
+    "ja": "完了確認はすでに転送されています。",
+    "zh-Hans": "完成确认已传输。",
+    "zh-Hant": "完成確認已傳輸。"
+  },
+  "The grant receipt must follow the manifest.": {
+    "de": "Die Freigabequittung muss nach dem Manifest kommen.",
+    "es": "El recibo de concesión debe ir después del manifiesto.",
+    "fr": "Le reçu d'autorisation doit suivre le manifeste.",
+    "ja": "付与レシートはマニフェストの後に送る必要があります。",
+    "zh-Hans": "授权回执必须在清单之后。",
+    "zh-Hant": "授權回條必須在清單之後。"
+  },
+  "The grant receipt was already transferred.": {
+    "de": "Die Freigabequittung wurde bereits übertragen.",
+    "es": "El recibo de concesión ya se transfirió.",
+    "fr": "Le reçu d'autorisation a déjà été transféré.",
+    "ja": "付与レシートはすでに転送されています。",
+    "zh-Hans": "授权回执已传输。",
+    "zh-Hant": "授權回條已傳輸。"
+  },
+  "The host-grant receipt is invalid.": {
+    "de": "Die Host-Freigabequittung ist ungültig.",
+    "es": "El recibo de concesión de host no es válido.",
+    "fr": "Le reçu d'autorisation d'hôte n'est pas valide.",
+    "ja": "ホスト付与レシートが無効です。",
+    "zh-Hans": "主机授权回执无效。",
+    "zh-Hant": "主機授權回條無效。"
+  },
+  "The manifest import acknowledgement is invalid.": {
+    "de": "Die Bestätigung des Manifest-Imports ist ungültig.",
+    "es": "La confirmación de importación del manifiesto no es válida.",
+    "fr": "L'accusé d'import du manifeste n'est pas valide.",
+    "ja": "マニフェストのインポート確認が無効です。",
+    "zh-Hans": "清单导入确认无效。",
+    "zh-Hant": "清單匯入確認無效。"
+  },
+  "The manifest import acknowledgement was already transferred.": {
+    "de": "Die Bestätigung des Manifest-Imports wurde bereits übertragen.",
+    "es": "La confirmación de importación del manifiesto ya se transfirió.",
+    "fr": "L'accusé d'import du manifeste a déjà été transféré.",
+    "ja": "マニフェストのインポート確認はすでに転送されています。",
+    "zh-Hans": "清单导入确认已传输。",
+    "zh-Hant": "清單匯入確認已傳輸。"
+  },
+  "The manifest was already transferred.": {
+    "de": "Das Manifest wurde bereits übertragen.",
+    "es": "El manifiesto ya se transfirió.",
+    "fr": "Le manifeste a déjà été transféré.",
+    "ja": "マニフェストはすでに転送されています。",
+    "zh-Hans": "清单已传输。",
+    "zh-Hant": "清單已傳輸。"
+  },
+  "The origin denied this transfer.": {
+    "de": "Die Quelle hat diese Übertragung abgelehnt.",
+    "es": "El origen denegó esta transferencia.",
+    "fr": "La source a refusé ce transfert.",
+    "ja": "送信元がこの転送を拒否しました。",
+    "zh-Hans": "来源设备拒绝了此次传输。",
+    "zh-Hant": "來源裝置拒絕了此次傳輸。"
+  },
+  "The peer reflected the local public key.": {
+    "de": "Die Gegenstelle hat den lokalen öffentlichen Key zurückgespiegelt.",
+    "es": "El par devolvió la clave pública local.",
+    "fr": "Le pair a renvoyé la clé publique locale.",
+    "ja": "ピアがローカルの公開鍵をそのまま返しました。",
+    "zh-Hans": "对端把本机公钥原样返回了。",
+    "zh-Hant": "對端把本機公開金鑰原樣返回了。"
+  },
+  "The recipient hello does not match its commitment.": {
+    "de": "Das Hello des Empfängers passt nicht zu seiner Commitment-Zusage.",
+    "es": "El saludo del receptor no coincide con su compromiso.",
+    "fr": "Le hello du destinataire ne correspond pas à son engagement.",
+    "ja": "受信側の hello がコミットメントと一致しません。",
+    "zh-Hans": "接收方的 hello 与其承诺值不匹配。",
+    "zh-Hant": "接收方的 hello 與其承諾值不相符。"
+  },
+  "The recipient must acknowledge imported hosts before key grants begin.": {
+    "de": "Der Empfänger muss importierte Hosts bestätigen, bevor Key-Freigaben beginnen.",
+    "es": "El receptor debe confirmar los hosts importados antes de que empiecen las concesiones de claves.",
+    "fr": "Le destinataire doit confirmer les hôtes importés avant le début des autorisations de clés.",
+    "ja": "キーの付与を始める前に、受信側がインポート済みホストを確認する必要があります。",
+    "zh-Hans": "接收方必须先确认已导入的主机，才能开始密钥授权。",
+    "zh-Hant": "接收方必須先確認已匯入的主機，才能開始金鑰授權。"
+  },
+  "The recipient public key is required.": {
+    "de": "Der öffentliche Key des Empfängers ist erforderlich.",
+    "es": "Se requiere la clave pública del receptor.",
+    "fr": "La clé publique du destinataire est requise.",
+    "ja": "受信側の公開鍵が必要です。",
+    "zh-Hans": "需要接收方的公钥。",
+    "zh-Hant": "需要接收方的公開金鑰。"
+  },
+  "The recipient public key was already transferred.": {
+    "de": "Der öffentliche Key des Empfängers wurde bereits übertragen.",
+    "es": "La clave pública del receptor ya se transfirió.",
+    "fr": "La clé publique du destinataire a déjà été transférée.",
+    "ja": "受信側の公開鍵はすでに転送されています。",
+    "zh-Hans": "接收方的公钥已传输。",
+    "zh-Hant": "接收方的公開金鑰已傳輸。"
+  },
+  "This handshake attempt has already been consumed.": {
+    "de": "Dieser Handshake-Versuch wurde bereits verbraucht.",
+    "es": "Este intento de handshake ya se ha consumido.",
+    "fr": "Cette tentative de handshake a déjà été consommée.",
+    "ja": "このハンドシェイクはすでに使用済みです。",
+    "zh-Hans": "此次握手尝试已被使用。",
+    "zh-Hant": "此次交握嘗試已被使用。"
+  },
+  "This transfer was aborted; start a fresh transfer.": {
+    "de": "Diese Übertragung wurde abgebrochen — starte eine neue Übertragung.",
+    "es": "Esta transferencia se canceló; inicia una nueva.",
+    "fr": "Ce transfert a été interrompu ; lancez un nouveau transfert.",
+    "ja": "この転送は中止されました。転送をやり直してください。",
+    "zh-Hans": "此次传输已中止；请重新开始传输。",
+    "zh-Hant": "此次傳輸已中止；請重新開始傳輸。"
+  },
+  "Unexpected encrypted message.": {
+    "de": "Unerwartete verschlüsselte Nachricht.",
+    "es": "Mensaje cifrado inesperado.",
+    "fr": "Message chiffré inattendu.",
+    "ja": "予期しない暗号化メッセージです。",
+    "zh-Hans": "收到意外的加密消息。",
+    "zh-Hant": "收到非預期的加密訊息。"
+  },
+  "Nearby transfer is already running.": {
+    "de": "Die Übertragung in der Nähe läuft bereits.",
+    "es": "La transferencia cercana ya está en marcha.",
+    "fr": "Le transfert à proximité est déjà en cours.",
+    "ja": "近くのデバイスへの転送はすでに実行中です。",
+    "zh-Hans": "附近传输已在进行中。",
+    "zh-Hant": "鄰近傳輸已在進行中。"
+  },
+  "Nearby transfer is not running.": {
+    "de": "Die Übertragung in der Nähe läuft nicht.",
+    "es": "La transferencia cercana no está en marcha.",
+    "fr": "Le transfert à proximité n'est pas en cours.",
+    "ja": "近くのデバイスへの転送は実行されていません。",
+    "zh-Hans": "附近传输未在进行。",
+    "zh-Hant": "鄰近傳輸未在進行。"
+  },
+  "The nearby connection closed.": {
+    "de": "Die Verbindung zum Gerät in der Nähe wurde geschlossen.",
+    "es": "La conexión cercana se cerró.",
+    "fr": "La connexion à proximité s'est fermée.",
+    "ja": "近くのデバイスとの接続が閉じられました。",
+    "zh-Hans": "附近连接已关闭。",
+    "zh-Hant": "鄰近連線已關閉。"
+  },
+  "The nearby peer is no longer available.": {
+    "de": "Das Gerät in der Nähe ist nicht mehr verfügbar.",
+    "es": "El dispositivo cercano ya no está disponible.",
+    "fr": "L'appareil à proximité n'est plus disponible.",
+    "ja": "近くのデバイスが利用できなくなりました。",
+    "zh-Hans": "附近的设备已不可用。",
+    "zh-Hant": "鄰近的裝置已無法使用。"
+  }
+}

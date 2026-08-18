@@ -1,0 +1,238 @@
+{
+  "\"%@\" already uses this chord.": {
+    "de": "„%@“ belegt diese Tastenkombination bereits.",
+    "es": "«%@» ya usa esta combinación.",
+    "fr": "« %@ » utilise déjà cette combinaison.",
+    "ja": "「%@」がこのキーの組み合わせをすでに使用しています。",
+    "zh-Hans": "“%@”已使用该组合键。",
+    "zh-Hant": "「%@」已使用這個組合鍵。"
+  },
+  "%@ · raw session": {
+    "de": "%@ · einfache Sitzung",
+    "es": "%@ · sesión simple",
+    "fr": "%@ · session simple",
+    "ja": "%@ · 素のセッション",
+    "zh-Hans": "%@ · 原始会话",
+    "zh-Hant": "%@ · 原始工作階段"
+  },
+  "window %lld": {
+    "de": "Fenster %lld",
+    "es": "ventana %lld",
+    "fr": "fenêtre %lld",
+    "ja": "ウインドウ %lld",
+    "zh-Hans": "窗口 %lld",
+    "zh-Hant": "視窗 %lld"
+  },
+  "window %lld “%@”": {
+    "de": "Fenster %1$lld „%2$@“",
+    "es": "ventana %1$lld «%2$@»",
+    "fr": "fenêtre %1$lld « %2$@ »",
+    "ja": "ウインドウ %1$lld「%2$@」",
+    "zh-Hans": "窗口 %1$lld“%2$@”",
+    "zh-Hant": "視窗 %1$lld「%2$@」"
+  },
+  "on %@": {
+    "de": "auf %@",
+    "es": "en %@",
+    "fr": "sur %@",
+    "ja": "%@ で",
+    "zh-Hans": "在 %@ 上",
+    "zh-Hant": "在 %@ 上"
+  },
+  "on another %@": {
+    "de": "auf einem anderen %@",
+    "es": "en otro %@",
+    "fr": "sur un autre %@",
+    "ja": "別の %@ で",
+    "zh-Hans": "在另一台 %@ 上",
+    "zh-Hant": "在另一台 %@ 上"
+  },
+
+  "Bind failed: %@": {
+    "de": "Bind fehlgeschlagen: %@",
+    "es": "Error al enlazar: %@",
+    "fr": "Échec du bind : %@",
+    "ja": "バインドに失敗しました: %@",
+    "zh-Hans": "绑定失败：%@",
+    "zh-Hant": "綁定失敗：%@"
+  },
+  "Port %u is already in use.": {
+    "de": "Port %u ist bereits belegt.",
+    "es": "El puerto %u ya está en uso.",
+    "fr": "Le port %u est déjà utilisé.",
+    "ja": "ポート %u はすでに使用されています。",
+    "zh-Hans": "端口 %u 已被占用。",
+    "zh-Hant": "連接埠 %u 已被佔用。"
+  },
+  "Export failed: %@": {
+    "de": "Export fehlgeschlagen: %@",
+    "es": "Error al exportar: %@",
+    "fr": "Échec de l'export : %@",
+    "ja": "書き出しに失敗しました: %@",
+    "zh-Hans": "导出失败：%@",
+    "zh-Hant": "匯出失敗：%@"
+  },
+  "import %lld · replace %lld": {
+    "de": "%1$lld importieren · %2$lld ersetzen",
+    "es": "importar %1$lld · reemplazar %2$lld",
+    "fr": "importer %1$lld · remplacer %2$lld",
+    "ja": "%1$lld 件をインポート · %2$lld 件を置換",
+    "zh-Hans": "导入 %1$lld · 替换 %2$lld",
+    "zh-Hant": "匯入 %1$lld · 取代 %2$lld"
+  },
+
+  "SSH connection did not produce a client.": {
+    "de": "Die SSH-Verbindung hat keinen Client geliefert.",
+    "es": "La conexión SSH no produjo un cliente.",
+    "fr": "La connexion SSH n'a produit aucun client.",
+    "ja": "SSH 接続からクライアントが得られませんでした。",
+    "zh-Hans": "SSH 连接未产生客户端。",
+    "zh-Hant": "SSH 連線未產生用戶端。"
+  },
+  "Failed to open the SSH channel.": {
+    "de": "Der SSH-Kanal konnte nicht geöffnet werden.",
+    "es": "No se pudo abrir el canal SSH.",
+    "fr": "Impossible d'ouvrir le canal SSH.",
+    "ja": "SSH のチャネルを開けませんでした。",
+    "zh-Hans": "无法打开 SSH 通道。",
+    "zh-Hant": "無法開啟 SSH 通道。"
+  },
+  "Remote command failed with exit status %lld.": {
+    "de": "Der Remote-Befehl ist mit Exit-Status %lld fehlgeschlagen.",
+    "es": "El comando remoto falló con el estado de salida %lld.",
+    "fr": "La commande distante a échoué avec le code de sortie %lld.",
+    "ja": "リモートコマンドが終了ステータス %lld で失敗しました。",
+    "zh-Hans": "远程命令失败，退出状态 %lld。",
+    "zh-Hant": "遠端指令失敗，結束狀態 %lld。"
+  },
+  "Host-key approval for %@ did not persist. The connection was stopped.": {
+    "de": "Die Host-Key-Freigabe für %@ wurde nicht gespeichert. Die Verbindung wurde beendet.",
+    "es": "La aprobación de la clave de host para %@ no se guardó. La conexión se detuvo.",
+    "fr": "L'approbation de la clé d'hôte pour %@ n'a pas été enregistrée. La connexion a été arrêtée.",
+    "ja": "%@ のホストキー承認が保存されませんでした。接続を停止しました。",
+    "zh-Hans": "%@ 的主机密钥批准未能保存。连接已停止。",
+    "zh-Hant": "%@ 的主機金鑰核准未能儲存。連線已停止。"
+  },
+  "Matches the key %@ trusts.": {
+    "de": "Stimmt mit dem Key überein, dem %@ vertraut.",
+    "es": "Coincide con la clave en la que confía %@.",
+    "fr": "Correspond à la clé à laquelle %@ fait confiance.",
+    "ja": "%@ が信頼しているキーと一致します。",
+    "zh-Hans": "与 %@ 信任的密钥一致。",
+    "zh-Hant": "與 %@ 信任的金鑰一致。"
+  },
+  "Differs from the key %@ trusts. Verify out of band before connecting.": {
+    "de": "Weicht von dem Key ab, dem %@ vertraut. Prüfe ihn über einen anderen Kanal, bevor du verbindest.",
+    "es": "Difiere de la clave en la que confía %@. Verifícala por otro canal antes de conectar.",
+    "fr": "Diffère de la clé à laquelle %@ fait confiance. Vérifiez-la par un autre canal avant de vous connecter.",
+    "ja": "%@ が信頼しているキーと異なります。接続する前に別の経路で確認してください。",
+    "zh-Hans": "与 %@ 信任的密钥不同。连接前请通过其他渠道核实。",
+    "zh-Hant": "與 %@ 信任的金鑰不同。連線前請透過其他管道核實。"
+  },
+  "WSL2 reports an outer MTU of %lld while tailscale0 uses %lld. Larger SSH replies may stall.": {
+    "de": "WSL2 meldet eine äußere MTU von %1$lld, während tailscale0 %2$lld verwendet. Größere SSH-Antworten können hängen bleiben.",
+    "es": "WSL2 informa de una MTU externa de %1$lld mientras que tailscale0 usa %2$lld. Las respuestas SSH grandes pueden quedarse bloqueadas.",
+    "fr": "WSL2 signale une MTU externe de %1$lld alors que tailscale0 utilise %2$lld. Les réponses SSH volumineuses peuvent se bloquer.",
+    "ja": "WSL2 は外側の MTU を %1$lld と報告していますが、tailscale0 は %2$lld を使用しています。大きな SSH 応答が停止する可能性があります。",
+    "zh-Hans": "WSL2 报告的外层 MTU 为 %1$lld，而 tailscale0 使用 %2$lld。较大的 SSH 响应可能会卡住。",
+    "zh-Hant": "WSL2 回報的外層 MTU 為 %1$lld，而 tailscale0 使用 %2$lld。較大的 SSH 回應可能會卡住。"
+  },
+
+  "Could not read the existing tmux session size without changing it.": {
+    "de": "Die Größe der bestehenden tmux-Sitzung konnte nicht gelesen werden, ohne sie zu verändern.",
+    "es": "No se pudo leer el tamaño de la sesión tmux existente sin modificarla.",
+    "fr": "Impossible de lire la taille de la session tmux existante sans la modifier.",
+    "ja": "既存の tmux セッションのサイズを、変更せずに読み取ることができませんでした。",
+    "zh-Hans": "无法在不改变现有 tmux 会话的情况下读取其尺寸。",
+    "zh-Hant": "無法在不變更現有 tmux 工作階段的情況下讀取其尺寸。"
+  },
+  "The existing tmux session reported an invalid size.": {
+    "de": "Die bestehende tmux-Sitzung hat eine ungültige Größe gemeldet.",
+    "es": "La sesión tmux existente informó de un tamaño no válido.",
+    "fr": "La session tmux existante a signalé une taille non valide.",
+    "ja": "既存の tmux セッションが無効なサイズを返しました。",
+    "zh-Hans": "现有 tmux 会话报告了无效的尺寸。",
+    "zh-Hant": "現有 tmux 工作階段回報了無效的尺寸。"
+  },
+  "Could not start mosh. The remote host may not have `mosh-server` installed or on PATH, or it exited immediately during startup.": {
+    "de": "mosh konnte nicht gestartet werden. Auf dem Host ist `mosh-server` möglicherweise nicht installiert oder nicht im PATH, oder er wurde beim Start sofort beendet.",
+    "es": "No se pudo iniciar mosh. Puede que el host no tenga `mosh-server` instalado o en el PATH, o que se cerrara nada más arrancar.",
+    "fr": "Impossible de démarrer mosh. L'hôte n'a peut-être pas `mosh-server` installé ou dans le PATH, ou il s'est arrêté aussitôt au démarrage.",
+    "ja": "mosh を開始できませんでした。リモートホストに `mosh-server` がインストールされていないか PATH にないか、起動直後に終了した可能性があります。",
+    "zh-Hans": "无法启动 mosh。远程主机可能未安装 `mosh-server` 或它不在 PATH 中，也可能在启动时立即退出。",
+    "zh-Hant": "無法啟動 mosh。遠端主機可能未安裝 `mosh-server` 或不在 PATH 中，也可能在啟動時立即結束。"
+  },
+  "mosh is unreachable through the jump chain, but Tessera could not safely stop its remote mosh-server before switching transports. %@ Connect with SSH manually.": {
+    "de": "mosh ist über die Jump-Kette nicht erreichbar, und Tessera konnte den entfernten mosh-server vor dem Transportwechsel nicht sicher beenden. %@ Verbinde dich manuell per SSH.",
+    "es": "mosh no es accesible a través de la cadena de saltos y Tessera no pudo detener con seguridad su mosh-server remoto antes de cambiar de transporte. %@ Conéctate manualmente con SSH.",
+    "fr": "mosh est injoignable via la chaîne de rebonds, et Tessera n'a pas pu arrêter proprement son mosh-server distant avant de changer de transport. %@ Connectez-vous manuellement en SSH.",
+    "ja": "ジャンプチェーン経由で mosh に到達できず、トランスポートを切り替える前にリモートの mosh-server を安全に停止できませんでした。%@ SSH で手動接続してください。",
+    "zh-Hans": "无法通过跳板链连接 mosh，且 Tessera 在切换传输方式前无法安全停止远程的 mosh-server。%@ 请手动使用 SSH 连接。",
+    "zh-Hant": "無法透過跳板鏈連線 mosh，且 Tessera 在切換傳輸方式前無法安全停止遠端的 mosh-server。%@ 請手動使用 SSH 連線。"
+  },
+  "attach to per-host tmux session `%@`.": {
+    "de": "an die Host-eigene tmux-Sitzung `%@` anhängen.",
+    "es": "conectar a la sesión tmux propia del host `%@`.",
+    "fr": "s'attacher à la session tmux propre à l'hôte `%@`.",
+    "ja": "ホストごとの tmux セッション `%@` にアタッチします。",
+    "zh-Hans": "附加到该主机专属的 tmux 会话 `%@`。",
+    "zh-Hant": "附加到該主機專屬的 tmux 工作階段 `%@`。"
+  },
+  "start mosh inside per-host tmux session `%@`.": {
+    "de": "mosh in der Host-eigenen tmux-Sitzung `%@` starten.",
+    "es": "iniciar mosh dentro de la sesión tmux propia del host `%@`.",
+    "fr": "démarrer mosh dans la session tmux propre à l'hôte `%@`.",
+    "ja": "ホストごとの tmux セッション `%@` の中で mosh を開始します。",
+    "zh-Hans": "在该主机专属的 tmux 会话 `%@` 中启动 mosh。",
+    "zh-Hant": "在該主機專屬的 tmux 工作階段 `%@` 中啟動 mosh。"
+  },
+
+  "Could not verify Agent Center integration.": {
+    "de": "Die Agent-Center-Integration konnte nicht geprüft werden.",
+    "es": "No se pudo verificar la integración de Agent Center.",
+    "fr": "Impossible de vérifier l'intégration d'Agent Center.",
+    "ja": "Agent Center の連携を確認できませんでした。",
+    "zh-Hans": "无法验证 Agent Center 集成。",
+    "zh-Hant": "無法驗證 Agent Center 整合。"
+  },
+  "Could not verify Agent Center integration: %@": {
+    "de": "Die Agent-Center-Integration konnte nicht geprüft werden: %@",
+    "es": "No se pudo verificar la integración de Agent Center: %@",
+    "fr": "Impossible de vérifier l'intégration d'Agent Center : %@",
+    "ja": "Agent Center の連携を確認できませんでした: %@",
+    "zh-Hans": "无法验证 Agent Center 集成：%@",
+    "zh-Hant": "無法驗證 Agent Center 整合：%@"
+  },
+  "Provider hook settings kept changing during installation.": {
+    "de": "Die Hook-Einstellungen des Anbieters haben sich während der Installation ständig geändert.",
+    "es": "Los ajustes de hooks del proveedor cambiaron continuamente durante la instalación.",
+    "fr": "Les réglages de hooks du fournisseur n'ont cessé de changer pendant l'installation.",
+    "ja": "インストール中にプロバイダのフック設定が変更され続けました。",
+    "zh-Hans": "安装期间提供方的 hook 设置一直在变化。",
+    "zh-Hant": "安裝期間提供方的 hook 設定一直在變動。"
+  },
+  "Installed (%@). Takes effect on the next shell login — run exec $SHELL or reconnect.": {
+    "de": "Installiert (%@). Wirkt ab der nächsten Shell-Anmeldung — führe exec $SHELL aus oder verbinde dich neu.",
+    "es": "Instalado (%@). Se aplica en el próximo inicio de shell: ejecuta exec $SHELL o vuelve a conectar.",
+    "fr": "Installé (%@). Prend effet à la prochaine ouverture de shell — lancez exec $SHELL ou reconnectez-vous.",
+    "ja": "インストールしました (%@)。次回のシェルログインから有効になります — exec $SHELL を実行するか、接続し直してください。",
+    "zh-Hans": "已安装（%@）。将在下次登录 shell 时生效 — 运行 exec $SHELL 或重新连接。",
+    "zh-Hant": "已安裝（%@）。將在下次登入 shell 時生效 — 執行 exec $SHELL 或重新連線。"
+  },
+  "Can't resolve %@ — no directory signal for relative paths.": {
+    "de": "%@ kann nicht aufgelöst werden — für relative Pfade fehlt ein Verzeichnissignal.",
+    "es": "No se puede resolver %@: no hay señal de directorio para rutas relativas.",
+    "fr": "Impossible de résoudre %@ — aucun signal de répertoire pour les chemins relatifs.",
+    "ja": "%@ を解決できません — 相対パスに使えるディレクトリ情報がありません。",
+    "zh-Hans": "无法解析 %@ — 没有可用于相对路径的目录信号。",
+    "zh-Hant": "無法解析 %@ — 沒有可用於相對路徑的目錄訊號。"
+  },
+  "tessera could not read saved hosts. nothing was changed; try again.": {
+    "de": "tessera konnte die gesicherten Hosts nicht lesen. es wurde nichts geändert; versuche es erneut.",
+    "es": "tessera no pudo leer los hosts guardados. no se cambió nada; inténtalo de nuevo.",
+    "fr": "tessera n'a pas pu lire les hôtes enregistrés. rien n'a été modifié ; réessayez.",
+    "ja": "tessera は保存されたホストを読み取れませんでした。何も変更されていません。もう一度お試しください。",
+    "zh-Hans": "tessera 无法读取已保存的主机。未做任何更改；请重试。",
+    "zh-Hant": "tessera 無法讀取已儲存的主機。未做任何變更；請重試。"
+  }
+}

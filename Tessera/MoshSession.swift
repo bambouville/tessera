@@ -509,7 +509,7 @@ public final class MoshSession: ObservableObject, TerminalSession {
 
         guard let serverPID = remoteServerPID, serverPID > 0 else {
             failJumpFallbackCleanup(
-                "The remote mosh-server PID was unavailable, so Tessera did not start a second login command automatically."
+                String(localized: "The remote mosh-server PID was unavailable, so Tessera did not start a second login command automatically.")
             )
             return true
         }
@@ -541,7 +541,7 @@ public final class MoshSession: ObservableObject, TerminalSession {
                 // Set failed before disconnecting the driver so teardown
                 // callbacks cannot replace this takeover state.
                 self.state = .failed(
-                    "mosh is unreachable through the jump chain — UDP cannot traverse SSH bastions. Reconnecting over SSH…"
+                    String(localized: "mosh is unreachable through the jump chain — UDP cannot traverse SSH bastions. Reconnecting over SSH…")
                 )
                 self.driver?.disconnect()
                 self.driver = nil
@@ -566,7 +566,10 @@ public final class MoshSession: ObservableObject, TerminalSession {
         )
         updateTransportState(.disconnected, reason: "jump fallback cleanup failed")
         state = .failed(
-            "mosh is unreachable through the jump chain, but Tessera could not safely stop its remote mosh-server before switching transports. \(SensitiveDataRedactor.redact(detail)) Connect with SSH manually."
+            String(
+                localized: "mosh is unreachable through the jump chain, but Tessera could not safely stop its remote mosh-server before switching transports. \(SensitiveDataRedactor.redact(detail)) Connect with SSH manually.",
+                comment: "mosh jump-chain fallback could not clean up the remote mosh-server"
+            )
         )
         driver?.disconnect()
         driver = nil
@@ -869,7 +872,7 @@ public final class MoshSession: ObservableObject, TerminalSession {
                 code: 1,
                 userInfo: [
                     NSLocalizedDescriptionKey:
-                        "Remote exit monitor finished without an exit marker."
+                        String(localized: "Remote exit monitor finished without an exit marker.")
                 ]
             )
         } catch {
@@ -918,7 +921,10 @@ public final class MoshSession: ObservableObject, TerminalSession {
         let trimmed = rawMessage?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !trimmed.isEmpty else {
-            return "Could not start mosh. The remote host may not have `mosh-server` installed or on PATH, or it exited immediately during startup."
+            return String(
+                localized: "Could not start mosh. The remote host may not have `mosh-server` installed or on PATH, or it exited immediately during startup.",
+                comment: "mosh startup failure with no usable detail from the host"
+            )
         }
 
         let lowered = trimmed.lowercased()
@@ -932,7 +938,7 @@ public final class MoshSession: ObservableObject, TerminalSession {
         // Citadel's exec/TTY channel open carries a hard 15 s timeout;
         // its bare enum case would otherwise surface verbatim.
         if trimmed == "channelCreationFailed" {
-            return "Could not start mosh: the host accepted the SSH connection but never opened the command channel (15 s). It may be overloaded or limiting sessions."
+            return String(localized: "Could not start mosh: the host accepted the SSH connection but never opened the command channel (15 s). It may be overloaded or limiting sessions.")
         }
 
         if lowered == "connection closed"
@@ -941,7 +947,10 @@ public final class MoshSession: ObservableObject, TerminalSession {
             || lowered.contains("end of file")
             || lowered.contains("eof")
         {
-            return "Could not start mosh. The remote host may not have `mosh-server` installed or on PATH, or it exited immediately during startup."
+            return String(
+                localized: "Could not start mosh. The remote host may not have `mosh-server` installed or on PATH, or it exited immediately during startup.",
+                comment: "mosh startup failure with no usable detail from the host"
+            )
         }
 
         return trimmed
@@ -1078,7 +1087,7 @@ final class MoshTransportDriver {
                     throw NSError(
                         domain: "com.bambouville.Tessera.MoshTransport",
                         code: 1,
-                        userInfo: [NSLocalizedDescriptionKey: "Mosh session key is unavailable."]
+                        userInfo: [NSLocalizedDescriptionKey: String(localized: "Mosh session key is unavailable.")]
                     )
                 }
                 let bridge = try MoshBridgeClient(
@@ -1562,7 +1571,7 @@ final class TmuxControlChannel {
             throw NSError(
                 domain: "Tessera.TmuxControlChannel",
                 code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "The tmux control channel is not connected."]
+                userInfo: [NSLocalizedDescriptionKey: String(localized: "The tmux control channel is not connected.")]
             )
         }
         var output = try await client.executeCommand(

@@ -1,13 +1,13 @@
 import SwiftUI
 
 struct Field<Content: View>: View {
-    var label: String
-    var sub: String?
+    var label: LocalizedStringKey
+    var sub: LocalizedStringKey?
     @ViewBuilder var content: () -> Content
 
     @Environment(\.designTokens) private var T
 
-    init(label: String, sub: String? = nil, @ViewBuilder content: @escaping () -> Content) {
+    init(label: LocalizedStringKey, sub: LocalizedStringKey? = nil, @ViewBuilder content: @escaping () -> Content) {
         self.label = label
         self.sub = sub
         self.content = content
@@ -35,11 +35,18 @@ struct Field<Content: View>: View {
     }
 }
 
+/// Sample copy for the Xcode canvas only. Building the key at runtime
+/// keeps these out of string extraction, so they never reach the
+/// shipped catalog as untranslated entries.
 #Preview {
+    let darkSample = "Dark Field"
+    let lightSample = "Light Field"
+    let subSample = "Supporting context"
+
     HStack(spacing: 24) {
         VStack(alignment: .leading) {
-            Field(label: "Dark Field", sub: "Supporting context") {
-                Text("Placeholder")
+            Field(label: LocalizedStringKey(darkSample), sub: LocalizedStringKey(subSample)) {
+                Text(verbatim: "Placeholder")
                     .font(Typography.tesseraMono(size: 13))
                     .foregroundStyle(DesignTokens.make(mode: .dark, accent: .blue).fg)
             }
@@ -49,8 +56,8 @@ struct Field<Content: View>: View {
         .environment(\.designTokens, DesignTokens.make(mode: .dark, accent: .blue))
 
         VStack(alignment: .leading) {
-            Field(label: "Light Field") {
-                Text("Placeholder")
+            Field(label: LocalizedStringKey(lightSample)) {
+                Text(verbatim: "Placeholder")
                     .font(Typography.tesseraMono(size: 13))
                     .foregroundStyle(DesignTokens.make(mode: .light, accent: .blue).fg)
             }

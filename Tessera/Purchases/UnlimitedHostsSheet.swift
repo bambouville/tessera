@@ -67,7 +67,7 @@ struct UnlimitedHostsStateNote: View {
         return nil
     }
 
-    private var text: String {
+    private var text: LocalizedStringResource {
         switch kind {
         case .loading:
             return "checking the app store for the localized product and price…"
@@ -147,15 +147,15 @@ struct UnlimitedHostsPurchaseButton: View {
 
     private var label: String {
         if store.accessState == .checking {
-            return "checking purchase status"
+            return String(localized: "checking purchase status")
         }
         if let product = store.product {
             if store.lastErrorMessage != nil {
-                return "try again · \(product.displayPrice)"
+                return String(localized: "try again · \(product.displayPrice)")
             }
-            return "unlock unlimited hosts · \(product.displayPrice)"
+            return String(localized: "unlock unlimited hosts · \(product.displayPrice)")
         }
-        return "unlock unlimited hosts"
+        return String(localized: "unlock unlimited hosts")
     }
 
     private var isDisabled: Bool {
@@ -176,7 +176,7 @@ struct UnlimitedHostsPurchaseButton: View {
                         .tint(T.isLight ? .white : .black)
                         .accessibilityHidden(true)
                 }
-                Text(label)
+                Text(verbatim: label)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -185,7 +185,7 @@ struct UnlimitedHostsPurchaseButton: View {
         }
         .disabled(isDisabled)
         .opacity(isDisabled ? 0.45 : 1)
-        .accessibilityLabel(label)
+        .accessibilityLabel(Text(verbatim: label))
     }
 }
 
@@ -357,7 +357,7 @@ struct UnlimitedHostsSheet: View {
             .frame(height: 0.5)
     }
 
-    private var heroCopy: String {
+    private var heroCopy: LocalizedStringResource {
         if store.accessState == .checking {
             return "tessera could not confirm your existing purchase status yet. retry or restore purchases before saving another host."
         }
@@ -379,20 +379,19 @@ struct UnlimitedHostsSheet: View {
                 .frame(height: 0.5)
 
             VStack(alignment: .leading, spacing: 7) {
-                checkRow {
-                    // StoreKit's localized product name when loaded; the
-                    // static lowercase copy stays as the pre-load fallback.
-                    Text(store.product?.displayName ?? "unlimited saved hosts").foregroundStyle(T.fg)
-                        + Text(" — the only paid upgrade").foregroundStyle(T.fgMuted)
-                }
-                checkRow {
-                    Text("one purchase on your ").foregroundStyle(T.fgMuted)
-                        + Text("iphone and ipad").foregroundStyle(T.fg)
-                }
-                checkRow {
-                    Text("no subscription").foregroundStyle(T.fg)
-                        + Text(" and no tessera account").foregroundStyle(T.fgMuted)
-                }
+                // StoreKit's localized product name when loaded; the static
+                // lowercase copy stays as the pre-load fallback.
+                let product = store.product?.displayName
+                    ?? String(localized: "unlimited saved hosts")
+                let devices = String(localized: "iphone and ipad")
+                let subscription = String(localized: "no subscription")
+
+                checkRow(String(localized: "\(product) — the only paid upgrade"),
+                         emphasizing: product)
+                checkRow(String(localized: "one purchase on your \(devices)"),
+                         emphasizing: devices)
+                checkRow(String(localized: "\(subscription) and no tessera account"),
+                         emphasizing: subscription)
             }
             .padding(.vertical, 13)
 
@@ -400,6 +399,23 @@ struct UnlimitedHostsSheet: View {
                 .fill(T.border)
                 .frame(height: 0.5)
         }
+    }
+
+    /// A benefit line whose subject is drawn in the foreground color and whose
+    /// surrounding words are muted.
+    ///
+    /// The whole line is one translatable sentence with the subject as its
+    /// only argument, so a language is free to move the subject to the front,
+    /// to the end, or to inflect the words around it. Splitting the line into
+    /// a muted stem plus a bright tail — the shape this replaced — would pin
+    /// English word order into every translation.
+    private func checkRow(_ sentence: String, emphasizing subject: String) -> some View {
+        var line = AttributedString(sentence)
+        line.foregroundColor = T.fgMuted
+        if let range = line.range(of: subject) {
+            line[range].foregroundColor = T.fg
+        }
+        return checkRow { Text(line) }
     }
 
     private func checkRow(_ text: () -> Text) -> some View {
@@ -504,7 +520,7 @@ struct HostLimitNoticeSheet: View {
             .frame(height: 0.5)
     }
 
-    private func noticeButton(_ title: String, isPrimary: Bool, action: @escaping () -> Void) -> some View {
+    private func noticeButton(_ title: LocalizedStringKey, isPrimary: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
                 .font(Typography.tesseraMono(size: 12, weight: isPrimary ? .semibold : .regular))
@@ -613,7 +629,7 @@ struct BootstrapQuotaDecisionSheet: View {
                     .font(Typography.sheetTitle)
                     .foregroundStyle(T.fg)
 
-                Text(explanationText)
+                Text(verbatim: explanationText)
                     .font(Typography.tesseraMono(size: 12))
                     .foregroundStyle(T.fgMuted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -682,9 +698,10 @@ struct BootstrapQuotaDecisionSheet: View {
     }
 
     private var explanationText: String {
-        let count = plan.newHostIDs.count
-        let noun = count == 1 ? "host" : "hosts"
-        return "free tessera remembers one host. this nearby setup offered \(count) \(noun) — choose one route to keep within the free limit, or unlock unlimited hosts to keep everything."
+        String(
+            localized: "free tessera remembers one host. this nearby setup offered \(plan.newHostIDs.count) hosts — choose one route to keep within the free limit, or unlock unlimited hosts to keep everything.",
+            comment: "Nearby-import quota explainer. Pluralized on the number of offered hosts."
+        )
     }
 
     private func retryStoreLoad() {

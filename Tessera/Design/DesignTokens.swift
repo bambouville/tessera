@@ -18,6 +18,16 @@ enum CompactLayout {
 enum AccentName: String, CaseIterable {
     case blue, green, amber, custom
 
+    /// The raw value is the persisted identity; the swatch caption shows this.
+    var displayName: LocalizedStringResource {
+        switch self {
+        case .blue:   return LocalizedStringResource("blue", comment: "Accent colour")
+        case .green:  return LocalizedStringResource("green", comment: "Accent colour")
+        case .amber:  return LocalizedStringResource("amber", comment: "Accent colour")
+        case .custom: return LocalizedStringResource("custom", comment: "Accent colour chosen by the user")
+        }
+    }
+
     /// Default RGB used when AccentName is `.custom` and no override is supplied.
     /// Hex 0xFF375F = the prior `.pink` accent — preserves a recognizable color
     /// for users who want a distinctive non-default tint.
@@ -200,17 +210,17 @@ enum ChromeMaterial: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .liquidGlass: return "liquid glass"
-        case .frosted:     return "frosted"
-        case .solid:       return "solid"
+        case .liquidGlass: return String(localized: "liquid glass", comment: "Surface material choice in Appearance settings")
+        case .frosted:     return String(localized: "frosted", comment: "Surface material choice in Appearance settings")
+        case .solid:       return String(localized: "solid", comment: "Surface material choice in Appearance settings")
         }
     }
 
     var caption: String {
         switch self {
-        case .liquidGlass: return "translucent, refractive"
-        case .frosted:     return "translucent blur"
-        case .solid:       return "opaque, plainest"
+        case .liquidGlass: return String(localized: "translucent, refractive", comment: "Caption under the 'liquid glass' surface material choice")
+        case .frosted:     return String(localized: "translucent blur", comment: "Caption under the 'frosted' surface material choice")
+        case .solid:       return String(localized: "opaque, plainest", comment: "Caption under the 'solid' surface material choice")
         }
     }
 

@@ -60,7 +60,7 @@ struct GenerateKeyModal: View {
                     Input(text: $draft.name, placeholder: "my new key")
 
                     if let errorText = draft.errorText {
-                        Text(errorText)
+                        Text(verbatim: errorText)
                             .font(Typography.tesseraMono(size: 12))
                             .foregroundStyle(T.red)
                             .padding(.top, 8)
@@ -114,7 +114,7 @@ struct GenerateKeyModal: View {
             .padding(.horizontal, isPhone ? 18 : 0)
         }
         .onChange(of: draft.name) { _, _ in
-            if draft.errorText == "name is required" {
+            if draft.errorText == String(localized: "name is required") {
                 draft.errorText = nil
             }
         }
@@ -162,14 +162,15 @@ struct GenerateKeyModal: View {
             .padding(.bottom, 20)
     }
 
-    private func algorithmCard(algorithm: KeyAlgorithm, title: String, subtitle: String) -> some View {
+    /// `title` is the algorithm's own name — the same in every language.
+    private func algorithmCard(algorithm: KeyAlgorithm, title: String, subtitle: LocalizedStringKey) -> some View {
         let selected = draft.algorithm == algorithm
 
         return Button {
             draft.algorithm = algorithm
         } label: {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
+                Text(verbatim: title)
                     .font(Typography.tesseraMono(size: 12, weight: .medium))
                     .foregroundStyle(T.fg)
 
@@ -194,7 +195,7 @@ struct GenerateKeyModal: View {
     private func generate() {
         let trimmedName = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
-            draft.errorText = "name is required"
+            draft.errorText = String(localized: "name is required")
             return
         }
 
@@ -221,7 +222,7 @@ struct GenerateKeyModal: View {
                     protection: .deviceUnlocked
                 )
             case .rsa:
-                draft.errorText = "RSA generation is not supported"
+                draft.errorText = String(localized: "RSA generation is not supported")
                 return
             }
             stored.requiresBiometric = draft.protectWithUserPresence
@@ -251,7 +252,7 @@ struct GenerateKeyModal: View {
         }
     }
 
-    private func enclaveNote(_ text: String) -> some View {
+    private func enclaveNote(_ text: LocalizedStringKey) -> some View {
         Text(text)
             .font(Typography.tesseraMono(size: 11))
             .foregroundStyle(T.fgDim)
