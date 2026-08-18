@@ -2393,6 +2393,96 @@ final class AgentCenterSafetyTests: XCTestCase {
         )
     }
 
+    func test_scrollPreventionHonorsPerProviderScrollLockSettings() async {
+        let claudeBox = AgentTestSourceBox(visibleText: "Thinking…")
+        let codexBox = AgentTestSourceBox(visibleText: "Thinking…")
+        codexBox.processNames = ["codex"]
+        let center = AgentCenter(sendVerificationDelayNanoseconds: 1_000_000)
+        center.noteOutput(
+            sessionID: claudeBox.sessionID,
+            paneID: claudeBox.paneID,
+            data: Self.lifecycleOSC(state: "working", timestamp: 401)[...]
+        )
+        center.noteOutput(
+            sessionID: codexBox.sessionID,
+            paneID: codexBox.paneID,
+            data: Self.lifecycleOSC(
+                state: "working",
+                timestamp: 402,
+                provider: "codex"
+            )[...]
+        )
+        center.register(claudeBox.source())
+        center.register(codexBox.source())
+
+        let claudeID = AgentInstanceID(
+            sessionID: claudeBox.sessionID,
+            paneID: claudeBox.paneID
+        )
+        let codexID = AgentInstanceID(
+            sessionID: codexBox.sessionID,
+            paneID: codexBox.paneID
+        )
+        func isProvenWorking(_ id: AgentInstanceID) -> Bool {
+            center.agents.first(where: { $0.id == id })?.status == .working
+                && center.lifecycleIntegrationState(agentID: id) == .active
+        }
+        await waitUntil { isProvenWorking(claudeID) && isProvenWorking(codexID) }
+
+        XCTAssertEqual(
+            center.agents.first(where: { $0.id == claudeID })?.profileID,
+            SwipePadProfile.builtInClaudeCodeID
+        )
+        XCTAssertEqual(
+            center.agents.first(where: { $0.id == codexID })?.profileID,
+            SwipePadProfile.builtInCodexCLIID
+        )
+        XCTAssertNotNil(
+            center.scrollPrevention(
+                sessionID: claudeID.sessionID,
+                paneID: claudeID.paneID
+            )
+        )
+        XCTAssertNotNil(
+            center.scrollPrevention(
+                sessionID: codexID.sessionID,
+                paneID: codexID.paneID
+            )
+        )
+
+        center.setScrollLock(claudeCode: false, codex: true)
+
+        XCTAssertNil(
+            center.scrollPrevention(
+                sessionID: claudeID.sessionID,
+                paneID: claudeID.paneID
+            ),
+            "opting out of the claude code lock must release the freeze on its panes"
+        )
+        XCTAssertNotNil(
+            center.scrollPrevention(
+                sessionID: codexID.sessionID,
+                paneID: codexID.paneID
+            ),
+            "the codex switch is independent and was left on"
+        )
+
+        center.setScrollLock(claudeCode: true, codex: false)
+
+        XCTAssertNotNil(
+            center.scrollPrevention(
+                sessionID: claudeID.sessionID,
+                paneID: claudeID.paneID
+            )
+        )
+        XCTAssertNil(
+            center.scrollPrevention(
+                sessionID: codexID.sessionID,
+                paneID: codexID.paneID
+            )
+        )
+    }
+
     func test_visibleAgentCenterBoundsViewportCapturesDuringSustainedOutput() async {
         let box = AgentTestSourceBox(visibleText: "Thinking…")
         box.processNames = ["codex"]

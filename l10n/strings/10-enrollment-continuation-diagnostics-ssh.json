@@ -1,0 +1,474 @@
+{
+  "A fresh device-owner authorization is required.": {
+    "de": "Eine erneute Autorisierung durch den Gerätebesitzer ist erforderlich.",
+    "es": "Se requiere una autorización reciente del propietario del dispositivo.",
+    "fr": "Une autorisation récente du propriétaire de l'appareil est requise.",
+    "ja": "デバイスの所有者による、直近の認証が必要です。",
+    "zh-Hans": "需要设备所有者重新授权。",
+    "zh-Hant": "需要裝置擁有者重新授權。"
+  },
+  "Biometric authorization was not fresh.": {
+    "de": "Die biometrische Autorisierung war nicht aktuell.",
+    "es": "La autorización biométrica no era reciente.",
+    "fr": "L'autorisation biométrique n'était pas récente.",
+    "ja": "生体認証が直近のものではありませんでした。",
+    "zh-Hans": "生物识别授权不是最新的。",
+    "zh-Hant": "生物辨識授權不是最新的。"
+  },
+  "Fresh biometric authorization failed.": {
+    "de": "Die erneute biometrische Autorisierung ist fehlgeschlagen.",
+    "es": "Falló la autorización biométrica reciente.",
+    "fr": "La nouvelle autorisation biométrique a échoué.",
+    "ja": "改めての生体認証に失敗しました。",
+    "zh-Hans": "重新进行生物识别授权失败。",
+    "zh-Hant": "重新進行生物辨識授權失敗。"
+  },
+  "Enrollment action is invalid in the current state.": {
+    "de": "Diese Enrollment-Aktion ist im aktuellen Zustand ungültig.",
+    "es": "La acción de inscripción no es válida en el estado actual.",
+    "fr": "Cette action d'inscription est invalide dans l'état actuel.",
+    "ja": "現在の状態では、この登録操作は無効です。",
+    "zh-Hans": "在当前状态下此注册操作无效。",
+    "zh-Hant": "在目前狀態下此註冊操作無效。"
+  },
+  "Enrollment request is invalid.": {
+    "de": "Die Enrollment-Anfrage ist ungültig.",
+    "es": "La solicitud de inscripción no es válida.",
+    "fr": "La demande d'inscription est invalide.",
+    "ja": "登録リクエストが不正です。",
+    "zh-Hans": "注册请求无效。",
+    "zh-Hant": "註冊請求無效。"
+  },
+  "Enrollment transport failed.": {
+    "de": "Der Enrollment-Transport ist fehlgeschlagen.",
+    "es": "Falló el transporte de la inscripción.",
+    "fr": "Le transport de l'inscription a échoué.",
+    "ja": "登録のトランスポートに失敗しました。",
+    "zh-Hans": "注册传输失败。",
+    "zh-Hant": "註冊傳輸失敗。"
+  },
+  "Enrollment requires an Apple continuation stream or a SAS-bound transport.": {
+    "de": "Für das Enrollment ist ein Apple-Continuation-Stream oder ein SAS-gebundener Transport nötig.",
+    "es": "La inscripción requiere un flujo de continuidad de Apple o un transporte vinculado a SAS.",
+    "fr": "L'inscription nécessite un flux de continuité Apple ou un transport lié au SAS.",
+    "ja": "登録には、Apple の継続ストリームまたは SAS に紐づいたトランスポートが必要です。",
+    "zh-Hans": "注册需要 Apple 接力流或绑定 SAS 的传输通道。",
+    "zh-Hant": "註冊需要 Apple 接續串流或綁定 SAS 的傳輸通道。"
+  },
+  "The host grant changed after device-owner authorization.": {
+    "de": "Die Host-Freigabe hat sich nach der Autorisierung durch den Gerätebesitzer geändert.",
+    "es": "La concesión del host cambió después de la autorización del propietario del dispositivo.",
+    "fr": "L'autorisation d'hôte a changé après l'autorisation du propriétaire de l'appareil.",
+    "ja": "デバイス所有者の認証後に、ホストの付与内容が変更されました。",
+    "zh-Hans": "在设备所有者授权之后，主机授权发生了变化。",
+    "zh-Hant": "在裝置擁有者授權之後，主機授權發生了變化。"
+  },
+  "The host grant selection is invalid.": {
+    "de": "Die Auswahl der Host-Freigabe ist ungültig.",
+    "es": "La selección de la concesión del host no es válida.",
+    "fr": "La sélection d'autorisation d'hôte est invalide.",
+    "ja": "ホストの付与の選択が不正です。",
+    "zh-Hans": "主机授权的选择无效。",
+    "zh-Hant": "主機授權的選擇無效。"
+  },
+  "The public-key grant request is invalid.": {
+    "de": "Die Anfrage zur Public-Key-Freigabe ist ungültig.",
+    "es": "La solicitud de concesión de clave pública no es válida.",
+    "fr": "La demande d'autorisation de clé publique est invalide.",
+    "ja": "公開鍵の付与リクエストが不正です。",
+    "zh-Hans": "公钥授权请求无效。",
+    "zh-Hant": "公開金鑰授權請求無效。"
+  },
+  "Tracked access for an earlier host route must be resolved before granting this key again.": {
+    "de": "Der erfasste Zugang einer früheren Host-Route muss geklärt sein, bevor dieser Key erneut freigegeben wird.",
+    "es": "Hay que resolver el acceso registrado de una ruta de host anterior antes de volver a conceder esta clave.",
+    "fr": "L'accès suivi d'une route d'hôte antérieure doit être résolu avant d'accorder de nouveau cette clé.",
+    "ja": "このキーを再び付与する前に、以前のホスト経路で記録されているアクセスを解消する必要があります。",
+    "zh-Hans": "在再次授予此密钥之前，必须先处理先前主机路由上已记录的访问权限。",
+    "zh-Hant": "在再次授予此金鑰之前，必須先處理先前主機路由上已記錄的存取權限。"
+  },
+  "Continue": {
+    "de": "Fortsetzen",
+    "es": "Continuar",
+    "fr": "Continuer",
+    "ja": "続ける",
+    "zh-Hans": "继续",
+    "zh-Hant": "繼續"
+  },
+  "A plain reconnect cannot advertise a tmux session.": {
+    "de": "Ein einfaches Neuverbinden kann keine tmux-Sitzung ankündigen.",
+    "es": "Una reconexión simple no puede anunciar una sesión de tmux.",
+    "fr": "Une simple reconnexion ne peut pas annoncer de session tmux.",
+    "ja": "単純な再接続では、tmux セッションを通知できません。",
+    "zh-Hans": "普通的重新连接无法公告 tmux 会话。",
+    "zh-Hant": "普通的重新連線無法公告 tmux 工作階段。"
+  },
+  "A tmux continuation requires its resolved session name.": {
+    "de": "Eine tmux-Fortsetzung braucht den aufgelösten Sitzungsnamen.",
+    "es": "Una continuación de tmux necesita el nombre de sesión ya resuelto.",
+    "fr": "Une reprise tmux nécessite son nom de session résolu.",
+    "ja": "tmux の継続には、解決済みのセッション名が必要です。",
+    "zh-Hans": "tmux 接力需要已解析的会话名称。",
+    "zh-Hant": "tmux 接續需要已解析的工作階段名稱。"
+  },
+  "The continuation tmux session name contains unsafe characters.": {
+    "de": "Der tmux-Sitzungsname der Fortsetzung enthält unsichere Zeichen.",
+    "es": "El nombre de la sesión de tmux de la continuación contiene caracteres no seguros.",
+    "fr": "Le nom de session tmux de la reprise contient des caractères non sûrs.",
+    "ja": "継続用の tmux セッション名に安全でない文字が含まれています。",
+    "zh-Hans": "接力的 tmux 会话名称中包含不安全字符。",
+    "zh-Hant": "接續的 tmux 工作階段名稱中包含不安全字元。"
+  },
+  "Continuation connection key does not match its endpoint route.": {
+    "de": "Der Verbindungsschlüssel der Fortsetzung passt nicht zu seiner Endpunkt-Route.",
+    "es": "La clave de conexión de la continuación no coincide con la ruta de su extremo.",
+    "fr": "La clé de connexion de la reprise ne correspond pas à sa route de point de terminaison.",
+    "ja": "継続の接続キーが、そのエンドポイント経路と一致しません。",
+    "zh-Hans": "接力的连接键与其端点路由不匹配。",
+    "zh-Hant": "接續的連線鍵與其端點路由不符。"
+  },
+  "Continuation endpoint has an empty connection key.": {
+    "de": "Der Fortsetzungs-Endpunkt hat einen leeren Verbindungsschlüssel.",
+    "es": "El extremo de la continuación tiene una clave de conexión vacía.",
+    "fr": "Le point de terminaison de la reprise a une clé de connexion vide.",
+    "ja": "継続のエンドポイントの接続キーが空です。",
+    "zh-Hans": "接力端点的连接键为空。",
+    "zh-Hant": "接續端點的連線鍵為空。"
+  },
+  "Continuation endpoint has an empty host-key fingerprint.": {
+    "de": "Der Fortsetzungs-Endpunkt hat einen leeren Host-Key-Fingerabdruck.",
+    "es": "El extremo de la continuación tiene una huella de clave de host vacía.",
+    "fr": "Le point de terminaison de la reprise a une empreinte de clé d'hôte vide.",
+    "ja": "継続のエンドポイントのホストキーフィンガープリントが空です。",
+    "zh-Hans": "接力端点的主机密钥指纹为空。",
+    "zh-Hant": "接續端點的主機金鑰指紋為空。"
+  },
+  "Continuation endpoint has invalid port %lld.": {
+    "de": "Der Fortsetzungs-Endpunkt hat den ungültigen Port %lld.",
+    "es": "El extremo de la continuación tiene el puerto no válido %lld.",
+    "fr": "Le point de terminaison de la reprise a un port invalide : %lld.",
+    "ja": "継続のエンドポイントのポート %lld が不正です。",
+    "zh-Hans": "接力端点的端口 %lld 无效。",
+    "zh-Hant": "接續端點的連接埠 %lld 無效。"
+  },
+  "Continuation route is unavailable: %@": {
+    "de": "Die Fortsetzungsroute ist nicht verfügbar: %@",
+    "es": "La ruta de continuación no está disponible: %@",
+    "fr": "La route de reprise est indisponible : %@",
+    "ja": "継続経路を利用できません: %@",
+    "zh-Hans": "继续路由不可用：%@",
+    "zh-Hant": "繼續路由不可用：%@"
+  },
+  "Continuation route repeats host %@.": {
+    "de": "Die Fortsetzungsroute enthält den Host %@ mehrfach.",
+    "es": "La ruta de continuación repite el host %@.",
+    "fr": "La route de reprise répète l'hôte %@.",
+    "ja": "継続経路でホスト %@ が重複しています。",
+    "zh-Hans": "继续路由中重复出现主机 %@。",
+    "zh-Hant": "繼續路由中重複出現主機 %@。"
+  },
+  "Unsupported continuation schema version %lld.": {
+    "de": "Nicht unterstützte Schema-Version %lld für die Fortsetzung.",
+    "es": "Versión %lld del esquema de continuación no admitida.",
+    "fr": "Version %lld du schéma de reprise non prise en charge.",
+    "ja": "サポートされていない継続スキーマのバージョン %lld です。",
+    "zh-Hans": "不支持的接力架构版本 %lld。",
+    "zh-Hant": "不支援的接續結構版本 %lld。"
+  },
+  "debug log": {
+    "de": "Debug-Log",
+    "es": "registro de depuración",
+    "fr": "journal de débogage",
+    "ja": "デバッグログ",
+    "zh-Hans": "调试日志",
+    "zh-Hant": "除錯日誌"
+  },
+  "verbose diagnostics": {
+    "de": "ausführliche Diagnose",
+    "es": "diagnóstico detallado",
+    "fr": "diagnostics détaillés",
+    "ja": "詳細な診断",
+    "zh-Hans": "详细诊断",
+    "zh-Hant": "詳細診斷"
+  },
+  "full tmux, mosh, SwipePad, and restore trace": {
+    "de": "vollständige Ablaufverfolgung für tmux, mosh, SwipePad und Wiederherstellung",
+    "es": "traza completa de tmux, mosh, SwipePad y la restauración",
+    "fr": "trace complète de tmux, mosh, SwipePad et de la restauration",
+    "ja": "tmux・mosh・SwipePad・復元の完全なトレース",
+    "zh-Hans": "tmux、mosh、SwipePad 和恢复的完整追踪",
+    "zh-Hant": "tmux、mosh、SwipePad 和回復的完整追蹤"
+  },
+  "scroll diagnostics": {
+    "de": "Scroll-Diagnose",
+    "es": "diagnóstico del desplazamiento",
+    "fr": "diagnostics du défilement",
+    "ja": "スクロールの診断",
+    "zh-Hans": "滚动诊断",
+    "zh-Hant": "捲動診斷"
+  },
+  "include ScrollDiag lines in exported logs": {
+    "de": "ScrollDiag-Zeilen in exportierte Logs aufnehmen",
+    "es": "incluir las líneas ScrollDiag en los registros exportados",
+    "fr": "inclure les lignes ScrollDiag dans les journaux exportés",
+    "ja": "書き出すログに ScrollDiag の行を含めます",
+    "zh-Hans": "在导出的日志中包含 ScrollDiag 行",
+    "zh-Hant": "在輸出的日誌中包含 ScrollDiag 行"
+  },
+  "export log": {
+    "de": "Log exportieren",
+    "es": "exportar el registro",
+    "fr": "exporter le journal",
+    "ja": "ログを書き出す",
+    "zh-Hans": "导出日志",
+    "zh-Hant": "輸出日誌"
+  },
+  "upload log": {
+    "de": "Log hochladen",
+    "es": "subir el registro",
+    "fr": "téléverser le journal",
+    "ja": "ログをアップロード",
+    "zh-Hans": "上传日志",
+    "zh-Hant": "上傳日誌"
+  },
+  "refresh": {
+    "de": "aktualisieren",
+    "es": "actualizar",
+    "fr": "actualiser",
+    "ja": "更新",
+    "zh-Hans": "刷新",
+    "zh-Hant": "重新整理"
+  },
+  "clear": {
+    "de": "leeren",
+    "es": "vaciar",
+    "fr": "effacer",
+    "ja": "消去",
+    "zh-Hans": "清空",
+    "zh-Hant": "清空"
+  },
+  "%@ · updated %@": {
+    "de": "%@ · aktualisiert %@",
+    "es": "%@ · actualizado %@",
+    "fr": "%@ · mis à jour %@",
+    "ja": "%@ · 更新 %@",
+    "zh-Hans": "%@ · 更新于 %@",
+    "zh-Hant": "%@ · 更新於 %@"
+  },
+  "Could not verify ~/.ssh/authorized_keys": {
+    "de": "~/.ssh/authorized_keys konnte nicht geprüft werden",
+    "es": "No se pudo verificar ~/.ssh/authorized_keys",
+    "fr": "Impossible de vérifier ~/.ssh/authorized_keys",
+    "ja": "~/.ssh/authorized_keys を確認できませんでした",
+    "zh-Hans": "无法校验 ~/.ssh/authorized_keys",
+    "zh-Hant": "無法檢驗 ~/.ssh/authorized_keys"
+  },
+  "Could not verify ~/.ssh/authorized_keys: %@": {
+    "de": "~/.ssh/authorized_keys konnte nicht geprüft werden: %@",
+    "es": "No se pudo verificar ~/.ssh/authorized_keys: %@",
+    "fr": "Impossible de vérifier ~/.ssh/authorized_keys : %@",
+    "ja": "~/.ssh/authorized_keys を確認できませんでした: %@",
+    "zh-Hans": "无法校验 ~/.ssh/authorized_keys：%@",
+    "zh-Hant": "無法檢驗 ~/.ssh/authorized_keys：%@"
+  },
+  "Could not write to ~/.ssh/authorized_keys": {
+    "de": "In ~/.ssh/authorized_keys konnte nicht geschrieben werden",
+    "es": "No se pudo escribir en ~/.ssh/authorized_keys",
+    "fr": "Impossible d'écrire dans ~/.ssh/authorized_keys",
+    "ja": "~/.ssh/authorized_keys に書き込めませんでした",
+    "zh-Hans": "无法写入 ~/.ssh/authorized_keys",
+    "zh-Hant": "無法寫入 ~/.ssh/authorized_keys"
+  },
+  "Could not write to ~/.ssh/authorized_keys: %@": {
+    "de": "In ~/.ssh/authorized_keys konnte nicht geschrieben werden: %@",
+    "es": "No se pudo escribir en ~/.ssh/authorized_keys: %@",
+    "fr": "Impossible d'écrire dans ~/.ssh/authorized_keys : %@",
+    "ja": "~/.ssh/authorized_keys に書き込めませんでした: %@",
+    "zh-Hans": "无法写入 ~/.ssh/authorized_keys：%@",
+    "zh-Hant": "無法寫入 ~/.ssh/authorized_keys：%@"
+  },
+  "Host key was not trusted. Connect once first to review it, then retry.": {
+    "de": "Dem Host-Key wurde nicht vertraut. Verbinde dich zunächst einmal, um ihn zu prüfen, und versuche es dann erneut.",
+    "es": "No se confió en la clave del host. Conecta una vez para revisarla y vuelve a intentarlo.",
+    "fr": "La clé d'hôte n'a pas été approuvée. Connectez-vous une fois pour la vérifier, puis réessayez.",
+    "ja": "ホストキーが信頼されていません。まず一度接続して内容を確認してから、やり直してください。",
+    "zh-Hans": "尚未信任该主机密钥。请先连接一次以核对，然后重试。",
+    "zh-Hant": "尚未信任該主機金鑰。請先連線一次以核對，然後重試。"
+  },
+  "Network unreachable: %@": {
+    "de": "Netzwerk nicht erreichbar: %@",
+    "es": "Red inalcanzable: %@",
+    "fr": "Réseau injoignable : %@",
+    "ja": "ネットワークに到達できません: %@",
+    "zh-Hans": "网络不可达：%@",
+    "zh-Hant": "網路無法連通：%@"
+  },
+  "The stored public key is malformed and cannot be revoked safely.": {
+    "de": "Der gesicherte Public Key ist fehlerhaft und lässt sich nicht sicher widerrufen.",
+    "es": "La clave pública guardada tiene un formato incorrecto y no se puede revocar con seguridad.",
+    "fr": "La clé publique stockée est mal formée et ne peut pas être révoquée en toute sécurité.",
+    "ja": "保存されている公開鍵の形式が不正なため、安全に失効させられません。",
+    "zh-Hans": "已存储的公钥格式有误，无法安全吊销。",
+    "zh-Hant": "已儲存的公開金鑰格式有誤，無法安全撤銷。"
+  },
+  "This host is no longer configured to authenticate with the key being revoked.": {
+    "de": "Dieser Host ist nicht mehr so eingerichtet, dass er sich mit dem zu widerrufenden Key authentifiziert.",
+    "es": "Este host ya no está configurado para autenticarse con la clave que se está revocando.",
+    "fr": "Cet hôte n'est plus configuré pour s'authentifier avec la clé en cours de révocation.",
+    "ja": "このホストは、失効させようとしているキーで認証する設定ではなくなっています。",
+    "zh-Hans": "此主机已不再配置为使用正被吊销的密钥进行认证。",
+    "zh-Hant": "此主機已不再設定為使用正被撤銷的金鑰進行驗證。"
+  },
+  "This host uses this key for authentication. Choose a host identity that uses a different key or password.": {
+    "de": "Dieser Host nutzt diesen Key zur Authentifizierung. Wähle eine Host-Identität, die einen anderen Key oder ein Passwort verwendet.",
+    "es": "Este host usa esta clave para autenticarse. Elige una identidad de host que use otra clave o una contraseña.",
+    "fr": "Cet hôte utilise cette clé pour s'authentifier. Choisissez une identité d'hôte qui utilise une autre clé ou un mot de passe.",
+    "ja": "このホストは、このキーを認証に使用しています。別のキーまたはパスワードを使うホスト識別情報を選んでください。",
+    "zh-Hans": "此主机使用该密钥进行认证。请选择使用其他密钥或密码的主机身份。",
+    "zh-Hant": "此主機使用該金鑰進行驗證。請選擇使用其他金鑰或密碼的主機身分。"
+  },
+  "This host or jump route changed after authorization. Review the saved route before changing remote access.": {
+    "de": "Dieser Host oder die Jump-Route hat sich nach der Autorisierung geändert. Prüfe die gesicherte Route, bevor du den entfernten Zugang änderst.",
+    "es": "Este host o su ruta de saltos cambió después de la autorización. Revisa la ruta guardada antes de cambiar el acceso remoto.",
+    "fr": "Cet hôte ou sa route de rebonds a changé après l'autorisation. Vérifiez la route enregistrée avant de modifier l'accès distant.",
+    "ja": "認証後に、このホストまたは踏み台経路が変更されました。リモートアクセスを変更する前に、保存済みの経路を確認してください。",
+    "zh-Hans": "授权之后此主机或跳板路由发生了变化。更改远程访问权限前请先核对已保存的路由。",
+    "zh-Hant": "授權之後此主機或跳板路由發生了變化。更改遠端存取權限前請先核對已儲存的路由。"
+  },
+  "Device authentication failed - %@": {
+    "de": "Die Geräteauthentifizierung ist fehlgeschlagen – %@",
+    "es": "Falló la autenticación del dispositivo: %@",
+    "fr": "L'authentification de l'appareil a échoué — %@",
+    "ja": "デバイスの認証に失敗しました — %@",
+    "zh-Hans": "设备认证失败 —— %@",
+    "zh-Hant": "裝置驗證失敗 —— %@"
+  },
+  "Device authentication failed - connection wasn't started.": {
+    "de": "Die Geräteauthentifizierung ist fehlgeschlagen – die Verbindung wurde nicht aufgebaut.",
+    "es": "Falló la autenticación del dispositivo: no se inició la conexión.",
+    "fr": "L'authentification de l'appareil a échoué — la connexion n'a pas été établie.",
+    "ja": "デバイスの認証に失敗しました。接続は開始されていません。",
+    "zh-Hans": "设备认证失败 —— 未建立连接。",
+    "zh-Hant": "裝置驗證失敗 —— 未建立連線。"
+  },
+  "Device authentication was cancelled - connection wasn't started.": {
+    "de": "Die Geräteauthentifizierung wurde abgebrochen – die Verbindung wurde nicht aufgebaut.",
+    "es": "Se canceló la autenticación del dispositivo: no se inició la conexión.",
+    "fr": "L'authentification de l'appareil a été annulée — la connexion n'a pas été établie.",
+    "ja": "デバイスの認証がキャンセルされました。接続は開始されていません。",
+    "zh-Hans": "设备认证已取消 —— 未建立连接。",
+    "zh-Hant": "裝置驗證已取消 —— 未建立連線。"
+  },
+  "SSH key %@… not found in Keychain.": {
+    "de": "SSH-Key %@… wurde im Schlüsselbund nicht gefunden.",
+    "es": "No se encontró la clave SSH %@… en el llavero.",
+    "fr": "Clé SSH %@… introuvable dans le trousseau.",
+    "ja": "SSH キー %@… がキーチェーンに見つかりません。",
+    "zh-Hans": "在钥匙串中找不到 SSH 密钥 %@…。",
+    "zh-Hant": "在鑰匙圈中找不到 SSH 金鑰 %@…。"
+  },
+  "SSH key %@… has no trusted metadata. Restore or replace the key before connecting.": {
+    "de": "Für den SSH-Key %@… gibt es keine vertrauenswürdigen Metadaten. Stelle den Key wieder her oder ersetze ihn, bevor du dich verbindest.",
+    "es": "La clave SSH %@… no tiene metadatos de confianza. Restaura o sustituye la clave antes de conectar.",
+    "fr": "La clé SSH %@… n'a pas de métadonnées de confiance. Restaurez ou remplacez la clé avant de vous connecter.",
+    "ja": "SSH キー %@… に信頼できるメタデータがありません。接続する前に、キーを復元するか差し替えてください。",
+    "zh-Hans": "SSH 密钥 %@… 没有受信任的元数据。请在连接前恢复或更换该密钥。",
+    "zh-Hant": "SSH 金鑰 %@… 沒有受信任的中繼資料。請在連線前回復或更換該金鑰。"
+  },
+  "The host or authentication policy changed while connecting. Try again.": {
+    "de": "Der Host oder die Authentifizierungsrichtlinie hat sich während des Verbindens geändert. Versuche es erneut.",
+    "es": "El host o la política de autenticación cambiaron durante la conexión. Vuelve a intentarlo.",
+    "fr": "L'hôte ou la politique d'authentification a changé pendant la connexion. Réessayez.",
+    "ja": "接続中にホストまたは認証ポリシーが変更されました。やり直してください。",
+    "zh-Hans": "连接过程中主机或认证策略发生了变化。请重试。",
+    "zh-Hant": "連線過程中主機或驗證原則發生了變化。請重試。"
+  },
+  "This key is still protected by iOS while authentication is off. Open Keys and choose ‘finish turning protection off’ before using it.": {
+    "de": "Dieser Key wird weiterhin von iOS geschützt, obwohl die Authentifizierung aus ist. Öffne „Keys“ und wähle „Schutz endgültig deaktivieren“, bevor du ihn verwendest.",
+    "es": "Esta clave sigue protegida por iOS aunque la autenticación esté desactivada. Abre Claves y elige «terminar de desactivar la protección» antes de usarla.",
+    "fr": "Cette clé est toujours protégée par iOS alors que l'authentification est désactivée. Ouvrez Clés et choisissez « terminer la désactivation de la protection » avant de l'utiliser.",
+    "ja": "認証がオフでも、このキーはまだ iOS によって保護されています。使用する前に「キー」を開き、「保護の解除を完了」を選んでください。",
+    "zh-Hans": "即便认证已关闭，此密钥仍受 iOS 保护。使用前请打开「密钥」并选择「完成关闭保护」。",
+    "zh-Hant": "即便驗證已關閉，此金鑰仍受 iOS 保護。使用前請打開「金鑰」並選擇「完成關閉保護」。"
+  },
+  "This legacy development-key identity is unavailable. Replace it with a Keychain-backed key before connecting.": {
+    "de": "Diese veraltete Entwicklungs-Key-Identität ist nicht verfügbar. Ersetze sie vor dem Verbinden durch einen Key aus dem Schlüsselbund.",
+    "es": "Esta identidad de clave de desarrollo heredada no está disponible. Sustitúyela por una clave respaldada por el llavero antes de conectar.",
+    "fr": "Cette identité de clé de développement héritée est indisponible. Remplacez-la par une clé stockée dans le trousseau avant de vous connecter.",
+    "ja": "この旧式の開発用キー識別情報は利用できません。接続する前に、キーチェーンに保存されたキーに差し替えてください。",
+    "zh-Hans": "此旧式开发密钥身份不可用。请在连接前换成由钥匙串保管的密钥。",
+    "zh-Hant": "此舊式開發金鑰身分不可用。請在連線前換成由鑰匙圈保管的金鑰。"
+  },
+  "This saved host no longer exists.": {
+    "de": "Dieser gesicherte Host existiert nicht mehr.",
+    "es": "Este host guardado ya no existe.",
+    "fr": "Cet hôte enregistré n'existe plus.",
+    "ja": "この保存済みホストはもう存在しません。",
+    "zh-Hans": "此已保存的主机已不存在。",
+    "zh-Hant": "此已儲存的主機已不存在。"
+  },
+  "Unlock Tessera before starting a connection.": {
+    "de": "Entsperre Tessera, bevor du eine Verbindung startest.",
+    "es": "Desbloquea Tessera antes de iniciar una conexión.",
+    "fr": "Déverrouillez Tessera avant d'ouvrir une connexion.",
+    "ja": "接続を開始する前に Tessera のロックを解除してください。",
+    "zh-Hans": "开始连接前请先解锁 Tessera。",
+    "zh-Hant": "開始連線前請先解鎖 Tessera。"
+  },
+  "%lld pt": {
+    "de": "%lld pt",
+    "es": "%lld pt",
+    "fr": "%lld pt",
+    "ja": "%lld pt",
+    "zh-Hans": "%lld pt",
+    "zh-Hant": "%lld pt"
+  },
+  "blur": {
+    "de": "Unschärfe",
+    "es": "desenfoque",
+    "fr": "flou",
+    "ja": "ぼかし",
+    "zh-Hans": "模糊",
+    "zh-Hant": "模糊"
+  },
+  "dim": {
+    "de": "Abdunkeln",
+    "es": "atenuar",
+    "fr": "assombrir",
+    "ja": "暗さ",
+    "zh-Hans": "变暗",
+    "zh-Hant": "變暗"
+  },
+  "fill": {
+    "de": "Füllen",
+    "es": "rellenar",
+    "fr": "remplir",
+    "ja": "塗りつぶし",
+    "zh-Hans": "填充",
+    "zh-Hant": "填充"
+  },
+  "choose file": {
+    "de": "Datei wählen",
+    "es": "elegir archivo",
+    "fr": "choisir un fichier",
+    "ja": "ファイルを選択",
+    "zh-Hans": "选择文件",
+    "zh-Hant": "選擇檔案"
+  },
+  "higher keeps text readable; 0% shows the photo untouched.": {
+    "de": "Höhere Werte halten den Text lesbar; bei 0 % wird das Foto unverändert gezeigt.",
+    "es": "un valor más alto mantiene el texto legible; con 0 % se muestra la foto sin alterar.",
+    "fr": "une valeur plus élevée garde le texte lisible ; à 0 %, la photo est affichée telle quelle.",
+    "ja": "値を大きくすると文字が読みやすくなります。0% では写真がそのまま表示されます。",
+    "zh-Hans": "数值越高文字越易读；0% 时原样显示照片。",
+    "zh-Hant": "數值越高文字越易讀；0% 時原樣顯示照片。"
+  },
+  "pick a picture from photos or files — it's downsampled and stored inside the app; the original is never referenced again.": {
+    "de": "Wähle ein Bild aus „Fotos“ oder „Dateien“ – es wird herunterskaliert und in der App gesichert; das Original wird danach nie wieder herangezogen.",
+    "es": "elige una imagen de Fotos o Archivos: se reduce de tamaño y se guarda dentro de la app; el original no se vuelve a usar.",
+    "fr": "choisissez une image dans Photos ou Fichiers — elle est sous-échantillonnée et stockée dans l'app ; l'original n'est plus jamais utilisé.",
+    "ja": "「写真」または「ファイル」から画像を選んでください。画像は縮小されてアプリ内に保存され、元のファイルが再び参照されることはありません。",
+    "zh-Hans": "从「照片」或「文件」中选一张图片 —— 它会被降采样后存入应用内部；此后不再引用原文件。",
+    "zh-Hant": "從「照片」或「檔案」中選一張圖片 —— 它會被降取樣後存入 App 內部；此後不再參照原檔案。"
+  }
+}

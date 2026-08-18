@@ -53,7 +53,7 @@ struct ImportKeyModal: View {
                 Field(label: "private-key file") {
                     HStack(spacing: 10) {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(selectedFilename ?? "no file selected")
+                            Text(verbatim: selectedFilename ?? String(localized: "no file selected"))
                                 .font(Typography.tesseraMono(size: 12))
                                 .foregroundStyle(selectedFilename == nil ? T.fgDim : T.fg)
                                 .lineLimit(1)
@@ -77,7 +77,7 @@ struct ImportKeyModal: View {
                     )
 
                     if let importError {
-                        Text(importError)
+                        Text(verbatim: importError)
                             .font(Typography.tesseraMono(size: 12))
                             .foregroundStyle(T.red)
                             .fixedSize(horizontal: false, vertical: true)
@@ -188,7 +188,7 @@ struct ImportKeyModal: View {
 
     private func importKey() {
         guard let selectedFileData else {
-            importError = "Choose an OpenSSH private-key file first."
+            importError = String(localized: "Choose an OpenSSH private-key file first.")
             return
         }
         do {
@@ -290,6 +290,6 @@ private enum ImportSurfaceError: LocalizedError {
     case fileTooLarge
 
     var errorDescription: String? {
-        "The selected key file is empty or exceeds the 1 MB safety limit."
+        String(localized: "The selected key file is empty or exceeds the 1 MB safety limit.")
     }
 }

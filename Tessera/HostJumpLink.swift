@@ -81,18 +81,18 @@ enum HostJumpChainResolver {
                 link = try fetchLink(for: currentID, in: context)
             } catch {
                 resolution.isBroken = true
-                resolution.brokenReason = "Could not read the jump-host configuration."
+                resolution.brokenReason = String(localized: "Could not read the jump-host configuration.")
                 return resolution
             }
             guard let link else { break }
             if inner.count >= maxDepth {
                 resolution.isBroken = true
-                resolution.brokenReason = "Jump chain exceeds \(maxDepth) hops."
+                resolution.brokenReason = String(localized: "Jump chain exceeds \(maxDepth) hops.")
                 return resolution
             }
             if visited.contains(link.jumpHostID) {
                 resolution.isBroken = true
-                resolution.brokenReason = "Jump chain contains a cycle."
+                resolution.brokenReason = String(localized: "Jump chain contains a cycle.")
                 return resolution
             }
             let jumpID = link.jumpHostID
@@ -104,12 +104,12 @@ enum HostJumpChainResolver {
                 bastion = try context.fetch(descriptor).first
             } catch {
                 resolution.isBroken = true
-                resolution.brokenReason = "Could not read the jump-host configuration."
+                resolution.brokenReason = String(localized: "Could not read the jump-host configuration.")
                 return resolution
             }
             guard let bastion else {
                 resolution.isBroken = true
-                resolution.brokenReason = "A configured jump host no longer exists."
+                resolution.brokenReason = String(localized: "A configured jump host no longer exists.")
                 return resolution
             }
             visited.insert(bastion.id)

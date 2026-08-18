@@ -3,6 +3,19 @@ import SwiftUI
 
 enum AppearanceModeOption: String {
     case system, dark, light
+
+    /// The raw value is the persisted identity and never moves; the card
+    /// under the preview shows this instead.
+    var displayName: LocalizedStringResource {
+        switch self {
+        case .system: return LocalizedStringResource(
+            "system", comment: "Appearance mode: follow the system setting")
+        case .dark:   return LocalizedStringResource(
+            "dark", comment: "Appearance mode")
+        case .light:  return LocalizedStringResource(
+            "light", comment: "Appearance mode")
+        }
+    }
 }
 
 /// Terminal cursor shape preference. Mapped to SwiftTerm.CursorStyle at the
@@ -10,6 +23,18 @@ enum AppearanceModeOption: String {
 /// here so AppearancePreferences doesn't need to import SwiftTerm.
 enum CursorStyleOption: String, CaseIterable {
     case block, bar, underline
+
+    /// The raw value is persisted; the picker shows this.
+    var displayName: LocalizedStringResource {
+        switch self {
+        case .block:     return LocalizedStringResource(
+            "block", comment: "Terminal cursor shape: a filled block")
+        case .bar:       return LocalizedStringResource(
+            "bar", comment: "Terminal cursor shape: a vertical bar")
+        case .underline: return LocalizedStringResource(
+            "underline", comment: "Terminal cursor shape: an underline")
+        }
+    }
 }
 
 enum AppLockSettingsPolicy {
@@ -221,6 +246,20 @@ final class AppearancePreferences {
         didSet { UserDefaults.standard.set(showAccessoryBar, forKey: "tessera.pref.showAccessoryBar") }
     }
 
+    /// Whether software-keyboard appearance changes the terminal's row count.
+    /// Default-off keeps the terminal grid stable and moves the composed
+    /// session surface as one layer instead, avoiding a reflow/SIGWINCH during
+    /// the keyboard animation. This is device-local because iPhone and iPad
+    /// keyboard setups can differ even for the same user.
+    var resizeTerminalWithKeyboard: Bool = false {
+        didSet {
+            UserDefaults.standard.set(
+                resizeTerminalWithKeyboard,
+                forKey: "tessera.pref.resizeTerminalWithKeyboard"
+            )
+        }
+    }
+
     /// Ordered chip IDs (raw `AccessoryChip` rawValues) that compose the user's
     /// custom accessory bar. Persisted as `[String]` rather than `[AccessoryChip]`
     /// so unknown legacy IDs round-trip silently after schema rolls instead of
@@ -236,6 +275,13 @@ final class AppearancePreferences {
     /// don't break decoding. Valid values: "oneShot", "sticky".
     var modifierBehavior: String = "oneShot" {
         didSet { UserDefaults.standard.set(modifierBehavior, forKey: "tessera.pref.modifierBehavior") }
+    }
+
+    /// How modifier keys are written app-wide — glyphs (⌘⇧E) or words
+    /// (cmd-shift-e). Display only; see `ModifierNotation`. Defaults to `.glyph`
+    /// so no existing user sees a change until they opt in.
+    var modifierNotation: ModifierNotation = .glyph {
+        didSet { UserDefaults.standard.set(modifierNotation.rawValue, forKey: "tessera.pref.modifierNotation") }
     }
 
     // MARK: - Files
@@ -322,6 +368,27 @@ final class AppearancePreferences {
             if agentCenterEnabled {
                 coordinateAgentCenterAndBellNotificationsIfNeeded()
             }
+        }
+    }
+
+    /// Per-provider gates for freezing terminal scrolling while a
+    /// lifecycle-proven agent is `.working`. They govern only the scroll
+    /// suppression: detection, cards, and attention notifications stay on
+    /// either way, so turning one off costs nothing but the frozen viewport.
+    var agentScrollLockClaudeCodeEnabled: Bool = true {
+        didSet {
+            UserDefaults.standard.set(
+                agentScrollLockClaudeCodeEnabled,
+                forKey: "tessera.pref.agentScrollLockClaudeCodeEnabled"
+            )
+        }
+    }
+    var agentScrollLockCodexEnabled: Bool = true {
+        didSet {
+            UserDefaults.standard.set(
+                agentScrollLockCodexEnabled,
+                forKey: "tessera.pref.agentScrollLockCodexEnabled"
+            )
         }
     }
 
@@ -461,12 +528,21 @@ final class AppearancePreferences {
         if ud.object(forKey: "tessera.pref.showAccessoryBar") != nil {
             showAccessoryBar = ud.bool(forKey: "tessera.pref.showAccessoryBar")
         }
+        if ud.object(forKey: "tessera.pref.resizeTerminalWithKeyboard") != nil {
+            resizeTerminalWithKeyboard = ud.bool(
+                forKey: "tessera.pref.resizeTerminalWithKeyboard"
+            )
+        }
         if let keys = ud.array(forKey: "tessera.pref.accessoryBarKeys") as? [String] {
             accessoryBarKeys = keys
         }
         if let raw = ud.string(forKey: "tessera.pref.modifierBehavior"),
            raw == "oneShot" || raw == "sticky" {
             modifierBehavior = raw
+        }
+        if let raw = ud.string(forKey: "tessera.pref.modifierNotation"),
+           let notation = ModifierNotation(rawValue: raw) {
+            modifierNotation = notation
         }
 
         if ud.object(forKey: RemoteFilesConstants.reaperDaysKey) != nil {
@@ -507,6 +583,16 @@ final class AppearancePreferences {
         }
         if ud.object(forKey: "tessera.pref.agentCenterEnabled") != nil {
             agentCenterEnabled = ud.bool(forKey: "tessera.pref.agentCenterEnabled")
+        }
+        if ud.object(forKey: "tessera.pref.agentScrollLockClaudeCodeEnabled") != nil {
+            agentScrollLockClaudeCodeEnabled = ud.bool(
+                forKey: "tessera.pref.agentScrollLockClaudeCodeEnabled"
+            )
+        }
+        if ud.object(forKey: "tessera.pref.agentScrollLockCodexEnabled") != nil {
+            agentScrollLockCodexEnabled = ud.bool(
+                forKey: "tessera.pref.agentScrollLockCodexEnabled"
+            )
         }
         if ud.object(forKey: "tessera.pref.swipePadEnabled") != nil {
             swipePadEnabled = ud.bool(forKey: "tessera.pref.swipePadEnabled")

@@ -1,0 +1,818 @@
+{
+  "+ generate": {
+    "de": "+ erzeugen",
+    "es": "+ generar",
+    "fr": "+ générer",
+    "ja": "+ 生成",
+    "zh-Hans": "+ 生成",
+    "zh-Hant": "+ 產生"
+  },
+  "import": {
+    "de": "importieren",
+    "es": "importar",
+    "fr": "importer",
+    "ja": "読み込む",
+    "zh-Hans": "导入",
+    "zh-Hant": "輸入"
+  },
+  "search": {
+    "de": "suchen",
+    "es": "buscar",
+    "fr": "rechercher",
+    "ja": "検索",
+    "zh-Hans": "搜索",
+    "zh-Hant": "搜尋"
+  },
+  "restore": {
+    "de": "wiederherstellen",
+    "es": "restaurar",
+    "fr": "restaurer",
+    "ja": "復元",
+    "zh-Hans": "恢复",
+    "zh-Hant": "回復"
+  },
+  "verify": {
+    "de": "prüfen",
+    "es": "verificar",
+    "fr": "vérifier",
+    "ja": "検証",
+    "zh-Hans": "验证",
+    "zh-Hant": "驗證"
+  },
+  "revoke": {
+    "de": "widerrufen",
+    "es": "revocar",
+    "fr": "révoquer",
+    "ja": "失効",
+    "zh-Hans": "吊销",
+    "zh-Hant": "撤銷"
+  },
+  "revoking…": {
+    "de": "wird widerrufen…",
+    "es": "revocando…",
+    "fr": "révocation…",
+    "ja": "失効中…",
+    "zh-Hans": "正在吊销…",
+    "zh-Hant": "正在撤銷…"
+  },
+  "share": {
+    "de": "teilen",
+    "es": "compartir",
+    "fr": "partager",
+    "ja": "共有",
+    "zh-Hans": "共享",
+    "zh-Hant": "共享"
+  },
+  "type": {
+    "de": "Typ",
+    "es": "tipo",
+    "fr": "type",
+    "ja": "種類",
+    "zh-Hans": "类型",
+    "zh-Hant": "類型"
+  },
+  "used by": {
+    "de": "verwendet von",
+    "es": "usada por",
+    "fr": "utilisée par",
+    "ja": "使用元",
+    "zh-Hans": "使用者",
+    "zh-Hant": "使用者"
+  },
+  "recovery": {
+    "de": "Wiederherstellung",
+    "es": "recuperación",
+    "fr": "récupération",
+    "ja": "復旧",
+    "zh-Hans": "恢复",
+    "zh-Hant": "回復"
+  },
+  "public key": {
+    "de": "Public Key",
+    "es": "clave pública",
+    "fr": "clé publique",
+    "ja": "公開鍵",
+    "zh-Hans": "公钥",
+    "zh-Hant": "公開金鑰"
+  },
+  "fingerprint (sha256)": {
+    "de": "Fingerabdruck (sha256)",
+    "es": "huella (sha256)",
+    "fr": "empreinte (sha256)",
+    "ja": "フィンガープリント (sha256)",
+    "zh-Hans": "指纹 (sha256)",
+    "zh-Hant": "指紋 (sha256)"
+  },
+  "device access": {
+    "de": "Gerätezugriff",
+    "es": "acceso al dispositivo",
+    "fr": "accès à l'appareil",
+    "ja": "デバイスアクセス",
+    "zh-Hans": "设备访问",
+    "zh-Hant": "裝置存取"
+  },
+  "user presence": {
+    "de": "Anwesenheit des Nutzers",
+    "es": "presencia del usuario",
+    "fr": "présence de l'utilisateur",
+    "ja": "ユーザーの存在確認",
+    "zh-Hans": "用户在场验证",
+    "zh-Hant": "使用者在場驗證"
+  },
+  "device-bound key": {
+    "de": "gerätegebundener Key",
+    "es": "clave vinculada al dispositivo",
+    "fr": "clé liée à l'appareil",
+    "ja": "デバイス固定キー",
+    "zh-Hans": "设备绑定密钥",
+    "zh-Hant": "裝置綁定金鑰"
+  },
+  "secure enclave": {
+    "de": "secure enclave",
+    "es": "secure enclave",
+    "fr": "secure enclave",
+    "ja": "secure enclave",
+    "zh-Hans": "secure enclave",
+    "zh-Hant": "secure enclave"
+  },
+  "enforced": {
+    "de": "erzwungen",
+    "es": "obligatorio",
+    "fr": "imposé",
+    "ja": "必須",
+    "zh-Hans": "已强制",
+    "zh-Hant": "已強制"
+  },
+  "disabled": {
+    "de": "deaktiviert",
+    "es": "desactivado",
+    "fr": "désactivé",
+    "ja": "無効",
+    "zh-Hans": "已停用",
+    "zh-Hant": "已停用"
+  },
+  "missing": {
+    "de": "fehlt",
+    "es": "falta",
+    "fr": "manquante",
+    "ja": "見つかりません",
+    "zh-Hans": "缺失",
+    "zh-Hant": "缺失"
+  },
+  "rejected": {
+    "de": "abgelehnt",
+    "es": "rechazada",
+    "fr": "rejetée",
+    "ja": "拒否",
+    "zh-Hans": "已拒绝",
+    "zh-Hant": "已拒絕"
+  },
+  "unavailable": {
+    "de": "nicht verfügbar",
+    "es": "no disponible",
+    "fr": "indisponible",
+    "ja": "利用できません",
+    "zh-Hans": "不可用",
+    "zh-Hant": "不可用"
+  },
+  "no keys yet": {
+    "de": "noch keine Keys",
+    "es": "aún no hay claves",
+    "fr": "aucune clé pour l'instant",
+    "ja": "キーはまだありません",
+    "zh-Hans": "还没有密钥",
+    "zh-Hant": "還沒有金鑰"
+  },
+  "no matching keys": {
+    "de": "keine passenden Keys",
+    "es": "no hay claves coincidentes",
+    "fr": "aucune clé correspondante",
+    "ja": "一致するキーがありません",
+    "zh-Hans": "没有匹配的密钥",
+    "zh-Hant": "沒有相符的金鑰"
+  },
+  "no hosts use this key yet": {
+    "de": "noch nutzt kein Host diesen Key",
+    "es": "todavía ningún host usa esta clave",
+    "fr": "aucun hôte n'utilise encore cette clé",
+    "ja": "このキーを使用しているホストはまだありません",
+    "zh-Hans": "还没有主机使用此密钥",
+    "zh-Hant": "還沒有主機使用此金鑰"
+  },
+  "back to keys": {
+    "de": "zurück zu den Keys",
+    "es": "volver a claves",
+    "fr": "retour aux clés",
+    "ja": "キー一覧に戻る",
+    "zh-Hans": "返回密钥",
+    "zh-Hant": "返回金鑰"
+  },
+  "copy public key": {
+    "de": "Public Key kopieren",
+    "es": "copiar clave pública",
+    "fr": "copier la clé publique",
+    "ja": "公開鍵をコピー",
+    "zh-Hans": "拷贝公钥",
+    "zh-Hant": "拷貝公開金鑰"
+  },
+  "share public key": {
+    "de": "Public Key teilen",
+    "es": "compartir clave pública",
+    "fr": "partager la clé publique",
+    "ja": "公開鍵を共有",
+    "zh-Hans": "共享公钥",
+    "zh-Hant": "共享公開金鑰"
+  },
+  "Copies public material only": {
+    "de": "Kopiert nur öffentliches Material",
+    "es": "Copia únicamente el material público",
+    "fr": "Copie uniquement le matériel public",
+    "ja": "公開部分のみをコピーします",
+    "zh-Hans": "仅拷贝公开部分",
+    "zh-Hant": "僅拷貝公開部分"
+  },
+  "Shares public material only": {
+    "de": "Teilt nur öffentliches Material",
+    "es": "Comparte únicamente el material público",
+    "fr": "Partage uniquement le matériel public",
+    "ja": "公開部分のみを共有します",
+    "zh-Hans": "仅共享公开部分",
+    "zh-Hant": "僅共享公開部分"
+  },
+  "copy to host…": {
+    "de": "auf Host kopieren…",
+    "es": "copiar al host…",
+    "fr": "copier vers l'hôte…",
+    "ja": "ホストにコピー…",
+    "zh-Hans": "拷贝到主机…",
+    "zh-Hant": "拷貝到主機…"
+  },
+  "confirm passphrase": {
+    "de": "Passphrase bestätigen",
+    "es": "confirmar la frase de contraseña",
+    "fr": "confirmer la phrase secrète",
+    "ja": "パスフレーズを確認",
+    "zh-Hans": "确认密码短语",
+    "zh-Hant": "確認密碼短語"
+  },
+  "recovery-file passphrase": {
+    "de": "Passphrase der Wiederherstellungsdatei",
+    "es": "frase de contraseña del archivo de recuperación",
+    "fr": "phrase secrète du fichier de récupération",
+    "ja": "復旧ファイルのパスフレーズ",
+    "zh-Hans": "恢复文件的密码短语",
+    "zh-Hant": "回復檔案的密碼短語"
+  },
+  "biometrics or passcode": {
+    "de": "Biometrie oder Code",
+    "es": "datos biométricos o código",
+    "fr": "biométrie ou code",
+    "ja": "生体認証またはパスコード",
+    "zh-Hans": "生物识别或密码",
+    "zh-Hant": "生物辨識或密碼"
+  },
+  "require biometrics or passcode": {
+    "de": "Biometrie oder Code verlangen",
+    "es": "exigir datos biométricos o código",
+    "fr": "exiger la biométrie ou le code",
+    "ja": "生体認証またはパスコードを要求",
+    "zh-Hans": "要求生物识别或密码",
+    "zh-Hant": "要求生物辨識或密碼"
+  },
+  "Face ID/Touch ID or passcode whenever Tessera accesses this key": {
+    "de": "Face ID/Touch ID oder Code, sobald Tessera auf diesen Key zugreift",
+    "es": "Face ID/Touch ID o código cada vez que Tessera acceda a esta clave",
+    "fr": "Face ID/Touch ID ou code chaque fois que Tessera accède à cette clé",
+    "ja": "Tessera がこのキーにアクセスするたびに Face ID/Touch ID またはパスコードを要求します",
+    "zh-Hans": "Tessera 每次访问此密钥时都要求 Face ID/Touch ID 或密码",
+    "zh-Hant": "Tessera 每次存取此金鑰時都要求 Face ID/Touch ID 或密碼"
+  },
+  "Face ID/Touch ID or passcode is permanently enforced for this older Secure Enclave key": {
+    "de": "Für diesen älteren Secure-Enclave-Key sind Face ID/Touch ID oder Code dauerhaft erzwungen",
+    "es": "Face ID/Touch ID o código son obligatorios de forma permanente para esta clave antigua del Secure Enclave",
+    "fr": "Face ID/Touch ID ou le code sont imposés de façon permanente pour cette ancienne clé Secure Enclave",
+    "ja": "この古い Secure Enclave キーでは Face ID/Touch ID またはパスコードが恒久的に必須です",
+    "zh-Hans": "此较早的 Secure Enclave 密钥永久强制要求 Face ID/Touch ID 或密码",
+    "zh-Hant": "此較早的 Secure Enclave 金鑰永久強制要求 Face ID/Touch ID 或密碼"
+  },
+  "Tessera authenticates you before using this hardware-bound key": {
+    "de": "Tessera authentifiziert dich, bevor dieser hardwaregebundene Key verwendet wird",
+    "es": "Tessera te autentica antes de usar esta clave vinculada al hardware",
+    "fr": "Tessera vous authentifie avant d'utiliser cette clé liée au matériel",
+    "ja": "このハードウェア固定キーを使う前に Tessera が本人確認を行います",
+    "zh-Hans": "使用此硬件绑定密钥前，Tessera 会先验证你的身份",
+    "zh-Hant": "使用此硬體綁定金鑰前，Tessera 會先驗證你的身分"
+  },
+  "This older Secure Enclave key requires rotation to change authentication": {
+    "de": "Um die Authentifizierung zu ändern, muss dieser ältere Secure-Enclave-Key ersetzt werden",
+    "es": "Para cambiar la autenticación hay que rotar esta clave antigua del Secure Enclave",
+    "fr": "Pour changer l'authentification, cette ancienne clé Secure Enclave doit être remplacée",
+    "ja": "認証方法を変更するには、この古い Secure Enclave キーを更新する必要があります",
+    "zh-Hans": "要更改认证方式，需要轮换此较早的 Secure Enclave 密钥",
+    "zh-Hant": "要更改驗證方式，需要輪換此較早的 Secure Enclave 金鑰"
+  },
+  "key protection on": {
+    "de": "Key-Schutz an",
+    "es": "protección de la clave activada",
+    "fr": "protection de la clé activée",
+    "ja": "キー保護をオンにしました",
+    "zh-Hans": "已开启密钥保护",
+    "zh-Hant": "已開啟金鑰保護"
+  },
+  "key protection off - future key use will not require authentication": {
+    "de": "Key-Schutz aus – künftige Nutzung dieses Keys verlangt keine Authentifizierung",
+    "es": "protección de la clave desactivada: usarla en el futuro no requerirá autenticación",
+    "fr": "protection de la clé désactivée — les prochaines utilisations ne demanderont pas d'authentification",
+    "ja": "キー保護をオフにしました。今後このキーを使うときに認証は求められません",
+    "zh-Hans": "已关闭密钥保护 —— 今后使用此密钥将不再需要认证",
+    "zh-Hant": "已關閉金鑰保護 —— 今後使用此金鑰將不再需要驗證"
+  },
+  "key authentication on": {
+    "de": "Key-Authentifizierung an",
+    "es": "autenticación de la clave activada",
+    "fr": "authentification de la clé activée",
+    "ja": "キー認証をオンにしました",
+    "zh-Hans": "已开启密钥认证",
+    "zh-Hant": "已開啟金鑰驗證"
+  },
+  "key authentication off - future key use will not require authentication": {
+    "de": "Key-Authentifizierung aus – künftige Nutzung dieses Keys verlangt keine Authentifizierung",
+    "es": "autenticación de la clave desactivada: usarla en el futuro no requerirá autenticación",
+    "fr": "authentification de la clé désactivée — les prochaines utilisations ne demanderont pas d'authentification",
+    "ja": "キー認証をオフにしました。今後このキーを使うときに認証は求められません",
+    "zh-Hans": "已关闭密钥认证 —— 今后使用此密钥将不再需要认证",
+    "zh-Hant": "已關閉金鑰驗證 —— 今後使用此金鑰將不再需要驗證"
+  },
+  "Authentication cancelled - key protection unchanged": {
+    "de": "Authentifizierung abgebrochen – Key-Schutz unverändert",
+    "es": "autenticación cancelada: la protección de la clave no cambió",
+    "fr": "authentification annulée — protection de la clé inchangée",
+    "ja": "認証をキャンセルしました。キー保護は変更されていません",
+    "zh-Hans": "认证已取消 —— 密钥保护未更改",
+    "zh-Hant": "驗證已取消 —— 金鑰保護未更改"
+  },
+  "Authentication cancelled - key setting unchanged": {
+    "de": "Authentifizierung abgebrochen – Key-Einstellung unverändert",
+    "es": "autenticación cancelada: el ajuste de la clave no cambió",
+    "fr": "authentification annulée — réglage de la clé inchangé",
+    "ja": "認証をキャンセルしました。キーの設定は変更されていません",
+    "zh-Hans": "认证已取消 —— 密钥设置未更改",
+    "zh-Hant": "驗證已取消 —— 金鑰設定未更改"
+  },
+  "Could not change key protection: %@": {
+    "de": "Key-Schutz konnte nicht geändert werden: %@",
+    "es": "No se pudo cambiar la protección de la clave: %@",
+    "fr": "Impossible de modifier la protection de la clé : %@",
+    "ja": "キー保護を変更できませんでした: %@",
+    "zh-Hans": "无法更改密钥保护：%@",
+    "zh-Hant": "無法更改金鑰保護：%@"
+  },
+  "Could not change key authentication: %@": {
+    "de": "Key-Authentifizierung konnte nicht geändert werden: %@",
+    "es": "No se pudo cambiar la autenticación de la clave: %@",
+    "fr": "Impossible de modifier l'authentification de la clé : %@",
+    "ja": "キー認証を変更できませんでした: %@",
+    "zh-Hans": "无法更改密钥认证：%@",
+    "zh-Hant": "無法更改金鑰驗證：%@"
+  },
+  "Could not inspect current key protection; no change was made": {
+    "de": "Der aktuelle Key-Schutz ließ sich nicht ermitteln; es wurde nichts geändert",
+    "es": "No se pudo consultar la protección actual de la clave; no se hizo ningún cambio",
+    "fr": "Impossible de lire la protection actuelle de la clé ; aucune modification n'a été effectuée",
+    "ja": "現在のキー保護を確認できなかったため、変更は行われていません",
+    "zh-Hans": "无法读取当前的密钥保护状态，未做任何更改",
+    "zh-Hant": "無法讀取目前的金鑰保護狀態，未做任何更改"
+  },
+  "This key is still protected by iOS. Confirm once to finish turning protection off, then Tessera can use it without authentication.": {
+    "de": "Dieser Key wird weiterhin von iOS geschützt. Bestätige einmal, um den Schutz vollständig zu deaktivieren; danach kann Tessera ihn ohne Authentifizierung verwenden.",
+    "es": "Esta clave sigue protegida por iOS. Confirma una vez para terminar de desactivar la protección y Tessera podrá usarla sin autenticación.",
+    "fr": "Cette clé est encore protégée par iOS. Confirmez une fois pour terminer la désactivation de la protection ; Tessera pourra ensuite l'utiliser sans authentification.",
+    "ja": "このキーはまだ iOS によって保護されています。一度確認すると保護の解除が完了し、認証なしで Tessera が使用できるようになります。",
+    "zh-Hans": "此密钥仍受 iOS 保护。确认一次即可完成关闭保护，之后 Tessera 无需认证即可使用它。",
+    "zh-Hant": "此金鑰仍受 iOS 保護。確認一次即可完成關閉保護，之後 Tessera 無需驗證即可使用它。"
+  },
+  "finish turning protection off…": {
+    "de": "Schutz endgültig deaktivieren…",
+    "es": "terminar de desactivar la protección…",
+    "fr": "terminer la désactivation de la protection…",
+    "ja": "保護の解除を完了…",
+    "zh-Hans": "完成关闭保护…",
+    "zh-Hant": "完成關閉保護…"
+  },
+  "export private key…": {
+    "de": "privaten Key exportieren…",
+    "es": "exportar la clave privada…",
+    "fr": "exporter la clé privée…",
+    "ja": "秘密鍵を書き出す…",
+    "zh-Hans": "导出私钥…",
+    "zh-Hant": "輸出私密金鑰…"
+  },
+  "export encrypted file…": {
+    "de": "verschlüsselte Datei exportieren…",
+    "es": "exportar archivo cifrado…",
+    "fr": "exporter le fichier chiffré…",
+    "ja": "暗号化ファイルを書き出す…",
+    "zh-Hans": "导出加密文件…",
+    "zh-Hant": "輸出加密檔案…"
+  },
+  "export a new copy…": {
+    "de": "neue Kopie exportieren…",
+    "es": "exportar una copia nueva…",
+    "fr": "exporter une nouvelle copie…",
+    "ja": "新しいコピーを書き出す…",
+    "zh-Hans": "导出新副本…",
+    "zh-Hant": "輸出新副本…"
+  },
+  "export recovery first": {
+    "de": "erst Wiederherstellungsdatei exportieren",
+    "es": "exporta primero la recuperación",
+    "fr": "exportez d'abord la récupération",
+    "ja": "先に復旧ファイルを書き出してください",
+    "zh-Hans": "请先导出恢复文件",
+    "zh-Hant": "請先輸出回復檔案"
+  },
+  "protect recovery key…": {
+    "de": "Wiederherstellungs-Key schützen…",
+    "es": "proteger la clave de recuperación…",
+    "fr": "protéger la clé de récupération…",
+    "ja": "復旧キーを保護…",
+    "zh-Hans": "保护恢复密钥…",
+    "zh-Hant": "保護回復金鑰…"
+  },
+  "verify recovery file…": {
+    "de": "Wiederherstellungsdatei prüfen…",
+    "es": "verificar el archivo de recuperación…",
+    "fr": "vérifier le fichier de récupération…",
+    "ja": "復旧ファイルを検証…",
+    "zh-Hans": "验证恢复文件…",
+    "zh-Hant": "驗證回復檔案…"
+  },
+  "restore from recovery file…": {
+    "de": "aus Wiederherstellungsdatei wiederherstellen…",
+    "es": "restaurar desde el archivo de recuperación…",
+    "fr": "restaurer depuis le fichier de récupération…",
+    "ja": "復旧ファイルから復元…",
+    "zh-Hans": "从恢复文件恢复…",
+    "zh-Hant": "從回復檔案回復…"
+  },
+  "repair from matching recovery file…": {
+    "de": "aus passender Wiederherstellungsdatei reparieren…",
+    "es": "reparar desde el archivo de recuperación correspondiente…",
+    "fr": "réparer depuis le fichier de récupération correspondant…",
+    "ja": "対応する復旧ファイルから修復…",
+    "zh-Hans": "从匹配的恢复文件修复…",
+    "zh-Hant": "從相符的回復檔案修復…"
+  },
+  "recovery not exported": {
+    "de": "Wiederherstellung nicht exportiert",
+    "es": "recuperación no exportada",
+    "fr": "récupération non exportée",
+    "ja": "復旧ファイルは未書き出し",
+    "zh-Hans": "尚未导出恢复文件",
+    "zh-Hant": "尚未輸出回復檔案"
+  },
+  "recovery file verified": {
+    "de": "Wiederherstellungsdatei geprüft",
+    "es": "archivo de recuperación verificado",
+    "fr": "fichier de récupération vérifié",
+    "ja": "復旧ファイルを検証しました",
+    "zh-Hans": "恢复文件已验证",
+    "zh-Hant": "回復檔案已驗證"
+  },
+  "encrypted recovery file exported": {
+    "de": "verschlüsselte Wiederherstellungsdatei exportiert",
+    "es": "archivo de recuperación cifrado exportado",
+    "fr": "fichier de récupération chiffré exporté",
+    "ja": "暗号化された復旧ファイルを書き出しました",
+    "zh-Hans": "已导出加密的恢复文件",
+    "zh-Hant": "已輸出加密的回復檔案"
+  },
+  "recovery operation hidden": {
+    "de": "Wiederherstellungsvorgang ausgeblendet",
+    "es": "operación de recuperación oculta",
+    "fr": "opération de récupération masquée",
+    "ja": "復旧操作を非表示にしました",
+    "zh-Hans": "已隐藏恢复操作",
+    "zh-Hant": "已隱藏回復操作"
+  },
+  "private key restored": {
+    "de": "privater Key wiederhergestellt",
+    "es": "clave privada restaurada",
+    "fr": "clé privée restaurée",
+    "ja": "秘密鍵を復元しました",
+    "zh-Hans": "已恢复私钥",
+    "zh-Hant": "已回復私密金鑰"
+  },
+  "Encrypted OpenSSH recovery exported %@. Fingerprint %@.": {
+    "de": "Verschlüsselte OpenSSH-Wiederherstellung exportiert: %@. Fingerabdruck %@.",
+    "es": "Recuperación OpenSSH cifrada exportada: %@. Huella %@.",
+    "fr": "Récupération OpenSSH chiffrée exportée : %@. Empreinte %@.",
+    "ja": "暗号化された OpenSSH 復旧ファイルを書き出しました: %@。フィンガープリント %@。",
+    "zh-Hans": "已导出加密的 OpenSSH 恢复文件：%@。指纹 %@。",
+    "zh-Hant": "已輸出加密的 OpenSSH 回復檔案：%@。指紋 %@。"
+  },
+  "Recovery export was not completed: %@": {
+    "de": "Der Wiederherstellungs-Export wurde nicht abgeschlossen: %@",
+    "es": "La exportación de recuperación no se completó: %@",
+    "fr": "L'export de récupération n'a pas abouti : %@",
+    "ja": "復旧ファイルの書き出しが完了しませんでした: %@",
+    "zh-Hans": "恢复文件导出未完成：%@",
+    "zh-Hant": "回復檔案輸出未完成：%@"
+  },
+  "No verified recovery export is recorded. Device loss or local deletion may permanently remove this credential.": {
+    "de": "Es ist kein geprüfter Wiederherstellungs-Export vermerkt. Bei Geräteverlust oder lokalem Löschen kann dieser Zugang dauerhaft verloren gehen.",
+    "es": "No hay ninguna exportación de recuperación verificada registrada. Perder el dispositivo o eliminarla localmente puede borrar esta credencial de forma permanente.",
+    "fr": "Aucun export de récupération vérifié n'est enregistré. La perte de l'appareil ou une suppression locale peut effacer définitivement cet identifiant.",
+    "ja": "検証済みの復旧ファイルの記録がありません。デバイスを紛失したりローカルで削除したりすると、この資格情報は永久に失われる可能性があります。",
+    "zh-Hans": "没有记录到经过验证的恢复文件导出。设备丢失或在本地删除可能会永久移除此凭据。",
+    "zh-Hant": "沒有記錄到經過驗證的回復檔案輸出。裝置遺失或在本機刪除可能會永久移除此憑證。"
+  },
+  "This software key has no recorded recovery export. Installing it as the only remote credential can permanently lock you out after device loss or accidental deletion.": {
+    "de": "Für diesen Software-Key ist kein Wiederherstellungs-Export vermerkt. Wird er als einziger entfernter Zugang installiert, kannst du dich nach Geräteverlust oder versehentlichem Löschen dauerhaft aussperren.",
+    "es": "Esta clave por software no tiene ninguna exportación de recuperación registrada. Instalarla como única credencial remota puede dejarte sin acceso de forma permanente si pierdes el dispositivo o la eliminas por error.",
+    "fr": "Cette clé logicielle n'a aucun export de récupération enregistré. L'installer comme unique identifiant distant peut vous bloquer définitivement en cas de perte de l'appareil ou de suppression accidentelle.",
+    "ja": "このソフトウェアキーには復旧ファイルの記録がありません。これを唯一のリモート資格情報として設置すると、デバイスの紛失や誤削除の後、恒久的にログインできなくなるおそれがあります。",
+    "zh-Hans": "此软件密钥没有恢复文件导出记录。若将它作为唯一的远程凭据安装，设备丢失或误删后你可能被永久锁在门外。",
+    "zh-Hant": "此軟體金鑰沒有回復檔案輸出記錄。若將它作為唯一的遠端憑證安裝，裝置遺失或誤刪後你可能被永久鎖在門外。"
+  },
+  "This legacy software key type cannot be exported safely by this version. Generate a recoverable Ed25519 key, install it alongside this credential, then retire this key.": {
+    "de": "Dieser veraltete Software-Key-Typ lässt sich in dieser Version nicht sicher exportieren. Erzeuge einen wiederherstellbaren Ed25519-Key, installiere ihn neben diesem Zugang und nimm diesen Key anschließend außer Betrieb.",
+    "es": "Esta versión no puede exportar de forma segura este tipo de clave por software heredado. Genera una clave Ed25519 recuperable, instálala junto a esta credencial y luego retira esta clave.",
+    "fr": "Cette version ne peut pas exporter ce type de clé logicielle hérité en toute sécurité. Générez une clé Ed25519 récupérable, installez-la à côté de cet identifiant, puis retirez cette clé.",
+    "ja": "このバージョンでは、この旧式のソフトウェアキーを安全に書き出せません。復旧可能な Ed25519 キーを生成し、この資格情報と併せて設置してから、このキーを廃止してください。",
+    "zh-Hans": "此版本无法安全导出这种旧式软件密钥。请生成一个可恢复的 Ed25519 密钥，与此凭据一并安装，然后停用此密钥。",
+    "zh-Hant": "此版本無法安全輸出這種舊式軟體金鑰。請產生一個可回復的 Ed25519 金鑰，與此憑證一併安裝，然後停用此金鑰。"
+  },
+  "Secure Enclave private material cannot leave this device. Keep a second, recoverable credential authorized on every host that uses it.": {
+    "de": "Privates Material im Secure Enclave kann dieses Gerät nicht verlassen. Halte auf jedem Host, der ihn nutzt, einen zweiten, wiederherstellbaren Zugang autorisiert.",
+    "es": "El material privado del Secure Enclave no puede salir de este dispositivo. Mantén autorizada una segunda credencial recuperable en cada host que la use.",
+    "fr": "Le matériel privé du Secure Enclave ne peut pas quitter cet appareil. Gardez un second identifiant récupérable autorisé sur chaque hôte qui l'utilise.",
+    "ja": "Secure Enclave 内の秘密情報はこのデバイスの外に出せません。これを使うすべてのホストで、復旧可能な 2 つ目の資格情報を有効にしておいてください。",
+    "zh-Hans": "Secure Enclave 中的私密材料无法离开本设备。请在每台使用它的主机上保留第二个可恢复的授权凭据。",
+    "zh-Hant": "Secure Enclave 中的私密材料無法離開本裝置。請在每台使用它的主機上保留第二個可回復的授權憑證。"
+  },
+  "This Secure Enclave key can never be recovered after device loss. Before installing it remotely, keep a second recoverable credential on that host.": {
+    "de": "Dieser Secure-Enclave-Key lässt sich nach einem Geräteverlust nie wiederherstellen. Halte auf dem Host einen zweiten, wiederherstellbaren Zugang bereit, bevor du ihn dort installierst.",
+    "es": "Esta clave del Secure Enclave no se puede recuperar nunca tras perder el dispositivo. Antes de instalarla en remoto, deja una segunda credencial recuperable en ese host.",
+    "fr": "Cette clé Secure Enclave ne pourra jamais être récupérée après la perte de l'appareil. Avant de l'installer à distance, gardez un second identifiant récupérable sur cet hôte.",
+    "ja": "この Secure Enclave キーは、デバイスを紛失すると二度と復旧できません。リモートに設置する前に、そのホストに復旧可能な 2 つ目の資格情報を用意しておいてください。",
+    "zh-Hans": "此 Secure Enclave 密钥在设备丢失后永远无法恢复。远程安装前，请在该主机上保留第二个可恢复的凭据。",
+    "zh-Hant": "此 Secure Enclave 金鑰在裝置遺失後永遠無法回復。遠端安裝前，請在該主機上保留第二個可回復的憑證。"
+  },
+  "acknowledge device-loss risk…": {
+    "de": "Risiko bei Geräteverlust bestätigen…",
+    "es": "aceptar el riesgo de pérdida del dispositivo…",
+    "fr": "accepter le risque de perte de l'appareil…",
+    "ja": "デバイス紛失のリスクを承諾…",
+    "zh-Hans": "确认设备丢失风险…",
+    "zh-Hant": "確認裝置遺失風險…"
+  },
+  "acknowledge risk before remote use…": {
+    "de": "Risiko vor entfernter Nutzung bestätigen…",
+    "es": "aceptar el riesgo antes del uso remoto…",
+    "fr": "accepter le risque avant l'utilisation à distance…",
+    "ja": "リモートで使う前にリスクを承諾…",
+    "zh-Hans": "远程使用前确认风险…",
+    "zh-Hant": "遠端使用前確認風險…"
+  },
+  "I understand · continue": {
+    "de": "Verstanden · fortfahren",
+    "es": "Entendido · continuar",
+    "fr": "J'ai compris · continuer",
+    "ja": "理解しました · 続ける",
+    "zh-Hans": "我已了解 · 继续",
+    "zh-Hant": "我已了解 · 繼續"
+  },
+  "Key integrity is unavailable; installation is blocked": {
+    "de": "Die Key-Integrität lässt sich nicht prüfen; die Installation ist blockiert",
+    "es": "No se puede comprobar la integridad de la clave; la instalación está bloqueada",
+    "fr": "L'intégrité de la clé est indisponible ; l'installation est bloquée",
+    "ja": "キーの整合性を確認できないため、設置はブロックされています",
+    "zh-Hans": "无法确认密钥完整性，安装已被阻止",
+    "zh-Hant": "無法確認金鑰完整性，安裝已被阻擋"
+  },
+  "iOS could not complete a non-interactive integrity check. Tessera is failing closed for session restore and remote installation until the key becomes available.": {
+    "de": "iOS konnte eine nicht-interaktive Integritätsprüfung nicht abschließen. Tessera verweigert Sitzungswiederherstellung und entfernte Installation, bis der Key wieder verfügbar ist.",
+    "es": "iOS no pudo completar una comprobación de integridad no interactiva. Tessera bloquea la restauración de sesiones y la instalación remota hasta que la clave vuelva a estar disponible.",
+    "fr": "iOS n'a pas pu terminer une vérification d'intégrité non interactive. Tessera refuse la restauration de session et l'installation à distance tant que la clé n'est pas disponible.",
+    "ja": "iOS が非対話的な整合性チェックを完了できませんでした。キーが利用可能になるまで、Tessera はセッションの復元とリモート設置を安全側で拒否します。",
+    "zh-Hans": "iOS 无法完成非交互式完整性检查。在密钥恢复可用之前，Tessera 会安全地拒绝会话恢复和远程安装。",
+    "zh-Hant": "iOS 無法完成非互動式完整性檢查。在金鑰恢復可用之前，Tessera 會安全地拒絕工作階段回復和遠端安裝。"
+  },
+  "Legacy RSA installation is disabled; rotate to Ed25519": {
+    "de": "Die Installation von Legacy-RSA ist deaktiviert; wechsle zu Ed25519",
+    "es": "La instalación de RSA heredado está desactivada; rota a Ed25519",
+    "fr": "L'installation RSA héritée est désactivée ; passez à Ed25519",
+    "ja": "旧式 RSA の設置は無効です。Ed25519 に更新してください",
+    "zh-Hans": "旧版 RSA 安装已停用，请轮换到 Ed25519",
+    "zh-Hant": "舊版 RSA 安裝已停用，請輪換到 Ed25519"
+  },
+  "Legacy RSA authentication and installation are disabled because this SSH stack cannot prove RSA-SHA2 use. Generate an Ed25519 replacement and install it with a different credential before deleting this key.": {
+    "de": "Authentifizierung und Installation mit Legacy-RSA sind deaktiviert, weil dieser SSH-Stack die Nutzung von RSA-SHA2 nicht nachweisen kann. Erzeuge einen Ed25519-Ersatz und installiere ihn mit einem anderen Zugang, bevor du diesen Key löschst.",
+    "es": "La autenticación y la instalación con RSA heredado están desactivadas porque esta pila SSH no puede demostrar el uso de RSA-SHA2. Genera un reemplazo Ed25519 e instálalo con otra credencial antes de eliminar esta clave.",
+    "fr": "L'authentification et l'installation RSA héritées sont désactivées car cette pile SSH ne peut pas prouver l'usage de RSA-SHA2. Générez un remplacement Ed25519 et installez-le avec un autre identifiant avant de supprimer cette clé.",
+    "ja": "この SSH スタックでは RSA-SHA2 の使用を証明できないため、旧式 RSA での認証と設置は無効です。このキーを削除する前に、Ed25519 の代替キーを生成し、別の資格情報で設置してください。",
+    "zh-Hans": "由于此 SSH 栈无法证明使用了 RSA-SHA2，旧版 RSA 的认证和安装均已停用。删除此密钥前，请生成 Ed25519 替代密钥，并用另一个凭据完成安装。",
+    "zh-Hant": "由於此 SSH 堆疊無法證明使用了 RSA-SHA2，舊版 RSA 的驗證和安裝均已停用。刪除此金鑰前，請產生 Ed25519 替代金鑰，並用另一個憑證完成安裝。"
+  },
+  "Legacy RSA is disabled: Tessera cannot authenticate with or install this key. Generate an Ed25519 replacement, install it with a different working credential, then retire this RSA key.": {
+    "de": "Legacy-RSA ist deaktiviert: Tessera kann sich mit diesem Key weder authentifizieren noch ihn installieren. Erzeuge einen Ed25519-Ersatz, installiere ihn mit einem anderen funktionierenden Zugang und nimm diesen RSA-Key anschließend außer Betrieb.",
+    "es": "RSA heredado está desactivado: Tessera no puede autenticarse con esta clave ni instalarla. Genera un reemplazo Ed25519, instálalo con otra credencial que funcione y luego retira esta clave RSA.",
+    "fr": "RSA hérité est désactivé : Tessera ne peut ni s'authentifier avec cette clé ni l'installer. Générez un remplacement Ed25519, installez-le avec un autre identifiant fonctionnel, puis retirez cette clé RSA.",
+    "ja": "旧式 RSA は無効です。Tessera はこのキーで認証も設置もできません。Ed25519 の代替キーを生成し、別の有効な資格情報で設置してから、この RSA キーを廃止してください。",
+    "zh-Hans": "旧版 RSA 已停用：Tessera 无法用此密钥认证或安装它。请生成 Ed25519 替代密钥，用另一个可用凭据完成安装，然后停用此 RSA 密钥。",
+    "zh-Hant": "舊版 RSA 已停用：Tessera 無法用此金鑰驗證或安裝它。請產生 Ed25519 替代金鑰，用另一個可用憑證完成安裝，然後停用此 RSA 金鑰。"
+  },
+  "The metadata for this key exists, but its private material is missing from Keychain. Tessera will not restore sessions or authenticate with it.": {
+    "de": "Die Metadaten dieses Keys sind vorhanden, sein privates Material fehlt jedoch im Schlüsselbund. Tessera stellt damit keine Sitzungen wieder her und authentifiziert sich nicht.",
+    "es": "Los metadatos de esta clave existen, pero su material privado no está en el llavero. Tessera no restaurará sesiones ni se autenticará con ella.",
+    "fr": "Les métadonnées de cette clé existent, mais son matériel privé est absent du trousseau. Tessera ne restaurera pas de session et ne s'authentifiera pas avec elle.",
+    "ja": "このキーのメタデータはありますが、秘密情報がキーチェーンに存在しません。Tessera はこのキーでセッションの復元も認証も行いません。",
+    "zh-Hans": "此密钥的元数据存在，但其私密材料不在钥匙串中。Tessera 不会用它恢复会话或进行认证。",
+    "zh-Hant": "此金鑰的中繼資料存在，但其私密材料不在鑰匙圈中。Tessera 不會用它回復工作階段或進行驗證。"
+  },
+  "The private material is malformed for this key type. Tessera will not use it. Restore the matching Ed25519 recovery file or rotate the key.": {
+    "de": "Das private Material passt nicht zu diesem Key-Typ. Tessera verwendet es nicht. Stelle die passende Ed25519-Wiederherstellungsdatei wieder her oder wechsle den Key.",
+    "es": "El material privado no tiene el formato correcto para este tipo de clave. Tessera no lo usará. Restaura el archivo de recuperación Ed25519 correspondiente o rota la clave.",
+    "fr": "Le matériel privé est mal formé pour ce type de clé. Tessera ne l'utilisera pas. Restaurez le fichier de récupération Ed25519 correspondant ou remplacez la clé.",
+    "ja": "秘密情報がこのキーの種類に対して不正な形式です。Tessera はこれを使用しません。対応する Ed25519 の復旧ファイルから復元するか、キーを更新してください。",
+    "zh-Hans": "私密材料对于此密钥类型格式不正确。Tessera 不会使用它。请从匹配的 Ed25519 恢复文件恢复，或轮换该密钥。",
+    "zh-Hant": "私密材料對於此金鑰類型格式不正確。Tessera 不會使用它。請從相符的 Ed25519 回復檔案回復，或輪換該金鑰。"
+  },
+  "The private material stored under this key ID derives a different public key. Tessera will not restore sessions, authenticate, copy, or install it.": {
+    "de": "Das unter dieser Key-ID gespeicherte private Material ergibt einen anderen Public Key. Tessera stellt damit keine Sitzungen wieder her, authentifiziert sich nicht, kopiert und installiert ihn nicht.",
+    "es": "El material privado guardado con este ID de clave deriva una clave pública distinta. Tessera no restaurará sesiones, ni se autenticará, ni lo copiará, ni lo instalará.",
+    "fr": "Le matériel privé stocké sous cet identifiant de clé produit une clé publique différente. Tessera ne restaurera pas de session, ne s'authentifiera pas, ne le copiera pas et ne l'installera pas.",
+    "ja": "このキー ID で保存されている秘密情報からは、別の公開鍵が導出されます。Tessera はこれを使ったセッションの復元・認証・コピー・設置のいずれも行いません。",
+    "zh-Hans": "以此密钥 ID 存储的私密材料推导出的是另一个公钥。Tessera 不会用它恢复会话、认证、拷贝或安装。",
+    "zh-Hant": "以此金鑰 ID 儲存的私密材料推導出的是另一個公開金鑰。Tessera 不會用它回復工作階段、驗證、拷貝或安裝。"
+  },
+  "Private material exists without matching key metadata.": {
+    "de": "Es existiert privates Material ohne passende Key-Metadaten.",
+    "es": "Existe material privado sin metadatos de clave asociados.",
+    "fr": "Du matériel privé existe sans métadonnées de clé correspondantes.",
+    "ja": "対応するキーのメタデータがない秘密情報が存在します。",
+    "zh-Hans": "存在没有对应密钥元数据的私密材料。",
+    "zh-Hant": "存在沒有對應金鑰中繼資料的私密材料。"
+  },
+  "Restore the missing private key before installing it": {
+    "de": "Stelle den fehlenden privaten Key wieder her, bevor du ihn installierst",
+    "es": "Restaura la clave privada que falta antes de instalarla",
+    "fr": "Restaurez la clé privée manquante avant de l'installer",
+    "ja": "設置する前に、失われた秘密鍵を復元してください",
+    "zh-Hans": "安装前请先恢复缺失的私钥",
+    "zh-Hant": "安裝前請先回復缺失的私密金鑰"
+  },
+  "Repair the rejected private material before installing it": {
+    "de": "Repariere das abgelehnte private Material, bevor du es installierst",
+    "es": "Repara el material privado rechazado antes de instalarlo",
+    "fr": "Réparez le matériel privé rejeté avant de l'installer",
+    "ja": "設置する前に、拒否された秘密情報を修復してください",
+    "zh-Hans": "安装前请先修复被拒绝的私密材料",
+    "zh-Hant": "安裝前請先修復被拒絕的私密材料"
+  },
+  "delete orphaned private material": {
+    "de": "verwaistes privates Material löschen",
+    "es": "eliminar el material privado huérfano",
+    "fr": "supprimer le matériel privé orphelin",
+    "ja": "孤立した秘密情報を削除",
+    "zh-Hans": "删除孤立的私密材料",
+    "zh-Hant": "刪除孤立的私密材料"
+  },
+  "orphaned private material deleted": {
+    "de": "verwaistes privates Material gelöscht",
+    "es": "material privado huérfano eliminado",
+    "fr": "matériel privé orphelin supprimé",
+    "ja": "孤立した秘密情報を削除しました",
+    "zh-Hans": "已删除孤立的私密材料",
+    "zh-Hant": "已刪除孤立的私密材料"
+  },
+  "Some orphaned Keychain items could not be deleted": {
+    "de": "Einige verwaiste Schlüsselbund-Objekte konnten nicht gelöscht werden",
+    "es": "No se pudieron eliminar algunos ítems huérfanos del llavero",
+    "fr": "Certains éléments orphelins du trousseau n'ont pas pu être supprimés",
+    "ja": "孤立したキーチェーン項目の一部を削除できませんでした",
+    "zh-Hans": "部分孤立的钥匙串项目无法删除",
+    "zh-Hant": "部分孤立的鑰匙圈項目無法刪除"
+  },
+  "review cleanup…": {
+    "de": "Bereinigung prüfen…",
+    "es": "revisar la limpieza…",
+    "fr": "vérifier le nettoyage…",
+    "ja": "クリーンアップを確認…",
+    "zh-Hans": "查看清理…",
+    "zh-Hant": "查看清理…"
+  },
+  "delete local private key": {
+    "de": "lokalen privaten Key löschen",
+    "es": "eliminar la clave privada local",
+    "fr": "supprimer la clé privée locale",
+    "ja": "ローカルの秘密鍵を削除",
+    "zh-Hans": "删除本地私钥",
+    "zh-Hant": "刪除本機私密金鑰"
+  },
+  "delete local private key…": {
+    "de": "lokalen privaten Key löschen…",
+    "es": "eliminar la clave privada local…",
+    "fr": "supprimer la clé privée locale…",
+    "ja": "ローカルの秘密鍵を削除…",
+    "zh-Hans": "删除本地私钥…",
+    "zh-Hant": "刪除本機私密金鑰…"
+  },
+  "local delete only": {
+    "de": "nur lokal löschen",
+    "es": "eliminar solo en local",
+    "fr": "suppression locale seulement",
+    "ja": "ローカルの削除のみ",
+    "zh-Hans": "仅本地删除",
+    "zh-Hant": "僅本機刪除"
+  },
+  "Known remote installations: %lld. Deleting locally does not revoke any authorized_keys entry; remove this public key from every remote host separately.": {
+    "de": "Bekannte entfernte Installationen: %lld. Lokales Löschen widerruft keinen authorized_keys-Eintrag; entferne diesen Public Key auf jedem entfernten Host separat.",
+    "es": "Instalaciones remotas conocidas: %lld. Eliminarla en local no revoca ninguna entrada de authorized_keys; quita esta clave pública de cada host remoto por separado.",
+    "fr": "Installations distantes connues : %lld. La suppression locale ne révoque aucune entrée authorized_keys ; retirez cette clé publique de chaque hôte distant séparément.",
+    "ja": "把握しているリモート設置数: %lld。ローカルで削除しても authorized_keys のエントリは失効しません。各リモートホストからこの公開鍵を個別に削除してください。",
+    "zh-Hans": "已知的远程安装数：%lld。在本地删除不会吊销任何 authorized_keys 条目；请分别从每台远程主机移除此公钥。",
+    "zh-Hant": "已知的遠端安裝數：%lld。在本機刪除不會撤銷任何 authorized_keys 項目；請分別從每台遠端主機移除此公開金鑰。"
+  },
+  "local private key deleted; remote authorizations were not revoked": {
+    "de": "lokaler privater Key gelöscht; entfernte Autorisierungen wurden nicht widerrufen",
+    "es": "clave privada local eliminada; las autorizaciones remotas no se revocaron",
+    "fr": "clé privée locale supprimée ; les autorisations distantes n'ont pas été révoquées",
+    "ja": "ローカルの秘密鍵を削除しました。リモートの認可は失効していません",
+    "zh-Hans": "已删除本地私钥；远程授权未被吊销",
+    "zh-Hant": "已刪除本機私密金鑰；遠端授權未被撤銷"
+  },
+  "local private key deleted; earlier tracked remote revocation was preserved": {
+    "de": "lokaler privater Key gelöscht; ein früher erfasster entfernter Widerruf blieb erhalten",
+    "es": "clave privada local eliminada; se conservó la revocación remota registrada anteriormente",
+    "fr": "clé privée locale supprimée ; la révocation distante précédemment suivie a été conservée",
+    "ja": "ローカルの秘密鍵を削除しました。以前に記録したリモートの失効は保持されています",
+    "zh-Hans": "已删除本地私钥；先前记录的远程吊销已保留",
+    "zh-Hant": "已刪除本機私密金鑰；先前記錄的遠端撤銷已保留"
+  },
+  "Local key deletion failed; private material was not touched: %@": {
+    "de": "Das lokale Löschen des Keys ist fehlgeschlagen; das private Material blieb unverändert: %@",
+    "es": "Falló la eliminación local de la clave; el material privado no se modificó: %@",
+    "fr": "La suppression locale de la clé a échoué ; le matériel privé n'a pas été modifié : %@",
+    "ja": "ローカルのキー削除に失敗しました。秘密情報は変更されていません: %@",
+    "zh-Hans": "本地删除密钥失败；私密材料未被改动：%@",
+    "zh-Hant": "本機刪除金鑰失敗；私密材料未被改動：%@"
+  },
+  "Remote revocation failed; the local key was not deleted: %@": {
+    "de": "Der entfernte Widerruf ist fehlgeschlagen; der lokale Key wurde nicht gelöscht: %@",
+    "es": "Falló la revocación remota; la clave local no se eliminó: %@",
+    "fr": "La révocation distante a échoué ; la clé locale n'a pas été supprimée : %@",
+    "ja": "リモートでの失効に失敗しました。ローカルのキーは削除されていません: %@",
+    "zh-Hans": "远程吊销失败；本地密钥未被删除：%@",
+    "zh-Hant": "遠端撤銷失敗；本機金鑰未被刪除：%@"
+  },
+  "Revocation failed: %@": {
+    "de": "Widerruf fehlgeschlagen: %@",
+    "es": "Falló la revocación: %@",
+    "fr": "Échec de la révocation : %@",
+    "ja": "失効に失敗しました: %@",
+    "zh-Hans": "吊销失败：%@",
+    "zh-Hant": "撤銷失敗：%@"
+  },
+  "device access revoked on %@": {
+    "de": "Gerätezugriff auf %@ widerrufen",
+    "es": "acceso del dispositivo revocado en %@",
+    "fr": "accès de l'appareil révoqué sur %@",
+    "ja": "%@ でデバイスアクセスを失効させました",
+    "zh-Hans": "已在 %@ 上吊销设备访问权限",
+    "zh-Hant": "已在 %@ 上撤銷裝置存取權限"
+  },
+  "remote state uncertain · retry revoke or verify manually": {
+    "de": "entfernter Zustand unklar · Widerruf erneut versuchen oder manuell prüfen",
+    "es": "estado remoto incierto · reintenta la revocación o verifícalo manualmente",
+    "fr": "état distant incertain · réessayez la révocation ou vérifiez manuellement",
+    "ja": "リモートの状態が不確かです · 失効を再試行するか手動で確認してください",
+    "zh-Hans": "远程状态不确定 · 请重试吊销或手动核对",
+    "zh-Hant": "遠端狀態不確定 · 請重試撤銷或手動核對"
+  },
+  "No tracked remote host has a reachable alternate credential": {
+    "de": "Kein erfasster entfernter Host hat einen erreichbaren alternativen Zugang",
+    "es": "Ningún host remoto registrado tiene una credencial alternativa accesible",
+    "fr": "Aucun hôte distant suivi ne dispose d'un identifiant alternatif joignable",
+    "ja": "記録済みのリモートホストに、到達可能な代替の資格情報がありません",
+    "zh-Hans": "没有任何已记录的远程主机具备可用的备用凭据",
+    "zh-Hant": "沒有任何已記錄的遠端主機具備可用的備用憑證"
+  },
+  "The tracked host is no longer configured on this device": {
+    "de": "Der erfasste Host ist auf diesem Gerät nicht mehr konfiguriert",
+    "es": "El host registrado ya no está configurado en este dispositivo",
+    "fr": "L'hôte suivi n'est plus configuré sur cet appareil",
+    "ja": "記録済みのホストは、このデバイスにもう設定されていません",
+    "zh-Hans": "该已记录的主机已不在本设备上配置",
+    "zh-Hant": "該已記錄的主機已不在本裝置上設定"
+  },
+  "This older ledger entry has no public key material; revoke it from the host manually": {
+    "de": "Dieser ältere Eintrag enthält kein Public-Key-Material; widerrufe ihn manuell auf dem Host",
+    "es": "Esta entrada antigua del registro no tiene material de clave pública; revócala manualmente en el host",
+    "fr": "Cette ancienne entrée du registre ne contient pas de matériel de clé publique ; révoquez-la manuellement sur l'hôte",
+    "ja": "この古い記録には公開鍵の情報がありません。ホスト側で手動で失効させてください",
+    "zh-Hans": "此较早的记录条目没有公钥材料；请在主机上手动吊销",
+    "zh-Hant": "此較早的記錄項目沒有公開金鑰材料；請在主機上手動撤銷"
+  }
+}

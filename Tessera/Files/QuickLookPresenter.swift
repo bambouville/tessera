@@ -7,10 +7,127 @@ import QuickLook
 import SwiftUI
 import UIKit
 
+/// How big a Quick Look preview gets. `popup` keeps the system sheet — a
+/// centered form sheet on iPad, a page sheet on iPhone — which is the right
+/// glance for an image or a short config file. `fullScreen` hands the whole
+/// window to the preview, which is what a long document wants. The choice is
+/// persisted, so it carries to the next preview from any entry path.
+enum QuickLookPresentationMode: String, CaseIterable {
+    case popup
+    case fullScreen
+
+    static let storageKey = "tessera.pref.quickLookPresentation"
+    static let fallback: QuickLookPresentationMode = .popup
+
+    var toggled: QuickLookPresentationMode {
+        self == .popup ? .fullScreen : .popup
+    }
+
+    /// The glyph advertises the destination, matching how the system's own
+    /// expand/collapse affordances read.
+    var toggleSymbolName: String {
+        self == .popup
+            ? "arrow.up.left.and.arrow.down.right"
+            : "arrow.down.right.and.arrow.up.left"
+    }
+
+    var toggleLabel: String {
+        self == .popup
+            ? String(localized: "Enter Full Screen")
+            : String(localized: "Exit Full Screen")
+    }
+}
+
+/// One pending preview request, two possible SwiftUI containers (`.sheet` for
+/// `popup`, `.fullScreenCover` for `fullScreen`). Toggling the size while a
+/// preview is up must hand the request from one container to the other rather
+/// than cancel it, so the outgoing container's `nil` write is ignored — by the
+/// time it lands, `mode` already names the incoming container.
+enum QuickLookPresentationRouting {
+    static func presentedItem<Item>(
+        _ item: Item?,
+        mode: QuickLookPresentationMode,
+        container: QuickLookPresentationMode
+    ) -> Item? {
+        mode == container ? item : nil
+    }
+
+    static func clearsRequest(
+        mode: QuickLookPresentationMode,
+        container: QuickLookPresentationMode
+    ) -> Bool {
+        mode == container
+    }
+}
+
+extension View {
+    /// Hosts `item`'s preview at the user's chosen size. Every Quick Look
+    /// entry path routes through here so the size toggle inside the preview
+    /// means the same thing no matter which surface opened the file.
+    func quickLookPreview(item: Binding<FilesPanelController.PreviewRequest?>) -> some View {
+        modifier(QuickLookPreviewPresentation(item: item))
+    }
+}
+
+private struct QuickLookPreviewPresentation: ViewModifier {
+    @Binding var item: FilesPanelController.PreviewRequest?
+
+    @AppStorage(QuickLookPresentationMode.storageKey)
+    private var mode: QuickLookPresentationMode = QuickLookPresentationMode.fallback
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: container(.popup)) { request in
+                preview(request)
+            }
+            .fullScreenCover(item: container(.fullScreen)) { request in
+                preview(request)
+            }
+    }
+
+    private func container(
+        _ container: QuickLookPresentationMode
+    ) -> Binding<FilesPanelController.PreviewRequest?> {
+        Binding(
+            get: {
+                QuickLookPresentationRouting.presentedItem(item, mode: mode, container: container)
+            },
+            set: { newValue in
+                guard newValue == nil else { return }
+                guard QuickLookPresentationRouting.clearsRequest(
+                    mode: mode,
+                    container: container
+                ) else { return }
+                item = nil
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func preview(_ request: FilesPanelController.PreviewRequest) -> some View {
+        let presenter = QuickLookPresenter(fileURL: request.localURL, displayTitle: request.title)
+        switch mode {
+        case .popup:
+            // The sheet supplies its own inset chrome, so the preview fills it.
+            presenter.ignoresSafeArea()
+        case .fullScreen:
+            // A full-screen modal gets a zero top safe-area inset on iPad, so
+            // a visible status bar would sit on top of the preview's nav bar.
+            // Hiding it matches the rest of the in-session chrome (ContentView
+            // and SessionView hide it too) and keeps the reading surface clean.
+            presenter
+                .statusBarHidden(true)
+        }
+    }
+}
+
 struct QuickLookPresenter: View {
     let fileURL: URL
     let displayTitle: String?
     let onDismiss: (() -> Void)?
+
+    @AppStorage(QuickLookPresentationMode.storageKey)
+    private var mode: QuickLookPresentationMode = QuickLookPresentationMode.fallback
 
     @Environment(\.dismiss) private var dismiss
 
@@ -27,14 +144,28 @@ struct QuickLookPresenter: View {
     @ViewBuilder
     var body: some View {
         if presentsMarkdown {
-            MarkdownPreview(fileURL: fileURL, displayTitle: displayTitle) {
+            MarkdownPreview(
+                fileURL: fileURL,
+                displayTitle: displayTitle,
+                mode: mode,
+                onToggleMode: toggleMode
+            ) {
                 finish()
             }
         } else {
-            QuickLookController(fileURL: fileURL, displayTitle: displayTitle) {
+            QuickLookController(
+                fileURL: fileURL,
+                displayTitle: displayTitle,
+                mode: mode,
+                onToggleMode: toggleMode
+            ) {
                 finish()
             }
         }
+    }
+
+    private func toggleMode() {
+        mode = mode.toggled
     }
 
     private func finish() {
@@ -67,6 +198,30 @@ enum MarkdownPreviewSupport {
             source: source,
             baseURL: fileURL.deletingLastPathComponent()
         )
+    }
+}
+
+/// Toggling the preview size tears the whole presentation down and rebuilds it
+/// in the other container, which would otherwise re-parse the document and
+/// flash the spinner mid-transition. One entry is enough: it only has to
+/// survive that hand-off.
+@MainActor
+private enum MarkdownDocumentCache {
+    private static var entry: (url: URL, modified: Date?, document: MarkdownDocument)?
+
+    static func document(for fileURL: URL) -> MarkdownDocument? {
+        guard let entry, entry.url == fileURL, entry.modified == modificationDate(of: fileURL) else {
+            return nil
+        }
+        return entry.document
+    }
+
+    static func store(_ document: MarkdownDocument, for fileURL: URL) {
+        entry = (fileURL, modificationDate(of: fileURL), document)
+    }
+
+    private static func modificationDate(of fileURL: URL) -> Date? {
+        try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
     }
 }
 
@@ -193,6 +348,8 @@ private struct MarkdownPreview: View {
 
     let fileURL: URL
     let displayTitle: String?
+    let mode: QuickLookPresentationMode
+    let onToggleMode: () -> Void
     let onDone: () -> Void
 
     @State private var loadState: LoadState = .loading
@@ -207,6 +364,12 @@ private struct MarkdownPreview: View {
                 .navigationTitle(title)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button(action: onToggleMode) {
+                            Image(systemName: mode.toggleSymbolName)
+                        }
+                        .accessibilityLabel(mode.toggleLabel)
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         ShareLink(item: fileURL) {
                             Image(systemName: "square.and.arrow.up")
@@ -219,12 +382,17 @@ private struct MarkdownPreview: View {
                 }
         }
         .task(id: fileURL) {
+            if let cached = MarkdownDocumentCache.document(for: fileURL) {
+                loadState = .loaded(cached)
+                return
+            }
             loadState = .loading
             do {
                 let document = try await Task.detached(priority: .userInitiated) {
                     try MarkdownPreviewSupport.loadDocument(from: fileURL)
                 }.value
                 try Task.checkCancellation()
+                MarkdownDocumentCache.store(document, for: fileURL)
                 loadState = .loaded(document)
             } catch is CancellationError {
                 return
@@ -351,16 +519,26 @@ private struct MarkdownBlockView: View {
 private struct QuickLookController: UIViewControllerRepresentable {
     let fileURL: URL
     let displayTitle: String?
+    let mode: QuickLookPresentationMode
+    let onToggleMode: () -> Void
     let onDismiss: () -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(fileURL: fileURL, displayTitle: displayTitle, onDismiss: onDismiss)
+        Coordinator(
+            fileURL: fileURL,
+            displayTitle: displayTitle,
+            onToggleMode: onToggleMode,
+            onDismiss: onDismiss
+        )
     }
 
     func makeUIViewController(context: Context) -> UINavigationController {
         let previewController = QLPreviewController()
         previewController.dataSource = context.coordinator
         previewController.delegate = context.coordinator
+        // QuickLook draws its own chrome, so the size toggle rides the nav bar
+        // opposite Done — the same spot the Markdown path uses.
+        previewController.navigationItem.leftBarButtonItem = context.coordinator.toggleItem(mode: mode)
         previewController.navigationItem.rightBarButtonItem = UIBarButtonItem(
             barButtonSystemItem: .done,
             target: context.coordinator,
@@ -371,23 +549,71 @@ private struct QuickLookController: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: UINavigationController, context: Context) {
-        context.coordinator.update(fileURL: fileURL, displayTitle: displayTitle)
+        let itemChanged = context.coordinator.update(fileURL: fileURL, displayTitle: displayTitle)
         context.coordinator.onDismiss = onDismiss
-        (controller.viewControllers.first as? QLPreviewController)?.reloadData()
+        context.coordinator.onToggleMode = onToggleMode
+        guard let previewController = controller.viewControllers.first as? QLPreviewController else {
+            return
+        }
+        let toggle = context.coordinator.toggleItem(mode: mode)
+        if previewController.navigationItem.leftBarButtonItem !== toggle {
+            previewController.navigationItem.leftBarButtonItem = toggle
+        }
+        // Only reload for a genuinely new file. SwiftUI re-runs this on every
+        // surrounding update — the session redraws constantly — and each
+        // reloadData() restarts QuickLook's async render, which left the
+        // preview permanently blank.
+        if itemChanged {
+            previewController.reloadData()
+        }
     }
 
     final class Coordinator: NSObject, QLPreviewControllerDataSource, QLPreviewControllerDelegate {
         private var item: PreviewItem
+        private var existingToggleItem: UIBarButtonItem?
+        var onToggleMode: () -> Void
         var onDismiss: () -> Void
         private var hasDismissed = false
 
-        init(fileURL: URL, displayTitle: String?, onDismiss: @escaping () -> Void) {
+        init(
+            fileURL: URL,
+            displayTitle: String?,
+            onToggleMode: @escaping () -> Void,
+            onDismiss: @escaping () -> Void
+        ) {
             self.item = PreviewItem(url: fileURL, title: displayTitle)
+            self.onToggleMode = onToggleMode
             self.onDismiss = onDismiss
         }
 
-        func update(fileURL: URL, displayTitle: String?) {
+        /// The bar item is created once and only restyled afterwards. Handing
+        /// the navigation item a *new* UIBarButtonItem on every SwiftUI update
+        /// cancels whatever touch is being tracked on the old one, which
+        /// silently swallowed taps while the panel re-rendered.
+        func toggleItem(mode: QuickLookPresentationMode) -> UIBarButtonItem {
+            let item = existingToggleItem ?? UIBarButtonItem(
+                image: nil,
+                style: .plain,
+                target: self,
+                action: #selector(togglePresentationMode)
+            )
+            item.image = UIImage(systemName: mode.toggleSymbolName)
+            item.accessibilityLabel = mode.toggleLabel
+            existingToggleItem = item
+            return item
+        }
+
+        @objc func togglePresentationMode() {
+            onToggleMode()
+        }
+
+        /// Returns true when the previewed file actually changed, so callers
+        /// can reload QuickLook only then.
+        @discardableResult
+        func update(fileURL: URL, displayTitle: String?) -> Bool {
+            guard item.url != fileURL || item.title != displayTitle else { return false }
             item = PreviewItem(url: fileURL, title: displayTitle)
+            return true
         }
 
         func numberOfPreviewItems(in controller: QLPreviewController) -> Int {

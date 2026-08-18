@@ -11,9 +11,15 @@ public enum HostTransport: String, CaseIterable, Codable, Sendable {
     var editorDescription: String {
         switch self {
         case .ssh:
-            return "single SSH connection; tmux tabs stay on the main session."
+            return String(
+                localized: "single SSH connection; tmux tabs stay on the main session.",
+                comment: "Explains the SSH transport in the host editor"
+            )
         case .mosh:
-            return "mosh terminal over UDP; tmux tabs use a second SSH side channel."
+            return String(
+                localized: "mosh terminal over UDP; tmux tabs use a second SSH side channel.",
+                comment: "Explains the mosh transport in the host editor"
+            )
         }
     }
 }

@@ -1,0 +1,706 @@
+{
+  "known hosts": {
+    "de": "bekannte Hosts",
+    "es": "hosts conocidos",
+    "fr": "hôtes connus",
+    "ja": "既知のホスト",
+    "zh-Hans": "已知主机",
+    "zh-Hant": "已知主機"
+  },
+  "host": {
+    "de": "Host",
+    "es": "host",
+    "fr": "hôte",
+    "ja": "ホスト",
+    "zh-Hans": "主机",
+    "zh-Hant": "主機"
+  },
+  "algo": {
+    "de": "Algo",
+    "es": "algoritmo",
+    "fr": "algo",
+    "ja": "アルゴリズム",
+    "zh-Hans": "算法",
+    "zh-Hant": "演算法"
+  },
+  "status": {
+    "de": "Status",
+    "es": "estado",
+    "fr": "état",
+    "ja": "状態",
+    "zh-Hans": "状态",
+    "zh-Hant": "狀態"
+  },
+  "added": {
+    "de": "hinzugefügt",
+    "es": "añadido",
+    "fr": "ajouté",
+    "ja": "追加日",
+    "zh-Hans": "添加时间",
+    "zh-Hant": "加入時間"
+  },
+  "added %@": {
+    "de": "hinzugefügt %@",
+    "es": "añadido el %@",
+    "fr": "ajouté le %@",
+    "ja": "%@ に追加",
+    "zh-Hans": "于 %@ 添加",
+    "zh-Hant": "於 %@ 加入"
+  },
+  "verified": {
+    "de": "geprüft",
+    "es": "verificado",
+    "fr": "vérifié",
+    "ja": "検証済み",
+    "zh-Hans": "已验证",
+    "zh-Hant": "已驗證"
+  },
+  "changed": {
+    "de": "geändert",
+    "es": "cambiado",
+    "fr": "modifié",
+    "ja": "変更あり",
+    "zh-Hans": "已变更",
+    "zh-Hant": "已變更"
+  },
+  "stale": {
+    "de": "veraltet",
+    "es": "obsoleto",
+    "fr": "obsolète",
+    "ja": "古い記録",
+    "zh-Hans": "已过时",
+    "zh-Hant": "已過時"
+  },
+  "matched peer": {
+    "de": "passt zur Gegenstelle",
+    "es": "coincide con el par",
+    "fr": "correspond au pair",
+    "ja": "接続先と一致",
+    "zh-Hans": "与对端匹配",
+    "zh-Hant": "與對端相符"
+  },
+  "matched %@ at trust time": {
+    "de": "stimmte beim Vertrauensaufbau mit %@ überein",
+    "es": "coincidía con %@ cuando se estableció la confianza",
+    "fr": "correspondait à %@ au moment de l'approbation",
+    "ja": "信頼した時点では %@ と一致していました",
+    "zh-Hans": "建立信任时与 %@ 匹配",
+    "zh-Hant": "建立信任時與 %@ 相符"
+  },
+  "replaces %@": {
+    "de": "ersetzt %@",
+    "es": "sustituye a %@",
+    "fr": "remplace %@",
+    "ja": "%@ を置き換えます",
+    "zh-Hans": "替换 %@",
+    "zh-Hant": "取代 %@"
+  },
+  "line %lld · %@": {
+    "de": "Zeile %lld · %@",
+    "es": "línea %lld · %@",
+    "fr": "ligne %lld · %@",
+    "ja": "%lld 行目 · %@",
+    "zh-Hans": "第 %lld 行 · %@",
+    "zh-Hant": "第 %lld 行 · %@"
+  },
+  "all · %lld": {
+    "de": "alle · %lld",
+    "es": "todos · %lld",
+    "fr": "tous · %lld",
+    "ja": "すべて · %lld",
+    "zh-Hans": "全部 · %lld",
+    "zh-Hant": "全部 · %lld"
+  },
+  "copy fingerprint": {
+    "de": "Fingerabdruck kopieren",
+    "es": "copiar la huella",
+    "fr": "copier l'empreinte",
+    "ja": "フィンガープリントをコピー",
+    "zh-Hans": "拷贝指纹",
+    "zh-Hant": "拷貝指紋"
+  },
+  "accept new key": {
+    "de": "neuen Key akzeptieren",
+    "es": "aceptar la clave nueva",
+    "fr": "accepter la nouvelle clé",
+    "ja": "新しいキーを受け入れる",
+    "zh-Hans": "接受新密钥",
+    "zh-Hant": "接受新金鑰"
+  },
+  "remove": {
+    "de": "entfernen",
+    "es": "quitar",
+    "fr": "retirer",
+    "ja": "削除",
+    "zh-Hans": "移除",
+    "zh-Hant": "移除"
+  },
+  "export": {
+    "de": "exportieren",
+    "es": "exportar",
+    "fr": "exporter",
+    "ja": "書き出す",
+    "zh-Hans": "导出",
+    "zh-Hant": "輸出"
+  },
+  "Exports public host keys and fingerprints as an OpenSSH known hosts file": {
+    "de": "Exportiert öffentliche Host-Keys und Fingerabdrücke als OpenSSH-known-hosts-Datei",
+    "es": "Exporta las claves públicas de host y sus huellas como un archivo known hosts de OpenSSH",
+    "fr": "Exporte les clés d'hôte publiques et leurs empreintes dans un fichier known hosts OpenSSH",
+    "ja": "公開ホストキーとフィンガープリントを OpenSSH の known hosts ファイルとして書き出します",
+    "zh-Hans": "将公开主机密钥和指纹导出为 OpenSSH known hosts 文件",
+    "zh-Hant": "將公開主機金鑰和指紋輸出為 OpenSSH known hosts 檔案"
+  },
+  "Reviews an OpenSSH known hosts file before merging it": {
+    "de": "Prüft eine OpenSSH-known-hosts-Datei, bevor sie zusammengeführt wird",
+    "es": "Revisa un archivo known hosts de OpenSSH antes de fusionarlo",
+    "fr": "Examine un fichier known hosts OpenSSH avant de le fusionner",
+    "ja": "OpenSSH の known hosts ファイルを、統合する前に確認します",
+    "zh-Hans": "在合并前先审阅 OpenSSH known hosts 文件",
+    "zh-Hant": "在合併前先審閱 OpenSSH known hosts 檔案"
+  },
+  "review known hosts import": {
+    "de": "Import bekannter Hosts prüfen",
+    "es": "revisar la importación de hosts conocidos",
+    "fr": "vérifier l'import des hôtes connus",
+    "ja": "既知のホストの読み込みを確認",
+    "zh-Hans": "审阅已知主机的导入",
+    "zh-Hant": "審閱已知主機的輸入"
+  },
+  "No importable host pins were found.": {
+    "de": "Es wurden keine importierbaren Host-Pins gefunden.",
+    "es": "No se encontró ninguna fijación de host importable.",
+    "fr": "Aucun épinglage d'hôte importable n'a été trouvé.",
+    "ja": "読み込めるホストピンが見つかりませんでした。",
+    "zh-Hans": "未找到可导入的主机固定项。",
+    "zh-Hant": "未找到可輸入的主機固定項。"
+  },
+  "Nothing changes until you confirm. Replacements preserve the prior fingerprint in Known Hosts for review.": {
+    "de": "Bis zu deiner Bestätigung ändert sich nichts. Bei Ersetzungen bleibt der frühere Fingerabdruck zur Prüfung unter „Bekannte Hosts“ erhalten.",
+    "es": "No cambia nada hasta que confirmes. Las sustituciones conservan la huella anterior en Hosts conocidos para que puedas revisarla.",
+    "fr": "Rien ne change tant que vous n'avez pas confirmé. Les remplacements conservent l'empreinte précédente dans Hôtes connus pour vérification.",
+    "ja": "確認するまで何も変更されません。置き換えを行っても、以前のフィンガープリントは確認できるよう「既知のホスト」に残ります。",
+    "zh-Hans": "在你确认之前不会有任何更改。替换时会在「已知主机」中保留原有指纹以供查看。",
+    "zh-Hant": "在你確認之前不會有任何更改。取代時會在「已知主機」中保留原有指紋以供查看。"
+  },
+  "⚠ remote host identification has changed. man-in-the-middle attack, or server key was rotated.": {
+    "de": "⚠ Die Identifikation des entfernten Hosts hat sich geändert. Entweder ein Man-in-the-Middle-Angriff oder der Server-Key wurde gewechselt.",
+    "es": "⚠ La identificación del host remoto ha cambiado. Puede ser un ataque de intermediario o que se haya rotado la clave del servidor.",
+    "fr": "⚠ L'identification de l'hôte distant a changé. Attaque de l'intercepteur, ou clé du serveur renouvelée.",
+    "ja": "⚠ リモートホストの識別情報が変わりました。中間者攻撃か、サーバーキーが更新された可能性があります。",
+    "zh-Hans": "⚠ 远程主机的标识已改变。可能是中间人攻击，也可能是服务器密钥被轮换了。",
+    "zh-Hant": "⚠ 遠端主機的識別資訊已改變。可能是中間人攻擊，也可能是伺服器金鑰被輪換了。"
+  },
+  "port forwarding rules applied when this host connects.": {
+    "de": "Regeln zur Portweiterleitung, die beim Verbinden mit diesem Host angewandt werden.",
+    "es": "reglas de reenvío de puertos que se aplican al conectar con este host.",
+    "fr": "règles de redirection de ports appliquées lors de la connexion à cet hôte.",
+    "ja": "このホストに接続したときに適用されるポート転送ルール。",
+    "zh-Hans": "连接此主机时应用的端口转发规则。",
+    "zh-Hant": "連線此主機時套用的連接埠轉發規則。"
+  },
+  "no rules configured": {
+    "de": "keine Regeln eingerichtet",
+    "es": "no hay reglas configuradas",
+    "fr": "aucune règle configurée",
+    "ja": "ルールが設定されていません",
+    "zh-Hans": "尚未配置规则",
+    "zh-Hant": "尚未設定規則"
+  },
+  "+ add forwarding rule": {
+    "de": "+ Weiterleitungsregel hinzufügen",
+    "es": "+ añadir regla de reenvío",
+    "fr": "+ ajouter une règle de redirection",
+    "ja": "+ 転送ルールを追加",
+    "zh-Hans": "+ 添加转发规则",
+    "zh-Hant": "+ 加入轉發規則"
+  },
+  "add rule": {
+    "de": "Regel hinzufügen",
+    "es": "añadir regla",
+    "fr": "ajouter la règle",
+    "ja": "ルールを追加",
+    "zh-Hans": "添加规则",
+    "zh-Hant": "加入規則"
+  },
+  "new rule": {
+    "de": "neue Regel",
+    "es": "regla nueva",
+    "fr": "nouvelle règle",
+    "ja": "新規ルール",
+    "zh-Hans": "新建规则",
+    "zh-Hant": "新增規則"
+  },
+  "adding": {
+    "de": "wird hinzugefügt",
+    "es": "añadiendo",
+    "fr": "ajout",
+    "ja": "追加中",
+    "zh-Hans": "添加中",
+    "zh-Hant": "加入中"
+  },
+  "editing": {
+    "de": "wird bearbeitet",
+    "es": "editando",
+    "fr": "modification",
+    "ja": "編集中",
+    "zh-Hans": "编辑中",
+    "zh-Hant": "編輯中"
+  },
+  "delete rule?": {
+    "de": "Regel löschen?",
+    "es": "¿Eliminar la regla?",
+    "fr": "Supprimer la règle ?",
+    "ja": "ルールを削除しますか？",
+    "zh-Hans": "要删除此规则吗？",
+    "zh-Hant": "要刪除此規則嗎？"
+  },
+  "discard": {
+    "de": "verwerfen",
+    "es": "descartar",
+    "fr": "abandonner",
+    "ja": "破棄",
+    "zh-Hans": "放弃",
+    "zh-Hant": "放棄"
+  },
+  "discard changes?": {
+    "de": "Änderungen verwerfen?",
+    "es": "¿Descartar los cambios?",
+    "fr": "Abandonner les modifications ?",
+    "ja": "変更を破棄しますか？",
+    "zh-Hans": "要放弃更改吗？",
+    "zh-Hant": "要放棄更改嗎？"
+  },
+  "keep editing": {
+    "de": "weiter bearbeiten",
+    "es": "seguir editando",
+    "fr": "continuer la modification",
+    "ja": "編集を続ける",
+    "zh-Hans": "继续编辑",
+    "zh-Hant": "繼續編輯"
+  },
+  "the form has unsaved changes.": {
+    "de": "Das Formular enthält ungesicherte Änderungen.",
+    "es": "el formulario tiene cambios sin guardar.",
+    "fr": "le formulaire contient des modifications non enregistrées.",
+    "ja": "フォームに保存していない変更があります。",
+    "zh-Hans": "表单中有未保存的更改。",
+    "zh-Hant": "表單中有未儲存的更改。"
+  },
+  "label (optional)": {
+    "de": "Beschriftung (optional)",
+    "es": "etiqueta (opcional)",
+    "fr": "libellé (facultatif)",
+    "ja": "ラベル（省略可能）",
+    "zh-Hans": "标签（可选）",
+    "zh-Hant": "標籤（選用）"
+  },
+  "local port": {
+    "de": "lokaler Port",
+    "es": "puerto local",
+    "fr": "port local",
+    "ja": "ローカルポート",
+    "zh-Hans": "本地端口",
+    "zh-Hant": "本機連接埠"
+  },
+  "remote host": {
+    "de": "entfernter Host",
+    "es": "host remoto",
+    "fr": "hôte distant",
+    "ja": "リモートホスト",
+    "zh-Hans": "远程主机",
+    "zh-Hant": "遠端主機"
+  },
+  "remote port": {
+    "de": "entfernter Port",
+    "es": "puerto remoto",
+    "fr": "port distant",
+    "ja": "リモートポート",
+    "zh-Hans": "远程端口",
+    "zh-Hant": "遠端連接埠"
+  },
+  "the address as seen from the SSH server": {
+    "de": "die Adresse, wie sie der SSH-Server sieht",
+    "es": "la dirección tal como la ve el servidor SSH",
+    "fr": "l'adresse telle que la voit le serveur SSH",
+    "ja": "SSH サーバーから見たアドレス",
+    "zh-Hans": "从 SSH 服务器看到的地址",
+    "zh-Hant": "從 SSH 伺服器看到的位址"
+  },
+  "presets": {
+    "de": "Vorlagen",
+    "es": "ajustes predefinidos",
+    "fr": "préréglages",
+    "ja": "プリセット",
+    "zh-Hans": "预设",
+    "zh-Hant": "預設組合"
+  },
+  "web app": {
+    "de": "Web-App",
+    "es": "app web",
+    "fr": "app web",
+    "ja": "Web アプリ",
+    "zh-Hans": "网页应用",
+    "zh-Hant": "網頁 App"
+  },
+  "auto-start when connecting": {
+    "de": "beim Verbinden automatisch starten",
+    "es": "iniciar automáticamente al conectar",
+    "fr": "démarrer automatiquement à la connexion",
+    "ja": "接続時に自動で開始",
+    "zh-Hans": "连接时自动启动",
+    "zh-Hant": "連線時自動啟動"
+  },
+  "open the listener automatically once the SSH session is up": {
+    "de": "den Listener automatisch öffnen, sobald die SSH-Sitzung steht",
+    "es": "abrir la escucha automáticamente en cuanto la sesión SSH esté activa",
+    "fr": "ouvrir l'écouteur automatiquement dès que la session SSH est établie",
+    "ja": "SSH セッションが確立したら、自動的にリスナーを開きます",
+    "zh-Hans": "SSH 会话建立后自动打开监听器",
+    "zh-Hant": "SSH 工作階段建立後自動打開監聽器"
+  },
+  "this launch mode has no ssh connection to carry forwards. switch the launch mode to auto-tmux or pinned-tmux on the connection tab — those modes keep an ssh side-channel for tmux that forwarding can ride on. (or change transport to ssh.)": {
+    "de": "Dieser Startmodus hat keine SSH-Verbindung, über die Weiterleitungen laufen könnten. Stelle den Startmodus im Tab „Verbindung“ auf Auto-tmux oder festgelegtes tmux um – diese Modi halten für tmux einen SSH-Seitenkanal offen, den die Weiterleitung mitbenutzen kann. (Oder wechsle den Transport auf SSH.)",
+    "es": "este modo de inicio no tiene ninguna conexión ssh por la que llevar los reenvíos. cambia el modo de inicio a auto-tmux o tmux fijo en la pestaña de conexión: esos modos mantienen un canal lateral ssh para tmux que el reenvío puede aprovechar. (o cambia el transporte a ssh.)",
+    "fr": "ce mode de lancement n'a aucune connexion ssh pour transporter les redirections. passez le mode de lancement à auto-tmux ou tmux fixé dans l'onglet connexion — ces modes gardent un canal ssh secondaire pour tmux, que la redirection peut emprunter. (ou changez le transport pour ssh.)",
+    "ja": "この起動モードには、転送を通せる ssh 接続がありません。「接続」タブで起動モードを auto-tmux または固定 tmux に切り替えてください。これらのモードは tmux 用の ssh サイドチャネルを保持しており、転送はそこに相乗りできます。（または、トランスポートを ssh に変更してください。）",
+    "zh-Hans": "此启动模式没有可承载转发的 ssh 连接。请在「连接」标签中将启动模式改为 auto-tmux 或固定 tmux —— 这两种模式会为 tmux 保留一条 ssh 侧信道，转发可以搭载其上。（或者把传输方式改为 ssh。）",
+    "zh-Hant": "此啟動模式沒有可承載轉發的 ssh 連線。請在「連線」標籤中將啟動模式改為 auto-tmux 或固定 tmux —— 這兩種模式會為 tmux 保留一條 ssh 側通道，轉發可以搭載其上。（或者把傳輸方式改為 ssh。）"
+  },
+  "free tessera remembers one host": {
+    "de": "Das kostenlose Tessera merkt sich einen Host",
+    "es": "tessera gratis recuerda un host",
+    "fr": "tessera gratuit retient un hôte",
+    "ja": "無料版の tessera が記憶できるホストは 1 台です",
+    "zh-Hans": "免费版 tessera 只记住一台主机",
+    "zh-Hant": "免費版 tessera 只記住一台主機"
+  },
+  "save every host": {
+    "de": "Jeden Host sichern",
+    "es": "guarda todos tus hosts",
+    "fr": "enregistrez tous vos hôtes",
+    "ja": "すべてのホストを保存",
+    "zh-Hans": "保存每一台主机",
+    "zh-Hant": "儲存每一台主機"
+  },
+  "unlimited saved hosts": {
+    "de": "unbegrenzt gesicherte Hosts",
+    "es": "hosts guardados ilimitados",
+    "fr": "hôtes enregistrés illimités",
+    "ja": "保存できるホスト数が無制限",
+    "zh-Hans": "无限量保存主机",
+    "zh-Hant": "無限量儲存主機"
+  },
+  "%@ — the only paid upgrade": {
+    "de": "%@ – das einzige kostenpflichtige Upgrade",
+    "es": "%@: la única mejora de pago",
+    "fr": "%@ — la seule option payante",
+    "ja": "%@ — 唯一の有料アップグレード",
+    "zh-Hans": "%@ —— 唯一的付费升级",
+    "zh-Hant": "%@ —— 唯一的付費升級"
+  },
+  "iphone and ipad": {
+    "de": "iPhone und iPad",
+    "es": "iphone y ipad",
+    "fr": "iphone et ipad",
+    "ja": "iPhone と iPad",
+    "zh-Hans": "iPhone 和 iPad",
+    "zh-Hant": "iPhone 和 iPad"
+  },
+  "one purchase on your %@": {
+    "de": "ein Kauf für dein %@",
+    "es": "una sola compra para tu %@",
+    "fr": "un seul achat pour vos %@",
+    "ja": "%@ をまとめて 1 回の購入で",
+    "zh-Hans": "一次购买，%@ 通用",
+    "zh-Hant": "一次購買，%@ 通用"
+  },
+  "no subscription": {
+    "de": "kein Abo",
+    "es": "sin suscripción",
+    "fr": "aucun abonnement",
+    "ja": "サブスクリプションなし",
+    "zh-Hans": "无订阅",
+    "zh-Hant": "無訂閱"
+  },
+  "%@ and no tessera account": {
+    "de": "%@ und kein Tessera-Konto",
+    "es": "%@ y sin cuenta de tessera",
+    "fr": "%@ et aucun compte tessera",
+    "ja": "%@、tessera アカウントも不要",
+    "zh-Hans": "%@，也无需 tessera 账户",
+    "zh-Hant": "%@，也無需 tessera 帳戶"
+  },
+  "payment is handled by the app store. your saved hosts remain unchanged if you cancel.": {
+    "de": "Die Zahlung wickelt der App Store ab. Deine gesicherten Hosts bleiben unverändert, wenn du abbrichst.",
+    "es": "el pago lo gestiona el app store. tus hosts guardados no cambian si cancelas.",
+    "fr": "le paiement est géré par l'app store. vos hôtes enregistrés restent inchangés si vous annulez.",
+    "ja": "支払いは App Store が処理します。キャンセルしても、保存済みのホストはそのまま残ります。",
+    "zh-Hans": "付款由 app store 处理。即使你取消，已保存的主机也不会改变。",
+    "zh-Hant": "付款由 app store 處理。即使你取消，已儲存的主機也不會改變。"
+  },
+  "restore purchases": {
+    "de": "Käufe wiederherstellen",
+    "es": "restaurar compras",
+    "fr": "restaurer les achats",
+    "ja": "購入を復元",
+    "zh-Hans": "恢复购买",
+    "zh-Hant": "回復購買"
+  },
+  "view unlimited hosts": {
+    "de": "unbegrenzte Hosts ansehen",
+    "es": "ver hosts ilimitados",
+    "fr": "voir les hôtes illimités",
+    "ja": "ホスト数無制限を見る",
+    "zh-Hans": "查看无限主机",
+    "zh-Hant": "查看無限主機"
+  },
+  "checking host access": {
+    "de": "Host-Zugang wird geprüft",
+    "es": "comprobando el acceso a hosts",
+    "fr": "vérification de l'accès aux hôtes",
+    "ja": "ホストの利用権を確認中",
+    "zh-Hans": "正在检查主机权限",
+    "zh-Hant": "正在檢查主機權限"
+  },
+  "tessera will not offer a purchase until existing access is confirmed. your saved hosts remain available.": {
+    "de": "Tessera bietet keinen Kauf an, bevor der bestehende Zugang bestätigt ist. Deine gesicherten Hosts bleiben verfügbar.",
+    "es": "tessera no ofrecerá ninguna compra hasta confirmar el acceso que ya tienes. tus hosts guardados siguen disponibles.",
+    "fr": "tessera ne proposera aucun achat tant que l'accès existant n'est pas confirmé. vos hôtes enregistrés restent disponibles.",
+    "ja": "既存の利用権が確認できるまで、tessera が購入を提案することはありません。保存済みのホストは引き続き利用できます。",
+    "zh-Hans": "在确认你已有的权限之前，tessera 不会提示购买。你已保存的主机仍可正常使用。",
+    "zh-Hant": "在確認你既有的權限之前，tessera 不會提示購買。你已儲存的主機仍可正常使用。"
+  },
+  "try again": {
+    "de": "erneut versuchen",
+    "es": "reintentar",
+    "fr": "réessayer",
+    "ja": "再試行",
+    "zh-Hans": "重试",
+    "zh-Hant": "重試"
+  },
+  "double-tap to try again": {
+    "de": "Zum erneuten Versuch doppeltippen",
+    "es": "toca dos veces para reintentar",
+    "fr": "appuyez deux fois pour réessayer",
+    "ja": "ダブルタップで再試行します",
+    "zh-Hans": "双点以重试",
+    "zh-Hant": "點兩下以重試"
+  },
+  "no free host slot": {
+    "de": "kein freier Host-Platz",
+    "es": "no hay ningún hueco de host libre",
+    "fr": "aucun emplacement d'hôte libre",
+    "ja": "空いているホスト枠がありません",
+    "zh-Hans": "没有空闲的主机名额",
+    "zh-Hant": "沒有空閒的主機名額"
+  },
+  "your saved hosts are unchanged. edit an existing host, remove saved hosts until a slot is free, or view the one-time unlimited-hosts option.": {
+    "de": "Deine gesicherten Hosts bleiben unverändert. Bearbeite einen vorhandenen Host, entferne gesicherte Hosts, bis ein Platz frei wird, oder sieh dir die einmalige Option für unbegrenzte Hosts an.",
+    "es": "tus hosts guardados no cambian. edita un host existente, elimina hosts guardados hasta liberar un hueco, o mira la opción de pago único de hosts ilimitados.",
+    "fr": "vos hôtes enregistrés restent inchangés. modifiez un hôte existant, supprimez des hôtes enregistrés jusqu'à libérer un emplacement, ou consultez l'option d'achat unique pour des hôtes illimités.",
+    "ja": "保存済みのホストは変更されません。既存のホストを編集するか、枠が空くまで保存済みホストを削除するか、買い切りのホスト数無制限オプションをご覧ください。",
+    "zh-Hans": "你已保存的主机不会改变。可以编辑现有主机、删除已保存的主机以腾出名额，或查看一次性的无限主机选项。",
+    "zh-Hant": "你已儲存的主機不會改變。可以編輯現有主機、刪除已儲存的主機以騰出名額，或查看一次性的無限主機選項。"
+  },
+  "choose what to keep": {
+    "de": "wähle, was du behalten willst",
+    "es": "elige qué conservar",
+    "fr": "choisissez ce que vous gardez",
+    "ja": "残すものを選んでください",
+    "zh-Hans": "选择要保留的内容",
+    "zh-Hant": "選擇要保留的內容"
+  },
+  "double-tap to keep only this route": {
+    "de": "Doppeltippen, um nur diese Route zu behalten",
+    "es": "toca dos veces para conservar solo esta ruta",
+    "fr": "appuyez deux fois pour ne garder que cette route",
+    "ja": "ダブルタップすると、この経路だけを残します",
+    "zh-Hans": "双点以仅保留此路由",
+    "zh-Hant": "點兩下以僅保留此路由"
+  },
+  "needs a jump host too": {
+    "de": "braucht zusätzlich einen Jump-Host",
+    "es": "también necesita un host de salto",
+    "fr": "nécessite aussi un hôte de rebond",
+    "ja": "踏み台ホストも必要です",
+    "zh-Hans": "还需要一台跳板主机",
+    "zh-Hant": "還需要一台跳板主機"
+  },
+  "not selectable within the free limit": {
+    "de": "im kostenlosen Rahmen nicht auswählbar",
+    "es": "no se puede elegir dentro del límite gratuito",
+    "fr": "non sélectionnable dans la limite gratuite",
+    "ja": "無料の上限内では選択できません",
+    "zh-Hans": "在免费上限内无法选择",
+    "zh-Hant": "在免費上限內無法選擇"
+  },
+  "cancel transfer": {
+    "de": "Übertragung abbrechen",
+    "es": "cancelar la transferencia",
+    "fr": "annuler le transfert",
+    "ja": "転送をキャンセル",
+    "zh-Hans": "取消传输",
+    "zh-Hant": "取消傳輸"
+  },
+  "Enrollment frame payload is empty.": {
+    "de": "Die Nutzlast des Enrollment-Frames ist leer.",
+    "es": "La carga de la trama de inscripción está vacía.",
+    "fr": "La charge utile de la trame d'inscription est vide.",
+    "ja": "登録フレームのペイロードが空です。",
+    "zh-Hans": "注册帧负载为空。",
+    "zh-Hant": "註冊影格負載為空。"
+  },
+  "Enrollment frame payload is invalid.": {
+    "de": "Die Nutzlast des Enrollment-Frames ist ungültig.",
+    "es": "La carga de la trama de inscripción no es válida.",
+    "fr": "La charge utile de la trame d'inscription est invalide.",
+    "ja": "登録フレームのペイロードが不正です。",
+    "zh-Hans": "注册帧负载无效。",
+    "zh-Hant": "註冊影格負載無效。"
+  },
+  "Enrollment control message contains a request payload.": {
+    "de": "Die Enrollment-Steuernachricht enthält eine Anfrage-Nutzlast.",
+    "es": "El mensaje de control de inscripción contiene una carga de solicitud.",
+    "fr": "Le message de contrôle d'inscription contient une charge utile de requête.",
+    "ja": "登録の制御メッセージにリクエストのペイロードが含まれています。",
+    "zh-Hans": "注册控制消息中包含请求负载。",
+    "zh-Hant": "註冊控制訊息中包含請求負載。"
+  },
+  "Enrollment request payload is missing.": {
+    "de": "Die Anfrage-Nutzlast des Enrollments fehlt.",
+    "es": "Falta la carga de solicitud de la inscripción.",
+    "fr": "La charge utile de requête d'inscription est absente.",
+    "ja": "登録リクエストのペイロードがありません。",
+    "zh-Hans": "缺少注册请求负载。",
+    "zh-Hant": "缺少註冊請求負載。"
+  },
+  "Enrollment non-failure message contains a failure code.": {
+    "de": "Eine Enrollment-Nachricht ohne Fehlerkennzeichnung enthält einen Fehlercode.",
+    "es": "Un mensaje de inscripción que no indica fallo contiene un código de error.",
+    "fr": "Un message d'inscription sans échec contient un code d'erreur.",
+    "ja": "失敗を示していない登録メッセージに失敗コードが含まれています。",
+    "zh-Hans": "非失败的注册消息中包含失败代码。",
+    "zh-Hant": "非失敗的註冊訊息中包含失敗代碼。"
+  },
+  "Enrollment failure code is missing.": {
+    "de": "Der Enrollment-Fehlercode fehlt.",
+    "es": "Falta el código de error de la inscripción.",
+    "fr": "Le code d'échec de l'inscription est absent.",
+    "ja": "登録の失敗コードがありません。",
+    "zh-Hans": "缺少注册失败代码。",
+    "zh-Hant": "缺少註冊失敗代碼。"
+  },
+  "Enrollment device name is empty.": {
+    "de": "Der Gerätename für das Enrollment ist leer.",
+    "es": "El nombre del dispositivo de inscripción está vacío.",
+    "fr": "Le nom d'appareil de l'inscription est vide.",
+    "ja": "登録のデバイス名が空です。",
+    "zh-Hans": "注册的设备名称为空。",
+    "zh-Hant": "註冊的裝置名稱為空。"
+  },
+  "Enrollment host name is empty.": {
+    "de": "Der Hostname für das Enrollment ist leer.",
+    "es": "El nombre de host de la inscripción está vacío.",
+    "fr": "Le nom d'hôte de l'inscription est vide.",
+    "ja": "登録のホスト名が空です。",
+    "zh-Hans": "注册的主机名为空。",
+    "zh-Hant": "註冊的主機名稱為空。"
+  },
+  "Enrollment display metadata is too long.": {
+    "de": "Die Anzeige-Metadaten des Enrollments sind zu lang.",
+    "es": "Los metadatos de presentación de la inscripción son demasiado largos.",
+    "fr": "Les métadonnées d'affichage de l'inscription sont trop longues.",
+    "ja": "登録の表示用メタデータが長すぎます。",
+    "zh-Hans": "注册的显示元数据过长。",
+    "zh-Hant": "註冊的顯示中繼資料過長。"
+  },
+  "Enrollment display metadata contains unsafe characters.": {
+    "de": "Die Anzeige-Metadaten des Enrollments enthalten unsichere Zeichen.",
+    "es": "Los metadatos de presentación de la inscripción contienen caracteres no seguros.",
+    "fr": "Les métadonnées d'affichage de l'inscription contiennent des caractères non sûrs.",
+    "ja": "登録の表示用メタデータに安全でない文字が含まれています。",
+    "zh-Hans": "注册的显示元数据中包含不安全字符。",
+    "zh-Hant": "註冊的顯示中繼資料中包含不安全字元。"
+  },
+  "Enrollment public-key name is empty.": {
+    "de": "Der Name des Enrollment-Public-Keys ist leer.",
+    "es": "El nombre de la clave pública de inscripción está vacío.",
+    "fr": "Le nom de la clé publique d'inscription est vide.",
+    "ja": "登録する公開鍵の名前が空です。",
+    "zh-Hans": "注册公钥的名称为空。",
+    "zh-Hant": "註冊公開金鑰的名稱為空。"
+  },
+  "Enrollment public-key name is too long.": {
+    "de": "Der Name des Enrollment-Public-Keys ist zu lang.",
+    "es": "El nombre de la clave pública de inscripción es demasiado largo.",
+    "fr": "Le nom de la clé publique d'inscription est trop long.",
+    "ja": "登録する公開鍵の名前が長すぎます。",
+    "zh-Hans": "注册公钥的名称过长。",
+    "zh-Hant": "註冊公開金鑰的名稱過長。"
+  },
+  "Enrollment public-key name contains unsafe display characters.": {
+    "de": "Der Name des Enrollment-Public-Keys enthält unsichere Anzeigezeichen.",
+    "es": "El nombre de la clave pública de inscripción contiene caracteres de presentación no seguros.",
+    "fr": "Le nom de la clé publique d'inscription contient des caractères d'affichage non sûrs.",
+    "ja": "登録する公開鍵の名前に、表示上安全でない文字が含まれています。",
+    "zh-Hans": "注册公钥的名称中包含不安全的显示字符。",
+    "zh-Hant": "註冊公開金鑰的名稱中包含不安全的顯示字元。"
+  },
+  "Enrollment public-key blob is not canonical base64.": {
+    "de": "Der Blob des Enrollment-Public-Keys ist kein kanonisches Base64.",
+    "es": "El blob de la clave pública de inscripción no es base64 canónico.",
+    "fr": "Le blob de la clé publique d'inscription n'est pas du base64 canonique.",
+    "ja": "登録する公開鍵の blob が正規の base64 ではありません。",
+    "zh-Hans": "注册公钥的 blob 不是规范的 base64。",
+    "zh-Hant": "註冊公開金鑰的 blob 不是規範的 base64。"
+  },
+  "Enrollment public-key blob exceeds the protocol limit.": {
+    "de": "Der Blob des Enrollment-Public-Keys überschreitet das Protokolllimit.",
+    "es": "El blob de la clave pública de inscripción supera el límite del protocolo.",
+    "fr": "Le blob de la clé publique d'inscription dépasse la limite du protocole.",
+    "ja": "登録する公開鍵の blob がプロトコルの上限を超えています。",
+    "zh-Hans": "注册公钥的 blob 超出协议限制。",
+    "zh-Hant": "註冊公開金鑰的 blob 超出協定限制。"
+  },
+  "Enrollment public-key blob does not match its declared algorithm.": {
+    "de": "Der Blob des Enrollment-Public-Keys passt nicht zum angegebenen Algorithmus.",
+    "es": "El blob de la clave pública de inscripción no coincide con el algoritmo declarado.",
+    "fr": "Le blob de la clé publique d'inscription ne correspond pas à l'algorithme déclaré.",
+    "ja": "登録する公開鍵の blob が、宣言されたアルゴリズムと一致しません。",
+    "zh-Hans": "注册公钥的 blob 与其声明的算法不符。",
+    "zh-Hant": "註冊公開金鑰的 blob 與其宣告的演算法不符。"
+  },
+  "Enrollment public-key fingerprint is invalid.": {
+    "de": "Der Fingerabdruck des Enrollment-Public-Keys ist ungültig.",
+    "es": "La huella de la clave pública de inscripción no es válida.",
+    "fr": "L'empreinte de la clé publique d'inscription est invalide.",
+    "ja": "登録する公開鍵のフィンガープリントが不正です。",
+    "zh-Hans": "注册公钥的指纹无效。",
+    "zh-Hant": "註冊公開金鑰的指紋無效。"
+  },
+  "Enrollment public-key fingerprint does not match its blob.": {
+    "de": "Der Fingerabdruck des Enrollment-Public-Keys passt nicht zu seinem Blob.",
+    "es": "La huella de la clave pública de inscripción no coincide con su blob.",
+    "fr": "L'empreinte de la clé publique d'inscription ne correspond pas à son blob.",
+    "ja": "登録する公開鍵のフィンガープリントが、その blob と一致しません。",
+    "zh-Hans": "注册公钥的指纹与其 blob 不符。",
+    "zh-Hant": "註冊公開金鑰的指紋與其 blob 不符。"
+  },
+  "Enrollment public-key protection metadata is impossible for its algorithm.": {
+    "de": "Die Schutz-Metadaten des Enrollment-Public-Keys sind für seinen Algorithmus unmöglich.",
+    "es": "Los metadatos de protección de la clave pública de inscripción son imposibles para su algoritmo.",
+    "fr": "Les métadonnées de protection de la clé publique d'inscription sont impossibles pour son algorithme.",
+    "ja": "登録する公開鍵の保護メタデータは、そのアルゴリズムではあり得ない内容です。",
+    "zh-Hans": "注册公钥的保护元数据与其算法不可能匹配。",
+    "zh-Hant": "註冊公開金鑰的保護中繼資料與其演算法不可能相符。"
+  },
+  "Unsupported enrollment message version %lld.": {
+    "de": "Nicht unterstützte Enrollment-Nachrichtenversion %lld.",
+    "es": "Versión %lld del mensaje de inscripción no admitida.",
+    "fr": "Version %lld du message d'inscription non prise en charge.",
+    "ja": "サポートされていない登録メッセージのバージョン %lld です。",
+    "zh-Hans": "不支持的注册消息版本 %lld。",
+    "zh-Hant": "不支援的註冊訊息版本 %lld。"
+  }
+}

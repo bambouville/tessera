@@ -1,0 +1,274 @@
+{
+  "A fast iPad terminal for SSH & Mosh — trackpad scrolling in TUIs, native tmux, truecolor, edge-to-edge. Want a quick tour?": {
+    "de": "Ein schnelles iPad-Terminal für SSH & Mosh — Trackpad-Scrollen in TUIs, natives tmux, Truecolor, randlos. Lust auf eine kurze Tour?",
+    "es": "Un terminal rápido para iPad con SSH y Mosh: desplazamiento con trackpad en TUI, tmux nativo, truecolor y de borde a borde. ¿Quieres un recorrido rápido?",
+    "fr": "Un terminal iPad rapide pour SSH et Mosh — défilement au trackpad dans les TUI, tmux natif, truecolor, bord à bord. Envie d'une visite rapide ?",
+    "ja": "SSH と mosh のための高速な iPad ターミナル — TUI でのトラックパッドスクロール、ネイティブ tmux、トゥルーカラー、画面いっぱいの表示。簡単なツアーをご覧になりますか？",
+    "zh-Hans": "为 SSH 和 mosh 打造的快速 iPad 终端 —— TUI 中的触控板滚动、原生 tmux、真彩色、全屏显示。要快速浏览一下吗？",
+    "zh-Hant": "為 SSH 和 mosh 打造的快速 iPad 終端機 —— TUI 中的觸控板捲動、原生 tmux、全彩、全螢幕顯示。要快速導覽一下嗎？"
+  },
+  "A fast terminal for SSH & Mosh — native tmux, remote files, agent-aware controls, and a keyboard built for your phone. Want a quick tour?": {
+    "de": "Ein schnelles Terminal für SSH & Mosh — natives tmux, entfernte Dateien, agentenbewusste Steuerung und eine Tastatur für dein Telefon. Lust auf eine kurze Tour?",
+    "es": "Un terminal rápido para SSH y Mosh: tmux nativo, archivos remotos, controles conscientes de los agentes y un teclado pensado para tu teléfono. ¿Quieres un recorrido rápido?",
+    "fr": "Un terminal rapide pour SSH et Mosh — tmux natif, fichiers distants, commandes adaptées aux agents et un clavier conçu pour votre téléphone. Envie d'une visite rapide ?",
+    "ja": "SSH と mosh のための高速ターミナル — ネイティブ tmux、リモートファイル、エージェント対応の操作、そして iPhone のために設計されたキーボード。簡単なツアーをご覧になりますか？",
+    "zh-Hans": "为 SSH 和 mosh 打造的快速终端 —— 原生 tmux、远程文件、感知智能体的控件，以及专为手机设计的键盘。要快速浏览一下吗？",
+    "zh-Hant": "為 SSH 和 mosh 打造的快速終端機 —— 原生 tmux、遠端檔案、感知智慧體的控制項，以及專為手機設計的鍵盤。要快速導覽一下嗎？"
+  },
+  "Start here. Name it, drop in an address, pick an SSH key, then connect. %@ works from anywhere.": {
+    "de": "Fang hier an. Benenne ihn, trage eine Adresse ein, wähle einen SSH-Key und verbinde dich. %@ funktioniert von überall.",
+    "es": "Empieza aquí. Ponle nombre, escribe una dirección, elige una clave SSH y conéctate. %@ funciona desde cualquier sitio.",
+    "fr": "Commencez ici. Nommez-le, saisissez une adresse, choisissez une clé SSH, puis connectez-vous. %@ fonctionne depuis n'importe où.",
+    "ja": "ここから始めましょう。名前を付け、アドレスを入力し、SSH キーを選んで接続します。%@ はどこからでも使えます。",
+    "zh-Hans": "从这里开始。为它命名、填入地址、选择一个 SSH 密钥，然后连接。%@ 在任何位置都可用。",
+    "zh-Hant": "從這裡開始。為它命名、填入位址、選擇一個 SSH 金鑰，然後連線。%@ 在任何位置都可使用。"
+  },
+  "Start here. Name it, enter an address, choose an SSH key, then connect.": {
+    "de": "Fang hier an. Benenne ihn, trage eine Adresse ein, wähle einen SSH-Key und verbinde dich.",
+    "es": "Empieza aquí. Ponle nombre, escribe una dirección, elige una clave SSH y conéctate.",
+    "fr": "Commencez ici. Nommez-le, saisissez une adresse, choisissez une clé SSH, puis connectez-vous.",
+    "ja": "ここから始めましょう。名前を付け、アドレスを入力し、SSH キーを選んで接続します。",
+    "zh-Hans": "从这里开始。为它命名、填入地址、选择一个 SSH 密钥，然后连接。",
+    "zh-Hant": "從這裡開始。為它命名、填入位址、選擇一個 SSH 金鑰，然後連線。"
+  },
+  "keys, protected your way": {
+    "de": "Keys, geschützt wie du willst",
+    "es": "claves, protegidas a tu manera",
+    "fr": "des clés, protégées à votre façon",
+    "ja": "キーを、あなたの方法で保護",
+    "zh-Hans": "密钥，按你的方式保护",
+    "zh-Hant": "金鑰，依你的方式保護"
+  },
+  "Create recoverable Ed25519 keys or device-bound P-256 keys. Biometrics or passcode are optional, and Tessera can install the public key for you.": {
+    "de": "Erstelle wiederherstellbare Ed25519-Keys oder gerätegebundene P-256-Keys. Biometrie oder Code sind optional, und Tessera kann den Public Key für dich installieren.",
+    "es": "Crea claves Ed25519 recuperables o claves P-256 vinculadas al dispositivo. La biometría o el código son opcionales, y Tessera puede instalar la clave pública por ti.",
+    "fr": "Créez des clés Ed25519 récupérables ou des clés P-256 liées à l'appareil. La biométrie ou le code sont facultatifs, et Tessera peut installer la clé publique pour vous.",
+    "ja": "復元可能な Ed25519 キー、またはデバイスに紐づく P-256 キーを作成できます。生体認証やパスコードは任意で、Tessera が公開鍵のインストールを代行できます。",
+    "zh-Hans": "创建可恢复的 Ed25519 密钥，或绑定设备的 P-256 密钥。生物识别或密码为可选项，Tessera 可以替你安装公钥。",
+    "zh-Hant": "建立可復原的 Ed25519 金鑰，或綁定裝置的 P-256 金鑰。生物辨識或密碼為選用，Tessera 可以替你安裝公鑰。"
+  },
+  "tmux windows & panes": {
+    "de": "tmux-Fenster & Bereiche",
+    "es": "ventanas y paneles de tmux",
+    "fr": "fenêtres et volets tmux",
+    "ja": "tmux のウインドウとペイン",
+    "zh-Hans": "tmux 窗口与窗格",
+    "zh-Hant": "tmux 視窗與窗格"
+  },
+  "In tmux sessions, every window is a tab up top — %@ opens one, %@ jumps, and %@ splits a pane. Native control mode, not a passthrough.": {
+    "de": "In tmux-Sitzungen ist jedes Fenster ein Tab oben — %1$@ öffnet eines, %2$@ springt und %3$@ teilt einen Bereich. Nativer Control Mode, kein Passthrough.",
+    "es": "En las sesiones de tmux, cada ventana es una pestaña arriba: %1$@ abre una, %2$@ salta y %3$@ divide un panel. Modo control nativo, no un passthrough.",
+    "fr": "Dans les sessions tmux, chaque fenêtre est un onglet en haut — %1$@ en ouvre une, %2$@ permet de sauter et %3$@ divise un volet. Mode contrôle natif, pas un passthrough.",
+    "ja": "tmux セッションでは、各ウインドウが上部のタブになります。%1$@ で新規作成、%2$@ で移動、%3$@ でペインを分割します。パススルーではなくネイティブのコントロールモードです。",
+    "zh-Hans": "在 tmux 会话中，每个窗口都是顶部的一个标签 —— %1$@ 新建，%2$@ 跳转，%3$@ 分割窗格。原生控制模式，而非透传。",
+    "zh-Hant": "在 tmux 工作階段中，每個視窗都是頂部的一個分頁 —— %1$@ 新增，%2$@ 跳轉，%3$@ 分割窗格。原生控制模式，而非透傳。"
+  },
+  "Open and switch tmux windows from the top bar. Split panes stay intact while the focused pane fits the phone viewport.": {
+    "de": "Öffne und wechsle tmux-Fenster über die obere Leiste. Geteilte Bereiche bleiben erhalten, während der fokussierte Bereich in den Bildschirm passt.",
+    "es": "Abre y cambia de ventana de tmux desde la barra superior. Los paneles divididos se mantienen intactos mientras el panel enfocado se ajusta a la pantalla del teléfono.",
+    "fr": "Ouvrez et changez de fenêtre tmux depuis la barre supérieure. Les volets divisés restent intacts pendant que le volet actif s'adapte à l'écran du téléphone.",
+    "ja": "上部バーから tmux ウインドウを開いたり切り替えたりできます。分割ペインはそのまま保たれ、フォーカス中のペインが画面に合わせて表示されます。",
+    "zh-Hans": "从顶栏打开并切换 tmux 窗口。分割窗格保持不变，同时聚焦的窗格会适配手机视口。",
+    "zh-Hant": "從頂部列開啟並切換 tmux 視窗。分割窗格保持不變，同時聚焦的窗格會適應手機檢視區。"
+  },
+  "Follow Claude Code and Codex across every session. See who needs input, answer a prompt, or jump straight to the right terminal.": {
+    "de": "Verfolge Claude Code und Codex über alle Sitzungen hinweg. Sieh, wer eine Eingabe braucht, beantworte eine Rückfrage oder springe direkt ins richtige Terminal.",
+    "es": "Sigue a Claude Code y Codex en todas las sesiones. Mira quién necesita entrada, responde una pregunta o salta directamente al terminal correcto.",
+    "fr": "Suivez Claude Code et Codex dans toutes vos sessions. Voyez qui attend une réponse, répondez à une invite ou passez directement au bon terminal.",
+    "ja": "すべてのセッションで Claude Code と Codex を追跡できます。入力待ちのエージェントを確認し、プロンプトに答え、目的のターミナルへ直接移動できます。",
+    "zh-Hans": "跨所有会话跟踪 Claude Code 和 Codex。查看谁在等待输入、回答提示，或直接跳转到对应的终端。",
+    "zh-Hant": "跨所有工作階段追蹤 Claude Code 和 Codex。查看誰在等待輸入、回答提示，或直接跳至對應的終端機。"
+  },
+  "Touch the center puck, then swipe toward an option and release to send it. The layout follows live prompts; double-tap the center for dictation.": {
+    "de": "Berühre den mittleren Puck, wische dann zu einer Option und lass los, um sie zu senden. Das Layout folgt den aktuellen Rückfragen; ein Doppeltipp in der Mitte startet das Diktat.",
+    "es": "Toca el disco central, desliza hacia una opción y suelta para enviarla. El diseño sigue las preguntas en vivo; toca dos veces el centro para dictar.",
+    "fr": "Touchez le palet central, glissez vers une option et relâchez pour l'envoyer. La disposition suit les invites en direct ; double-touchez le centre pour dicter.",
+    "ja": "中央のパックに触れ、選択肢の方向へスワイプして離すと送信されます。レイアウトはライブのプロンプトに追従し、中央をダブルタップすると音声入力が始まります。",
+    "zh-Hans": "触摸中心圆钮，向某个选项滑动并松开即可发送。布局会跟随实时提示；双击中心可开始听写。",
+    "zh-Hant": "觸摸中心圓鈕，往某個選項滑動並放開即可送出。版面會跟隨即時提示；點兩下中心可開始聽寫。"
+  },
+  "files, beside your shell": {
+    "de": "Dateien, direkt neben deiner Shell",
+    "es": "archivos, junto a tu shell",
+    "fr": "des fichiers, à côté de votre shell",
+    "ja": "シェルの隣にファイルを",
+    "zh-Hans": "文件，就在 shell 旁边",
+    "zh-Hant": "檔案，就在 shell 旁邊"
+  },
+  "A folder glyph up top — or %@ — slides out a panel that tracks your shell's directory. Browse, download, and Quick Look files on the host, over SSH and mosh alike.": {
+    "de": "Ein Ordnersymbol oben — oder %@ — blendet ein Panel ein, das dem Verzeichnis deiner Shell folgt. Durchsuche, lade herunter und öffne Dateien auf dem Host per Quick Look, über SSH wie über mosh.",
+    "es": "Un icono de carpeta arriba —o %@— despliega un panel que sigue el directorio de tu shell. Explora, descarga y usa Vista Rápida con archivos del host, tanto por SSH como por mosh.",
+    "fr": "Une icône de dossier en haut — ou %@ — fait glisser un panneau qui suit le répertoire de votre shell. Parcourez, téléchargez et prévisualisez les fichiers de l'hôte, aussi bien en SSH qu'en mosh.",
+    "ja": "上部のフォルダアイコン、または %@ で、シェルのディレクトリに追従するパネルが開きます。SSH でも mosh でも、ホスト上のファイルを閲覧・ダウンロード・クイックルックできます。",
+    "zh-Hans": "点击顶部的文件夹图标 —— 或按 %@ —— 会滑出一个跟随 shell 当前目录的面板。可在 SSH 与 mosh 下浏览、下载并用快速查看打开主机上的文件。",
+    "zh-Hant": "點擊頂部的資料夾圖示 —— 或按 %@ —— 會滑出一個跟隨 shell 目前目錄的面板。可在 SSH 與 mosh 下瀏覽、下載並用預覽開啟主機上的檔案。"
+  },
+  "files from your phone": {
+    "de": "Dateien vom Telefon aus",
+    "es": "archivos desde tu teléfono",
+    "fr": "des fichiers depuis votre téléphone",
+    "ja": "iPhone からファイルを",
+    "zh-Hans": "在手机上管理文件",
+    "zh-Hant": "在手機上管理檔案"
+  },
+  "Open Files from the terminal top bar to browse, download, and Quick Look remote files. SSH, tmux, and mosh sessions share the same file tools.": {
+    "de": "Öffne Dateien über die obere Terminalleiste, um entfernte Dateien zu durchsuchen, herunterzuladen und per Quick Look anzusehen. SSH-, tmux- und mosh-Sitzungen nutzen dieselben Dateiwerkzeuge.",
+    "es": "Abre Archivos desde la barra superior del terminal para explorar, descargar y previsualizar archivos remotos. Las sesiones SSH, tmux y mosh comparten las mismas herramientas de archivos.",
+    "fr": "Ouvrez Fichiers depuis la barre supérieure du terminal pour parcourir, télécharger et prévisualiser des fichiers distants. Les sessions SSH, tmux et mosh partagent les mêmes outils de fichiers.",
+    "ja": "ターミナル上部バーからファイルを開くと、リモートファイルの閲覧・ダウンロード・クイックルックができます。SSH、tmux、mosh のセッションはいずれも同じファイルツールを共有します。",
+    "zh-Hans": "从终端顶栏打开“文件”即可浏览、下载并快速查看远程文件。SSH、tmux 与 mosh 会话共用同一套文件工具。",
+    "zh-Hant": "從終端機頂部列開啟「檔案」即可瀏覽、下載並預覽遠端檔案。SSH、tmux 與 mosh 工作階段共用同一套檔案工具。"
+  },
+  "share, in and out": {
+    "de": "Teilen, in beide Richtungen",
+    "es": "compartir, en ambos sentidos",
+    "fr": "partager, dans les deux sens",
+    "ja": "双方向で共有",
+    "zh-Hans": "双向共享",
+    "zh-Hant": "雙向分享"
+  },
+  "Drag or share a remote file out to Files, Mail, or Photos. Share a file into Tessera from any app and it lands on the host — the native iOS share sheet, both directions.": {
+    "de": "Zieh oder teile eine entfernte Datei nach Dateien, Mail oder Fotos. Teile aus jeder App eine Datei nach Tessera, und sie landet auf dem Host — das native iOS-Teilen-Menü, in beide Richtungen.",
+    "es": "Arrastra o comparte un archivo remoto a Archivos, Mail o Fotos. Comparte un archivo hacia Tessera desde cualquier app y aterrizará en el host: la hoja de compartir nativa de iOS, en ambos sentidos.",
+    "fr": "Faites glisser ou partagez un fichier distant vers Fichiers, Mail ou Photos. Partagez un fichier vers Tessera depuis n'importe quelle app et il arrive sur l'hôte — la feuille de partage native d'iOS, dans les deux sens.",
+    "ja": "リモートファイルをファイル、メール、写真へドラッグまたは共有できます。任意のアプリから Tessera へファイルを共有すれば、そのままホストに届きます。iOS 標準の共有シートが双方向で使えます。",
+    "zh-Hans": "把远程文件拖动或共享到“文件”、“邮件”或“照片”。也可以从任意 App 把文件共享到 Tessera，它会直接落到主机上 —— 原生 iOS 共享表单，双向可用。",
+    "zh-Hant": "把遠端檔案拖曳或分享到「檔案」、「郵件」或「照片」。也可以從任何 App 把檔案分享到 Tessera，它會直接落到主機上 —— 原生 iOS 分享工作表，雙向可用。"
+  },
+  "Send a remote file to another app, or share a local file into Tessera and choose its host. The native iOS share sheet works in both directions.": {
+    "de": "Sende eine entfernte Datei an eine andere App oder teile eine lokale Datei nach Tessera und wähle ihren Host. Das native iOS-Teilen-Menü funktioniert in beide Richtungen.",
+    "es": "Envía un archivo remoto a otra app, o comparte un archivo local hacia Tessera y elige su host. La hoja de compartir nativa de iOS funciona en ambos sentidos.",
+    "fr": "Envoyez un fichier distant vers une autre app, ou partagez un fichier local vers Tessera en choisissant son hôte. La feuille de partage native d'iOS fonctionne dans les deux sens.",
+    "ja": "リモートファイルを他のアプリへ送ったり、ローカルファイルを Tessera に共有してホストを選んだりできます。iOS 標準の共有シートが双方向で機能します。",
+    "zh-Hans": "把远程文件发送到其他 App，或把本地文件共享到 Tessera 并选择目标主机。原生 iOS 共享表单双向可用。",
+    "zh-Hant": "把遠端檔案傳送到其他 App，或把本機檔案分享到 Tessera 並選擇目標主機。原生 iOS 分享工作表雙向可用。"
+  },
+  "paste a screenshot": {
+    "de": "einen Screenshot einfügen",
+    "es": "pega una captura de pantalla",
+    "fr": "coller une capture d'écran",
+    "ja": "スクリーンショットを貼り付け",
+    "zh-Hans": "粘贴截图",
+    "zh-Hant": "貼上截圖"
+  },
+  "Share an image in, or drop one on the terminal — Tessera uploads it and types the path. Claude Code and Codex pick it up automatically, just like dragging a file in on the desktop.": {
+    "de": "Teile ein Bild nach Tessera oder lege es auf dem Terminal ab — Tessera lädt es hoch und tippt den Pfad ein. Claude Code und Codex greifen es automatisch auf, genau wie beim Ziehen einer Datei auf dem Desktop.",
+    "es": "Comparte una imagen hacia Tessera o suéltala sobre el terminal: Tessera la sube y escribe la ruta. Claude Code y Codex la recogen automáticamente, igual que al arrastrar un archivo en el escritorio.",
+    "fr": "Partagez une image vers Tessera ou déposez-la sur le terminal — Tessera l'envoie et saisit le chemin. Claude Code et Codex la reprennent automatiquement, comme en glissant un fichier sur un ordinateur.",
+    "ja": "画像を Tessera に共有するか、ターミナルにドロップすると、Tessera がアップロードしてパスを入力します。デスクトップでファイルをドラッグしたときと同じように、Claude Code と Codex が自動で認識します。",
+    "zh-Hans": "把图片共享到 Tessera，或直接拖放到终端上 —— Tessera 会上传并输入路径。Claude Code 和 Codex 会自动识别，就像在桌面上拖入文件一样。",
+    "zh-Hant": "把圖片分享到 Tessera，或直接拖放到終端機上 —— Tessera 會上傳並輸入路徑。Claude Code 和 Codex 會自動辨識，就像在桌面上拖入檔案一樣。"
+  },
+  "Share an image into Tessera and choose an active session. Tessera uploads it, types the path, and Claude Code or Codex attaches it automatically.": {
+    "de": "Teile ein Bild nach Tessera und wähle eine aktive Sitzung. Tessera lädt es hoch, tippt den Pfad ein, und Claude Code oder Codex hängt es automatisch an.",
+    "es": "Comparte una imagen hacia Tessera y elige una sesión activa. Tessera la sube, escribe la ruta y Claude Code o Codex la adjunta automáticamente.",
+    "fr": "Partagez une image vers Tessera et choisissez une session active. Tessera l'envoie, saisit le chemin, et Claude Code ou Codex l'attache automatiquement.",
+    "ja": "画像を Tessera に共有してアクティブなセッションを選ぶと、Tessera がアップロードしてパスを入力し、Claude Code や Codex が自動で添付します。",
+    "zh-Hans": "把图片共享到 Tessera 并选择一个活动会话。Tessera 会上传、输入路径，Claude Code 或 Codex 会自动附加它。",
+    "zh-Hant": "把圖片分享到 Tessera 並選擇一個使用中的工作階段。Tessera 會上傳、輸入路徑，Claude Code 或 Codex 會自動附加它。"
+  },
+  "With a Magic Keyboard, global and context-aware actions stay a chord away:": {
+    "de": "Mit einem Magic Keyboard bleiben globale und kontextabhängige Aktionen nur einen Tastengriff entfernt:",
+    "es": "Con un Magic Keyboard, las acciones globales y contextuales están a un acorde de distancia:",
+    "fr": "Avec un Magic Keyboard, les actions globales et contextuelles restent à un raccourci près :",
+    "ja": "Magic Keyboard があれば、グローバル操作も文脈に応じた操作もキーの組み合わせひとつで実行できます:",
+    "zh-Hans": "配合妙控键盘，全局操作和上下文相关操作都只需一个组合键：",
+    "zh-Hant": "搭配巧控鍵盤，全域操作與情境相關操作都只需一個組合鍵："
+  },
+  "terminal controls": {
+    "de": "Terminal-Steuerung",
+    "es": "controles del terminal",
+    "fr": "commandes du terminal",
+    "ja": "ターミナル操作",
+    "zh-Hans": "终端控件",
+    "zh-Hant": "終端機控制項"
+  },
+  "The keyboard bar keeps Escape, arrows, Tab, Control, and other shell keys within reach. Tap a modifier once for the next key, or twice to lock it.": {
+    "de": "Die Tastaturleiste hält Escape, Pfeiltasten, Tab, Control und weitere Shell-Tasten griffbereit. Tippe einen Modifier einmal für die nächste Taste an oder zweimal, um ihn festzustellen.",
+    "es": "La barra de teclado mantiene a mano Escape, flechas, Tab, Control y otras teclas del shell. Toca un modificador una vez para la siguiente tecla o dos veces para fijarlo.",
+    "fr": "La barre clavier garde Échap, les flèches, Tab, Control et les autres touches shell à portée de main. Touchez un modificateur une fois pour la touche suivante, ou deux fois pour le verrouiller.",
+    "ja": "キーボードバーには Escape、矢印キー、Tab、Control などのシェルキーが並びます。修飾キーは 1 回タップで次のキーのみ、2 回タップでロックできます。",
+    "zh-Hans": "键盘栏把 Escape、方向键、Tab、Control 等 shell 按键放在手边。轻点一次修饰键作用于下一个按键，轻点两次可锁定。",
+    "zh-Hant": "鍵盤列把 Escape、方向鍵、Tab、Control 等 shell 按鍵放在手邊。輕點一次修飾鍵套用到下一個按鍵，輕點兩次可鎖定。"
+  },
+  "new tmux window": {
+    "de": "neues tmux-Fenster",
+    "es": "nueva ventana de tmux",
+    "fr": "nouvelle fenêtre tmux",
+    "ja": "新しい tmux ウインドウ",
+    "zh-Hans": "新建 tmux 窗口",
+    "zh-Hant": "新增 tmux 視窗"
+  },
+  "close window": {
+    "de": "Fenster schließen",
+    "es": "cerrar ventana",
+    "fr": "fermer la fenêtre",
+    "ja": "ウインドウを閉じる",
+    "zh-Hans": "关闭窗口",
+    "zh-Hant": "關閉視窗"
+  },
+  "switch window": {
+    "de": "Fenster wechseln",
+    "es": "cambiar de ventana",
+    "fr": "changer de fenêtre",
+    "ja": "ウインドウを切り替え",
+    "zh-Hans": "切换窗口",
+    "zh-Hant": "切換視窗"
+  },
+  "prev / next window": {
+    "de": "vorheriges / nächstes Fenster",
+    "es": "ventana anterior / siguiente",
+    "fr": "fenêtre précédente / suivante",
+    "ja": "前 / 次のウインドウ",
+    "zh-Hans": "上一个 / 下一个窗口",
+    "zh-Hant": "上一個 / 下一個視窗"
+  },
+  "split pane": {
+    "de": "Bereich teilen",
+    "es": "dividir panel",
+    "fr": "diviser le volet",
+    "ja": "ペインを分割",
+    "zh-Hans": "分割窗格",
+    "zh-Hant": "分割窗格"
+  },
+  "files panel": {
+    "de": "Dateien-Panel",
+    "es": "panel de archivos",
+    "fr": "panneau des fichiers",
+    "ja": "ファイルパネル",
+    "zh-Hans": "文件面板",
+    "zh-Hant": "檔案面板"
+  },
+  "session switcher": {
+    "de": "Sitzungswechsler",
+    "es": "selector de sesiones",
+    "fr": "sélecteur de sessions",
+    "ja": "セッション切り替え",
+    "zh-Hans": "会话切换器",
+    "zh-Hant": "工作階段切換器"
+  },
+  "tap once · next key": {
+    "de": "einmal tippen · nächste Taste",
+    "es": "un toque · siguiente tecla",
+    "fr": "une touche · touche suivante",
+    "ja": "1 回タップ · 次のキー",
+    "zh-Hans": "轻点一次 · 下一个按键",
+    "zh-Hant": "輕點一次 · 下一個按鍵"
+  },
+  "tap twice · locked": {
+    "de": "zweimal tippen · festgestellt",
+    "es": "dos toques · fijado",
+    "fr": "deux touches · verrouillé",
+    "ja": "2 回タップ · ロック",
+    "zh-Hans": "轻点两次 · 已锁定",
+    "zh-Hant": "輕點兩次 · 已鎖定"
+  },
+  "Add a server to open a session over SSH or Mosh — with tmux, truecolor, and trackpad scrolling built in.": {
+    "de": "Füge einen Server hinzu, um eine Sitzung über SSH oder mosh zu öffnen — mit tmux, Truecolor und Trackpad-Scrollen von Haus aus.",
+    "es": "Añade un servidor para abrir una sesión por SSH o Mosh, con tmux, truecolor y desplazamiento con trackpad incluidos.",
+    "fr": "Ajoutez un serveur pour ouvrir une session en SSH ou Mosh — avec tmux, truecolor et défilement au trackpad intégrés.",
+    "ja": "サーバーを追加すると、SSH または mosh でセッションを開けます。tmux、トゥルーカラー、トラックパッドスクロールを標準装備しています。",
+    "zh-Hans": "添加一台服务器，即可通过 SSH 或 mosh 打开会话 —— 内置 tmux、真彩色和触控板滚动。",
+    "zh-Hant": "新增一台伺服器，即可透過 SSH 或 mosh 開啟工作階段 —— 內建 tmux、全彩和觸控板捲動。"
+  }
+}

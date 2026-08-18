@@ -8,7 +8,8 @@ final class TmuxControllerTests: XCTestCase {
     // accumulator arrays we can assert on.
     private func makeController(
         controlPath: TmuxController.ControlPath = .inline,
-        clientSizePolicy: TmuxController.ClientSizePolicy = .resizeTmux
+        clientSizePolicy: TmuxController.ClientSizePolicy = .resizeTmux,
+        separatorProbeEnabled: Bool = false
     ) -> (
         TmuxController,
         fed: Accumulator<UInt8>,
@@ -18,7 +19,8 @@ final class TmuxControllerTests: XCTestCase {
         let sent = Accumulator<UInt8>()
         let controller = TmuxController(
             controlPath: controlPath,
-            clientSizePolicy: clientSizePolicy
+            clientSizePolicy: clientSizePolicy,
+            separatorProbeEnabled: separatorProbeEnabled
         )
         controller.feedTerminal = { slice in fed.append(contentsOf: slice) }
         controller.sendBytes = { bytes in sent.append(contentsOf: bytes) }
@@ -2481,6 +2483,242 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertEqual(state?.originMode, true)
         XCTAssertEqual(state?.altSavedX, 2)
         XCTAssertEqual(state?.altSavedY, 3)
+    }
+
+    /// The 2026-08-17 field report, verbatim shape: a host whose tmux
+    /// returned our tab-joined format with every tab replaced by one
+    /// character. All 22 values intact, separators single spaces.
+    func test_parseRenderedPaneState_spaceMangledFieldReportLine() {
+        let line = "%11 18 0 cygnvs bash cygnvs 0 0 0 42 1 0 0 0 1 0 0 0 0 0 4294967295 4294967295"
+
+        let state = TmuxController.parseRenderedPaneState(line)
+
+        XCTAssertEqual(state?.paneId, PaneId(11))
+        XCTAssertEqual(state?.cursorX, 18)
+        XCTAssertEqual(state?.cursorY, 0)
+        XCTAssertEqual(state?.paneTitle, "cygnvs")
+        XCTAssertEqual(state?.windowName, "bash")
+        XCTAssertEqual(state?.paneInAltScreen, false)
+        XCTAssertEqual(state?.historySize, 0)
+        XCTAssertEqual(state?.scrollRegionLower, 42)
+        XCTAssertEqual(state?.cursorVisible, true)
+        XCTAssertEqual(state?.wrapMode, true)
+        XCTAssertNil(state?.altSavedX, "UINT_MAX sentinel must stay nil through the fallback")
+        XCTAssertNil(state?.altSavedY)
+    }
+
+    func test_parseRenderedPaneState_underscoreMangledLine() {
+        let line = "%3_5_2_title_win_host_1_100_0_23_1_0_0_0_1_0_0_0_0_0_7_8"
+
+        let state = TmuxController.parseRenderedPaneState(line)
+
+        XCTAssertEqual(state?.paneId, PaneId(3))
+        XCTAssertEqual(state?.cursorX, 5)
+        XCTAssertEqual(state?.cursorY, 2)
+        XCTAssertEqual(state?.paneTitle, "title")
+        XCTAssertEqual(state?.windowName, "win")
+        XCTAssertEqual(state?.paneInAltScreen, true)
+        XCTAssertEqual(state?.historySize, 100)
+        XCTAssertEqual(state?.altSavedX, 7)
+        XCTAssertEqual(state?.altSavedY, 8)
+    }
+
+    /// A separator character inside a string field inflates the token count
+    /// past 22: the numeric state must still be recovered off the front/back
+    /// anchors, and the unattributable string fields dropped rather than
+    /// misassigned.
+    func test_parseRenderedPaneState_mangledSeparatorInsideTitleDropsStrings() {
+        let line = "%9 4 1 my long title bash host 1 55 0 23 1 0 0 0 1 0 0 0 0 0 2 3"
+
+        let state = TmuxController.parseRenderedPaneState(line)
+
+        XCTAssertEqual(state?.paneId, PaneId(9))
+        XCTAssertEqual(state?.cursorX, 4)
+        XCTAssertEqual(state?.cursorY, 1)
+        XCTAssertNil(state?.paneTitle)
+        XCTAssertNil(state?.windowName)
+        XCTAssertEqual(state?.paneInAltScreen, true)
+        XCTAssertEqual(state?.historySize, 55)
+        XCTAssertEqual(state?.altSavedX, 2)
+        XCTAssertEqual(state?.altSavedY, 3)
+    }
+
+    /// An empty title on a mangling host arrives as two consecutive
+    /// separators; the empty token must keep its slot so the count stays 22.
+    func test_parseRenderedPaneState_mangledEmptyTitleKeepsSlot() {
+        let line = "%2 0 0  win host 0 10 0 23 1 0 0 0 1 0 0 0 0 0 4294967295 4294967295"
+
+        let state = TmuxController.parseRenderedPaneState(line)
+
+        XCTAssertEqual(state?.paneId, PaneId(2))
+        XCTAssertNil(state?.paneTitle)
+        XCTAssertEqual(state?.windowName, "win")
+        XCTAssertEqual(state?.historySize, 10)
+    }
+
+    func test_parseRenderedPaneState_mangledRejectsShortOrNonNumericTail() {
+        XCTAssertNil(
+            TmuxController.parseRenderedPaneState("%1 2 3 four five"),
+            "fewer than 22 tokens has no anchor worth trusting"
+        )
+        XCTAssertNil(
+            TmuxController.parseRenderedPaneState(
+                "%1 2 3 t w h 0 x 0 23 1 0 0 0 1 0 0 0 0 0 2 oops"
+            ),
+            "a non-numeric 16-field tail must fail the anchor"
+        )
+        XCTAssertNil(
+            TmuxController.parseRenderedPaneState("no-pane-anchor 1 2"),
+            "the %<digits> front anchor is mandatory"
+        )
+    }
+
+    /// A healthy tab-separated line whose title contains the would-be
+    /// fallback separator must never be routed through the mangled path.
+    func test_parseRenderedPaneState_tabLineWithSpacesInTitleUnaffected() {
+        let fields = [
+            "%7", "8", "9", "a title with spaces", "ops win", "host", "1",
+            "1234", "4", "19", "0", "1", "1", "1", "0",
+            "0", "0", "1", "1", "1", "2", "3",
+        ]
+
+        let state = TmuxController.parseRenderedPaneState(fields.joined(separator: "\t"))
+
+        XCTAssertEqual(state?.paneTitle, "a title with spaces")
+        XCTAssertEqual(state?.windowName, "ops win")
+        XCTAssertEqual(state?.historySize, 1234)
+    }
+
+    /// The probe adds a slot to the command-reply FIFO, so it must stay
+    /// off by default (scripted positional consumers — golden tests and
+    /// the in-app debug harnesses — reply to an exact attach frame count)
+    /// and, when the production wiring opts in, must consume exactly its
+    /// own reply so later replies stay on their own slots.
+    func test_separatorProbe_optInSendsOneCommandAndKeepsFIFOAligned() {
+        let (plain, _, plainSent) = makeController()
+        plain.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
+        plain.ingest(responseFrame(1, flags: 0))
+        for number in 2...8 { plain.ingest(responseFrame(number)) }
+        XCTAssertFalse(
+            String(decoding: plainSent.bytes, as: UTF8.self).contains("tessera-sep"),
+            "hydration must not add the probe slot unless the session wiring opts in"
+        )
+
+        let (controller, _, sent) = makeController(separatorProbeEnabled: true)
+        var diagnostics: [String] = []
+        TmuxDiagnostics.sink = { diagnostics.append($0) }
+        defer { TmuxDiagnostics.sink = nil }
+        controller.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
+        controller.ingest(responseFrame(1, flags: 0))
+        for number in 2...8 { controller.ingest(responseFrame(number)) }
+        XCTAssertTrue(
+            String(decoding: sent.bytes, as: UTF8.self).contains("tessera-sep")
+        )
+
+        controller.ingest(responseFrame(9, body: ["tessera-sep\t3.4"]))
+        XCTAssertTrue(
+            diagnostics.contains { $0.contains("separator-probe result=intact version=3.4") },
+            "the probe must consume its own reply slot"
+        )
+
+        controller.ingest(Array("%window-add @1\r\n".utf8))
+        controller.ingest(responseFrame(10, body: [
+            "1\tb25d,80x24,0,0,5\tb25d,80x24,0,0,5\t0\tbuild",
+        ]))
+        XCTAssertEqual(
+            controller.windows.first(where: { $0.id == WindowId(1) })?.name,
+            "build",
+            "replies after the probe must land on their own commands"
+        )
+    }
+
+    func test_classifySeparatorProbe_reportsIntactMangledAndRejected() {
+        XCTAssertEqual(
+            TmuxController.classifySeparatorProbe(.success(["tessera-sep\t3.4"])),
+            "result=intact version=3.4"
+        )
+        XCTAssertEqual(
+            TmuxController.classifySeparatorProbe(.success(["tessera-sep_3.3a"])),
+            "result=mangled sepHex=5f version=3.3a"
+        )
+        XCTAssertEqual(
+            TmuxController.classifySeparatorProbe(.success(["tessera-sep 3.5"])),
+            "result=mangled sepHex=20 version=3.5"
+        )
+        XCTAssertEqual(
+            TmuxController.classifySeparatorProbe(
+                .failure(.tmuxError(lines: ["usage: display-message ..."]))
+            ),
+            "result=command-rejected lines=1"
+        )
+        XCTAssertEqual(
+            TmuxController.classifySeparatorProbe(.success([])),
+            "result=empty"
+        )
+        XCTAssertEqual(
+            TmuxController.classifySeparatorProbe(.success(["something else"])),
+            "result=unrecognized len=14"
+        )
+    }
+
+    /// End-to-end attach against a host whose tmux sanitizes every command
+    /// reply (tabs arrive as `_`, the 2026-08-17 field mechanism): windows
+    /// and panes must hydrate off the mangled lists, the initial render must
+    /// latch WITHOUT a capture-pane (whose sanitized body would paint
+    /// garbage), and live `%output` must then feed the shared terminal.
+    func test_attachOnSanitizedRepliesHost_hydratesLatchesAndSkipsCapture() {
+        let (controller, fed, sent) = makeController()
+
+        var chunk: [UInt8] = [0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70]
+        chunk.append(contentsOf: Array("%begin 0 1 0\r\n%end 0 1 0\r\n".utf8))
+        controller.ingest(chunk)
+
+        // history-limit, pause-after, bell subscription: empty replies.
+        controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8))
+        controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8))
+        controller.ingest(Array("%begin 0 4 1\r\n%end 0 4 1\r\n".utf8))
+        // list-windows, every tab replaced by `_` — the window name itself
+        // contains an underscore and must survive via the name-last split.
+        controller.ingest(Array(
+            "%begin 0 5 1\r\n@1_0_b25d,80x24,0,0,5_b25d,80x24,0,0,5_0_build_logs\r\n%end 0 5 1\r\n".utf8
+        ))
+        // list-panes, same mangle, exactly ten tokens.
+        controller.ingest(Array(
+            "%begin 0 6 1\r\n@1_%5_1_0_0_80_24_bash_vim_web01\r\n%end 0 6 1\r\n".utf8
+        ))
+        // active-window: single-field reply, immune to the mangle.
+        controller.ingest(Array("%begin 0 7 1\r\n@1\r\n%end 0 7 1\r\n".utf8))
+        // pane metadata subscription: empty reply.
+        controller.ingest(Array("%begin 0 8 1\r\n%end 0 8 1\r\n".utf8))
+
+        XCTAssertEqual(controller.windows.count, 1)
+        XCTAssertEqual(controller.windows.first?.windowName, "build_logs")
+        XCTAssertEqual(controller.windows.first?.index, 0)
+        XCTAssertNotNil(controller.windows.first?.layout)
+        XCTAssertEqual(controller.windows.first?.panes.map(\.id), [PaneId(5)])
+        XCTAssertEqual(controller.windows.first?.panes.first?.title, "vim")
+        XCTAssertFalse(controller.isInitialRenderReady)
+
+        // The active-window reply triggered the render refresh — answer its
+        // metadata query with the mangled shape.
+        controller.ingest(Array(
+            "%begin 0 9 1\r\n%5_3_1_vim_build_web01_0_0_0_23_1_0_0_0_1_0_0_0_0_0_4294967295_4294967295\r\n%end 0 9 1\r\n".utf8
+        ))
+
+        XCTAssertTrue(
+            controller.isInitialRenderReady,
+            "mangled metadata must latch the pane and mark ready without capture"
+        )
+        XCTAssertFalse(
+            String(decoding: sent.bytes, as: UTF8.self).contains("capture-pane"),
+            "a sanitized-replies host must never be sent a render capture"
+        )
+
+        controller.ingest(Array("%output %5 hello\r\n".utf8))
+        XCTAssertTrue(
+            String(decoding: fed.bytes, as: UTF8.self).contains("hello"),
+            "live %output must feed the shared terminal after the latch"
+        )
     }
 
     func test_parseRenderedPaneState_emptyOptionalFieldsAreNil() {

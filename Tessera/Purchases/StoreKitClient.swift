@@ -79,11 +79,11 @@ enum StoreKitClientError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .productUnavailable:
-            return "the App Store did not return the unlimited saved hosts product"
+            return String(localized: "the App Store did not return the unlimited saved hosts product")
         case .purchaseUnverified:
-            return "the App Store returned a purchase that failed verification"
+            return String(localized: "the App Store returned a purchase that failed verification")
         case .entitlementUnverified:
-            return "the App Store could not verify existing purchase status"
+            return String(localized: "the App Store could not verify existing purchase status")
         }
     }
 }

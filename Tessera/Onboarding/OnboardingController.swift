@@ -15,7 +15,7 @@ final class OnboardingController {
     var phase: OnboardingPhase = .inactive
 
     /// The ordered step list. Pure data — see `OnboardingStep.firstRun`.
-    let steps: [OnboardingStep] = OnboardingStep.firstRun
+    var steps: [OnboardingStep] { OnboardingStep.firstRun(appearance.modifierNotation) }
 
     private let appearance: AppearancePreferences
 

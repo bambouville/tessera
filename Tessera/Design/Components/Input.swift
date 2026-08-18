@@ -3,10 +3,43 @@ import UIKit
 
 struct Input: View {
     @Binding var text: String
-    var placeholder: String = ""
+    /// Already resolved, so `TextField` takes its `StringProtocol` overload.
+    /// Which initializer produced it decides whether it was translated.
+    private let placeholder: String
     var mono: Bool = true
     var secure: Bool = false
     var disabled: Bool = false
+
+    /// Prose shown until the field is filled in — "my-server", "tag".
+    init(
+        text: Binding<String>,
+        placeholder: LocalizedStringResource = "",
+        mono: Bool = true,
+        secure: Bool = false,
+        disabled: Bool = false
+    ) {
+        self._text = text
+        self.placeholder = String(localized: placeholder)
+        self.mono = mono
+        self.secure = secure
+        self.disabled = disabled
+    }
+
+    /// Sample input that must survive verbatim in every language: shell
+    /// commands, addresses, masked-password bullets.
+    init(
+        text: Binding<String>,
+        verbatimPlaceholder: String,
+        mono: Bool = true,
+        secure: Bool = false,
+        disabled: Bool = false
+    ) {
+        self._text = text
+        self.placeholder = verbatimPlaceholder
+        self.mono = mono
+        self.secure = secure
+        self.disabled = disabled
+    }
 
     @Environment(\.designTokens) private var T
     // Read so the sans branch's UIFontMetrics size recomputes when the user's
@@ -57,12 +90,12 @@ private struct InputPreview: View {
 
     var body: some View {
         HStack(spacing: 24) {
-            Input(text: $darkText, placeholder: "Dark input")
+            Input(text: $darkText, verbatimPlaceholder: "Dark input")
                 .padding()
                 .background(DesignTokens.make(mode: .dark, accent: .blue).bg)
                 .environment(\.designTokens, DesignTokens.make(mode: .dark, accent: .blue))
 
-            Input(text: $lightText, placeholder: "Light input", mono: false)
+            Input(text: $lightText, verbatimPlaceholder: "Light input", mono: false)
                 .padding()
                 .background(DesignTokens.make(mode: .light, accent: .blue).bg)
                 .environment(\.designTokens, DesignTokens.make(mode: .light, accent: .blue))

@@ -1,0 +1,474 @@
+{
+  "Bring your setup with you": {
+    "de": "Nimm deine Einrichtung mit",
+    "es": "Llévate tu configuración contigo",
+    "fr": "Emportez votre configuration avec vous",
+    "ja": "セットアップをそのまま引き継ぐ",
+    "zh-Hans": "把你的配置带过来",
+    "zh-Hant": "把你的設定帶過來"
+  },
+  "Copy hosts, jump routes, port forwards, and portable appearance settings from a nearby iPhone or iPad. The sending device separately chooses whether sensitive host text and trusted host keys move. Passwords and private keys never move.": {
+    "de": "Kopiere Hosts, Jump-Routen, Portweiterleitungen und übertragbare Darstellungseinstellungen von einem iPhone oder iPad in der Nähe. Das sendende Gerät entscheidet separat, ob sensibler Host-Text und vertrauenswürdige Host-Keys mitgehen. Passwörter und private Keys wandern nie mit.",
+    "es": "Copia hosts, rutas de salto, reenvíos de puertos y ajustes de apariencia portables desde un iPhone o iPad cercano. El dispositivo emisor decide por separado si se mueven el texto sensible de los hosts y las claves de host de confianza. Las contraseñas y las claves privadas nunca se mueven.",
+    "fr": "Copiez les hôtes, routes de rebond, redirections de ports et réglages d'apparence transférables depuis un iPhone ou un iPad à proximité. L'appareil émetteur décide séparément si le texte sensible des hôtes et les clés d'hôte de confiance sont transférés. Les mots de passe et les clés privées ne le sont jamais.",
+    "ja": "近くの iPhone や iPad から、ホスト・踏み台ルート・ポート転送・持ち運べる外観設定をコピーします。機密性のあるホストのテキストと信頼済みホストキーを移すかどうかは、送信側のデバイスが個別に選びます。パスワードと秘密鍵が移ることはありません。",
+    "zh-Hans": "从附近的 iPhone 或 iPad 复制主机、跳板路由、端口转发和可迁移的外观设置。是否迁移敏感的主机文本和受信任主机密钥，由发送设备单独决定。密码和私钥绝不会迁移。",
+    "zh-Hant": "從鄰近的 iPhone 或 iPad 複製主機、跳板路由、連接埠轉發和可遷移的外觀設定。是否遷移敏感的主機文字和受信任主機金鑰，由傳送裝置單獨決定。密碼和私密金鑰絕不會遷移。"
+  },
+  "INHERIT FROM NEARBY": {
+    "de": "VON GERÄT IN DER NÄHE ÜBERNEHMEN",
+    "es": "HEREDAR DE UN DISPOSITIVO CERCANO",
+    "fr": "HÉRITER D'UN APPAREIL PROCHE",
+    "ja": "近くのデバイスから引き継ぐ",
+    "zh-Hans": "从附近设备继承",
+    "zh-Hant": "從鄰近裝置繼承"
+  },
+  "Choose your other device": {
+    "de": "Wähle dein anderes Gerät",
+    "es": "Elige tu otro dispositivo",
+    "fr": "Choisissez votre autre appareil",
+    "ja": "もう一方のデバイスを選ぶ",
+    "zh-Hans": "选择你的另一台设备",
+    "zh-Hant": "選擇你的另一台裝置"
+  },
+  "On that device, open Settings → Continuity and tap “send setup to nearby device.”": {
+    "de": "Öffne auf jenem Gerät „Einstellungen“ → „Kontinuität“ und tippe auf „Einrichtung an Gerät in der Nähe senden“.",
+    "es": "En ese dispositivo, abre Ajustes → Continuidad y toca «enviar la configuración a un dispositivo cercano».",
+    "fr": "Sur cet appareil, ouvrez Réglages → Continuité et touchez « envoyer la configuration à un appareil proche ».",
+    "ja": "そのデバイスで「設定」→「連係」を開き、「近くのデバイスにセットアップを送る」をタップしてください。",
+    "zh-Hans": "在那台设备上，打开「设置 → 接力」并轻点「将设置发送到附近设备」。",
+    "zh-Hant": "在那台裝置上，打開「設定 → 接續互通」並點一下「將設定傳送到鄰近裝置」。"
+  },
+  "Looking nearby": {
+    "de": "Suche in der Nähe",
+    "es": "Buscando cerca",
+    "fr": "Recherche à proximité",
+    "ja": "近くを検索中",
+    "zh-Hans": "正在搜索附近",
+    "zh-Hant": "正在搜尋鄰近裝置"
+  },
+  "No devices found yet. Both devices must keep Tessera open on the setup screen.": {
+    "de": "Noch keine Geräte gefunden. Auf beiden Geräten muss Tessera im Einrichtungsbildschirm geöffnet bleiben.",
+    "es": "Todavía no se ha encontrado ningún dispositivo. Ambos deben mantener Tessera abierto en la pantalla de configuración.",
+    "fr": "Aucun appareil trouvé pour l'instant. Les deux appareils doivent garder Tessera ouvert sur l'écran de configuration.",
+    "ja": "まだデバイスが見つかりません。両方のデバイスで、Tessera をセットアップ画面のまま開いておいてください。",
+    "zh-Hans": "还没有找到设备。两台设备都需要让 Tessera 停留在设置界面。",
+    "zh-Hant": "還沒有找到裝置。兩台裝置都需要讓 Tessera 停留在設定畫面。"
+  },
+  "tap to connect · name is not trusted": {
+    "de": "zum Verbinden tippen · dem Namen wird nicht vertraut",
+    "es": "toca para conectar · el nombre no es de confianza",
+    "fr": "touchez pour vous connecter · le nom n'est pas fiable",
+    "ja": "タップして接続 · 表示名は信頼の根拠になりません",
+    "zh-Hans": "轻点以连接 · 名称不可作为信任依据",
+    "zh-Hant": "點一下以連線 · 名稱不可作為信任依據"
+  },
+  "may need newer Tessera on this device · tap to try": {
+    "de": "braucht auf diesem Gerät vielleicht ein neueres Tessera · zum Versuchen tippen",
+    "es": "puede que este dispositivo necesite una versión más reciente de Tessera · toca para intentarlo",
+    "fr": "cet appareil a peut-être besoin d'une version plus récente de Tessera · touchez pour essayer",
+    "ja": "このデバイスには新しい Tessera が必要かもしれません · タップして試す",
+    "zh-Hans": "本设备可能需要更新版本的 Tessera · 轻点以尝试",
+    "zh-Hant": "本裝置可能需要更新版本的 Tessera · 點一下以嘗試"
+  },
+  "may need newer Tessera on that device · tap to try": {
+    "de": "braucht auf jenem Gerät vielleicht ein neueres Tessera · zum Versuchen tippen",
+    "es": "puede que ese dispositivo necesite una versión más reciente de Tessera · toca para intentarlo",
+    "fr": "cet autre appareil a peut-être besoin d'une version plus récente de Tessera · touchez pour essayer",
+    "ja": "そのデバイスには新しい Tessera が必要かもしれません · タップして試す",
+    "zh-Hans": "那台设备可能需要更新版本的 Tessera · 轻点以尝试",
+    "zh-Hant": "那台裝置可能需要更新版本的 Tessera · 點一下以嘗試"
+  },
+  "Waiting for your other device": {
+    "de": "Warte auf dein anderes Gerät",
+    "es": "Esperando a tu otro dispositivo",
+    "fr": "En attente de votre autre appareil",
+    "ja": "もう一方のデバイスを待っています",
+    "zh-Hans": "正在等待你的另一台设备",
+    "zh-Hant": "正在等待你的另一台裝置"
+  },
+  "Keep this screen open. Tessera is visible only while this setup flow is in the foreground.": {
+    "de": "Lass diesen Bildschirm geöffnet. Tessera ist nur sichtbar, solange dieser Einrichtungsablauf im Vordergrund ist.",
+    "es": "Mantén esta pantalla abierta. Tessera solo es visible mientras este proceso de configuración está en primer plano.",
+    "fr": "Gardez cet écran ouvert. Tessera n'est visible que tant que ce processus de configuration est au premier plan.",
+    "ja": "この画面を開いたままにしてください。Tessera は、このセットアップ画面が前面にある間だけ相手から見えます。",
+    "zh-Hans": "请保持此界面打开。只有当这个设置流程位于前台时，Tessera 才可被发现。",
+    "zh-Hant": "請保持此畫面打開。只有當這個設定流程位於前景時，Tessera 才可被發現。"
+  },
+  "Opening an encrypted channel": {
+    "de": "Verschlüsselter Kanal wird geöffnet",
+    "es": "Abriendo un canal cifrado",
+    "fr": "Ouverture d'un canal chiffré",
+    "ja": "暗号化チャネルを開いています",
+    "zh-Hans": "正在打开加密通道",
+    "zh-Hant": "正在打開加密通道"
+  },
+  "Connecting to %@. Device names are labels only; the code on the next screen verifies the channel.": {
+    "de": "Verbinde mit %@. Gerätenamen sind nur Beschriftungen; der Code auf dem nächsten Bildschirm prüft den Kanal.",
+    "es": "Conectando con %@. Los nombres de dispositivo son solo etiquetas; el código de la pantalla siguiente verifica el canal.",
+    "fr": "Connexion à %@. Les noms d'appareil ne sont que des libellés ; c'est le code de l'écran suivant qui vérifie le canal.",
+    "ja": "%@ に接続中です。デバイス名は単なるラベルであり、チャネルを検証するのは次の画面のコードです。",
+    "zh-Hans": "正在连接 %@。设备名称只是标签；真正验证通道的是下一屏的代码。",
+    "zh-Hant": "正在連線 %@。裝置名稱只是標籤；真正驗證通道的是下一畫面的代碼。"
+  },
+  "Compare this code": {
+    "de": "Vergleiche diesen Code",
+    "es": "Compara este código",
+    "fr": "Comparez ce code",
+    "ja": "このコードを見比べる",
+    "zh-Hans": "核对此代码",
+    "zh-Hant": "核對此代碼"
+  },
+  "Confirm only if the same code is visible on %@. If either device rejects the code, both devices stop this attempt; retrying creates fresh encryption keys.": {
+    "de": "Bestätige nur, wenn auf %@ derselbe Code steht. Lehnt eines der Geräte den Code ab, brechen beide diesen Versuch ab; ein erneuter Versuch erzeugt neue Verschlüsselungs-Keys.",
+    "es": "Confirma solo si aparece el mismo código en %@. Si cualquiera de los dispositivos rechaza el código, ambos detienen este intento; volver a intentarlo genera claves de cifrado nuevas.",
+    "fr": "Ne confirmez que si le même code s'affiche sur %@. Si l'un des appareils refuse le code, les deux interrompent la tentative ; réessayer génère de nouvelles clés de chiffrement.",
+    "ja": "%@ に同じコードが表示されている場合にのみ確認してください。どちらかのデバイスがコードを拒否すると、両方がこの試行を中止します。やり直すと新しい暗号鍵が生成されます。",
+    "zh-Hans": "只有当 %@ 上显示相同代码时才确认。任何一台设备拒绝该代码，两台都会中止此次尝试；重试会生成新的加密密钥。",
+    "zh-Hant": "只有當 %@ 上顯示相同代碼時才確認。任何一台裝置拒絕該代碼，兩台都會中止此次嘗試；重試會產生新的加密金鑰。"
+  },
+  "Waiting for the other device": {
+    "de": "Warte auf das andere Gerät",
+    "es": "Esperando al otro dispositivo",
+    "fr": "En attente de l'autre appareil",
+    "ja": "もう一方のデバイスを待っています",
+    "zh-Hans": "正在等待另一台设备",
+    "zh-Hant": "正在等待另一台裝置"
+  },
+  "You confirmed code %@. %@ must confirm the same code before setup can continue.": {
+    "de": "Du hast den Code %@ bestätigt. %@ muss denselben Code bestätigen, bevor die Einrichtung weitergeht.",
+    "es": "Confirmaste el código %@. %@ debe confirmar el mismo código para que la configuración pueda continuar.",
+    "fr": "Vous avez confirmé le code %@. %@ doit confirmer le même code pour que la configuration se poursuive.",
+    "ja": "コード %1$@ を確認しました。セットアップを続けるには、%2$@ でも同じコードを確認する必要があります。",
+    "zh-Hans": "你已确认代码 %1$@。%2$@ 也必须确认同一代码，设置才能继续。",
+    "zh-Hant": "你已確認代碼 %1$@。%2$@ 也必須確認同一代碼，設定才能繼續。"
+  },
+  "Stopping nearby setup": {
+    "de": "Einrichtung in der Nähe wird abgebrochen",
+    "es": "Deteniendo la configuración cercana",
+    "fr": "Arrêt de la configuration à proximité",
+    "ja": "近くのデバイスからのセットアップを中止しています",
+    "zh-Hans": "正在停止附近设置",
+    "zh-Hant": "正在停止鄰近設定"
+  },
+  "Telling %@ that this pairing attempt was rejected.": {
+    "de": "%@ wird mitgeteilt, dass dieser Kopplungsversuch abgelehnt wurde.",
+    "es": "Informando a %@ de que se rechazó este intento de emparejamiento.",
+    "fr": "Information de %@ que cette tentative d'appairage a été refusée.",
+    "ja": "このペアリングの試行が拒否されたことを %@ に伝えています。",
+    "zh-Hans": "正在告知 %@ 此次配对尝试已被拒绝。",
+    "zh-Hant": "正在告知 %@ 此次配對嘗試已被拒絕。"
+  },
+  "Waiting for the device key": {
+    "de": "Warte auf den Geräte-Key",
+    "es": "Esperando la clave del dispositivo",
+    "fr": "En attente de la clé de l'appareil",
+    "ja": "デバイスキーを待っています",
+    "zh-Hans": "正在等待设备密钥",
+    "zh-Hant": "正在等待裝置金鑰"
+  },
+  "Code %@ matched. Waiting for %@ to create or reuse its device public key.": {
+    "de": "Code %@ stimmt überein. Warte darauf, dass %@ seinen Geräte-Public-Key erzeugt oder wiederverwendet.",
+    "es": "El código %@ coincide. Esperando a que %@ cree o reutilice su clave pública de dispositivo.",
+    "fr": "Le code %@ correspond. En attente que %@ crée ou réutilise sa clé publique d'appareil.",
+    "ja": "コード %1$@ が一致しました。%2$@ がデバイスの公開鍵を作成または再利用するのを待っています。",
+    "zh-Hans": "代码 %1$@ 已匹配。正在等待 %2$@ 创建或复用其设备公钥。",
+    "zh-Hant": "代碼 %1$@ 已相符。正在等待 %2$@ 製作或重複使用其裝置公開金鑰。"
+  },
+  "Prepare this device key": {
+    "de": "Diesen Geräte-Key vorbereiten",
+    "es": "Preparar la clave de este dispositivo",
+    "fr": "Préparer la clé de cet appareil",
+    "ja": "このデバイスのキーを準備",
+    "zh-Hans": "准备本设备的密钥",
+    "zh-Hant": "準備本裝置的金鑰"
+  },
+  "Tessera is creating or loading this device’s Secure Enclave key. If your key-use setting requires authentication, confirm Face ID or device passcode. You can change it later in Keys.": {
+    "de": "Tessera erzeugt oder lädt den Secure-Enclave-Key dieses Geräts. Verlangt deine Einstellung zur Key-Nutzung eine Authentifizierung, bestätige mit Face ID oder dem Gerätecode. Du kannst das später unter „Keys“ ändern.",
+    "es": "Tessera está creando o cargando la clave del Secure Enclave de este dispositivo. Si tu ajuste de uso de claves exige autenticación, confirma con Face ID o el código del dispositivo. Puedes cambiarlo luego en Claves.",
+    "fr": "Tessera crée ou charge la clé Secure Enclave de cet appareil. Si votre réglage d'utilisation des clés exige une authentification, confirmez avec Face ID ou le code de l'appareil. Vous pourrez le modifier plus tard dans Clés.",
+    "ja": "Tessera がこのデバイスの Secure Enclave キーを作成または読み込んでいます。キー使用時の設定で認証が必要な場合は、Face ID かデバイスのパスコードで確認してください。設定はあとから「キー」で変更できます。",
+    "zh-Hans": "Tessera 正在创建或载入本设备的 Secure Enclave 密钥。如果你的密钥使用设置要求认证，请用 Face ID 或设备密码确认。之后可以在「密钥」中更改。",
+    "zh-Hant": "Tessera 正在製作或載入本裝置的 Secure Enclave 金鑰。如果你的金鑰使用設定要求驗證，請用 Face ID 或裝置密碼確認。之後可以在「金鑰」中更改。"
+  },
+  "Approve on the other device": {
+    "de": "Auf dem anderen Gerät bestätigen",
+    "es": "Aprobar en el otro dispositivo",
+    "fr": "Approuver sur l'autre appareil",
+    "ja": "もう一方のデバイスで承認",
+    "zh-Hans": "在另一台设备上批准",
+    "zh-Hant": "在另一台裝置上核准"
+  },
+  "Code %@ matched. %@ must approve before any setup data can be sent.": {
+    "de": "Code %@ stimmt überein. %@ muss bestätigen, bevor Einrichtungsdaten gesendet werden können.",
+    "es": "El código %@ coincide. %@ debe aprobar antes de que se envíe ningún dato de configuración.",
+    "fr": "Le code %@ correspond. %@ doit approuver avant l'envoi de toute donnée de configuration.",
+    "ja": "コード %1$@ が一致しました。セットアップのデータを送信するには、%2$@ での承認が必要です。",
+    "zh-Hans": "代码 %1$@ 已匹配。必须先经 %2$@ 批准，才能发送任何设置数据。",
+    "zh-Hant": "代碼 %1$@ 已相符。必須先經 %2$@ 核准，才能傳送任何設定資料。"
+  },
+  "Confirm on this device": {
+    "de": "Auf diesem Gerät bestätigen",
+    "es": "Confirmar en este dispositivo",
+    "fr": "Confirmer sur cet appareil",
+    "ja": "このデバイスで確認",
+    "zh-Hans": "在本设备上确认",
+    "zh-Hant": "在本裝置上確認"
+  },
+  "Authorizing %@ with code %@.": {
+    "de": "%@ wird mit dem Code %@ autorisiert.",
+    "es": "Autorizando a %@ con el código %@.",
+    "fr": "Autorisation de %@ avec le code %@.",
+    "ja": "コード %2$@ で %1$@ を認可しています。",
+    "zh-Hans": "正在使用代码 %2$@ 授权 %1$@。",
+    "zh-Hant": "正在使用代碼 %2$@ 授權 %1$@。"
+  },
+  "Sending setup": {
+    "de": "Einrichtung wird gesendet",
+    "es": "Enviando la configuración",
+    "fr": "Envoi de la configuration",
+    "ja": "セットアップを送信中",
+    "zh-Hans": "正在发送设置",
+    "zh-Hant": "正在傳送設定"
+  },
+  "Importing setup": {
+    "de": "Einrichtung wird importiert",
+    "es": "Importando la configuración",
+    "fr": "Import de la configuration",
+    "ja": "セットアップを読み込み中",
+    "zh-Hans": "正在导入设置",
+    "zh-Hant": "正在輸入設定"
+  },
+  "Sending the approved, encrypted manifest to %@.": {
+    "de": "Das bestätigte, verschlüsselte Manifest wird an %@ gesendet.",
+    "es": "Enviando el manifiesto aprobado y cifrado a %@.",
+    "fr": "Envoi du manifeste approuvé et chiffré à %@.",
+    "ja": "承認済みの暗号化されたマニフェストを %@ に送信しています。",
+    "zh-Hans": "正在把已批准的加密清单发送到 %@。",
+    "zh-Hant": "正在把已核准的加密清單傳送到 %@。"
+  },
+  "Verifying and importing the approved manifest from %@.": {
+    "de": "Das bestätigte Manifest von %@ wird geprüft und importiert.",
+    "es": "Verificando e importando el manifiesto aprobado de %@.",
+    "fr": "Vérification et import du manifeste approuvé provenant de %@.",
+    "ja": "%@ から受け取った承認済みマニフェストを検証して読み込んでいます。",
+    "zh-Hans": "正在校验并导入来自 %@ 的已批准清单。",
+    "zh-Hant": "正在檢驗並輸入來自 %@ 的已核准清單。"
+  },
+  "Choose what to copy": {
+    "de": "Wähle, was kopiert wird",
+    "es": "Elige qué copiar",
+    "fr": "Choisissez ce qui est copié",
+    "ja": "コピーする内容を選ぶ",
+    "zh-Hans": "选择要复制的内容",
+    "zh-Hant": "選擇要複製的內容"
+  },
+  "Code %@ matched. Optional host text and trust start off. Review this exact setup transfer and where to install %@.": {
+    "de": "Code %@ stimmt überein. Optionaler Host-Text und Vertrauen sind zunächst aus. Prüfe genau diese Übertragung und wo %@ installiert werden soll.",
+    "es": "El código %@ coincide. El texto opcional de los hosts y la confianza empiezan desactivados. Revisa exactamente esta transferencia y dónde instalar %@.",
+    "fr": "Le code %@ correspond. Le texte d'hôte facultatif et la confiance sont désactivés au départ. Vérifiez précisément ce transfert et l'endroit où installer %@.",
+    "ja": "コード %1$@ が一致しました。任意のホストテキストと信頼設定は初期状態でオフです。この転送内容と、%2$@ をどこに設置するかを確認してください。",
+    "zh-Hans": "代码 %1$@ 已匹配。可选的主机文本和信任默认关闭。请核对这次转移的具体内容，以及要把 %2$@ 安装到哪里。",
+    "zh-Hant": "代碼 %1$@ 已相符。選用的主機文字和信任預設關閉。請核對這次轉移的具體內容，以及要把 %2$@ 安裝到哪裡。"
+  },
+  "RECIPIENT PUBLIC KEY": {
+    "de": "PUBLIC KEY DES EMPFÄNGERS",
+    "es": "CLAVE PÚBLICA DEL DESTINATARIO",
+    "fr": "CLÉ PUBLIQUE DU DESTINATAIRE",
+    "ja": "受信側の公開鍵",
+    "zh-Hans": "接收方公钥",
+    "zh-Hant": "接收方公開金鑰"
+  },
+  "OPTIONAL HOST DATA · OFF BY DEFAULT": {
+    "de": "OPTIONALE HOST-DATEN · STANDARDMÄSSIG AUS",
+    "es": "DATOS DE HOST OPCIONALES · DESACTIVADOS POR OMISIÓN",
+    "fr": "DONNÉES D'HÔTE FACULTATIVES · DÉSACTIVÉES PAR DÉFAUT",
+    "ja": "任意のホストデータ · 初期状態はオフ",
+    "zh-Hans": "可选主机数据 · 默认关闭",
+    "zh-Hant": "選用主機資料 · 預設關閉"
+  },
+  "HOST GRANTS": {
+    "de": "HOST-FREIGABEN",
+    "es": "CONCESIONES DE HOST",
+    "fr": "AUTORISATIONS D'HÔTE",
+    "ja": "ホストへの付与",
+    "zh-Hans": "主机授权",
+    "zh-Hant": "主機授權"
+  },
+  "hosts, jump routes, port forwards, and portable appearance": {
+    "de": "Hosts, Jump-Routen, Portweiterleitungen und übertragbare Darstellung",
+    "es": "hosts, rutas de salto, reenvíos de puertos y apariencia portable",
+    "fr": "hôtes, routes de rebond, redirections de ports et apparence transférable",
+    "ja": "ホスト・踏み台ルート・ポート転送・持ち運べる外観",
+    "zh-Hans": "主机、跳板路由、端口转发和可迁移的外观",
+    "zh-Hant": "主機、跳板路由、連接埠轉發和可遷移的外觀"
+  },
+  "no passwords or private keys move": {
+    "de": "weder Passwörter noch private Keys wandern mit",
+    "es": "no se mueven contraseñas ni claves privadas",
+    "fr": "aucun mot de passe ni clé privée n'est transféré",
+    "ja": "パスワードと秘密鍵は移りません",
+    "zh-Hans": "不迁移任何密码或私钥",
+    "zh-Hant": "不遷移任何密碼或私密金鑰"
+  },
+  "launch commands": {
+    "de": "Startbefehle",
+    "es": "comandos de inicio",
+    "fr": "commandes de lancement",
+    "ja": "起動コマンド",
+    "zh-Hans": "启动命令",
+    "zh-Hant": "啟動指令"
+  },
+  "startup snippets": {
+    "de": "Startskripte",
+    "es": "fragmentos de inicio",
+    "fr": "extraits de démarrage",
+    "ja": "起動スニペット",
+    "zh-Hans": "启动脚本片段",
+    "zh-Hant": "啟動指令片段"
+  },
+  "trusted host keys": {
+    "de": "vertrauenswürdige Host-Keys",
+    "es": "claves de host de confianza",
+    "fr": "clés d'hôte de confiance",
+    "ja": "信頼済みホストキー",
+    "zh-Hans": "受信任的主机密钥",
+    "zh-Hant": "受信任的主機金鑰"
+  },
+  "Custom shell commands. These may contain secrets.": {
+    "de": "Eigene Shell-Befehle. Sie können Geheimnisse enthalten.",
+    "es": "Comandos de shell personalizados. Pueden contener secretos.",
+    "fr": "Commandes shell personnalisées. Elles peuvent contenir des secrets.",
+    "ja": "独自のシェルコマンド。秘密情報が含まれている場合があります。",
+    "zh-Hans": "自定的 shell 命令。其中可能含有机密。",
+    "zh-Hant": "自訂的 shell 指令。其中可能含有機密。"
+  },
+  "Free-form host notes. These may contain sensitive text.": {
+    "de": "Freie Host-Notizen. Sie können sensiblen Text enthalten.",
+    "es": "Notas libres del host. Pueden contener texto sensible.",
+    "fr": "Notes libres sur l'hôte. Elles peuvent contenir du texte sensible.",
+    "ja": "ホストの自由記述メモ。機密性のある文章が含まれている場合があります。",
+    "zh-Hans": "主机的自由备注。其中可能含有敏感文本。",
+    "zh-Hant": "主機的自由備註。其中可能含有敏感文字。"
+  },
+  "Environment variables. These commonly contain tokens or credentials.": {
+    "de": "Umgebungsvariablen. Sie enthalten häufig Tokens oder Zugangsdaten.",
+    "es": "Variables de entorno. Suelen contener tokens o credenciales.",
+    "fr": "Variables d'environnement. Elles contiennent souvent des jetons ou des identifiants.",
+    "ja": "環境変数。トークンや資格情報が含まれていることがよくあります。",
+    "zh-Hans": "环境变量。其中常含有令牌或凭据。",
+    "zh-Hant": "環境變數。其中常含有權杖或憑證。"
+  },
+  "Shell text run at startup. This may contain secrets.": {
+    "de": "Shell-Text, der beim Start läuft. Er kann Geheimnisse enthalten.",
+    "es": "Texto de shell que se ejecuta al arrancar. Puede contener secretos.",
+    "fr": "Texte shell exécuté au démarrage. Il peut contenir des secrets.",
+    "ja": "起動時に実行されるシェルのテキスト。秘密情報が含まれている場合があります。",
+    "zh-Hans": "启动时执行的 shell 文本。其中可能含有机密。",
+    "zh-Hant": "啟動時執行的 shell 文字。其中可能含有機密。"
+  },
+  "The receiving device will trust the same server keys without prompting again. Existing conflicts are preserved for review.": {
+    "de": "Das empfangende Gerät vertraut denselben Server-Keys ohne erneute Nachfrage. Bestehende Konflikte bleiben zur Prüfung erhalten.",
+    "es": "El dispositivo receptor confiará en las mismas claves de servidor sin volver a preguntar. Los conflictos existentes se conservan para revisarlos.",
+    "fr": "L'appareil destinataire fera confiance aux mêmes clés de serveur sans redemander. Les conflits existants sont conservés pour vérification.",
+    "ja": "受信側のデバイスは、同じサーバーキーを再確認なしで信頼します。既存の競合は確認できるよう保持されます。",
+    "zh-Hans": "接收设备将信任相同的服务器密钥，不再询问。已有的冲突会被保留以供查看。",
+    "zh-Hant": "接收裝置將信任相同的伺服器金鑰，不再詢問。既有的衝突會被保留以供查看。"
+  },
+  "HOST ACCESS RECEIPT": {
+    "de": "BELEG ÜBER HOST-ZUGANG",
+    "es": "COMPROBANTE DE ACCESO A HOSTS",
+    "fr": "REÇU D'ACCÈS AUX HÔTES",
+    "ja": "ホストアクセスの記録",
+    "zh-Hans": "主机访问回执",
+    "zh-Hant": "主機存取回條"
+  },
+  "AUTHORIZED": {
+    "de": "AUTORISIERT",
+    "es": "AUTORIZADO",
+    "fr": "AUTORISÉ",
+    "ja": "認可済み",
+    "zh-Hans": "已授权",
+    "zh-Hant": "已授權"
+  },
+  "FAILED": {
+    "de": "FEHLGESCHLAGEN",
+    "es": "FALLÓ",
+    "fr": "ÉCHEC",
+    "ja": "失敗",
+    "zh-Hans": "失败",
+    "zh-Hant": "失敗"
+  },
+  "NOT SELECTED": {
+    "de": "NICHT AUSGEWÄHLT",
+    "es": "NO SELECCIONADO",
+    "fr": "NON SÉLECTIONNÉ",
+    "ja": "未選択",
+    "zh-Hans": "未选择",
+    "zh-Hant": "未選擇"
+  },
+  "NOT IMPORTED": {
+    "de": "NICHT IMPORTIERT",
+    "es": "NO IMPORTADO",
+    "fr": "NON IMPORTÉ",
+    "ja": "未読み込み",
+    "zh-Hans": "未导入",
+    "zh-Hant": "未輸入"
+  },
+  "EXCLUDED": {
+    "de": "AUSGESCHLOSSEN",
+    "es": "EXCLUIDO",
+    "fr": "EXCLU",
+    "ja": "対象外",
+    "zh-Hans": "已排除",
+    "zh-Hant": "已排除"
+  },
+  "The recipient device key was installed and recorded on both devices.": {
+    "de": "Der Geräte-Key des Empfängers wurde installiert und auf beiden Geräten vermerkt.",
+    "es": "La clave del dispositivo destinatario se instaló y quedó registrada en ambos dispositivos.",
+    "fr": "La clé de l'appareil destinataire a été installée et enregistrée sur les deux appareils.",
+    "ja": "受信側のデバイスキーを設置し、両方のデバイスに記録しました。",
+    "zh-Hans": "接收方的设备密钥已安装，并在两台设备上都做了记录。",
+    "zh-Hant": "接收方的裝置金鑰已安裝，並在兩台裝置上都做了記錄。"
+  },
+  "The public-key installation failed.": {
+    "de": "Die Installation des Public Keys ist fehlgeschlagen.",
+    "es": "Falló la instalación de la clave pública.",
+    "fr": "L'installation de la clé publique a échoué.",
+    "ja": "公開鍵の設置に失敗しました。",
+    "zh-Hans": "公钥安装失败。",
+    "zh-Hant": "公開金鑰安裝失敗。"
+  },
+  "This eligible host was not included in the approved batch.": {
+    "de": "Dieser infrage kommende Host war nicht Teil der bestätigten Auswahl.",
+    "es": "Este host apto no se incluyó en el lote aprobado.",
+    "fr": "Cet hôte éligible n'était pas inclus dans le lot approuvé.",
+    "ja": "対象となり得るこのホストは、承認されたまとまりに含まれていませんでした。",
+    "zh-Hans": "这台符合条件的主机未包含在已批准的批次中。",
+    "zh-Hant": "這台符合條件的主機未包含在已核准的批次中。"
+  },
+  "The other device did not import this host, so no key was installed.": {
+    "de": "Das andere Gerät hat diesen Host nicht importiert, daher wurde kein Key installiert.",
+    "es": "El otro dispositivo no importó este host, así que no se instaló ninguna clave.",
+    "fr": "L'autre appareil n'a pas importé cet hôte, aucune clé n'a donc été installée.",
+    "ja": "もう一方のデバイスがこのホストを読み込まなかったため、キーは設置されていません。",
+    "zh-Hans": "另一台设备没有导入这台主机，因此没有安装任何密钥。",
+    "zh-Hant": "另一台裝置沒有輸入這台主機，因此沒有安裝任何金鑰。"
+  },
+  "Passwords and unavailable credentials cannot be reused for a bootstrap grant.": {
+    "de": "Passwörter und nicht verfügbare Zugangsdaten lassen sich nicht für eine Bootstrap-Freigabe wiederverwenden.",
+    "es": "Las contraseñas y las credenciales no disponibles no se pueden reutilizar para una concesión de bootstrap.",
+    "fr": "Les mots de passe et les identifiants indisponibles ne peuvent pas être réutilisés pour une autorisation de bootstrap.",
+    "ja": "パスワードや利用できない資格情報は、ブートストラップの付与に再利用できません。",
+    "zh-Hans": "密码和不可用的凭据无法复用于引导授权。",
+    "zh-Hant": "密碼和不可用的憑證無法重複用於啟動授權。"
+  },
+  "Nearby setup stopped": {
+    "de": "Einrichtung in der Nähe abgebrochen",
+    "es": "Se detuvo la configuración cercana",
+    "fr": "Configuration à proximité interrompue",
+    "ja": "近くのデバイスからのセットアップを中止しました",
+    "zh-Hans": "附近设置已停止",
+    "zh-Hant": "鄰近設定已停止"
+  }
+}

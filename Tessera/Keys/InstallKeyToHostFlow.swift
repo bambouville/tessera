@@ -58,7 +58,7 @@ struct InstallKeyToHostFlow: View {
                 .font(Typography.sheetTitle)
                 .foregroundStyle(T.fg)
 
-            Text(stepLabel)
+            Text(verbatim: stepLabel)
                 .font(Typography.tesseraMono(size: 12))
                 .foregroundStyle(T.fgMuted)
         }
@@ -71,7 +71,7 @@ struct InstallKeyToHostFlow: View {
             resultHeader(
                 symbol: "xmark.shield.fill",
                 color: T.red,
-                title: "Legacy RSA installation is disabled. Generate an Ed25519 replacement and use a different working credential to install it before retiring this key."
+                title: String(localized: "Legacy RSA installation is disabled. Generate an Ed25519 replacement and use a different working credential to install it before retiring this key.")
             )
         } else {
             switch step {
@@ -214,7 +214,7 @@ struct InstallKeyToHostFlow: View {
                 resultHeader(
                     symbol: "checkmark.circle.fill",
                     color: T.green,
-                    title: "Key installed on \(displayName(for: host))"
+                    title: String(localized: "Key installed on \(displayName(for: host))")
                 )
 
             case .failure(let message):
@@ -228,13 +228,15 @@ struct InstallKeyToHostFlow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Every caller resolves its own copy: a catalog lookup, or a message
+    /// that came back from the host.
     private func resultHeader(symbol: String, color: Color, title: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: symbol)
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(color)
 
-            Text(title)
+            Text(verbatim: title)
                 .font(Typography.tesseraMono(size: 14, weight: .medium))
                 .foregroundStyle(T.fg)
                 .fixedSize(horizontal: false, vertical: true)
@@ -301,13 +303,13 @@ struct InstallKeyToHostFlow: View {
     private var stepLabel: String {
         switch step {
         case .pickHost:
-            return "pick host"
+            return String(localized: "pick host")
         case .confirm:
-            return "confirm"
+            return String(localized: "confirm")
         case .installing:
-            return "installing"
+            return String(localized: "installing")
         case .result:
-            return "result"
+            return String(localized: "result")
         }
     }
 
@@ -375,7 +377,7 @@ struct InstallKeyToHostFlow: View {
 
     private func userFacingMessage(for error: Error) -> String {
         if let installError = error as? RemoteAuthorizedKeysInstaller.InstallError {
-            return installError.errorDescription ?? "Could not install key"
+            return installError.errorDescription ?? String(localized: "Could not install key")
         }
         return error.localizedDescription
     }

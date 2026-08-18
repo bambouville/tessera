@@ -161,6 +161,17 @@ final class TesseraTerminalContainer: UIView {
     /// tab actions.
     var tmuxShortcutsEnabled = true
 
+    /// User keymap overrides and custom shortcuts. `keyCommands` is rebuilt on
+    /// every responder query, so an edit in Settings takes effect on the next
+    /// keystroke without re-mounting the terminal. nil falls back to the
+    /// shipped defaults.
+    var shortcutStore: ShortcutStore?
+
+    /// Invoked when a user-defined shortcut's chord fires. The owner encodes
+    /// the shortcut's tokens and writes them to the session — nil means custom
+    /// chords are not registered at all.
+    var onCustomShortcut: ((CustomShortcut) -> Void)?
+
     /// True when this surface belongs to a mounted multi-pane grid. Gates the
     /// bare ⌘[/⌘] pane-cycle and ⌘⇧Return zoom chords (which relocated the
     /// session switcher to ⌘⇧K/⌘⇧J) so they no-op on the single-pane shared
@@ -278,8 +289,8 @@ final class TesseraTerminalContainer: UIView {
         // false for foreign selectors, so the walk lands here — the same
         // mechanism the tmux key commands ride (see the class comment).
         terminalView.additionalMenuItems = [
-            UIMenuItem(title: "Quick Look", action: #selector(selectionQuickLook(_:))),
-            UIMenuItem(title: "Reveal in Files", action: #selector(selectionRevealInFiles(_:))),
+            UIMenuItem(title: String(localized: "Quick Look"), action: #selector(selectionQuickLook(_:))),
+            UIMenuItem(title: String(localized: "Reveal in Files"), action: #selector(selectionRevealInFiles(_:))),
         ]
     }
 
@@ -317,173 +328,121 @@ final class TesseraTerminalContainer: UIView {
             }
         }
 
-        // §R4.6 find-in-scrollback. Always on regardless of tmux mode.
-        // ⌘F opens the bar; ⌘G / ⇧⌘G navigate matches even when the
-        // bar isn't visible (mirrors iTerm2's "find again works without
-        // re-opening the find bar" convention).
-        commands.append(contentsOf: [
-            UIKeyCommand(input: "f",
-                         modifierFlags: .command,
-                         action: #selector(findOpen)),
-            UIKeyCommand(input: "g",
-                         modifierFlags: .command,
-                         action: #selector(findNextMatch)),
-            UIKeyCommand(input: "g",
-                         modifierFlags: [.command, .shift],
-                         action: #selector(findPreviousMatch)),
-        ])
-
-        // Session-switcher chords. Always on — the user expects these
-        // whether they're in tmux mode or passthrough.
-        //   ⌘K  → open the quick-switch palette
-        //   ⌘⇧K → switch to the previous session (up the sidebar list)
-        //   ⌘⇧J → switch to the next session (down the sidebar list)
-        // The bare ⌘[/⌘] brackets were RELOCATED off session switching so
-        // the cheap bracket chords can drive in-window pane cycling (iTerm2
-        // parity — pane switching is the high-frequency action). See the
-        // tmux block below for the ⌘[/⌘] pane-cycle bindings.
+        // Every app chord below is generated from `ShortcutAction` + the user's
+        // `ShortcutStore` overrides rather than written out here, so the
+        // settings editor and the responder chain cannot disagree. The reasons
+        // each default chord is what it is moved onto the registry cases — in
+        // particular why the session switcher is ⌘⇧K/⌘⇧J and not ⌃Tab, ⌘↑/⌘↓,
+        // or ⌘⌥[ (all three tried, all three dropped by iPadOS before the
+        // keyCommand could match — see docs/keyboard-interception-research.md).
         //
-        // These are UIKeyCommands rather than pressesBegan hooks: when a
-        // SwiftTerm TerminalView holds first responder it consumes raw
-        // key presses before they propagate up the chain, but for
-        // *letter/punctuation* keys UIKit matches keyCommands across the
-        // whole responder chain *before* delivering the press, so a
-        // command registered here wins — the same path the tmux ⌘⇧[ /
-        // ⌘⇧] window chords ride.
-        //
-        // Three earlier chords failed and are documented here so they
-        // don't get re-tried: ⌃Tab (iPadOS's focus engine claims
-        // Tab-family keys and swallows it before the chain sees it);
-        // ⌘↑/⌘↓ (arrow keys are consumed by SwiftTerm's UITextInput
-        // first responder and never reach an *ancestor's* keyCommands —
-        // `wantsPriorityOverSystemBehavior` can't help a command that's
-        // never consulted); and ⌘⌥[ / ⌘⌥] (Option remaps "[" to a
-        // different glyph, so a command registered for input "[" with
-        // `.alternate` never matches — confirmed on-device: the selector
-        // never fired). Plain ⌘⇧+letter avoids all three: Shift doesn't
-        // remap the base char, so ⌘⇧J/⌘⇧K match like the ⌘⇧[ window chords.
-        // See SessionSwitcher.swift.
-        commands.append(
-            UIKeyCommand(input: "k",
-                         modifierFlags: .command,
-                         action: #selector(switcherOpenPalette))
-        )
-        let prevCommand = UIKeyCommand(input: "k",
-                                       modifierFlags: [.command, .shift],
-                                       action: #selector(switcherCyclePrevious))
-        prevCommand.wantsPriorityOverSystemBehavior = true
-        commands.append(prevCommand)
-        let nextCommand = UIKeyCommand(input: "j",
-                                       modifierFlags: [.command, .shift],
-                                       action: #selector(switcherCycleNext))
-        nextCommand.wantsPriorityOverSystemBehavior = true
-        commands.append(nextCommand)
+        // Registry order is `ShortcutAction.allCases`, which is stable: with a
+        // user-editable keymap, the array's order stops being an implementation
+        // detail and starts deciding which of two overlapping chords wins.
+        for action in ShortcutAction.terminalActions {
+            guard let selector = Self.shortcutSelector(for: action),
+                  let binding = resolvedBinding(for: action) else { continue }
 
-        // ⌘, → open Settings. Always on, like find and the switcher —
-        // the user expects the standard preferences chord whether
-        // they're in tmux mode or passthrough.
-        commands.append(
-            UIKeyCommand(input: ",",
-                         modifierFlags: .command,
-                         action: #selector(openSettings))
-        )
+            if action.isDigitBlock {
+                // ⌘1–⌘9 is nine commands sharing one action; the stored binding
+                // supplies the modifiers and the digits are fixed.
+                for digit in 1...9 {
+                    let command = UIKeyCommand(
+                        input: "\(digit)",
+                        modifierFlags: binding.modifierFlags,
+                        action: selector
+                    )
+                    command.wantsPriorityOverSystemBehavior =
+                        action.wantsPriorityOverSystemBehavior
+                    commands.append(command)
+                }
+                continue
+            }
 
-        // iPad hardware-keyboard refresh. The terminal remains first
-        // responder while a session is active, so this belongs on the
-        // container in the same responder-chain position as the other
-        // terminal commands. iPhone exposes the same action in the bar only.
-        if UIDevice.current.userInterfaceIdiom == .pad {
-            let refreshCommand = UIKeyCommand(input: "r",
-                                              modifierFlags: .command,
-                                              action: #selector(forceRefresh))
-            refreshCommand.wantsPriorityOverSystemBehavior = true
-            commands.append(refreshCommand)
+            let command = UIKeyCommand(
+                input: binding.key.keyCommandInput,
+                modifierFlags: binding.modifierFlags,
+                action: selector
+            )
+            command.wantsPriorityOverSystemBehavior = action.wantsPriorityOverSystemBehavior
+            commands.append(command)
         }
 
-        let agentCenterCommand = UIKeyCommand(
-            input: "a",
-            modifierFlags: [.command, .shift],
-            action: #selector(openAgentCenter)
-        )
-        agentCenterCommand.wantsPriorityOverSystemBehavior = true
-        commands.append(agentCenterCommand)
-
-        // ⌘⇧E → toggle the Remote Files panel. Always on, like find and
-        // the switcher — cwd-following handles tmux/non-tmux internally.
-        let filesCommand = UIKeyCommand(input: "e",
-                                        modifierFlags: [.command, .shift],
-                                        action: #selector(filesToggle))
-        filesCommand.wantsPriorityOverSystemBehavior = true
-        commands.append(filesCommand)
-
-        if tmuxShortcutsEnabled {
-            let splitPaneHorizontalCommand = UIKeyCommand(input: "d",
-                                                          modifierFlags: .command,
-                                                          action: #selector(tmuxSplitPaneHorizontal))
-            splitPaneHorizontalCommand.wantsPriorityOverSystemBehavior = true
-            let splitPaneVerticalCommand = UIKeyCommand(input: "d",
-                                                        modifierFlags: [.command, .shift],
-                                                        action: #selector(tmuxSplitPaneVertical))
-            splitPaneVerticalCommand.wantsPriorityOverSystemBehavior = true
-
-            // Bare ⌘[/⌘] cycle panes within the focused window (DFS order),
-            // matching iTerm2. Gated by `multiPaneActive` in canPerformAction
-            // so they no-op on the single-pane shared terminal (the session
-            // switcher moved to ⌘⇧K/⌘⇧J). ⌘⇧Return toggles zoom on the
-            // focused pane.
-            let paneCyclePreviousCommand = UIKeyCommand(input: "[",
-                                                        modifierFlags: .command,
-                                                        action: #selector(tmuxPaneCyclePrevious))
-            paneCyclePreviousCommand.wantsPriorityOverSystemBehavior = true
-            let paneCycleNextCommand = UIKeyCommand(input: "]",
-                                                    modifierFlags: .command,
-                                                    action: #selector(tmuxPaneCycleNext))
-            paneCycleNextCommand.wantsPriorityOverSystemBehavior = true
-            let zoomPaneCommand = UIKeyCommand(input: "\r",
-                                               modifierFlags: [.command, .shift],
-                                               action: #selector(tmuxZoomPane))
-            zoomPaneCommand.wantsPriorityOverSystemBehavior = true
-
-            commands.append(contentsOf: [
-                UIKeyCommand(input: "t",
-                             modifierFlags: .command,
-                             action: #selector(tmuxNewWindow)),
-                UIKeyCommand(input: "w",
-                             modifierFlags: [.command, .shift],
-                             action: #selector(tmuxKillWindow)),
-                UIKeyCommand(input: "[",
-                             modifierFlags: [.command, .shift],
-                             action: #selector(tmuxPreviousWindow)),
-                UIKeyCommand(input: "]",
-                             modifierFlags: [.command, .shift],
-                             action: #selector(tmuxNextWindow)),
-                splitPaneHorizontalCommand,
-                splitPaneVerticalCommand,
-                paneCyclePreviousCommand,
-                paneCycleNextCommand,
-                zoomPaneCommand,
-                UIKeyCommand(input: "1", modifierFlags: .command,
-                             action: #selector(tmuxSelectWindow(_:))),
-                UIKeyCommand(input: "2", modifierFlags: .command,
-                             action: #selector(tmuxSelectWindow(_:))),
-                UIKeyCommand(input: "3", modifierFlags: .command,
-                             action: #selector(tmuxSelectWindow(_:))),
-                UIKeyCommand(input: "4", modifierFlags: .command,
-                             action: #selector(tmuxSelectWindow(_:))),
-                UIKeyCommand(input: "5", modifierFlags: .command,
-                             action: #selector(tmuxSelectWindow(_:))),
-                UIKeyCommand(input: "6", modifierFlags: .command,
-                             action: #selector(tmuxSelectWindow(_:))),
-                UIKeyCommand(input: "7", modifierFlags: .command,
-                             action: #selector(tmuxSelectWindow(_:))),
-                UIKeyCommand(input: "8", modifierFlags: .command,
-                             action: #selector(tmuxSelectWindow(_:))),
-                UIKeyCommand(input: "9", modifierFlags: .command,
-                             action: #selector(tmuxSelectWindow(_:))),
-            ])
+        // User-defined shortcuts. All share one selector and carry their
+        // identity in `propertyList`, the same shape the ⌘1–9 block uses to
+        // avoid nine near-identical methods.
+        if let store = shortcutStore, onCustomShortcut != nil {
+            for shortcut in store.customShortcuts {
+                guard let binding = shortcut.binding else { continue }
+                let command = UIKeyCommand(
+                    title: shortcut.name,
+                    image: nil,
+                    action: #selector(customShortcutFired(_:)),
+                    input: binding.key.keyCommandInput,
+                    modifierFlags: binding.modifierFlags,
+                    propertyList: shortcut.id.uuidString
+                )
+                command.wantsPriorityOverSystemBehavior = true
+                commands.append(command)
+            }
         }
+
+        // Availability (tmux attached, multi-pane, iPad-only) is still enforced
+        // in `canPerformAction` below rather than by withdrawing commands here,
+        // so a chord the user rebinds keeps the same gating it always had.
 
         return commands
+    }
+
+    /// Maps a registry action to the container's `@objc` handler. Actions the
+    /// terminal doesn't own (new host, connect) return nil and are registered
+    /// by their owning SwiftUI view instead.
+    static func shortcutSelector(for action: ShortcutAction) -> Selector? {
+        switch action {
+        case .quickSwitchPalette:  return #selector(switcherOpenPalette)
+        case .previousSession:     return #selector(switcherCyclePrevious)
+        case .nextSession:         return #selector(switcherCycleNext)
+        case .openSettings:        return #selector(openSettings)
+        case .toggleAgentCenter:   return #selector(openAgentCenter)
+        case .toggleFilesPanel:    return #selector(filesToggle)
+        case .refreshTerminal:     return #selector(forceRefresh)
+        case .findOpen:            return #selector(findOpen)
+        case .findNext:            return #selector(findNextMatch)
+        case .findPrevious:        return #selector(findPreviousMatch)
+        case .tmuxNewWindow:       return #selector(tmuxNewWindow)
+        case .tmuxCloseWindow:     return #selector(tmuxKillWindow)
+        case .tmuxPreviousWindow:  return #selector(tmuxPreviousWindow)
+        case .tmuxNextWindow:      return #selector(tmuxNextWindow)
+        case .tmuxSelectWindow:    return #selector(tmuxSelectWindow(_:))
+        case .paneSplitSideBySide: return #selector(tmuxSplitPaneHorizontal)
+        case .paneSplitStacked:    return #selector(tmuxSplitPaneVertical)
+        case .panePrevious:        return #selector(tmuxPaneCyclePrevious)
+        case .paneNext:            return #selector(tmuxPaneCycleNext)
+        case .paneZoom:            return #selector(tmuxZoomPane)
+        case .newHost, .connect:   return nil
+        }
+    }
+
+    /// The user's binding, falling back to the shipped default when no store is
+    /// injected (previews, harnesses, tests) so behavior is unchanged there.
+    /// A present-but-nil override means deliberately unbound — the chord is
+    /// simply not registered.
+    private func resolvedBinding(for action: ShortcutAction) -> KeyBinding? {
+        guard let shortcutStore else { return action.defaultBinding }
+        return shortcutStore.binding(for: action)
+    }
+
+    /// Selector for user-defined shortcuts, shared by the registered
+    /// `UIKeyCommand`s and by on-screen ⌘ chords dispatched through the
+    /// responder chain.
+    static let customShortcutSelector = #selector(customShortcutFired(_:))
+
+    @objc private func customShortcutFired(_ sender: UIKeyCommand) {
+        guard let raw = sender.propertyList as? String,
+              let id = UUID(uuidString: raw),
+              let shortcut = shortcutStore?.customShortcuts.first(where: { $0.id == id })
+        else { return }
+        onCustomShortcut?(shortcut)
     }
 
     override func canPerformAction(
@@ -491,6 +450,8 @@ final class TesseraTerminalContainer: UIView {
         withSender sender: Any?
     ) -> Bool {
         switch action {
+        case #selector(customShortcutFired(_:)):
+            return onCustomShortcut != nil
         case #selector(tmuxNewWindow),
              #selector(tmuxKillWindow),
              #selector(tmuxPreviousWindow),

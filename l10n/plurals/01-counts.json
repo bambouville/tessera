@@ -1,0 +1,272 @@
+{
+  "%lld agents finished": {
+    "en": { "one": "%lld agent finished", "other": "%lld agents finished" },
+    "de": { "one": "%lld Agent fertig", "other": "%lld Agenten fertig" },
+    "es": { "one": "%lld agente ha terminado", "other": "%lld agentes han terminado" },
+    "fr": { "one": "%lld agent a terminé", "other": "%lld agents ont terminé" },
+    "ja": { "other": "%lld 個のエージェントが完了" },
+    "zh-Hans": { "other": "%lld 个智能体已完成" },
+    "zh-Hant": { "other": "%lld 個智慧體已完成" }
+  },
+  "%lld agents need input": {
+    "en": { "one": "%lld agent needs input", "other": "%lld agents need input" },
+    "de": { "one": "%lld Agent braucht Eingabe", "other": "%lld Agenten brauchen Eingabe" },
+    "es": { "one": "%lld agente necesita entrada", "other": "%lld agentes necesitan entrada" },
+    "fr": { "one": "%lld agent attend une saisie", "other": "%lld agents attendent une saisie" },
+    "ja": { "other": "%lld 個のエージェントが入力待ち" },
+    "zh-Hans": { "other": "%lld 个智能体等待输入" },
+    "zh-Hant": { "other": "%lld 個智慧體等待輸入" }
+  },
+  "%lld bytes": {
+    "en": { "one": "%lld byte", "other": "%lld bytes" },
+    "de": { "one": "%lld Byte", "other": "%lld Bytes" },
+    "es": { "one": "%lld byte", "other": "%lld bytes" },
+    "fr": { "one": "%lld octet", "other": "%lld octets" },
+    "ja": { "other": "%lld バイト" },
+    "zh-Hans": { "other": "%lld 字节" },
+    "zh-Hant": { "other": "%lld 位元組" }
+  },
+  "%lld matches": {
+    "en": { "one": "%lld match", "other": "%lld matches" },
+    "de": { "one": "%lld Treffer", "other": "%lld Treffer" },
+    "es": { "one": "%lld coincidencia", "other": "%lld coincidencias" },
+    "fr": { "one": "%lld correspondance", "other": "%lld correspondances" },
+    "ja": { "other": "%lld 件の一致" },
+    "zh-Hans": { "other": "%lld 个匹配项" },
+    "zh-Hant": { "other": "%lld 個相符項目" }
+  },
+  "%lld hosts": {
+    "en": { "one": "%lld host", "other": "%lld hosts" },
+    "de": { "one": "%lld Host", "other": "%lld Hosts" },
+    "es": { "one": "%lld host", "other": "%lld hosts" },
+    "fr": { "one": "%lld hôte", "other": "%lld hôtes" },
+    "ja": { "other": "%lld 台のホスト" },
+    "zh-Hans": { "other": "%lld 台主机" },
+    "zh-Hant": { "other": "%lld 台主機" }
+  },
+  "%lld rows hidden by filter": {
+    "en": { "one": "%lld row hidden by filter", "other": "%lld rows hidden by filter" },
+    "de": { "one": "%lld Zeile durch Filter ausgeblendet", "other": "%lld Zeilen durch Filter ausgeblendet" },
+    "es": { "one": "%lld fila oculta por el filtro", "other": "%lld filas ocultas por el filtro" },
+    "fr": { "one": "%lld ligne masquée par le filtre", "other": "%lld lignes masquées par le filtre" },
+    "ja": { "other": "フィルタで %lld 行を非表示" },
+    "zh-Hans": { "other": "筛选隐藏了 %lld 行" },
+    "zh-Hant": { "other": "篩選隱藏了 %lld 列" }
+  },
+  "%lld changed from default": {
+    "de": { "one": "%lld vom Standard abweichend", "other": "%lld vom Standard abweichend" },
+    "es": { "one": "%lld distinto del valor por omisión", "other": "%lld distintos del valor por omisión" },
+    "fr": { "one": "%lld modifié par rapport au réglage par défaut", "other": "%lld modifiés par rapport au réglage par défaut" },
+    "ja": { "other": "デフォルトから %lld 件変更済み" },
+    "zh-Hans": { "other": "%lld 项已不同于默认值" },
+    "zh-Hant": { "other": "%lld 項已不同於預設值" }
+  },
+  "restore %lld changed": {
+    "de": { "one": "%lld geänderte Einstellung zurücksetzen", "other": "%lld geänderte Einstellungen zurücksetzen" },
+    "es": { "one": "restaurar %lld cambio", "other": "restaurar %lld cambios" },
+    "fr": { "one": "restaurer %lld modification", "other": "restaurer %lld modifications" },
+    "ja": { "other": "変更した %lld 件を戻す" },
+    "zh-Hans": { "other": "还原已更改的 %lld 项" },
+    "zh-Hant": { "other": "還原已更改的 %lld 項" }
+  },
+  "%lld host keys have changed since last connect — review before reconnecting": {
+    "en": { "one": "%lld host key has changed since last connect — review before reconnecting", "other": "%lld host keys have changed since last connect — review before reconnecting" },
+    "de": { "one": "%lld Host-Key hat sich seit der letzten Verbindung geändert — prüfe ihn vor dem erneuten Verbinden", "other": "%lld Host-Keys haben sich seit der letzten Verbindung geändert — prüfe sie vor dem erneuten Verbinden" },
+    "es": { "one": "%lld clave de host ha cambiado desde la última conexión: revísala antes de volver a conectar", "other": "%lld claves de host han cambiado desde la última conexión: revísalas antes de volver a conectar" },
+    "fr": { "one": "%lld clé d'hôte a changé depuis la dernière connexion — vérifiez-la avant de vous reconnecter", "other": "%lld clés d'hôte ont changé depuis la dernière connexion — vérifiez-les avant de vous reconnecter" },
+    "ja": { "other": "前回の接続以降に %lld 件のホストキーが変更されました — 再接続する前に確認してください" },
+    "zh-Hans": { "other": "自上次连接以来有 %lld 个主机密钥发生变化 —— 请在重新连接前核对" },
+    "zh-Hant": { "other": "自上次連線以來有 %lld 個主機金鑰發生變化 —— 請在重新連線前核對" }
+  },
+  "%lld saved-host connections can be reopened.": {
+    "en": { "one": "%lld saved-host connection can be reopened.", "other": "%lld saved-host connections can be reopened." },
+    "de": { "one": "%lld Verbindung zu einem gesicherten Host kann wieder geöffnet werden.", "other": "%lld Verbindungen zu gesicherten Hosts können wieder geöffnet werden." },
+    "es": { "one": "Se puede volver a abrir %lld conexión a un host guardado.", "other": "Se pueden volver a abrir %lld conexiones a hosts guardados." },
+    "fr": { "one": "%lld connexion vers un hôte enregistré peut être rouverte.", "other": "%lld connexions vers des hôtes enregistrés peuvent être rouvertes." },
+    "ja": { "other": "保存済みホストへの接続 %lld 件を再開できます。" },
+    "zh-Hans": { "other": "可以重新打开 %lld 个已保存主机的连接。" },
+    "zh-Hant": { "other": "可以重新打開 %lld 個已儲存主機的連線。" }
+  },
+  "%lld previous connections were skipped because the saved host or credentials changed.": {
+    "en": { "one": "%lld previous connection was skipped because the saved host or credentials changed.", "other": "%lld previous connections were skipped because the saved host or credentials changed." },
+    "de": { "one": "%lld frühere Verbindung wurde übersprungen, weil sich der gesicherte Host oder die Anmeldedaten geändert haben.", "other": "%lld frühere Verbindungen wurden übersprungen, weil sich der gesicherte Host oder die Anmeldedaten geändert haben." },
+    "es": { "one": "Se omitió %lld conexión anterior porque el host guardado o las credenciales cambiaron.", "other": "Se omitieron %lld conexiones anteriores porque el host guardado o las credenciales cambiaron." },
+    "fr": { "one": "%lld connexion précédente a été ignorée car l'hôte enregistré ou les identifiants ont changé.", "other": "%lld connexions précédentes ont été ignorées car l'hôte enregistré ou les identifiants ont changé." },
+    "ja": { "other": "保存済みホストまたは認証情報が変更されたため、以前の接続 %lld 件をスキップしました。" },
+    "zh-Hans": { "other": "由于已保存的主机或凭据发生变化，跳过了 %lld 个先前的连接。" },
+    "zh-Hant": { "other": "由於已儲存的主機或憑證發生變化，略過了 %lld 個先前的連線。" }
+  },
+  "%lld orphaned Keychain items": {
+    "en": { "one": "%lld orphaned Keychain item", "other": "%lld orphaned Keychain items" },
+    "de": { "one": "%lld verwaistes Schlüsselbund-Objekt", "other": "%lld verwaiste Schlüsselbund-Objekte" },
+    "es": { "one": "%lld ítem huérfano del llavero", "other": "%lld ítems huérfanos del llavero" },
+    "fr": { "one": "%lld élément orphelin du trousseau", "other": "%lld éléments orphelins du trousseau" },
+    "ja": { "other": "孤立したキーチェーン項目 %lld 件" },
+    "zh-Hans": { "other": "%lld 个孤立的钥匙串项目" },
+    "zh-Hant": { "other": "%lld 個孤立的鑰匙圈項目" }
+  },
+  "delete %lld orphaned items": {
+    "en": { "one": "delete %lld orphaned item", "other": "delete %lld orphaned items" },
+    "de": { "one": "%lld verwaistes Objekt löschen", "other": "%lld verwaiste Objekte löschen" },
+    "es": { "one": "eliminar %lld ítem huérfano", "other": "eliminar %lld ítems huérfanos" },
+    "fr": { "one": "supprimer %lld élément orphelin", "other": "supprimer %lld éléments orphelins" },
+    "ja": { "other": "孤立した %lld 件を削除" },
+    "zh-Hans": { "other": "删除 %lld 个孤立项目" },
+    "zh-Hant": { "other": "刪除 %lld 個孤立項目" }
+  },
+  "Tessera found %lld Keychain items with no matching key metadata. They cannot be selected, authenticated with, exported, or associated with a host. This removes only those inaccessible orphaned items.": {
+    "en": { "one": "Tessera found %lld Keychain item with no matching key metadata. It cannot be selected, authenticated with, exported, or associated with a host. This removes only that inaccessible orphaned item.", "other": "Tessera found %lld Keychain items with no matching key metadata. They cannot be selected, authenticated with, exported, or associated with a host. This removes only those inaccessible orphaned items." },
+    "de": { "one": "Tessera hat %lld Schlüsselbund-Objekt ohne passende Key-Metadaten gefunden. Es lässt sich nicht auswählen, zur Authentifizierung nutzen, exportieren oder einem Host zuordnen. Entfernt werden nur diese unzugänglichen verwaisten Objekte.", "other": "Tessera hat %lld Schlüsselbund-Objekte ohne passende Key-Metadaten gefunden. Sie lassen sich nicht auswählen, zur Authentifizierung nutzen, exportieren oder einem Host zuordnen. Entfernt werden nur diese unzugänglichen verwaisten Objekte." },
+    "es": { "one": "Tessera encontró %lld ítem del llavero sin metadatos de clave asociados. No se puede seleccionar, usar para autenticar, exportar ni asociar a un host. Esto elimina únicamente esos ítems huérfanos inaccesibles.", "other": "Tessera encontró %lld ítems del llavero sin metadatos de clave asociados. No se pueden seleccionar, usar para autenticar, exportar ni asociar a un host. Esto elimina únicamente esos ítems huérfanos inaccesibles." },
+    "fr": { "one": "Tessera a trouvé %lld élément du trousseau sans métadonnées de clé correspondantes. Il ne peut être ni sélectionné, ni utilisé pour s'authentifier, ni exporté, ni associé à un hôte. Seuls ces éléments orphelins inaccessibles sont supprimés.", "other": "Tessera a trouvé %lld éléments du trousseau sans métadonnées de clé correspondantes. Ils ne peuvent être ni sélectionnés, ni utilisés pour s'authentifier, ni exportés, ni associés à un hôte. Seuls ces éléments orphelins inaccessibles sont supprimés." },
+    "ja": { "other": "対応するキーのメタデータがないキーチェーン項目が %lld 件見つかりました。これらは選択・認証・書き出し・ホストへの関連付けのいずれもできません。この操作では、アクセスできない孤立した項目のみを削除します。" },
+    "zh-Hans": { "other": "Tessera 发现 %lld 个没有对应密钥元数据的钥匙串项目。它们无法被选择、用于认证、导出或关联到主机。此操作只会移除这些无法访问的孤立项目。" },
+    "zh-Hant": { "other": "Tessera 發現 %lld 個沒有對應金鑰中繼資料的鑰匙圈項目。它們無法被選擇、用於驗證、輸出或關聯到主機。此操作只會移除這些無法存取的孤立項目。" }
+  },
+  "revoke on %lld tracked hosts & delete": {
+    "en": { "one": "revoke on %lld tracked host & delete", "other": "revoke on %lld tracked hosts & delete" },
+    "de": { "one": "Auf %lld erfassten Host widerrufen und löschen", "other": "Auf %lld erfassten Hosts widerrufen und löschen" },
+    "es": { "one": "revocar en %lld host registrado y eliminar", "other": "revocar en %lld hosts registrados y eliminar" },
+    "fr": { "one": "révoquer sur %lld hôte suivi et supprimer", "other": "révoquer sur %lld hôtes suivis et supprimer" },
+    "ja": { "other": "記録済みの %lld 台のホストで失効させて削除" },
+    "zh-Hans": { "other": "在 %lld 台已记录的主机上吊销并删除" },
+    "zh-Hant": { "other": "在 %lld 台已記錄的主機上撤銷並刪除" }
+  },
+  "local private key deleted after revoking %lld tracked remote authorizations": {
+    "en": { "one": "local private key deleted after revoking %lld tracked remote authorization", "other": "local private key deleted after revoking %lld tracked remote authorizations" },
+    "de": { "one": "Lokaler privater Key gelöscht, nachdem %lld erfasste entfernte Autorisierung widerrufen wurde", "other": "Lokaler privater Key gelöscht, nachdem %lld erfasste entfernte Autorisierungen widerrufen wurden" },
+    "es": { "one": "clave privada local eliminada tras revocar %lld autorización remota registrada", "other": "clave privada local eliminada tras revocar %lld autorizaciones remotas registradas" },
+    "fr": { "one": "clé privée locale supprimée après révocation de %lld autorisation distante suivie", "other": "clé privée locale supprimée après révocation de %lld autorisations distantes suivies" },
+    "ja": { "other": "記録済みのリモート認可 %lld 件を失効させたうえで、ローカルの秘密鍵を削除しました" },
+    "zh-Hans": { "other": "已吊销 %lld 项已记录的远程授权，并删除了本地私钥" },
+    "zh-Hant": { "other": "已撤銷 %lld 項已記錄的遠端授權，並刪除了本機私密金鑰" }
+  },
+  "Close all %lld panes": {
+    "en": { "one": "Close %lld pane", "other": "Close all %lld panes" },
+    "de": { "one": "%lld Bereich schließen", "other": "Alle %lld Bereiche schließen" },
+    "es": { "one": "Cerrar %lld panel", "other": "Cerrar los %lld paneles" },
+    "fr": { "one": "Fermer %lld volet", "other": "Fermer les %lld volets" },
+    "ja": { "other": "%lld 個のペインをすべて閉じる" },
+    "zh-Hans": { "other": "关闭全部 %lld 个窗格" },
+    "zh-Hant": { "other": "關閉全部 %lld 個窗格" }
+  },
+  "Continuation route contains %lld jump hosts.": {
+    "en": { "one": "Continuation route contains %lld jump host.", "other": "Continuation route contains %lld jump hosts." },
+    "de": { "one": "Die Fortsetzungsroute enthält %lld Jump-Host.", "other": "Die Fortsetzungsroute enthält %lld Jump-Hosts." },
+    "es": { "one": "La ruta de continuación contiene %lld host de salto.", "other": "La ruta de continuación contiene %lld hosts de salto." },
+    "fr": { "one": "La route de reprise contient %lld hôte de rebond.", "other": "La route de reprise contient %lld hôtes de rebond." },
+    "ja": { "other": "継続経路に %lld 台の踏み台ホストが含まれています。" },
+    "zh-Hans": { "other": "继续路由包含 %lld 台跳板主机。" },
+    "zh-Hant": { "other": "繼續路由包含 %lld 台跳板主機。" }
+  },
+  "Show all options, %lld more": {
+    "de": { "one": "Alle Optionen anzeigen, %lld weitere", "other": "Alle Optionen anzeigen, %lld weitere" },
+    "es": { "one": "Mostrar todas las opciones, %lld más", "other": "Mostrar todas las opciones, %lld más" },
+    "fr": { "one": "Afficher toutes les options, %lld de plus", "other": "Afficher toutes les options, %lld de plus" },
+    "ja": { "other": "すべての選択肢を表示（他 %lld 件）" },
+    "zh-Hans": { "other": "显示全部选项，还有 %lld 项" },
+    "zh-Hant": { "other": "顯示全部選項，還有 %lld 項" }
+  },
+  "%lld hosts sent securely. Credentials remain local to each device.": {
+    "en": { "one": "%lld host sent securely. Credentials remain local to each device.", "other": "%lld hosts sent securely. Credentials remain local to each device." },
+    "de": { "one": "%lld Host sicher gesendet. Anmeldedaten bleiben auf jedem Gerät lokal.", "other": "%lld Hosts sicher gesendet. Anmeldedaten bleiben auf jedem Gerät lokal." },
+    "es": { "one": "%lld host enviado de forma segura. Las credenciales permanecen en cada dispositivo.", "other": "%lld hosts enviados de forma segura. Las credenciales permanecen en cada dispositivo." },
+    "fr": { "one": "%lld hôte envoyé de manière sécurisée. Les identifiants restent locaux à chaque appareil.", "other": "%lld hôtes envoyés de manière sécurisée. Les identifiants restent locaux à chaque appareil." },
+    "ja": { "other": "%lld 台のホストを安全に送信しました。認証情報は各デバイスに留まります。" },
+    "zh-Hans": { "other": "已安全发送 %lld 台主机。凭据始终保留在各自设备上。" },
+    "zh-Hant": { "other": "已安全傳送 %lld 台主機。憑證始終保留在各自裝置上。" }
+  },
+  "%lld identical trusted host keys were already present.": {
+    "en": { "one": "%lld identical trusted host key was already present.", "other": "%lld identical trusted host keys were already present." },
+    "de": { "one": "%lld identischer vertrauenswürdiger Host-Key war bereits vorhanden.", "other": "%lld identische vertrauenswürdige Host-Keys waren bereits vorhanden." },
+    "es": { "one": "Ya había %lld clave de host de confianza idéntica.", "other": "Ya había %lld claves de host de confianza idénticas." },
+    "fr": { "one": "%lld clé d'hôte de confiance identique était déjà présente.", "other": "%lld clés d'hôte de confiance identiques étaient déjà présentes." },
+    "ja": { "other": "同一の信頼済みホストキーが %lld 件すでに存在していました。" },
+    "zh-Hans": { "other": "已存在 %lld 个相同的受信任主机密钥。" },
+    "zh-Hant": { "other": "已存在 %lld 個相同的受信任主機金鑰。" }
+  },
+  "%lld local trusted host key conflicts were preserved for review in Known Hosts.": {
+    "en": { "one": "%lld local trusted host key conflict was preserved for review in Known Hosts.", "other": "%lld local trusted host key conflicts were preserved for review in Known Hosts." },
+    "de": { "one": "%lld lokaler Konflikt bei vertrauenswürdigen Host-Keys wurde zur Prüfung unter „Bekannte Hosts“ aufbewahrt.", "other": "%lld lokale Konflikte bei vertrauenswürdigen Host-Keys wurden zur Prüfung unter „Bekannte Hosts“ aufbewahrt." },
+    "es": { "one": "Se conservó %lld conflicto local de clave de host de confianza para revisarlo en Hosts conocidos.", "other": "Se conservaron %lld conflictos locales de claves de host de confianza para revisarlos en Hosts conocidos." },
+    "fr": { "one": "%lld conflit local de clé d'hôte de confiance a été conservé pour vérification dans Hôtes connus.", "other": "%lld conflits locaux de clés d'hôte de confiance ont été conservés pour vérification dans Hôtes connus." },
+    "ja": { "other": "ローカルの信頼済みホストキーの競合 %lld 件を、「既知のホスト」で確認できるよう保持しました。" },
+    "zh-Hans": { "other": "保留了 %lld 处本地受信任主机密钥冲突，可在「已知主机」中查看。" },
+    "zh-Hant": { "other": "保留了 %lld 處本機受信任主機金鑰衝突，可在「已知主機」中查看。" }
+  },
+  "%lld optional data categories selected": {
+    "en": { "one": "%lld optional data category selected", "other": "%lld optional data categories selected" },
+    "de": { "one": "%lld optionale Datenkategorie ausgewählt", "other": "%lld optionale Datenkategorien ausgewählt" },
+    "es": { "one": "%lld categoría de datos opcional seleccionada", "other": "%lld categorías de datos opcionales seleccionadas" },
+    "fr": { "one": "%lld catégorie de données facultative sélectionnée", "other": "%lld catégories de données facultatives sélectionnées" },
+    "ja": { "other": "任意のデータカテゴリを %lld 件選択中" },
+    "zh-Hans": { "other": "已选择 %lld 个可选数据类别" },
+    "zh-Hant": { "other": "已選擇 %lld 個選用資料類別" }
+  },
+  "%lld public-key grants selected": {
+    "en": { "one": "%lld public-key grant selected", "other": "%lld public-key grants selected" },
+    "de": { "one": "%lld Public-Key-Freigabe ausgewählt", "other": "%lld Public-Key-Freigaben ausgewählt" },
+    "es": { "one": "%lld concesión de clave pública seleccionada", "other": "%lld concesiones de clave pública seleccionadas" },
+    "fr": { "one": "%lld autorisation de clé publique sélectionnée", "other": "%lld autorisations de clé publique sélectionnées" },
+    "ja": { "other": "公開鍵の付与を %lld 件選択中" },
+    "zh-Hans": { "other": "已选择 %lld 项公钥授权" },
+    "zh-Hant": { "other": "已選擇 %lld 項公開金鑰授權" }
+  },
+  "Approve setup and %lld host key grants with code %@": {
+    "en": { "one": "Approve setup and %lld host key grant with code %@", "other": "Approve setup and %lld host key grants with code %@" },
+    "de": { "one": "Konfiguration und %lld Host-Key-Freigabe mit Code %@ bestätigen", "other": "Konfiguration und %lld Host-Key-Freigaben mit Code %@ bestätigen" },
+    "es": { "one": "Aprobar la configuración y %lld concesión de clave de host con el código %@", "other": "Aprobar la configuración y %lld concesiones de clave de host con el código %@" },
+    "fr": { "one": "Approuver la configuration et %lld autorisation de clé d'hôte avec le code %@", "other": "Approuver la configuration et %lld autorisations de clé d'hôte avec le code %@" },
+    "ja": { "other": "コード %2$@ でセットアップとホストキーの付与 %1$lld 件を承認" },
+    "zh-Hans": { "other": "使用代码 %2$@ 批准设置和 %1$lld 项主机密钥授权" },
+    "zh-Hant": { "other": "使用代碼 %2$@ 核准設定和 %1$lld 項主機金鑰授權" }
+  },
+  "free tessera remembers one host. this nearby setup offered %lld hosts — choose one route to keep within the free limit, or unlock unlimited hosts to keep everything.": {
+    "de": { "one": "Das kostenlose Tessera merkt sich einen Host. Diese Übertragung bietet %lld Host an — wähle eine Route, um im kostenlosen Rahmen zu bleiben, oder schalte unbegrenzte Hosts frei, um alles zu behalten.", "other": "Das kostenlose Tessera merkt sich einen Host. Diese Übertragung bietet %lld Hosts an — wähle eine Route, um im kostenlosen Rahmen zu bleiben, oder schalte unbegrenzte Hosts frei, um alles zu behalten." },
+    "es": { "one": "tessera gratis recuerda un host. esta configuración cercana ofreció %lld host: elige una ruta para no superar el límite gratuito, o desbloquea hosts ilimitados para conservarlo todo.", "other": "tessera gratis recuerda un host. esta configuración cercana ofreció %lld hosts: elige una ruta para no superar el límite gratuito, o desbloquea hosts ilimitados para conservarlo todo." },
+    "fr": { "one": "tessera gratuit retient un hôte. cette configuration à proximité en proposait %lld — choisissez une route pour rester dans la limite gratuite, ou débloquez les hôtes illimités pour tout conserver.", "other": "tessera gratuit retient un hôte. cette configuration à proximité en proposait %lld — choisissez une route pour rester dans la limite gratuite, ou débloquez les hôtes illimités pour tout conserver." },
+    "ja": { "other": "無料版の tessera が記憶できるホストは 1 台です。この近くのセットアップでは %lld 台が提示されました。無料の上限内に収めるには経路を 1 つ選ぶか、ホスト数無制限を解除してすべて残してください。" },
+    "zh-Hans": { "other": "免费版 tessera 只记住一台主机。此次附近设置提供了 %lld 台 —— 请选择一条路由以符合免费上限，或解锁无限主机以保留全部。" },
+    "zh-Hant": { "other": "免費版 tessera 只記住一台主機。此次鄰近設定提供了 %lld 台 —— 請選擇一條路由以符合免費上限，或解鎖無限主機以保留全部。" }
+  },
+  "Bootstrap manifest contains too many hosts (%lld).": {
+    "de": { "one": "Das Bootstrap-Manifest enthält zu viele Hosts (%lld).", "other": "Das Bootstrap-Manifest enthält zu viele Hosts (%lld)." },
+    "es": { "one": "El manifiesto del bootstrap contiene demasiados hosts (%lld).", "other": "El manifiesto del bootstrap contiene demasiados hosts (%lld)." },
+    "fr": { "one": "Le manifeste du bootstrap contient trop d'hôtes (%lld).", "other": "Le manifeste du bootstrap contient trop d'hôtes (%lld)." },
+    "ja": { "other": "ブートストラップマニフェストのホストが多すぎます（%lld 台）。" },
+    "zh-Hans": { "other": "引导清单包含的主机过多（%lld 台）。" },
+    "zh-Hant": { "other": "啟動清單包含的主機過多（%lld 台）。" }
+  },
+  "Bootstrap manifest contains too many identities (%lld).": {
+    "de": { "one": "Das Bootstrap-Manifest enthält zu viele Identitäten (%lld).", "other": "Das Bootstrap-Manifest enthält zu viele Identitäten (%lld)." },
+    "es": { "one": "El manifiesto del bootstrap contiene demasiadas identidades (%lld).", "other": "El manifiesto del bootstrap contiene demasiadas identidades (%lld)." },
+    "fr": { "one": "Le manifeste du bootstrap contient trop d'identités (%lld).", "other": "Le manifeste du bootstrap contient trop d'identités (%lld)." },
+    "ja": { "other": "ブートストラップマニフェストの識別情報が多すぎます（%lld 件）。" },
+    "zh-Hans": { "other": "引导清单包含的身份过多（%lld 个）。" },
+    "zh-Hant": { "other": "啟動清單包含的身分過多（%lld 個）。" }
+  },
+  "Bootstrap manifest contains too many jump-chain links (%lld).": {
+    "de": { "one": "Das Bootstrap-Manifest enthält zu viele Jump-Kettenglieder (%lld).", "other": "Das Bootstrap-Manifest enthält zu viele Jump-Kettenglieder (%lld)." },
+    "es": { "one": "El manifiesto del bootstrap contiene demasiados enlaces de cadena de saltos (%lld).", "other": "El manifiesto del bootstrap contiene demasiados enlaces de cadena de saltos (%lld)." },
+    "fr": { "one": "Le manifeste du bootstrap contient trop de maillons de chaîne de rebonds (%lld).", "other": "Le manifeste du bootstrap contient trop de maillons de chaîne de rebonds (%lld)." },
+    "ja": { "other": "ブートストラップマニフェストの踏み台チェーンのリンクが多すぎます（%lld 件）。" },
+    "zh-Hans": { "other": "引导清单包含的跳板链链接过多（%lld 个）。" },
+    "zh-Hant": { "other": "啟動清單包含的跳板鏈連結過多（%lld 個）。" }
+  },
+  "Bootstrap manifest contains too many known-host records (%lld).": {
+    "de": { "one": "Das Bootstrap-Manifest enthält zu viele Known-Hosts-Einträge (%lld).", "other": "Das Bootstrap-Manifest enthält zu viele Known-Hosts-Einträge (%lld)." },
+    "es": { "one": "El manifiesto del bootstrap contiene demasiados registros de hosts conocidos (%lld).", "other": "El manifiesto del bootstrap contiene demasiados registros de hosts conocidos (%lld)." },
+    "fr": { "one": "Le manifeste du bootstrap contient trop d'enregistrements d'hôtes connus (%lld).", "other": "Le manifeste du bootstrap contient trop d'enregistrements d'hôtes connus (%lld)." },
+    "ja": { "other": "ブートストラップマニフェストの既知ホスト記録が多すぎます（%lld 件）。" },
+    "zh-Hans": { "other": "引导清单包含的已知主机记录过多（%lld 条）。" },
+    "zh-Hant": { "other": "啟動清單包含的已知主機記錄過多（%lld 筆）。" }
+  },
+  "Enrollment frame payload is too large (%lld bytes).": {
+    "de": { "one": "Die Nutzlast des Enrollment-Frames ist zu groß (%lld Byte).", "other": "Die Nutzlast des Enrollment-Frames ist zu groß (%lld Bytes)." },
+    "es": { "one": "La carga de la trama de inscripción es demasiado grande (%lld byte).", "other": "La carga de la trama de inscripción es demasiado grande (%lld bytes)." },
+    "fr": { "one": "La charge utile de la trame d'inscription est trop grande (%lld octet).", "other": "La charge utile de la trame d'inscription est trop grande (%lld octets)." },
+    "ja": { "other": "登録フレームのペイロードが大きすぎます（%lld バイト）。" },
+    "zh-Hans": { "other": "注册帧负载过大（%lld 字节）。" },
+    "zh-Hant": { "other": "註冊影格負載過大（%lld 位元組）。" }
+  }
+}

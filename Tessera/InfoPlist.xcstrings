@@ -1,0 +1,198 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "NSFaceIDUsageDescription" : {
+      "comment" : "Face ID permission prompt. Shown by iOS when unlocking a key that is protected by biometrics.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera entsperrt SSH-Keys, die durch biometrische Authentifizierung geschützt sind."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera unlocks SSH keys protected by biometric authentication."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera desbloquea las claves SSH protegidas con autenticación biométrica."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera déverrouille les clés SSH protégées par authentification biométrique."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera は、生体認証で保護された SSH キーのロックを解除します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera 用于解锁受生物识别认证保护的 SSH 密钥。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera 用於解鎖受生物辨識驗證保護的 SSH 金鑰。"
+          }
+        }
+      }
+    },
+    "NSLocalNetworkUsageDescription" : {
+      "comment" : "Local network permission prompt. Covers SSH/Mosh on the LAN, port forwarding, and nearby-device setup transfer.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera verbindet sich mit SSH- und Mosh-Servern in deinem lokalen Netzwerk, leitet lokale Ports weiter und kann ein neues Gerät direkt von einem Tessera-Gerät in der Nähe einrichten."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera connects to SSH and Mosh servers on your local network, forwards local ports, and can bootstrap a new device directly from a nearby Tessera device."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera se conecta a servidores SSH y Mosh de tu red local, redirige puertos locales y puede configurar un dispositivo nuevo directamente desde un dispositivo Tessera cercano."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera se connecte aux serveurs SSH et Mosh de votre réseau local, redirige des ports locaux et peut configurer un nouvel appareil directement depuis un appareil Tessera à proximité."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera は、ローカルネットワーク上の SSH および Mosh サーバへの接続、ローカルポートの転送、近くの Tessera デバイスからの新しいデバイスのセットアップに使用します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera 会连接到本地网络中的 SSH 和 Mosh 服务器、转发本地端口，并可直接从附近的 Tessera 设备设置新设备。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera 會連接至本機網路中的 SSH 和 Mosh 伺服器、轉發本機埠，並可直接從附近的 Tessera 裝置設定新裝置。"
+          }
+        }
+      }
+    },
+    "NSMicrophoneUsageDescription" : {
+      "comment" : "Microphone permission prompt. Dictation into a terminal session.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera verwendet das Mikrofon für die Diktierfunktion auf dem Gerät in Terminal-Sitzungen."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera uses the microphone for on-device dictation into terminal sessions."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera usa el micrófono para dictar texto en las sesiones de terminal directamente en el dispositivo."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera utilise le microphone pour la dictée sur l'appareil dans les sessions de terminal."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera は、ターミナルセッションへのデバイス上の音声入力にマイクを使用します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera 使用麦克风在设备上听写内容并输入到终端会话中。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera 使用麥克風在裝置上聽寫內容並輸入到終端機工作階段中。"
+          }
+        }
+      }
+    },
+    "NSSpeechRecognitionUsageDescription" : {
+      "comment" : "Speech recognition permission prompt. On-device dictation into a terminal session.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera verwendet die Spracherkennung auf dem Gerät, um Text in Terminal-Sitzungen zu diktieren."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera uses on-device speech recognition to dictate text into terminal sessions."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera usa el reconocimiento de voz en el dispositivo para dictar texto en las sesiones de terminal."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera utilise la reconnaissance vocale sur l'appareil pour dicter du texte dans les sessions de terminal."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera は、デバイス上の音声認識を使用してターミナルセッションにテキストを入力します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera 使用设备端语音识别将文字听写到终端会话中。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tessera 使用裝置端語音辨識將文字聽寫到終端機工作階段中。"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

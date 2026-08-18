@@ -1,0 +1,282 @@
+{
+  "liquid glass": {
+    "de": "Liquid Glass",
+    "es": "vidrio líquido",
+    "fr": "verre liquide",
+    "ja": "リキッドグラス",
+    "zh-Hans": "液态玻璃",
+    "zh-Hant": "液態玻璃"
+  },
+  "translucent, refractive": {
+    "de": "Transluzent, lichtbrechend",
+    "es": "translúcido, refractivo",
+    "fr": "translucide, réfractif",
+    "ja": "半透明・光の屈折あり",
+    "zh-Hans": "半透明，带折射",
+    "zh-Hant": "半透明，帶折射"
+  },
+  "frosted": {
+    "de": "Milchglas",
+    "es": "esmerilado",
+    "fr": "givré",
+    "ja": "すりガラス",
+    "zh-Hans": "磨砂",
+    "zh-Hant": "霧面"
+  },
+  "translucent blur": {
+    "de": "Transluzente Unschärfe",
+    "es": "desenfoque translúcido",
+    "fr": "flou translucide",
+    "ja": "半透明のぼかし",
+    "zh-Hans": "半透明模糊",
+    "zh-Hant": "半透明模糊"
+  },
+  "solid": {
+    "de": "deckend",
+    "es": "opaco",
+    "fr": "opaque",
+    "ja": "不透明",
+    "zh-Hans": "纯色",
+    "zh-Hant": "純色"
+  },
+  "opaque, plainest": {
+    "de": "Ohne Transparenz, am schlichtesten",
+    "es": "sin transparencia, lo más sencillo",
+    "fr": "sans transparence, le plus sobre",
+    "ja": "透明効果なし・最もシンプル",
+    "zh-Hans": "无透明效果，最简洁",
+    "zh-Hant": "無透明效果，最簡潔"
+  },
+  "— locked —": {
+    "de": "— Gesperrt —",
+    "es": "— bloqueado —",
+    "fr": "— verrouillé —",
+    "ja": "— ロック中 —",
+    "zh-Hans": "— 已锁定 —",
+    "zh-Hant": "— 已鎖定 —"
+  },
+  "tap to unlock": {
+    "de": "Zum Entsperren tippen",
+    "es": "toca para desbloquear",
+    "fr": "touchez pour déverrouiller",
+    "ja": "タップしてロック解除",
+    "zh-Hans": "轻点以解锁",
+    "zh-Hant": "輕點以解鎖"
+  },
+  "unlocking...": {
+    "de": "Wird entsperrt …",
+    "es": "desbloqueando…",
+    "fr": "déverrouillage…",
+    "ja": "ロック解除中…",
+    "zh-Hans": "正在解锁…",
+    "zh-Hant": "正在解鎖…"
+  },
+  "face id · or device passcode": {
+    "de": "Face ID · oder Gerätecode",
+    "es": "face id · o código del dispositivo",
+    "fr": "face id · ou code de l'appareil",
+    "ja": "face id・またはデバイスパスコード",
+    "zh-Hans": "face id · 或设备密码",
+    "zh-Hant": "face id · 或裝置密碼"
+  },
+  "everywhere": {
+    "de": "Überall",
+    "es": "en todas partes",
+    "fr": "partout",
+    "ja": "すべての場所",
+    "zh-Hans": "所有位置",
+    "zh-Hant": "所有位置"
+  },
+  "when running %@": {
+    "de": "Wenn %@ läuft",
+    "es": "cuando se ejecuta %@",
+    "fr": "quand %@ est en cours d'exécution",
+    "ja": "%@ の実行中",
+    "zh-Hans": "运行 %@ 时",
+    "zh-Hant": "執行 %@ 時"
+  },
+  "Dictation": {
+    "de": "Diktat",
+    "es": "Dictado",
+    "fr": "Dictée",
+    "ja": "音声入力",
+    "zh-Hans": "听写",
+    "zh-Hant": "聽寫"
+  },
+  "Cancel dictation": {
+    "de": "Diktat abbrechen",
+    "es": "Cancelar el dictado",
+    "fr": "Annuler la dictée",
+    "ja": "音声入力をキャンセル",
+    "zh-Hans": "取消听写",
+    "zh-Hant": "取消聽寫"
+  },
+  "Acknowledge completion": {
+    "de": "Abschluss bestätigen",
+    "es": "Confirmar finalización",
+    "fr": "Accuser réception",
+    "ja": "完了を確認",
+    "zh-Hans": "确认完成",
+    "zh-Hant": "確認完成"
+  },
+  "LISTENING": {
+    "de": "HÖRT ZU",
+    "es": "ESCUCHANDO",
+    "fr": "ÉCOUTE",
+    "ja": "認識中",
+    "zh-Hans": "正在聆听",
+    "zh-Hant": "正在聆聽"
+  },
+  "Tap to commit.": {
+    "de": "Zum Bestätigen tippen.",
+    "es": "Toca para confirmar.",
+    "fr": "Touchez pour valider.",
+    "ja": "タップして確定します。",
+    "zh-Hans": "轻点以提交。",
+    "zh-Hant": "輕點以提交。"
+  },
+  "Tap to commit. Silence can auto-commit.": {
+    "de": "Zum Bestätigen tippen. Eine Pause kann automatisch bestätigen.",
+    "es": "Toca para confirmar. El silencio puede confirmar automáticamente.",
+    "fr": "Touchez pour valider. Un silence peut valider automatiquement.",
+    "ja": "タップして確定します。無音が続くと自動的に確定されます。",
+    "zh-Hans": "轻点以提交。静默时可自动提交。",
+    "zh-Hant": "輕點以提交。靜默時可自動提交。"
+  },
+  "no hosts yet": {
+    "de": "Noch keine Hosts",
+    "es": "aún no hay hosts",
+    "fr": "aucun hôte pour l'instant",
+    "ja": "ホストがまだありません",
+    "zh-Hans": "还没有主机",
+    "zh-Hant": "還沒有主機"
+  },
+  "add your first host": {
+    "de": "Ersten Host hinzufügen",
+    "es": "añade tu primer host",
+    "fr": "ajouter votre premier hôte",
+    "ja": "最初のホストを追加",
+    "zh-Hans": "添加第一个主机",
+    "zh-Hant": "加入第一個主機"
+  },
+  "new host": {
+    "de": "Neuer Host",
+    "es": "host nuevo",
+    "fr": "nouvel hôte",
+    "ja": "新しいホスト",
+    "zh-Hans": "新建主机",
+    "zh-Hant": "新增主機"
+  },
+  "remove host": {
+    "de": "Host entfernen",
+    "es": "eliminar el host",
+    "fr": "supprimer l'hôte",
+    "ja": "ホストを削除",
+    "zh-Hans": "移除主机",
+    "zh-Hant": "移除主機"
+  },
+  "remove host?": {
+    "de": "Host entfernen?",
+    "es": "¿eliminar el host?",
+    "fr": "supprimer l'hôte ?",
+    "ja": "ホストを削除しますか？",
+    "zh-Hans": "移除主机？",
+    "zh-Hant": "移除主機？"
+  },
+  "remove %@?": {
+    "de": "%@ entfernen?",
+    "es": "¿eliminar %@?",
+    "fr": "supprimer %@ ?",
+    "ja": "%@ を削除しますか？",
+    "zh-Hans": "移除 %@？",
+    "zh-Hant": "移除 %@？"
+  },
+  "edit %@": {
+    "de": "%@ bearbeiten",
+    "es": "editar %@",
+    "fr": "modifier %@",
+    "ja": "%@ を編集",
+    "zh-Hans": "编辑 %@",
+    "zh-Hant": "編輯 %@"
+  },
+  "edit…": {
+    "de": "Bearbeiten…",
+    "es": "editar…",
+    "fr": "modifier…",
+    "ja": "編集…",
+    "zh-Hans": "编辑…",
+    "zh-Hant": "編輯…"
+  },
+  "remove…": {
+    "de": "Entfernen…",
+    "es": "eliminar…",
+    "fr": "supprimer…",
+    "ja": "削除…",
+    "zh-Hans": "移除…",
+    "zh-Hant": "移除…"
+  },
+  "This removes the saved host. Existing live sessions are not disconnected.": {
+    "de": "Damit wird der gesicherte Host entfernt. Laufende Sitzungen werden nicht getrennt.",
+    "es": "Esto elimina el host guardado. Las sesiones activas no se desconectan.",
+    "fr": "Cela supprime l'hôte enregistré. Les sessions en cours ne sont pas déconnectées.",
+    "ja": "保存されたホストを削除します。実行中のセッションは切断されません。",
+    "zh-Hans": "这会移除已保存的主机。正在运行的会话不会断开。",
+    "zh-Hant": "這會移除已儲存的主機。進行中的工作階段不會中斷。"
+  },
+  "generate a key": {
+    "de": "Key erzeugen",
+    "es": "generar una clave",
+    "fr": "générer une clé",
+    "ja": "キーを生成",
+    "zh-Hans": "生成密钥",
+    "zh-Hant": "產生金鑰"
+  },
+  "last seen": {
+    "de": "Zuletzt gesehen",
+    "es": "última conexión",
+    "fr": "dernière connexion",
+    "ja": "最終接続",
+    "zh-Hans": "上次连接",
+    "zh-Hant": "上次連線"
+  },
+  "not recorded": {
+    "de": "Nicht erfasst",
+    "es": "sin registro",
+    "fr": "non enregistré",
+    "ja": "記録なし",
+    "zh-Hans": "无记录",
+    "zh-Hant": "無記錄"
+  },
+  "or type %@ in the search bar above to connect right away": {
+    "de": "Oder gib oben in der Suchleiste %@ ein, um dich direkt zu verbinden",
+    "es": "o escribe %@ en la barra de búsqueda de arriba para conectarte al instante",
+    "fr": "ou saisissez %@ dans la barre de recherche ci-dessus pour vous connecter directement",
+    "ja": "上の検索バーに %@ と入力すると、すぐに接続できます",
+    "zh-Hans": "或在上方搜索栏输入 %@ 即可直接连接",
+    "zh-Hant": "或在上方搜尋列輸入 %@ 即可直接連線"
+  },
+  "search hosts, or type user@host to quick-connect": {
+    "de": "Hosts suchen oder user@host für eine Schnellverbindung eingeben",
+    "es": "busca hosts o escribe user@host para conectar rápido",
+    "fr": "rechercher des hôtes, ou saisir user@host pour se connecter vite",
+    "ja": "ホストを検索、または user@host を入力してクイック接続",
+    "zh-Hans": "搜索主机，或输入 user@host 快速连接",
+    "zh-Hant": "搜尋主機，或輸入 user@host 快速連線"
+  },
+  "search hosts or add new ones below": {
+    "de": "Hosts suchen oder unten neue hinzufügen",
+    "es": "busca hosts o añade nuevos abajo",
+    "fr": "rechercher des hôtes ou en ajouter ci-dessous",
+    "ja": "ホストを検索、または下から追加",
+    "zh-Hans": "搜索主机，或在下方添加",
+    "zh-Hant": "搜尋主機，或在下方新增"
+  },
+  "search hosts or user@host": {
+    "de": "Hosts oder user@host suchen",
+    "es": "busca hosts o user@host",
+    "fr": "rechercher des hôtes ou user@host",
+    "ja": "ホストまたは user@host を検索",
+    "zh-Hans": "搜索主机或 user@host",
+    "zh-Hant": "搜尋主機或 user@host"
+  }
+}

@@ -58,7 +58,7 @@ enum SSHChainError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .brokenChain(let reason):
-            return reason ?? "The jump-host chain could not be resolved."
+            return reason ?? String(localized: "The jump-host chain could not be resolved.")
         }
     }
 }
@@ -67,7 +67,10 @@ private struct RepeatedHostKeyApprovalError: Error, LocalizedError {
     let endpoint: String
 
     var errorDescription: String? {
-        "Host-key approval for \(endpoint) did not persist. The connection was stopped."
+        String(
+            localized: "Host-key approval for \(endpoint) did not persist. The connection was stopped.",
+            comment: "Host-key trust could not be saved; the argument is a user@host:port endpoint"
+        )
     }
 }
 

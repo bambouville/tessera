@@ -849,6 +849,19 @@ public final class TmuxController {
     /// `%end` frame (flags bit0 clear) completes the control-mode
     /// handshake and starts attach hydration.
     @ObservationIgnored private var attachInitFlushed = false
+    /// One probe per controller lifetime: the answer is a property of the
+    /// host's tmux build, not of any single attach.
+    /// Whether hydration may append the one-shot separator diagnostics
+    /// probe to the command FIFO. Only the production session wiring opts
+    /// in; scripted positional-reply consumers (tests, debug harnesses)
+    /// keep the golden frame count.
+    @ObservationIgnored private let separatorProbeEnabled: Bool
+    @ObservationIgnored private var sentSeparatorProbe = false
+    /// Latched when a command reply proves this host's tmux sanitizes reply
+    /// bodies (our tab separators arrive as another character). On such a
+    /// host capture-pane output is equally sanitized — its escape sequences
+    /// arrive as literal garbage — so capture-repaints must not be painted.
+    @ObservationIgnored private var commandRepliesSanitized = false
     @ObservationIgnored private var allowUngatedLatchFallback = false
     /// A post-attach window swap whose authoritative capture has not landed.
     /// While true, incremental `%output` must not latch a pane over the stale
@@ -1000,10 +1013,12 @@ public final class TmuxController {
 
     public init(
         controlPath: ControlPath = .inline,
-        clientSizePolicy: ClientSizePolicy = .resizeTmux
+        clientSizePolicy: ClientSizePolicy = .resizeTmux,
+        separatorProbeEnabled: Bool = false
     ) {
         self.controlPath = controlPath
         self.clientSizePolicy = clientSizePolicy
+        self.separatorProbeEnabled = separatorProbeEnabled
     }
 
     // MARK: - Public API
@@ -4363,6 +4378,85 @@ public final class TmuxController {
         }
     }
 
+    /// One-shot on the first attach hydration: ask the server to echo a tab
+    /// plus its version, and log what the tab came back as. A host whose tmux
+    /// mangles the separator in command replies is the root-cause signature
+    /// behind `metadata-parse fallback engaged` (2026-08-17 field report);
+    /// the version pins which build does it. `result=intact` also certifies
+    /// that capture-pane bodies travel unmangled on this host — the reply
+    /// path is the same.
+    private func sendSeparatorProbeIfNeeded() {
+        // The probe adds a command slot to the reply FIFO, so only the
+        // production session wiring opts in: golden-FIFO tests and the
+        // in-app debug harnesses reply positionally and must never see
+        // an extra in-flight command.
+        guard separatorProbeEnabled else { return }
+        guard !sentSeparatorProbe else { return }
+        sentSeparatorProbe = true
+        sendControlCommand("display-message -p 'tessera-sep\t#{version}'") { result in
+            Self.logDiagnostic("separator-probe \(Self.classifySeparatorProbe(result))")
+        }
+    }
+
+    /// Pure classification of the probe reply, split out for tests. Never
+    /// echoes the raw line — the log line carries only derived facts.
+    static func classifySeparatorProbe(
+        _ result: Result<[String], CommandError>
+    ) -> String {
+        switch result {
+        case .failure(.tmuxError(let lines)):
+            // A usage error here is itself a mechanism signature: the host
+            // split our quoted single argument on the embedded tab and
+            // display-message rejected the extra argument.
+            return "result=command-rejected lines=\(lines.count)"
+        case .failure(.notInTmuxMode):
+            return "result=failed reason=not-in-tmux"
+        case .failure(.cancelled):
+            return "result=failed reason=cancelled"
+        case .success(let lines):
+            guard let line = lines.first(where: { !$0.isEmpty }) else {
+                return "result=empty"
+            }
+            guard let range = line.range(of: "tessera-sep") else {
+                return "result=unrecognized len=\(line.count)"
+            }
+            let rest = line[range.upperBound...]
+            guard let separator = rest.first else {
+                return "result=truncated"
+            }
+            let version = rest.dropFirst()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if separator == "\t" {
+                return "result=intact version=\(version)"
+            }
+            let sepHex = String(
+                format: "%02x",
+                separator.unicodeScalars.first?.value ?? 0
+            )
+            return "result=mangled sepHex=\(sepHex) version=\(version)"
+        }
+    }
+
+    /// App-level nudge for a stalled attach hydration (the launch overlay's
+    /// hydration watchdog): re-run the authoritative refresh with a fresh
+    /// generation and retry budget, and let the first live `%output` latch
+    /// the pane ungated if capture metadata keeps failing. No-op once the
+    /// initial render is ready or outside inline control mode.
+    public func forceInitialRenderRecovery(reason: String) {
+        guard controlPath == .inline, mode == .tmuxControl, !isInitialRenderReady else { return }
+        Self.logDiagnostic(
+            "initial-render force-recovery reason=\(reason) activeWindowPresent=\(activeWindowId != nil) generation=\(stateGeneration)"
+        )
+        allowUngatedLatchFallback = true
+        guard let activeWindowId else { return }
+        let generation = advanceStateGeneration(reason: reason)
+        refreshRenderedWindow(
+            windowId: activeWindowId,
+            generation: generation,
+            reason: reason
+        )
+    }
+
     private func startInitialRenderWatchdog() {
         guard controlPath == .inline else { return }
         cancelInitialRenderWatchdog()
@@ -6007,6 +6101,11 @@ public final class TmuxController {
         }
 
         sendPaneMetadataSubscription()
+
+        // Last on purpose: the attach-init frame numbering above is golden
+        // (tests reply positionally), and the probe's answer is diagnostic,
+        // not load-bearing.
+        sendSeparatorProbeIfNeeded()
     }
 
     private func handleHydratedWindowList(lines: [String]) {
@@ -6274,6 +6373,12 @@ public final class TmuxController {
         guard let first = parts.first,
               let id = parseWindowIdString(String(first))
         else {
+            // A separator-sanitizing host (tabs arrive as another single
+            // character) still yields the full wide shape — recover it
+            // before settling for the legacy 2-field guess.
+            if let mangled = parseSeparatorMangledWindowListLine(line) {
+                return mangled
+            }
             // Legacy 2-field shape fallback (id name, possibly space-joined).
             let spaceParts = line.split(
                 separator: " ",
@@ -6309,13 +6414,49 @@ public final class TmuxController {
         return .init(id: id, windowName: name)
     }
 
+    /// `list-windows` wide shape on a separator-sanitizing host. The five
+    /// fixed-grammar fields never contain the separator (window id, integer
+    /// index, layout strings, zoom flag), and `window_name` is LAST by
+    /// design, so bounded splits keep a name containing the separator
+    /// intact — the same hostile-name guarantee the tab shape has.
+    private static func parseSeparatorMangledWindowListLine(_ line: String) -> WindowInfo? {
+        guard line.hasPrefix("@") else { return nil }
+        let afterAnchor = line.dropFirst().drop(while: { ("0"..."9").contains($0) })
+        guard let separator = afterAnchor.first,
+              separator != "\t",
+              afterAnchor.startIndex != line.index(after: line.startIndex)
+        else { return nil }
+        let parts = line.split(
+            separator: separator,
+            maxSplits: 5,
+            omittingEmptySubsequences: false
+        )
+        guard parts.count >= 5,
+              let id = parseWindowIdString(String(parts[0])),
+              let index = Int(parts[1]),
+              let layout = WindowLayout.parse(String(parts[2])),
+              parts[4] == "0" || parts[4] == "1"
+        else { return nil }
+        let visible = WindowLayout.parse(String(parts[3]))
+        let name = parts.count >= 6 ? nonEmpty(String(parts[5])) : nil
+        var info = WindowInfo(id: id, index: index, windowName: name)
+        info.layout = layout
+        info.visibleLayout = visible ?? layout
+        info.isZoomed = parts[4] == "1"
+        info.panes = layout.paneIds.map { PaneInfo(id: $0) }
+        Self.logDiagnostic(
+            "window-list fallback engaged sepHex=\(String(format: "%02x", separator.unicodeScalars.first?.value ?? 0))"
+        )
+        return info
+    }
+
     private static func parsePaneListLine(_ line: String) -> PaneListEntry? {
         guard !line.isEmpty else { return nil }
         let parts = line.split(separator: "\t", omittingEmptySubsequences: false)
         guard parts.count >= 3,
               let windowId = parseWindowIdString(String(parts[0])),
               let paneId = parsePaneIdString(String(parts[1]))
-        else { return nil }
+        else { return parseSeparatorMangledPaneListLine(line) }
         let contentRect: CellRect?
         let currentCommandIndex: Int
         if parts.count >= 10,
@@ -6340,6 +6481,44 @@ public final class TmuxController {
             isActive: String(parts[2]) == "1",
             contentRect: contentRect,
             currentCommand: currentCommand,
+            paneTitle: title,
+            paneTitleIsDefault: isDefaultPaneTitle(title, host: host)
+        )
+    }
+
+    /// `list-panes` reply on a separator-sanitizing host. The seven leading
+    /// fixed-grammar fields (ids, active flag, geometry) never contain the
+    /// separator; the trailing three (command, title, host) may. Exactly ten
+    /// tokens maps unambiguously; more means a string field contained the
+    /// separator, and all three are dropped rather than misassigned — split
+    /// rendering needs the geometry, not the labels.
+    private static func parseSeparatorMangledPaneListLine(_ line: String) -> PaneListEntry? {
+        guard line.hasPrefix("@") else { return nil }
+        let afterAnchor = line.dropFirst().drop(while: { ("0"..."9").contains($0) })
+        guard let separator = afterAnchor.first,
+              separator != "\t",
+              afterAnchor.startIndex != line.index(after: line.startIndex)
+        else { return nil }
+        let parts = line.split(separator: separator, omittingEmptySubsequences: false)
+        guard parts.count >= 10,
+              let windowId = parseWindowIdString(String(parts[0])),
+              let paneId = parsePaneIdString(String(parts[1])),
+              parts[2] == "0" || parts[2] == "1",
+              let left = Int(parts[3]),
+              let top = Int(parts[4]),
+              let width = Int(parts[5]),
+              let height = Int(parts[6])
+        else { return nil }
+        let exact = parts.count == 10
+        let command = exact ? nonEmpty(String(parts[7])) : nil
+        let title = exact ? nonEmpty(String(parts[8])) : nil
+        let host = exact ? nonEmpty(String(parts[9])) : nil
+        return PaneListEntry(
+            windowId: windowId,
+            paneId: paneId,
+            isActive: parts[2] == "1",
+            contentRect: CellRect(width: width, height: height, x: left, y: top),
+            currentCommand: command,
             paneTitle: title,
             paneTitleIsDefault: isDefaultPaneTitle(title, host: host)
         )
@@ -6855,6 +7034,33 @@ public final class TmuxController {
                 return
             }
 
+            // A parse that succeeded on a tab-less reply means the host
+            // sanitized our separators — and it sanitizes every reply body
+            // the same way, so a capture-pane paint would render its escape
+            // sequences as literal garbage. On the initial attach, latch the
+            // pane the metadata named and let live `%output` (which travels
+            // escaped by the control protocol, not through reply bodies)
+            // paint the terminal. Established windows keep the fail-closed
+            // abort: stale-but-real content beats garbage.
+            if !head.contains("\t") {
+                self.commandRepliesSanitized = true
+                if !self.isInitialRenderReady {
+                    self.latchRenderedPaneWithoutCapture(
+                        windowId: windowId,
+                        state: parsed,
+                        generation: generation
+                    )
+                    return
+                }
+                self.abortRenderRefreshIfCurrent(
+                    windowId: windowId,
+                    generation: generation,
+                    stage: stage,
+                    reason: "metadata-sanitized"
+                )
+                return
+            }
+
             let resolvedStage = self.resolvedRenderStage(
                 requestedStage: stage,
                 windowId: windowId,
@@ -6900,6 +7106,36 @@ public final class TmuxController {
         return canRefreshInPlace ? .viewportOnly : .viewport
     }
 
+    /// Sanitized-replies host, initial attach: skip the capture (its body
+    /// would paint garbage) and latch the pane the metadata named so live
+    /// `%output` — which travels octal-escaped through the control protocol,
+    /// untouched by reply sanitization — feeds the shared terminal directly.
+    /// The screen fills on the pane's next output; the app side pairs this
+    /// with a "press any key" affordance when the pane is quiet.
+    private func latchRenderedPaneWithoutCapture(
+        windowId: WindowId,
+        state: RenderedPaneState,
+        generation: Int
+    ) {
+        clearPendingRenderRefresh(windowId: windowId, generation: generation)
+        renderRetryTask?.cancel()
+        renderRetryTask = nil
+        activePaneId = state.paneId
+        updateActivePane(
+            windowId: windowId,
+            paneId: state.paneId,
+            paneTitle: state.paneTitle,
+            activePaneTitleIsDefault: state.paneTitleIsDefault
+        )
+        renderedPaneId = state.paneId
+        renderedWindowId = windowId
+        preloadTerminalDefaultColorReportIfNeeded(for: state.paneId)
+        markInitialRenderReady()
+        Self.logDiagnostic(
+            "render-refresh capture-skipped latched pane=\(state.paneId) generation=\(generation) reason=replies-sanitized"
+        )
+    }
+
     private func captureRenderedWindow(
         windowId: WindowId,
         state: RenderedPaneState,
@@ -6908,6 +7144,18 @@ public final class TmuxController {
         stage: RenderStage,
         sizeEpoch: Int
     ) {
+        // Belt-and-braces for every flow that reaches a capture (attach,
+        // settled viewport, foreground repair): once a reply has proven this
+        // host sanitizes bodies, no capture may paint.
+        guard !commandRepliesSanitized else {
+            abortRenderRefreshIfCurrent(
+                windowId: windowId,
+                generation: generation,
+                stage: stage,
+                reason: "capture-suppressed-sanitized"
+            )
+            return
+        }
         switch stage {
         case .viewport, .viewportOnly:
             captureViewport(windowId: windowId, state: state, generation: generation, reason: reason, stage: stage, sizeEpoch: sizeEpoch)
@@ -7543,6 +7791,54 @@ public final class TmuxController {
             separator: "\t",
             omittingEmptySubsequences: false
         )
+        if let state = parseRenderedPaneState(fields: parts) {
+            return state
+        }
+        return parseSeparatorMangledPaneState(line)
+    }
+
+    /// Fallback for hosts whose tmux returns the reply with every tab in our
+    /// format replaced by one other character (2026-08-17 field report:
+    /// `fields=1 len=78`, all 22 values intact, single-character separators).
+    /// The separator is inferred as the first non-digit character after the
+    /// leading `%<pane-id>` anchor and trusted only when the last sixteen
+    /// fields are all numeric — the strongest shape anchor the format offers.
+    /// When a string field contained the separator itself the token count
+    /// exceeds 22 and the three string fields (title/window/host) are dropped
+    /// as unattributable; the numeric state that rendering needs survives.
+    /// Only the full 22-field modern format is recovered — a mangled line
+    /// short of that has no anchor worth trusting.
+    static func parseSeparatorMangledPaneState(_ line: String) -> RenderedPaneState? {
+        guard line.hasPrefix("%") else { return nil }
+        let afterAnchor = line.dropFirst().drop(while: { ("0"..."9").contains($0) })
+        guard let separator = afterAnchor.first,
+              separator != "\t",
+              afterAnchor.startIndex != line.index(after: line.startIndex)
+        else { return nil }
+        let parts = line.split(separator: separator, omittingEmptySubsequences: false)
+        guard parts.count >= 22 else { return nil }
+        let tail = Array(parts.suffix(16))
+        guard tail.allSatisfy({ Int($0) != nil }) else { return nil }
+        var fields = Array(parts.prefix(3))
+        if parts.count == 22 {
+            // Each string field contributed exactly one token — the mapping
+            // is unambiguous (a separator inside a title would inflate the
+            // count past 22; a missing field cannot happen, the format
+            // always expands all 22).
+            fields.append(contentsOf: parts[3..<6])
+        } else {
+            fields.append(contentsOf: [Substring(), Substring(), Substring()])
+        }
+        fields.append(contentsOf: tail)
+        guard let state = parseRenderedPaneState(fields: fields) else { return nil }
+        let sepHex = String(format: "%02x", separator.unicodeScalars.first?.value ?? 0)
+        logDiagnostic(
+            "metadata-parse fallback engaged sepHex=\(sepHex) fields=\(parts.count) len=\(line.count)"
+        )
+        return state
+    }
+
+    private static func parseRenderedPaneState(fields parts: [Substring]) -> RenderedPaneState? {
         guard parts.count >= 3,
               let paneId = parsePaneIdString(String(parts[0])),
               let cursorX = Int(parts[1]),

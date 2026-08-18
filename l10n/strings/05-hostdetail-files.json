@@ -1,0 +1,570 @@
+{
+  "name": {
+    "de": "Name",
+    "es": "nombre",
+    "fr": "nom",
+    "ja": "名前",
+    "zh-Hans": "名称",
+    "zh-Hant": "名稱"
+  },
+  "address": {
+    "de": "Adresse",
+    "es": "dirección",
+    "fr": "adresse",
+    "ja": "アドレス",
+    "zh-Hans": "地址",
+    "zh-Hant": "位址"
+  },
+  "port": {
+    "de": "Port",
+    "es": "puerto",
+    "fr": "port",
+    "ja": "ポート",
+    "zh-Hans": "端口",
+    "zh-Hant": "連接埠"
+  },
+  "user": {
+    "de": "Benutzer",
+    "es": "usuario",
+    "fr": "utilisateur",
+    "ja": "ユーザー",
+    "zh-Hans": "用户",
+    "zh-Hant": "使用者"
+  },
+  "username": {
+    "de": "Benutzername",
+    "es": "nombre de usuario",
+    "fr": "nom d'utilisateur",
+    "ja": "ユーザー名",
+    "zh-Hans": "用户名",
+    "zh-Hant": "使用者名稱"
+  },
+  "password": {
+    "de": "Passwort",
+    "es": "contraseña",
+    "fr": "mot de passe",
+    "ja": "パスワード",
+    "zh-Hans": "密码",
+    "zh-Hant": "密碼"
+  },
+  "identity": {
+    "de": "Identität",
+    "es": "identidad",
+    "fr": "identité",
+    "ja": "識別情報",
+    "zh-Hans": "身份",
+    "zh-Hant": "身分"
+  },
+  "transport": {
+    "de": "Transport",
+    "es": "transporte",
+    "fr": "transport",
+    "ja": "トランスポート",
+    "zh-Hans": "传输方式",
+    "zh-Hant": "傳輸方式"
+  },
+  "tag": {
+    "de": "Tag",
+    "es": "etiqueta",
+    "fr": "étiquette",
+    "ja": "タグ",
+    "zh-Hans": "标签",
+    "zh-Hant": "標籤"
+  },
+  "tags": {
+    "de": "Tags",
+    "es": "etiquetas",
+    "fr": "étiquettes",
+    "ja": "タグ",
+    "zh-Hans": "标签",
+    "zh-Hant": "標籤"
+  },
+  "notes": {
+    "de": "Notizen",
+    "es": "notas",
+    "fr": "notes",
+    "ja": "メモ",
+    "zh-Hans": "备注",
+    "zh-Hant": "備註"
+  },
+  "add": {
+    "de": "hinzufügen",
+    "es": "añadir",
+    "fr": "ajouter",
+    "ja": "追加",
+    "zh-Hans": "添加",
+    "zh-Hant": "加入"
+  },
+  "delete": {
+    "de": "löschen",
+    "es": "eliminar",
+    "fr": "supprimer",
+    "ja": "削除",
+    "zh-Hans": "删除",
+    "zh-Hant": "刪除"
+  },
+  "connect": {
+    "de": "verbinden",
+    "es": "conectar",
+    "fr": "se connecter",
+    "ja": "接続",
+    "zh-Hans": "连接",
+    "zh-Hant": "連線"
+  },
+  "launch": {
+    "de": "Start",
+    "es": "inicio",
+    "fr": "lancement",
+    "ja": "起動",
+    "zh-Hans": "启动",
+    "zh-Hant": "啟動"
+  },
+  "launch command": {
+    "de": "Startbefehl",
+    "es": "comando de inicio",
+    "fr": "commande de lancement",
+    "ja": "起動コマンド",
+    "zh-Hans": "启动命令",
+    "zh-Hant": "啟動指令"
+  },
+  "None": {
+    "de": "Keine",
+    "es": "Ninguna",
+    "fr": "Aucune",
+    "ja": "なし",
+    "zh-Hans": "无",
+    "zh-Hant": "無"
+  },
+  "none": {
+    "de": "keine",
+    "es": "ninguna",
+    "fr": "aucune",
+    "ja": "なし",
+    "zh-Hans": "无",
+    "zh-Hant": "無"
+  },
+  "os logo": {
+    "de": "OS-Logo",
+    "es": "logotipo del SO",
+    "fr": "logo de l'OS",
+    "ja": "OS ロゴ",
+    "zh-Hans": "系统标志",
+    "zh-Hant": "系統標誌"
+  },
+  "auto-detected on connect (currently: %@)": {
+    "de": "beim Verbinden automatisch erkannt (aktuell: %@)",
+    "es": "detectado automáticamente al conectar (ahora: %@)",
+    "fr": "détecté automatiquement à la connexion (actuellement : %@)",
+    "ja": "接続時に自動検出（現在: %@）",
+    "zh-Hans": "连接时自动检测（当前：%@）",
+    "zh-Hant": "連線時自動偵測（目前：%@）"
+  },
+  "from %@": {
+    "de": "von %@",
+    "es": "de %@",
+    "fr": "depuis %@",
+    "ja": "%@ から",
+    "zh-Hans": "来自 %@",
+    "zh-Hant": "來自 %@"
+  },
+  "password · %@": {
+    "de": "Passwort · %@",
+    "es": "contraseña · %@",
+    "fr": "mot de passe · %@",
+    "ja": "パスワード · %@",
+    "zh-Hans": "密码 · %@",
+    "zh-Hant": "密碼 · %@"
+  },
+  "stored only in this device's keychain — never synced": {
+    "de": "nur im Schlüsselbund dieses Geräts gesichert – wird nie synchronisiert",
+    "es": "se guarda solo en el llavero de este dispositivo, nunca se sincroniza",
+    "fr": "conservé uniquement dans le trousseau de cet appareil — jamais synchronisé",
+    "ja": "このデバイスのキーチェーンにのみ保存され、同期されることはありません",
+    "zh-Hans": "仅保存在本设备的钥匙串中 —— 绝不同步",
+    "zh-Hant": "僅儲存在本裝置的鑰匙圈中 —— 絕不同步"
+  },
+  "jump host": {
+    "de": "Jump-Host",
+    "es": "host de salto",
+    "fr": "hôte de rebond",
+    "ja": "踏み台ホスト",
+    "zh-Hans": "跳板主机",
+    "zh-Hant": "跳板主機"
+  },
+  "jump-host authentication": {
+    "de": "Jump-Host-Authentifizierung",
+    "es": "autenticación del host de salto",
+    "fr": "authentification de l'hôte de rebond",
+    "ja": "踏み台ホストの認証",
+    "zh-Hans": "跳板主机认证",
+    "zh-Hant": "跳板主機驗證"
+  },
+  "jump-host passwords are kept only for this live session.": {
+    "de": "Jump-Host-Passwörter werden nur für diese laufende Sitzung behalten.",
+    "es": "las contraseñas del host de salto solo se conservan durante esta sesión activa.",
+    "fr": "les mots de passe des hôtes de rebond ne sont conservés que pour cette session en cours.",
+    "ja": "踏み台ホストのパスワードは、この実行中のセッションの間だけ保持されます。",
+    "zh-Hans": "跳板主机的密码仅在本次活动会话期间保留。",
+    "zh-Hant": "跳板主機的密碼僅在本次進行中的工作階段期間保留。"
+  },
+  "environment variables": {
+    "de": "Umgebungsvariablen",
+    "es": "variables de entorno",
+    "fr": "variables d'environnement",
+    "ja": "環境変数",
+    "zh-Hans": "环境变量",
+    "zh-Hant": "環境變數"
+  },
+  "one KEY=value per line; an optional leading `export ` is stripped. values are passed to the remote shell verbatim — `$HOME`, `$(…)`, and quotes work as written.": {
+    "de": "ein KEY=value pro Zeile; ein optional vorangestelltes `export ` wird entfernt. Werte werden unverändert an die entfernte Shell übergeben – `$HOME`, `$(…)` und Anführungszeichen wirken genau so, wie sie geschrieben sind.",
+    "es": "un KEY=value por línea; se elimina un `export ` inicial opcional. los valores se pasan tal cual al shell remoto: `$HOME`, `$(…)` y las comillas funcionan como se escriben.",
+    "fr": "un KEY=value par ligne ; un `export ` en tête est retiré s'il est présent. les valeurs sont transmises telles quelles au shell distant — `$HOME`, `$(…)` et les guillemets agissent comme ils sont écrits.",
+    "ja": "1 行に 1 つの KEY=value を書きます。先頭の `export ` は省略可能で、指定しても取り除かれます。値はそのままリモートシェルに渡されるため、`$HOME`、`$(…)`、引用符は書いたとおりに機能します。",
+    "zh-Hans": "每行一个 KEY=value；开头可选的 `export ` 会被去掉。值会原样传给远程 shell —— `$HOME`、`$(…)` 和引号都按字面生效。",
+    "zh-Hant": "每行一個 KEY=value；開頭可選的 `export ` 會被去掉。值會原樣傳給遠端 shell —— `$HOME`、`$(…)` 和引號都按字面生效。"
+  },
+  "startup snippet": {
+    "de": "Startskript",
+    "es": "fragmento de inicio",
+    "fr": "extrait de démarrage",
+    "ja": "起動スニペット",
+    "zh-Hans": "启动脚本片段",
+    "zh-Hant": "啟動指令片段"
+  },
+  "commands run immediately after connect": {
+    "de": "Befehle, die direkt nach dem Verbinden laufen",
+    "es": "comandos que se ejecutan justo después de conectar",
+    "fr": "commandes exécutées juste après la connexion",
+    "ja": "接続直後に実行されるコマンド",
+    "zh-Hans": "连接后立即执行的命令",
+    "zh-Hant": "連線後立即執行的指令"
+  },
+  "free-form notes stored with this host": {
+    "de": "freie Notizen, die zu diesem Host gesichert werden",
+    "es": "notas libres guardadas junto a este host",
+    "fr": "notes libres enregistrées avec cet hôte",
+    "ja": "このホストと一緒に保存される自由記述のメモ",
+    "zh-Hans": "与此主机一并保存的自由备注",
+    "zh-Hant": "與此主機一併儲存的自由備註"
+  },
+  "tmux gotcha: env vars and the startup snippet only run when tmux *starts*. if you re-attach to an existing tmux session on this host, the running panes keep their old env. run `tmux kill-server` on the remote (or kill the session) and reconnect to pick up changes.": {
+    "de": "tmux-Falle: Umgebungsvariablen und das Startskript laufen nur, wenn tmux *startet*. Hängst du dich an eine bestehende tmux-Sitzung auf diesem Host, behalten die laufenden Bereiche ihre alte Umgebung. Führe `tmux kill-server` auf der Gegenstelle aus (oder beende die Sitzung) und verbinde dich neu, damit Änderungen greifen.",
+    "es": "detalle de tmux: las variables de entorno y el fragmento de inicio solo se ejecutan cuando tmux *arranca*. si vuelves a conectarte a una sesión de tmux existente en este host, los paneles en marcha conservan su entorno anterior. ejecuta `tmux kill-server` en el remoto (o cierra la sesión) y vuelve a conectar para aplicar los cambios.",
+    "fr": "piège tmux : les variables d'environnement et l'extrait de démarrage ne s'exécutent qu'au *démarrage* de tmux. si vous vous rattachez à une session tmux existante sur cet hôte, les volets en cours gardent leur ancien environnement. lancez `tmux kill-server` sur la machine distante (ou fermez la session) puis reconnectez-vous pour prendre en compte les changements.",
+    "ja": "tmux の注意点: 環境変数と起動スニペットは、tmux が *起動する* ときにしか実行されません。このホストの既存の tmux セッションに再アタッチした場合、稼働中のペインは以前の環境をそのまま使います。変更を反映するには、リモートで `tmux kill-server` を実行する（またはセッションを終了する）してから接続し直してください。",
+    "zh-Hans": "tmux 注意事项：环境变量和启动脚本片段只在 tmux *启动* 时执行。如果你重新接入此主机上已有的 tmux 会话，运行中的窗格仍会沿用旧环境。请在远程执行 `tmux kill-server`（或结束该会话）后重新连接，才能应用更改。",
+    "zh-Hant": "tmux 注意事項：環境變數和啟動指令片段只在 tmux *啟動* 時執行。如果你重新接入此主機上既有的 tmux 工作階段，執行中的窗格仍會沿用舊環境。請在遠端執行 `tmux kill-server`（或結束該工作階段）後重新連線，才能套用更改。"
+  },
+  "tmux session name": {
+    "de": "Name der tmux-Sitzung",
+    "es": "nombre de la sesión de tmux",
+    "fr": "nom de la session tmux",
+    "ja": "tmux セッション名",
+    "zh-Hans": "tmux 会话名称",
+    "zh-Hant": "tmux 工作階段名稱"
+  },
+  "letters, numbers, dash, underscore, dot only; anything else falls back to the auto-derived name.": {
+    "de": "nur Buchstaben, Ziffern, Bindestrich, Unterstrich und Punkt; alles andere fällt auf den automatisch abgeleiteten Namen zurück.",
+    "es": "solo letras, números, guion, guion bajo y punto; cualquier otra cosa vuelve al nombre derivado automáticamente.",
+    "fr": "lettres, chiffres, tiret, tiret bas et point uniquement ; tout le reste revient au nom déduit automatiquement.",
+    "ja": "使えるのは英数字・ハイフン・アンダースコア・ピリオドだけです。それ以外の場合は自動生成された名前が使われます。",
+    "zh-Hans": "只能使用字母、数字、连字符、下划线和点；其他情况一律回退到自动生成的名称。",
+    "zh-Hant": "只能使用字母、數字、連字符、底線和點；其他情況一律回退到自動產生的名稱。"
+  },
+  "terminal background": {
+    "de": "Terminal-Hintergrund",
+    "es": "fondo del terminal",
+    "fr": "arrière-plan du terminal",
+    "ja": "ターミナルの背景",
+    "zh-Hans": "终端背景",
+    "zh-Hant": "終端機背景"
+  },
+  "always the theme's solid color on this host, even when a global picture is set.": {
+    "de": "auf diesem Host immer die einfarbige Themenfarbe, auch wenn global ein Bild gesetzt ist.",
+    "es": "en este host siempre el color sólido del tema, aunque haya una imagen global.",
+    "fr": "toujours la couleur unie du thème sur cet hôte, même si une image globale est définie.",
+    "ja": "このホストでは、全体に画像が設定されていても常にテーマの単色を使います。",
+    "zh-Hans": "在此主机上始终使用主题的纯色背景，即便全局设置了图片。",
+    "zh-Hant": "在此主機上始終使用主題的純色背景，即便全域設定了圖片。"
+  },
+  "handoff action": {
+    "de": "Handoff-Aktion",
+    "es": "acción de handoff",
+    "fr": "action de Handoff",
+    "ja": "Handoff の動作",
+    "zh-Hans": "接力操作",
+    "zh-Hant": "接續互通操作"
+  },
+  "continue tmux session": {
+    "de": "tmux-Sitzung fortsetzen",
+    "es": "continuar la sesión de tmux",
+    "fr": "poursuivre la session tmux",
+    "ja": "tmux セッションを引き継ぐ",
+    "zh-Hans": "继续 tmux 会话",
+    "zh-Hant": "繼續 tmux 工作階段"
+  },
+  "reconnect with a new shell": {
+    "de": "mit einer neuen Shell neu verbinden",
+    "es": "reconectar con un shell nuevo",
+    "fr": "se reconnecter avec un nouveau shell",
+    "ja": "新しいシェルで接続し直す",
+    "zh-Hans": "以新的 shell 重新连接",
+    "zh-Hant": "以新的 shell 重新連線"
+  },
+  "the same server-side screen remains attached on both devices.": {
+    "de": "auf beiden Geräten bleibt derselbe serverseitige Bildschirm angehängt.",
+    "es": "la misma pantalla del servidor sigue conectada en ambos dispositivos.",
+    "fr": "le même écran côté serveur reste attaché sur les deux appareils.",
+    "ja": "両方のデバイスで、サーバー側の同じ画面がアタッチされたままになります。",
+    "zh-Hans": "两台设备保持接入服务器端的同一个屏幕。",
+    "zh-Hant": "兩台裝置保持接入伺服器端的同一個畫面。"
+  },
+  "plain SSH and mosh open a new remote shell on this device.": {
+    "de": "einfaches SSH und mosh öffnen auf diesem Gerät eine neue entfernte Shell.",
+    "es": "SSH simple y mosh abren un shell remoto nuevo en este dispositivo.",
+    "fr": "SSH simple et mosh ouvrent un nouveau shell distant sur cet appareil.",
+    "ja": "素の SSH と mosh は、このデバイスで新しいリモートシェルを開きます。",
+    "zh-Hans": "纯 SSH 和 mosh 会在本设备上打开一个新的远程 shell。",
+    "zh-Hant": "純 SSH 和 mosh 會在本裝置上開啟一個新的遠端 shell。"
+  },
+  "Sent as a secret-free descriptor. No password, private key, or trust pin was included; authentication happens on this device.": {
+    "de": "Als Deskriptor ohne Geheimnisse gesendet. Weder Passwort noch privater Key oder Trust-Pin waren enthalten; die Authentifizierung findet auf diesem Gerät statt.",
+    "es": "Se envía como un descriptor sin secretos. No se incluyó ninguna contraseña, clave privada ni fijación de confianza; la autenticación ocurre en este dispositivo.",
+    "fr": "Envoyé sous forme de descripteur sans secret. Aucun mot de passe, clé privée ou épinglage de confiance n'était inclus ; l'authentification a lieu sur cet appareil.",
+    "ja": "秘密情報を含まないディスクリプタとして送信されました。パスワード・秘密鍵・信頼ピンはいずれも含まれておらず、認証はこのデバイスで行われます。",
+    "zh-Hans": "以不含机密的描述符发送。其中不包含密码、私钥或信任固定项；认证在本设备上完成。",
+    "zh-Hant": "以不含機密的描述元傳送。其中不包含密碼、私密金鑰或信任固定項；驗證在本裝置上完成。"
+  },
+  "files": {
+    "de": "Dateien",
+    "es": "archivos",
+    "fr": "fichiers",
+    "ja": "ファイル",
+    "zh-Hans": "文件",
+    "zh-Hant": "檔案"
+  },
+  "path": {
+    "de": "Pfad",
+    "es": "ruta",
+    "fr": "chemin",
+    "ja": "パス",
+    "zh-Hans": "路径",
+    "zh-Hant": "路徑"
+  },
+  "open by path": {
+    "de": "über Pfad öffnen",
+    "es": "abrir por ruta",
+    "fr": "ouvrir par chemin",
+    "ja": "パスを指定して開く",
+    "zh-Hans": "按路径打开",
+    "zh-Hant": "依路徑開啟"
+  },
+  "close files panel": {
+    "de": "Dateibereich schließen",
+    "es": "cerrar el panel de archivos",
+    "fr": "fermer le panneau de fichiers",
+    "ja": "ファイルパネルを閉じる",
+    "zh-Hans": "关闭文件面板",
+    "zh-Hant": "關閉檔案面板"
+  },
+  "filter this directory": {
+    "de": "dieses Verzeichnis filtern",
+    "es": "filtrar este directorio",
+    "fr": "filtrer ce répertoire",
+    "ja": "このディレクトリを絞り込む",
+    "zh-Hans": "筛选此目录",
+    "zh-Hant": "篩選此目錄"
+  },
+  "close filter": {
+    "de": "Filter schließen",
+    "es": "cerrar el filtro",
+    "fr": "fermer le filtre",
+    "ja": "絞り込みを閉じる",
+    "zh-Hans": "关闭筛选",
+    "zh-Hant": "關閉篩選"
+  },
+  "RECENT": {
+    "de": "ZULETZT",
+    "es": "RECIENTES",
+    "fr": "RÉCENTS",
+    "ja": "最近使った項目",
+    "zh-Hans": "最近",
+    "zh-Hant": "最近"
+  },
+  "dir → browse there": {
+    "de": "Verzeichnis → dorthin wechseln",
+    "es": "directorio → navegar allí",
+    "fr": "répertoire → y naviguer",
+    "ja": "ディレクトリ → そこを開く",
+    "zh-Hans": "目录 → 浏览该处",
+    "zh-Hant": "目錄 → 瀏覽該處"
+  },
+  "⏎ file → Quick Look": {
+    "de": "⏎ Datei → Übersicht",
+    "es": "⏎ archivo → Vista rápida",
+    "fr": "⏎ fichier → Coup d'œil",
+    "ja": "⏎ ファイル → クイックルック",
+    "zh-Hans": "⏎ 文件 → 快速查看",
+    "zh-Hant": "⏎ 檔案 → 快速查看"
+  },
+  "Quick Look": {
+    "de": "Übersicht",
+    "es": "Vista rápida",
+    "fr": "Coup d'œil",
+    "ja": "クイックルック",
+    "zh-Hans": "快速查看",
+    "zh-Hant": "快速查看"
+  },
+  "Download": {
+    "de": "Laden",
+    "es": "Descargar",
+    "fr": "Télécharger",
+    "ja": "ダウンロード",
+    "zh-Hans": "下载",
+    "zh-Hant": "下載"
+  },
+  "Rename": {
+    "de": "Umbenennen",
+    "es": "Renombrar",
+    "fr": "Renommer",
+    "ja": "名称変更",
+    "zh-Hans": "重命名",
+    "zh-Hant": "重新命名"
+  },
+  "Create": {
+    "de": "Erstellen",
+    "es": "Crear",
+    "fr": "Créer",
+    "ja": "作成",
+    "zh-Hans": "创建",
+    "zh-Hant": "製作"
+  },
+  "New Folder": {
+    "de": "Neuer Ordner",
+    "es": "Carpeta nueva",
+    "fr": "Nouveau dossier",
+    "ja": "新規フォルダ",
+    "zh-Hans": "新建文件夹",
+    "zh-Hant": "新增檔案夾"
+  },
+  "Delete": {
+    "de": "Löschen",
+    "es": "Eliminar",
+    "fr": "Supprimer",
+    "ja": "削除",
+    "zh-Hans": "删除",
+    "zh-Hant": "刪除"
+  },
+  "Delete…": {
+    "de": "Löschen…",
+    "es": "Eliminar…",
+    "fr": "Supprimer…",
+    "ja": "削除…",
+    "zh-Hans": "删除…",
+    "zh-Hant": "刪除…"
+  },
+  "Delete \"%@\"?": {
+    "de": "„%@“ löschen?",
+    "es": "¿Eliminar «%@»?",
+    "fr": "Supprimer « %@ » ?",
+    "ja": "「%@」を削除しますか？",
+    "zh-Hans": "要删除「%@」吗？",
+    "zh-Hant": "要刪除「%@」嗎？"
+  },
+  "This permanently deletes the file on the host.": {
+    "de": "Damit wird die Datei auf dem Host dauerhaft gelöscht.",
+    "es": "Esto elimina el archivo del host de forma permanente.",
+    "fr": "Cela supprime définitivement le fichier sur l'hôte.",
+    "ja": "ホスト上のファイルが完全に削除されます。",
+    "zh-Hans": "这会永久删除主机上的该文件。",
+    "zh-Hant": "這會永久刪除主機上的該檔案。"
+  },
+  "Only empty folders can be deleted.": {
+    "de": "Nur leere Ordner können gelöscht werden.",
+    "es": "Solo se pueden eliminar carpetas vacías.",
+    "fr": "Seuls les dossiers vides peuvent être supprimés.",
+    "ja": "削除できるのは空のフォルダのみです。",
+    "zh-Hans": "只能删除空文件夹。",
+    "zh-Hant": "只能刪除空的檔案夾。"
+  },
+  "Copy Path": {
+    "de": "Pfad kopieren",
+    "es": "Copiar ruta",
+    "fr": "Copier le chemin",
+    "ja": "パスをコピー",
+    "zh-Hans": "拷贝路径",
+    "zh-Hant": "拷貝路徑"
+  },
+  "Send Path to Terminal": {
+    "de": "Pfad ans Terminal senden",
+    "es": "Enviar la ruta al terminal",
+    "fr": "Envoyer le chemin au terminal",
+    "ja": "パスをターミナルに送る",
+    "zh-Hans": "将路径发送到终端",
+    "zh-Hant": "將路徑傳送到終端機"
+  },
+  "Share…": {
+    "de": "Teilen…",
+    "es": "Compartir…",
+    "fr": "Partager…",
+    "ja": "共有…",
+    "zh-Hans": "共享…",
+    "zh-Hant": "共享…"
+  },
+  "Connecting to %@…": {
+    "de": "Verbinde mit %@…",
+    "es": "Conectando con %@…",
+    "fr": "Connexion à %@…",
+    "ja": "%@ に接続中…",
+    "zh-Hans": "正在连接 %@…",
+    "zh-Hant": "正在連線 %@…"
+  },
+  "Connection lost": {
+    "de": "Verbindung verloren",
+    "es": "Se perdió la conexión",
+    "fr": "Connexion perdue",
+    "ja": "接続が切断されました",
+    "zh-Hans": "连接已断开",
+    "zh-Hant": "連線已中斷"
+  },
+  "Disconnected": {
+    "de": "Getrennt",
+    "es": "Desconectado",
+    "fr": "Déconnecté",
+    "ja": "未接続",
+    "zh-Hans": "已断开",
+    "zh-Hant": "已中斷"
+  },
+  "Reconnect": {
+    "de": "Neu verbinden",
+    "es": "Reconectar",
+    "fr": "Se reconnecter",
+    "ja": "再接続",
+    "zh-Hans": "重新连接",
+    "zh-Hant": "重新連線"
+  },
+  "Install": {
+    "de": "Installieren",
+    "es": "Instalar",
+    "fr": "Installer",
+    "ja": "インストール",
+    "zh-Hans": "安装",
+    "zh-Hant": "安裝"
+  },
+  "Install shell integration?": {
+    "de": "Shell-Integration installieren?",
+    "es": "¿Instalar la integración con el shell?",
+    "fr": "Installer l'intégration au shell ?",
+    "ja": "シェル統合をインストールしますか？",
+    "zh-Hans": "要安装 shell 集成吗？",
+    "zh-Hant": "要安裝 shell 整合嗎？"
+  },
+  "Enable follow — install shell integration": {
+    "de": "Mitlaufen aktivieren – Shell-Integration installieren",
+    "es": "Activar el seguimiento: instalar la integración con el shell",
+    "fr": "Activer le suivi — installer l'intégration au shell",
+    "ja": "追従を有効にする — シェル統合をインストール",
+    "zh-Hans": "启用跟随 —— 安装 shell 集成",
+    "zh-Hant": "啟用跟隨 —— 安裝 shell 整合"
+  }
+}

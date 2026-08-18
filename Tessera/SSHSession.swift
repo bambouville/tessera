@@ -24,6 +24,27 @@ import PortForwarding
 /// the same protocol. SSH-specific state (`pendingHostKeyVerification`)
 /// stays on this concrete type rather than being hoisted to the
 /// protocol.
+/// Non-zero while a system authentication sheet or a host-key decision owns a
+/// connect path. The handshake budget must never accrue against a human: a
+/// passcode fallback can legitimately outlast it, and cancelling would tear the
+/// system sheet down under the user's finger and report a path-MTU stall that
+/// never happened.
+///
+/// Global rather than per-session on purpose. `HostKeyVerificationCoordinator`
+/// coalesces identical challenges, so sessions that are *waiting* on another
+/// session's prompt run no prompt of their own and would otherwise keep
+/// charging.
+@MainActor
+enum SSHHandshakePromptGate {
+    private static var depth = 0
+
+    static var isPrompting: Bool { depth > 0 }
+
+    static func begin() { depth += 1 }
+
+    static func end() { depth = max(0, depth - 1) }
+}
+
 @MainActor
 public final class SSHSession: ObservableObject, TerminalSession {
 
@@ -93,6 +114,27 @@ public final class SSHSession: ObservableObject, TerminalSession {
     private var lastReportedSize: (cols: Int, rows: Int)?
 
     private var runTask: Task<Void, Never>?
+
+    /// Wall-clock budget for everything before `.connected`: TCP connect,
+    /// banner, kex, auth and the chain's per-hop repeats. Citadel bounds only
+    /// the TCP connect; a path-MTU blackhole completes TCP and then stalls in
+    /// kex forever, parking the session in `.connecting` with no terminal
+    /// state at all. Session restore resolves its cohort on terminal states,
+    /// so an unbounded `.connecting` would hold that window open until the
+    /// backstop instead of failing honestly.
+    ///
+    /// Deliberately generous: it is a backstop against permafreeze, not a
+    /// responsiveness timer, and it must not preempt Citadel's own 30s TCP
+    /// connect timeout on a slow link. The window ends at the chain
+    /// handshake, so it never overlaps the tmux `-CC` launch watchdog.
+    static let handshakeBudgetSeconds: TimeInterval = 40
+    private static let handshakeWatchdogTickNanoseconds: UInt64 = 500_000_000
+    /// Longest tick delta charged to the budget. Anything larger means the
+    /// process was suspended, not that the handshake stalled.
+    private static let handshakeWatchdogMaxTickSeconds: TimeInterval = 2
+
+    private var handshakeWatchdog: Task<Void, Never>?
+    private var handshakeDidTimeOut = false
     private var client: SSHClient?
     /// Bastion clients when the host connects through a jump chain,
     /// outermost first. Closed explicitly in run()'s epilogues.
@@ -145,9 +187,55 @@ public final class SSHSession: ObservableObject, TerminalSession {
         DiagnosticLogStore.appendSSH(
             "connect start transport=\(host.transport.rawValue) launchMode=\(host.launchMode.rawValue) authKind=\(authKindDescription(for: host)) biometricRequired=\(requireBiometric) secureEnclave=\(isSecureEnclave)"
         )
+        armHandshakeWatchdog()
         runTask = Task { [weak self] in
             await self?.run()
         }
+    }
+
+    /// Fail a handshake that will never terminate on its own.
+    ///
+    /// Self-disarming: the loop exits the moment `state` leaves `.connecting`,
+    /// so every success and every real failure retires it without the callers
+    /// having to remember to. Charging only clamped, non-prompt time keeps a
+    /// backgrounded app and a waiting user from spending the budget.
+    private func armHandshakeWatchdog() {
+        handshakeWatchdog?.cancel()
+        handshakeDidTimeOut = false
+        handshakeWatchdog = Task { @MainActor [weak self] in
+            var spent: TimeInterval = 0
+            var lastTick = Date()
+            while !Task.isCancelled {
+                try? await Task.sleep(
+                    nanoseconds: Self.handshakeWatchdogTickNanoseconds
+                )
+                guard !Task.isCancelled, let self else { return }
+                guard case .connecting = self.state else { return }
+
+                let now = Date()
+                let delta = min(
+                    now.timeIntervalSince(lastTick),
+                    Self.handshakeWatchdogMaxTickSeconds
+                )
+                lastTick = now
+                if !SSHHandshakePromptGate.isPrompting {
+                    spent += delta
+                }
+                guard spent >= Self.handshakeBudgetSeconds else { continue }
+
+                DiagnosticLogStore.appendSSH(
+                    "connect result=handshake-timeout budgetSeconds=\(Int(Self.handshakeBudgetSeconds))"
+                )
+                self.handshakeDidTimeOut = true
+                self.runTask?.cancel()
+                return
+            }
+        }
+    }
+
+    private func disarmHandshakeWatchdog() {
+        handshakeWatchdog?.cancel()
+        handshakeWatchdog = nil
     }
 
     /// Push bytes to the remote shell's stdin. No-op before connection.
@@ -176,6 +264,7 @@ public final class SSHSession: ObservableObject, TerminalSession {
             pendingHostKeyVerification = nil
         }
         client = nil
+        disarmHandshakeWatchdog()
         runTask?.cancel()
         runTask = nil
         inputContinuation.yield([]) // wake the write loop so it can exit
@@ -238,19 +327,26 @@ public final class SSHSession: ObservableObject, TerminalSession {
     /// terminal connection. Agent Center uses this for its read-only hook
     /// check so opening the surface never creates a second SSH authentication
     /// attempt or owner-presence prompt.
-    func executeConnectedCommand(_ command: String) async throws -> String {
+    /// `inShell: false` runs the command as an SSH exec request
+    /// (`$SHELL -c …`) instead of feeding it to an interactive shell —
+    /// the same reasoning as `OSDetectionProbe`: a host whose login
+    /// dotfiles `exec tmux` would otherwise swallow the probe channel.
+    func executeConnectedCommand(
+        _ command: String,
+        inShell: Bool = true
+    ) async throws -> String {
         guard case .connected = state, let client else {
             throw NSError(
                 domain: "Tessera.SSHSession",
                 code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "The terminal session is not connected."]
+                userInfo: [NSLocalizedDescriptionKey: String(localized: "The terminal session is not connected.")]
             )
         }
         var output = try await client.executeCommand(
             command,
             maxResponseSize: 256 * 1024,
             mergeStreams: true,
-            inShell: true
+            inShell: inShell
         )
         let bytes = output.readBytes(length: output.readableBytes) ?? []
         return String(decoding: bytes, as: UTF8.self)
@@ -336,15 +432,26 @@ public final class SSHSession: ObservableObject, TerminalSession {
         } catch is CancellationError {
             await self.portForwarderManager.detach()
             if let connectedChain { await connectedChain.closeAll() }
+            // A watchdog cancellation is not a user cancellation. Reporting it
+            // as `.disconnected` would present a wedged handshake as a session
+            // that simply ended, with no reason and no recovery affordance.
+            let timedOut = self.handshakeDidTimeOut && !didConnect
             await MainActor.run {
                 if let connectedClient, self.client === connectedClient {
                     self.client = nil
                     self.upstreamClients = []
                 }
-                self.state = .disconnected
+                self.state = timedOut
+                    ? .failed(
+                        String(
+                            localized: "Timed out completing the SSH handshake. The connection opened but never finished negotiating — often a path-MTU blackhole on the route.",
+                            comment: "SSH connect gave up waiting for the handshake to finish"
+                        )
+                    )
+                    : .disconnected
             }
             DiagnosticLogStore.appendSSH(
-                "connect result=cancelled didConnect=\(didConnect) durationMs=\(Self.durationMs(since: startedAt))"
+                "connect result=\(timedOut ? "handshake-timeout" : "cancelled") didConnect=\(didConnect) durationMs=\(Self.durationMs(since: startedAt))"
             )
         } catch {
             await self.portForwarderManager.detach()
@@ -495,6 +602,9 @@ public final class SSHSession: ObservableObject, TerminalSession {
         DiagnosticLogStore.appendSSH(
             "hostkey prompt status=\(status) keyType=\(challenge.keyType)"
         )
+        // The handshake budget must not run while the decision is the user's.
+        SSHHandshakePromptGate.begin()
+        defer { SSHHandshakePromptGate.end() }
         let result = await withTaskCancellationHandler {
             guard !Task.isCancelled else { return false }
             return await withCheckedContinuation { continuation in

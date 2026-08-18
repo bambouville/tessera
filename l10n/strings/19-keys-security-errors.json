@@ -1,0 +1,666 @@
+{
+  "Public key copied": {
+    "de": "Public Key kopiert",
+    "es": "Clave pública copiada",
+    "fr": "Clé publique copiée",
+    "ja": "公開鍵をコピーしました",
+    "zh-Hans": "已复制公钥",
+    "zh-Hant": "已複製公鑰"
+  },
+  "no keys yet · generate or import one": {
+    "de": "noch keine Keys · erzeuge oder importiere einen",
+    "es": "aún no hay claves · genera o importa una",
+    "fr": "aucune clé pour l'instant · générez-en une ou importez-la",
+    "ja": "キーがまだありません · 生成またはインポートしてください",
+    "zh-Hans": "还没有密钥 · 生成或导入一个",
+    "zh-Hant": "還沒有金鑰 · 產生或匯入一個"
+  },
+  "select a key": {
+    "de": "Key auswählen",
+    "es": "selecciona una clave",
+    "fr": "sélectionner une clé",
+    "ja": "キーを選択",
+    "zh-Hans": "选择一个密钥",
+    "zh-Hant": "選擇一個金鑰"
+  },
+  "unnamed key": {
+    "de": "unbenannter Key",
+    "es": "clave sin nombre",
+    "fr": "clé sans nom",
+    "ja": "名称未設定のキー",
+    "zh-Hans": "未命名密钥",
+    "zh-Hant": "未命名金鑰"
+  },
+  "other device": {
+    "de": "anderes Gerät",
+    "es": "otro dispositivo",
+    "fr": "autre appareil",
+    "ja": "別のデバイス",
+    "zh-Hans": "其他设备",
+    "zh-Hant": "其他裝置"
+  },
+  "installed here": {
+    "de": "hier installiert",
+    "es": "instalado aquí",
+    "fr": "installé ici",
+    "ja": "ここにインストール済み",
+    "zh-Hans": "已安装在此",
+    "zh-Hant": "已安裝於此"
+  },
+  "granted from this device": {
+    "de": "von diesem Gerät gewährt",
+    "es": "concedido desde este dispositivo",
+    "fr": "accordé depuis cet appareil",
+    "ja": "このデバイスから許可",
+    "zh-Hans": "由本设备授予",
+    "zh-Hant": "由本裝置授予"
+  },
+  "received for this device": {
+    "de": "für dieses Gerät erhalten",
+    "es": "recibido para este dispositivo",
+    "fr": "reçu pour cet appareil",
+    "ja": "このデバイス向けに受信",
+    "zh-Hans": "为本设备接收",
+    "zh-Hant": "為本裝置接收"
+  },
+  "private key never leaves this device. sync, export, and copy-private-key are disabled.": {
+    "de": "der Private Key verlässt dieses Gerät nie. Sync, Export und Private-Key-Kopieren sind deaktiviert.",
+    "es": "la clave privada nunca sale de este dispositivo. La sincronización, la exportación y copiar la clave privada están desactivadas.",
+    "fr": "la clé privée ne quitte jamais cet appareil. La synchronisation, l'export et la copie de la clé privée sont désactivés.",
+    "ja": "秘密鍵はこのデバイスから出ません。同期、書き出し、秘密鍵のコピーは無効です。",
+    "zh-Hans": "私钥永不离开本设备。同步、导出和复制私钥均已禁用。",
+    "zh-Hant": "私鑰永不離開本裝置。同步、匯出和複製私鑰均已停用。"
+  },
+  "private material missing": {
+    "de": "privates Material fehlt",
+    "es": "falta el material privado",
+    "fr": "matériel privé manquant",
+    "ja": "秘密情報がありません",
+    "zh-Hans": "缺少私有材料",
+    "zh-Hant": "缺少私有材料"
+  },
+  "private material mismatch": {
+    "de": "privates Material stimmt nicht überein",
+    "es": "el material privado no coincide",
+    "fr": "matériel privé incohérent",
+    "ja": "秘密情報が一致しません",
+    "zh-Hans": "私有材料不匹配",
+    "zh-Hant": "私有材料不相符"
+  },
+  "private material invalid": {
+    "de": "privates Material ungültig",
+    "es": "material privado no válido",
+    "fr": "matériel privé non valide",
+    "ja": "秘密情報が無効です",
+    "zh-Hans": "私有材料无效",
+    "zh-Hant": "私有材料無效"
+  },
+  "integrity unavailable": {
+    "de": "Integrität nicht prüfbar",
+    "es": "integridad no disponible",
+    "fr": "intégrité indisponible",
+    "ja": "整合性を確認できません",
+    "zh-Hans": "无法确认完整性",
+    "zh-Hant": "無法確認完整性"
+  },
+  "legacy rsa disabled": {
+    "de": "Legacy-RSA deaktiviert",
+    "es": "RSA heredado desactivado",
+    "fr": "RSA hérité désactivé",
+    "ja": "レガシー RSA は無効",
+    "zh-Hans": "旧版 RSA 已禁用",
+    "zh-Hant": "舊版 RSA 已停用"
+  },
+  "recovery exported": {
+    "de": "Wiederherstellung exportiert",
+    "es": "recuperación exportada",
+    "fr": "récupération exportée",
+    "ja": "復元用データを書き出し済み",
+    "zh-Hans": "已导出恢复文件",
+    "zh-Hant": "已匯出復原檔案"
+  },
+  "device-loss risk acknowledged": {
+    "de": "Risiko bei Geräteverlust bestätigt",
+    "es": "riesgo por pérdida del dispositivo aceptado",
+    "fr": "risque de perte d'appareil accepté",
+    "ja": "デバイス紛失のリスクを確認済み",
+    "zh-Hans": "已确认设备丢失风险",
+    "zh-Hant": "已確認裝置遺失風險"
+  },
+  "protect recovery key": {
+    "de": "Wiederherstellungs-Key schützen",
+    "es": "proteger la clave de recuperación",
+    "fr": "protéger la clé de récupération",
+    "ja": "復元用キーを保護",
+    "zh-Hans": "保护恢复密钥",
+    "zh-Hant": "保護復原金鑰"
+  },
+  "verify recovery file": {
+    "de": "Wiederherstellungsdatei prüfen",
+    "es": "verificar el archivo de recuperación",
+    "fr": "vérifier le fichier de récupération",
+    "ja": "復元ファイルを検証",
+    "zh-Hans": "验证恢复文件",
+    "zh-Hant": "驗證復原檔案"
+  },
+  "restore private key": {
+    "de": "Private Key wiederherstellen",
+    "es": "restaurar la clave privada",
+    "fr": "restaurer la clé privée",
+    "ja": "秘密鍵を復元",
+    "zh-Hans": "恢复私钥",
+    "zh-Hant": "復原私鑰"
+  },
+  "Tessera will create a standard passphrase-encrypted OpenSSH private-key file. Tessera cannot recover this passphrase. No plaintext key file is created.": {
+    "de": "Tessera erstellt eine standardmäßige, mit Passphrase verschlüsselte OpenSSH-Private-Key-Datei. Tessera kann diese Passphrase nicht wiederherstellen. Es wird keine Klartext-Key-Datei erzeugt.",
+    "es": "Tessera creará un archivo de clave privada OpenSSH estándar cifrado con frase de contraseña. Tessera no puede recuperar esa frase. No se crea ningún archivo de clave en texto plano.",
+    "fr": "Tessera créera un fichier de clé privée OpenSSH standard chiffré par phrase secrète. Tessera ne peut pas récupérer cette phrase secrète. Aucun fichier de clé en clair n'est créé.",
+    "ja": "Tessera は、パスフレーズで暗号化された標準的な OpenSSH 秘密鍵ファイルを作成します。このパスフレーズを Tessera が復元することはできません。平文の鍵ファイルは作成されません。",
+    "zh-Hans": "Tessera 将创建一个标准的、用口令加密的 OpenSSH 私钥文件。Tessera 无法找回该口令。不会生成任何明文密钥文件。",
+    "zh-Hant": "Tessera 將建立一個標準的、以密語加密的 OpenSSH 私鑰檔案。Tessera 無法找回該密語。不會產生任何明文金鑰檔案。"
+  },
+  "The file will be decrypted in memory and its public fingerprint compared with this key. It will not replace the live key.": {
+    "de": "Die Datei wird im Arbeitsspeicher entschlüsselt und ihr öffentlicher Fingerabdruck mit diesem Key verglichen. Der aktive Key wird nicht ersetzt.",
+    "es": "El archivo se descifrará en memoria y su huella pública se comparará con esta clave. No reemplazará la clave activa.",
+    "fr": "Le fichier sera déchiffré en mémoire et son empreinte publique comparée à cette clé. La clé active ne sera pas remplacée.",
+    "ja": "ファイルはメモリ上で復号され、その公開フィンガープリントがこのキーと比較されます。稼働中のキーが置き換わることはありません。",
+    "zh-Hans": "该文件将在内存中解密，并将其公钥指纹与此密钥比对。不会替换正在使用的密钥。",
+    "zh-Hant": "該檔案將在記憶體中解密，並將其公鑰指紋與此金鑰比對。不會取代正在使用的金鑰。"
+  },
+  "The file will be decrypted in memory, fingerprint-matched, and restored under the existing key identity so host references remain intact.": {
+    "de": "Die Datei wird im Arbeitsspeicher entschlüsselt, per Fingerabdruck abgeglichen und unter der vorhandenen Key-Identität wiederhergestellt, damit Host-Verweise erhalten bleiben.",
+    "es": "El archivo se descifrará en memoria, se comparará su huella y se restaurará bajo la identidad de clave existente para que las referencias de los hosts sigan intactas.",
+    "fr": "Le fichier sera déchiffré en mémoire, comparé par empreinte, puis restauré sous l'identité de clé existante afin que les références des hôtes restent intactes.",
+    "ja": "ファイルはメモリ上で復号され、フィンガープリントが照合されたうえで、既存のキー ID のもとに復元されます。ホストからの参照はそのまま保たれます。",
+    "zh-Hans": "该文件将在内存中解密、比对指纹，并在现有密钥身份下恢复，使主机的引用保持不变。",
+    "zh-Hant": "該檔案將在記憶體中解密、比對指紋，並在現有金鑰身分下復原，使主機的參照保持不變。"
+  },
+  "This Secure Enclave key is permanently unrecoverable after deletion.": {
+    "de": "Dieser Secure-Enclave-Key ist nach dem Löschen dauerhaft unwiederbringlich.",
+    "es": "Esta clave del Secure Enclave será irrecuperable de forma permanente tras eliminarla.",
+    "fr": "Cette clé Secure Enclave sera définitivement irrécupérable après suppression.",
+    "ja": "この Secure Enclave キーは、削除すると二度と復元できません。",
+    "zh-Hans": "此 Secure Enclave 密钥一旦删除将永久无法恢复。",
+    "zh-Hant": "此 Secure Enclave 金鑰一旦刪除將永久無法復原。"
+  },
+  "A recovery export was recorded %@. Confirm that you still possess its passphrase before deleting.": {
+    "de": "Ein Wiederherstellungsexport wurde am %@ erfasst. Vergewissere dich vor dem Löschen, dass du die Passphrase noch hast.",
+    "es": "Se registró una exportación de recuperación el %@. Confirma que aún tienes su frase de contraseña antes de eliminarla.",
+    "fr": "Un export de récupération a été enregistré le %@. Confirmez que vous disposez encore de sa phrase secrète avant de supprimer.",
+    "ja": "%@ に復元用の書き出しが記録されています。削除する前に、そのパスフレーズを今も保管しているか確認してください。",
+    "zh-Hans": "已于 %@ 记录一次恢复导出。删除前请确认你仍持有其口令。",
+    "zh-Hant": "已於 %@ 記錄一次復原匯出。刪除前請確認你仍持有其密語。"
+  },
+  "No recovery export is recorded. Deletion may be permanent.": {
+    "de": "Es ist kein Wiederherstellungsexport erfasst. Das Löschen kann endgültig sein.",
+    "es": "No hay ninguna exportación de recuperación registrada. La eliminación puede ser permanente.",
+    "fr": "Aucun export de récupération n'est enregistré. La suppression peut être définitive.",
+    "ja": "復元用の書き出しは記録されていません。削除は取り消せない可能性があります。",
+    "zh-Hans": "未记录任何恢复导出。删除可能是永久性的。",
+    "zh-Hant": "未記錄任何復原匯出。刪除可能是永久性的。"
+  },
+  "A passphrase is required.": {
+    "de": "Eine Passphrase ist erforderlich.",
+    "es": "Se requiere una frase de contraseña.",
+    "fr": "Une phrase secrète est requise.",
+    "ja": "パスフレーズが必要です。",
+    "zh-Hans": "必须输入口令。",
+    "zh-Hant": "必須輸入密語。"
+  },
+  "Use at least 8 characters.": {
+    "de": "Verwende mindestens 8 Zeichen.",
+    "es": "Usa al menos 8 caracteres.",
+    "fr": "Utilisez au moins 8 caractères.",
+    "ja": "8 文字以上にしてください。",
+    "zh-Hans": "请至少使用 8 个字符。",
+    "zh-Hant": "請至少使用 8 個字元。"
+  },
+  "Passphrases do not match.": {
+    "de": "Die Passphrasen stimmen nicht überein.",
+    "es": "Las frases de contraseña no coinciden.",
+    "fr": "Les phrases secrètes ne correspondent pas.",
+    "ja": "パスフレーズが一致しません。",
+    "zh-Hans": "两次输入的口令不一致。",
+    "zh-Hant": "兩次輸入的密語不一致。"
+  },
+  "The recovery file is empty or exceeds the 1 MB safety limit.": {
+    "de": "Die Wiederherstellungsdatei ist leer oder überschreitet das Sicherheitslimit von 1 MB.",
+    "es": "El archivo de recuperación está vacío o supera el límite de seguridad de 1 MB.",
+    "fr": "Le fichier de récupération est vide ou dépasse la limite de sécurité de 1 Mo.",
+    "ja": "復元ファイルが空か、安全上の上限である 1 MB を超えています。",
+    "zh-Hans": "恢复文件为空，或超过 1 MB 的安全上限。",
+    "zh-Hant": "復原檔案為空，或超過 1 MB 的安全上限。"
+  },
+  "The selected key file is empty or exceeds the 1 MB safety limit.": {
+    "de": "Die ausgewählte Key-Datei ist leer oder überschreitet das Sicherheitslimit von 1 MB.",
+    "es": "El archivo de clave seleccionado está vacío o supera el límite de seguridad de 1 MB.",
+    "fr": "Le fichier de clé sélectionné est vide ou dépasse la limite de sécurité de 1 Mo.",
+    "ja": "選択したキーファイルが空か、安全上の上限である 1 MB を超えています。",
+    "zh-Hans": "所选密钥文件为空，或超过 1 MB 的安全上限。",
+    "zh-Hant": "所選金鑰檔案為空，或超過 1 MB 的安全上限。"
+  },
+  "no file selected": {
+    "de": "keine Datei ausgewählt",
+    "es": "ningún archivo seleccionado",
+    "fr": "aucun fichier sélectionné",
+    "ja": "ファイルが選択されていません",
+    "zh-Hans": "未选择文件",
+    "zh-Hant": "未選擇檔案"
+  },
+  "Choose an OpenSSH private-key file first.": {
+    "de": "Wähle zuerst eine OpenSSH-Private-Key-Datei aus.",
+    "es": "Elige primero un archivo de clave privada OpenSSH.",
+    "fr": "Choisissez d'abord un fichier de clé privée OpenSSH.",
+    "ja": "先に OpenSSH の秘密鍵ファイルを選択してください。",
+    "zh-Hans": "请先选择一个 OpenSSH 私钥文件。",
+    "zh-Hant": "請先選擇一個 OpenSSH 私鑰檔案。"
+  },
+  "name is required": {
+    "de": "Name ist erforderlich",
+    "es": "el nombre es obligatorio",
+    "fr": "le nom est obligatoire",
+    "ja": "名前は必須です",
+    "zh-Hans": "名称为必填项",
+    "zh-Hant": "名稱為必填項"
+  },
+  "RSA generation is not supported": {
+    "de": "RSA-Erzeugung wird nicht unterstützt",
+    "es": "La generación de RSA no es compatible",
+    "fr": "La génération RSA n'est pas prise en charge",
+    "ja": "RSA の生成には対応していません",
+    "zh-Hans": "不支持生成 RSA 密钥",
+    "zh-Hant": "不支援產生 RSA 金鑰"
+  },
+  "fast, modern default": {
+    "de": "schneller, moderner Standard",
+    "es": "predeterminado rápido y moderno",
+    "fr": "valeur par défaut rapide et moderne",
+    "ja": "高速で現代的な既定値",
+    "zh-Hans": "快速、现代的默认选项",
+    "zh-Hant": "快速、現代的預設選項"
+  },
+  "device-bound": {
+    "de": "gerätegebunden",
+    "es": "vinculada al dispositivo",
+    "fr": "liée à l'appareil",
+    "ja": "デバイスに紐づく",
+    "zh-Hans": "绑定设备",
+    "zh-Hant": "綁定裝置"
+  },
+  "P-256 keys are generated in the Secure Enclave. They cannot be exported or moved to another device. Install a separate recoverable Ed25519 key before relying on this credential.": {
+    "de": "P-256-Keys werden in der Secure Enclave erzeugt. Sie lassen sich nicht exportieren oder auf ein anderes Gerät übertragen. Installiere einen separaten, wiederherstellbaren Ed25519-Key, bevor du dich auf diese Anmeldeinformation verlässt.",
+    "es": "Las claves P-256 se generan en el Secure Enclave. No se pueden exportar ni mover a otro dispositivo. Instala una clave Ed25519 recuperable aparte antes de depender de esta credencial.",
+    "fr": "Les clés P-256 sont générées dans la Secure Enclave. Elles ne peuvent être ni exportées ni déplacées vers un autre appareil. Installez une clé Ed25519 récupérable distincte avant de dépendre de cet identifiant.",
+    "ja": "P-256 キーは Secure Enclave 内で生成されます。書き出しや他のデバイスへの移動はできません。この資格情報に頼る前に、復元可能な Ed25519 キーを別途用意してください。",
+    "zh-Hans": "P-256 密钥在 Secure Enclave 中生成，无法导出或迁移到其他设备。在依赖此凭据之前，请另外安装一个可恢复的 Ed25519 密钥。",
+    "zh-Hant": "P-256 金鑰在 Secure Enclave 中產生，無法匯出或移轉到其他裝置。在依賴此憑證之前，請另外安裝一個可復原的 Ed25519 金鑰。"
+  },
+  "Legacy RSA installation is disabled. Generate an Ed25519 replacement and use a different working credential to install it before retiring this key.": {
+    "de": "Die Installation von Legacy-RSA ist deaktiviert. Erzeuge einen Ed25519-Ersatz und installiere ihn mit einer anderen funktionierenden Anmeldeinformation, bevor du diesen Key ausmusterst.",
+    "es": "La instalación de RSA heredado está desactivada. Genera una clave Ed25519 de reemplazo e instálala con otra credencial que funcione antes de retirar esta clave.",
+    "fr": "L'installation du RSA hérité est désactivée. Générez une clé Ed25519 de remplacement et installez-la avec un autre identifiant fonctionnel avant de retirer cette clé.",
+    "ja": "レガシー RSA のインストールは無効です。Ed25519 の代替キーを生成し、別の有効な資格情報でインストールしてから、このキーを引退させてください。",
+    "zh-Hans": "旧版 RSA 的安装已禁用。请生成一个 Ed25519 替代密钥，并使用另一个可用凭据安装它，然后再停用此密钥。",
+    "zh-Hant": "舊版 RSA 的安裝已停用。請產生一個 Ed25519 替代金鑰，並使用另一個可用憑證安裝它，然後再停用此金鑰。"
+  },
+  "Could not install key": {
+    "de": "Key konnte nicht installiert werden",
+    "es": "No se pudo instalar la clave",
+    "fr": "Impossible d'installer la clé",
+    "ja": "キーをインストールできませんでした",
+    "zh-Hans": "无法安装密钥",
+    "zh-Hant": "無法安裝金鑰"
+  },
+  "pick host": {
+    "de": "Host wählen",
+    "es": "elegir host",
+    "fr": "choisir un hôte",
+    "ja": "ホストを選択",
+    "zh-Hans": "选择主机",
+    "zh-Hant": "選擇主機"
+  },
+  "installing": {
+    "de": "installiere",
+    "es": "instalando",
+    "fr": "installation",
+    "ja": "インストール中",
+    "zh-Hans": "正在安装",
+    "zh-Hant": "正在安裝"
+  },
+  "result": {
+    "de": "Ergebnis",
+    "es": "resultado",
+    "fr": "résultat",
+    "ja": "結果",
+    "zh-Hans": "结果",
+    "zh-Hant": "結果"
+  },
+  "Authentication failed": {
+    "de": "Authentifizierung fehlgeschlagen",
+    "es": "Falló la autenticación",
+    "fr": "Échec de l'authentification",
+    "ja": "認証に失敗しました",
+    "zh-Hans": "认证失败",
+    "zh-Hant": "驗證失敗"
+  },
+  "Authentication failed.": {
+    "de": "Die Authentifizierung ist fehlgeschlagen.",
+    "es": "Falló la autenticación.",
+    "fr": "L'authentification a échoué.",
+    "ja": "認証に失敗しました。",
+    "zh-Hans": "认证失败。",
+    "zh-Hant": "驗證失敗。"
+  },
+  "Network unreachable": {
+    "de": "Netzwerk nicht erreichbar",
+    "es": "Red inalcanzable",
+    "fr": "Réseau inaccessible",
+    "ja": "ネットワークに到達できません",
+    "zh-Hans": "网络不可达",
+    "zh-Hant": "網路無法連線"
+  },
+  "The server does not accept password authentication.": {
+    "de": "Der Server akzeptiert keine Passwort-Authentifizierung.",
+    "es": "El servidor no acepta autenticación por contraseña.",
+    "fr": "Le serveur n'accepte pas l'authentification par mot de passe.",
+    "ja": "サーバーはパスワード認証を受け付けません。",
+    "zh-Hans": "服务器不接受密码认证。",
+    "zh-Hant": "伺服器不接受密碼驗證。"
+  },
+  "The server does not accept public-key authentication.": {
+    "de": "Der Server akzeptiert keine Public-Key-Authentifizierung.",
+    "es": "El servidor no acepta autenticación por clave pública.",
+    "fr": "Le serveur n'accepte pas l'authentification par clé publique.",
+    "ja": "サーバーは公開鍵認証を受け付けません。",
+    "zh-Hans": "服务器不接受公钥认证。",
+    "zh-Hant": "伺服器不接受公鑰驗證。"
+  },
+  "The server does not accept host-based authentication.": {
+    "de": "Der Server akzeptiert keine hostbasierte Authentifizierung.",
+    "es": "El servidor no acepta autenticación basada en host.",
+    "fr": "Le serveur n'accepte pas l'authentification basée sur l'hôte.",
+    "ja": "サーバーはホストベース認証を受け付けません。",
+    "zh-Hans": "服务器不接受基于主机的认证。",
+    "zh-Hant": "伺服器不接受基於主機的驗證。"
+  },
+  "Failed to open the SSH exec channel.": {
+    "de": "Der SSH-exec-Kanal konnte nicht geöffnet werden.",
+    "es": "No se pudo abrir el canal exec de SSH.",
+    "fr": "Impossible d'ouvrir le canal exec SSH.",
+    "ja": "SSH の exec チャネルを開けませんでした。",
+    "zh-Hans": "无法打开 SSH exec 通道。",
+    "zh-Hant": "無法開啟 SSH exec 通道。"
+  },
+  "The terminal session is not connected.": {
+    "de": "Die Terminalsitzung ist nicht verbunden.",
+    "es": "La sesión de terminal no está conectada.",
+    "fr": "La session de terminal n'est pas connectée.",
+    "ja": "ターミナルセッションが接続されていません。",
+    "zh-Hans": "终端会话未连接。",
+    "zh-Hant": "終端機工作階段未連線。"
+  },
+  "The actual Keychain boundary currently requires biometrics (Face ID/Touch ID) or passcode.": {
+    "de": "Die tatsächliche Schlüsselbund-Grenze verlangt derzeit Biometrie (Face ID/Touch ID) oder Code.",
+    "es": "El límite real del llavero requiere actualmente biometría (Face ID/Touch ID) o código.",
+    "fr": "La limite réelle du trousseau exige actuellement la biométrie (Face ID/Touch ID) ou le code.",
+    "ja": "現在の実際のキーチェーン境界では、生体認証（Face ID／Touch ID）またはパスコードが必要です。",
+    "zh-Hans": "当前实际的钥匙串边界要求生物识别（Face ID/触控 ID）或密码。",
+    "zh-Hant": "目前實際的鑰匙圈邊界要求生物辨識（Face ID／Touch ID）或密碼。"
+  },
+  "The actual Keychain boundary currently uses device-unlocked protection.": {
+    "de": "Die tatsächliche Schlüsselbund-Grenze nutzt derzeit den Schutz „Gerät entsperrt“.",
+    "es": "El límite real del llavero usa actualmente la protección de dispositivo desbloqueado.",
+    "fr": "La limite réelle du trousseau utilise actuellement la protection « appareil déverrouillé ».",
+    "ja": "現在の実際のキーチェーン境界では、デバイスのロック解除による保護が使われています。",
+    "zh-Hans": "当前实际的钥匙串边界使用“设备已解锁”保护。",
+    "zh-Hant": "目前實際的鑰匙圈邊界使用「裝置已解鎖」保護。"
+  },
+  "The private material is now missing from Keychain.": {
+    "de": "Das private Material fehlt jetzt im Schlüsselbund.",
+    "es": "El material privado ya no está en el llavero.",
+    "fr": "Le matériel privé est désormais absent du trousseau.",
+    "ja": "秘密情報がキーチェーンから失われています。",
+    "zh-Hans": "私有材料现已从钥匙串中丢失。",
+    "zh-Hant": "私有材料現已從鑰匙圈中遺失。"
+  },
+  "The actual Keychain boundary could not be determined.": {
+    "de": "Die tatsächliche Schlüsselbund-Grenze konnte nicht ermittelt werden.",
+    "es": "No se pudo determinar el límite real del llavero.",
+    "fr": "Impossible de déterminer la limite réelle du trousseau.",
+    "ja": "実際のキーチェーン境界を特定できませんでした。",
+    "zh-Hans": "无法确定实际的钥匙串边界。",
+    "zh-Hant": "無法確定實際的鑰匙圈邊界。"
+  },
+  "Unlock Tessera": {
+    "de": "Tessera entsperren",
+    "es": "Desbloquear Tessera",
+    "fr": "Déverrouiller Tessera",
+    "ja": "Tessera のロックを解除",
+    "zh-Hans": "解锁 Tessera",
+    "zh-Hant": "解鎖 Tessera"
+  },
+  "face id didn't match. tap to try again or use device passcode.": {
+    "de": "Face ID hat nicht übereingestimmt. Tippe zum erneuten Versuch oder nutze den Gerätecode.",
+    "es": "Face ID no coincidió. Toca para volver a intentarlo o usa el código del dispositivo.",
+    "fr": "Face ID n'a pas correspondu. Touchez pour réessayer ou utilisez le code de l'appareil.",
+    "ja": "Face ID が一致しませんでした。タップしてやり直すか、デバイスのパスコードを使用してください。",
+    "zh-Hans": "面容 ID 不匹配。轻点重试，或使用设备密码。",
+    "zh-Hant": "Face ID 不相符。輕點重試，或使用裝置密碼。"
+  },
+  "biometric authentication is unavailable. tap to use device passcode.": {
+    "de": "Biometrische Authentifizierung ist nicht verfügbar. Tippe, um den Gerätecode zu verwenden.",
+    "es": "La autenticación biométrica no está disponible. Toca para usar el código del dispositivo.",
+    "fr": "L'authentification biométrique est indisponible. Touchez pour utiliser le code de l'appareil.",
+    "ja": "生体認証を利用できません。タップしてデバイスのパスコードを使用してください。",
+    "zh-Hans": "生物识别认证不可用。轻点以使用设备密码。",
+    "zh-Hant": "生物辨識驗證無法使用。輕點以使用裝置密碼。"
+  },
+  "Speech recognition permission was denied.": {
+    "de": "Die Berechtigung für Spracherkennung wurde verweigert.",
+    "es": "Se denegó el permiso de reconocimiento de voz.",
+    "fr": "L'autorisation de reconnaissance vocale a été refusée.",
+    "ja": "音声認識の権限が拒否されました。",
+    "zh-Hans": "语音识别权限被拒绝。",
+    "zh-Hant": "語音辨識權限遭拒。"
+  },
+  "Speech recognition is restricted on this device.": {
+    "de": "Die Spracherkennung ist auf diesem Gerät eingeschränkt.",
+    "es": "El reconocimiento de voz está restringido en este dispositivo.",
+    "fr": "La reconnaissance vocale est restreinte sur cet appareil.",
+    "ja": "このデバイスでは音声認識が制限されています。",
+    "zh-Hans": "此设备上的语音识别受限。",
+    "zh-Hant": "此裝置上的語音辨識受限。"
+  },
+  "Speech recognition permission is unavailable.": {
+    "de": "Die Berechtigung für Spracherkennung ist nicht verfügbar.",
+    "es": "El permiso de reconocimiento de voz no está disponible.",
+    "fr": "L'autorisation de reconnaissance vocale est indisponible.",
+    "ja": "音声認識の権限を利用できません。",
+    "zh-Hans": "语音识别权限不可用。",
+    "zh-Hant": "語音辨識權限無法使用。"
+  },
+  "Microphone permission was denied.": {
+    "de": "Die Mikrofonberechtigung wurde verweigert.",
+    "es": "Se denegó el permiso del micrófono.",
+    "fr": "L'autorisation du microphone a été refusée.",
+    "ja": "マイクの権限が拒否されました。",
+    "zh-Hans": "麦克风权限被拒绝。",
+    "zh-Hant": "麥克風權限遭拒。"
+  },
+  "Microphone permission is unavailable.": {
+    "de": "Die Mikrofonberechtigung ist nicht verfügbar.",
+    "es": "El permiso del micrófono no está disponible.",
+    "fr": "L'autorisation du microphone est indisponible.",
+    "ja": "マイクの権限を利用できません。",
+    "zh-Hans": "麦克风权限不可用。",
+    "zh-Hant": "麥克風權限無法使用。"
+  },
+  "Old fingerprint:": {
+    "de": "Alter Fingerabdruck:",
+    "es": "Huella anterior:",
+    "fr": "Ancienne empreinte :",
+    "ja": "以前のフィンガープリント:",
+    "zh-Hans": "旧指纹：",
+    "zh-Hant": "舊指紋："
+  },
+  "Server fingerprint:": {
+    "de": "Server-Fingerabdruck:",
+    "es": "Huella del servidor:",
+    "fr": "Empreinte du serveur :",
+    "ja": "サーバーのフィンガープリント:",
+    "zh-Hans": "服务器指纹：",
+    "zh-Hant": "伺服器指紋："
+  },
+  "Key type:": {
+    "de": "Key-Typ:",
+    "es": "Tipo de clave:",
+    "fr": "Type de clé :",
+    "ja": "キーの種類:",
+    "zh-Hans": "密钥类型：",
+    "zh-Hant": "金鑰類型："
+  },
+  "current fingerprint: ": {
+    "de": "aktueller Fingerabdruck: ",
+    "es": "huella actual: ",
+    "fr": "empreinte actuelle : ",
+    "ja": "現在のフィンガープリント: ",
+    "zh-Hans": "当前指纹：",
+    "zh-Hant": "目前指紋："
+  },
+  "previous fingerprint: ": {
+    "de": "vorheriger Fingerabdruck: ",
+    "es": "huella anterior: ",
+    "fr": "empreinte précédente : ",
+    "ja": "以前のフィンガープリント: ",
+    "zh-Hans": "上一个指纹：",
+    "zh-Hant": "上一個指紋："
+  },
+  "new fingerprint: ": {
+    "de": "neuer Fingerabdruck: ",
+    "es": "huella nueva: ",
+    "fr": "nouvelle empreinte : ",
+    "ja": "新しいフィンガープリント: ",
+    "zh-Hans": "新指纹：",
+    "zh-Hant": "新指紋："
+  },
+  "parsed entries": {
+    "de": "gelesene Einträge",
+    "es": "entradas analizadas",
+    "fr": "entrées analysées",
+    "ja": "解析済みのエントリ",
+    "zh-Hans": "已解析条目",
+    "zh-Hant": "已解析項目"
+  },
+  "rejected lines": {
+    "de": "abgelehnte Zeilen",
+    "es": "líneas rechazadas",
+    "fr": "lignes rejetées",
+    "ja": "拒否された行",
+    "zh-Hans": "被拒绝的行",
+    "zh-Hant": "被拒絕的行"
+  },
+  "Import failed: %@": {
+    "de": "Import fehlgeschlagen: %@",
+    "es": "Error de importación: %@",
+    "fr": "Échec de l'import : %@",
+    "ja": "インポートに失敗しました: %@",
+    "zh-Hans": "导入失败：%@",
+    "zh-Hant": "匯入失敗：%@"
+  },
+  "Import failed: known_hosts files must be 1 MiB or smaller.": {
+    "de": "Import fehlgeschlagen: known_hosts-Dateien dürfen höchstens 1 MiB groß sein.",
+    "es": "Error de importación: los archivos known_hosts deben ocupar 1 MiB o menos.",
+    "fr": "Échec de l'import : les fichiers known_hosts doivent faire 1 Mio au maximum.",
+    "ja": "インポートに失敗しました: known_hosts ファイルは 1 MiB 以下である必要があります。",
+    "zh-Hans": "导入失败：known_hosts 文件必须不超过 1 MiB。",
+    "zh-Hant": "匯入失敗：known_hosts 檔案必須不超過 1 MiB。"
+  },
+  "Import failed: the selected file is not UTF-8 text.": {
+    "de": "Import fehlgeschlagen: die ausgewählte Datei ist kein UTF-8-Text.",
+    "es": "Error de importación: el archivo seleccionado no es texto UTF-8.",
+    "fr": "Échec de l'import : le fichier sélectionné n'est pas du texte UTF-8.",
+    "ja": "インポートに失敗しました: 選択したファイルは UTF-8 のテキストではありません。",
+    "zh-Hans": "导入失败：所选文件不是 UTF-8 文本。",
+    "zh-Hant": "匯入失敗：所選檔案不是 UTF-8 文字。"
+  },
+  "empty host field": {
+    "de": "leeres Host-Feld",
+    "es": "campo de host vacío",
+    "fr": "champ hôte vide",
+    "ja": "ホスト欄が空です",
+    "zh-Hans": "主机字段为空",
+    "zh-Hant": "主機欄位為空"
+  },
+  "invalid host field": {
+    "de": "ungültiges Host-Feld",
+    "es": "campo de host no válido",
+    "fr": "champ hôte non valide",
+    "ja": "ホスト欄が無効です",
+    "zh-Hans": "主机字段无效",
+    "zh-Hant": "主機欄位無效"
+  },
+  "invalid bracketed host and port": {
+    "de": "ungültiger Host mit Klammern und Port",
+    "es": "host entre corchetes y puerto no válidos",
+    "fr": "hôte entre crochets et port non valides",
+    "ja": "角括弧付きのホストとポートが無効です",
+    "zh-Hans": "带方括号的主机和端口无效",
+    "zh-Hant": "帶方括號的主機和連接埠無效"
+  },
+  "invalid host or port": {
+    "de": "ungültiger Host oder Port",
+    "es": "host o puerto no válidos",
+    "fr": "hôte ou port non valide",
+    "ja": "ホストまたはポートが無効です",
+    "zh-Hans": "主机或端口无效",
+    "zh-Hant": "主機或連接埠無效"
+  },
+  "hashed hosts cannot be mapped to a Tessera endpoint": {
+    "de": "gehashte Hosts lassen sich keinem Tessera-Endpunkt zuordnen",
+    "es": "los hosts con hash no se pueden asignar a un endpoint de Tessera",
+    "fr": "les hôtes hachés ne peuvent pas être associés à un point de terminaison Tessera",
+    "ja": "ハッシュ化されたホストは Tessera のエンドポイントに対応付けられません",
+    "zh-Hans": "哈希化的主机无法映射到 Tessera 端点",
+    "zh-Hant": "雜湊化的主機無法對應到 Tessera 端點"
+  },
+  "wildcard and negated hosts are not supported": {
+    "de": "Wildcard- und negierte Hosts werden nicht unterstützt",
+    "es": "no se admiten hosts con comodines ni negados",
+    "fr": "les hôtes avec caractères génériques ou négation ne sont pas pris en charge",
+    "ja": "ワイルドカードや否定形のホストには対応していません",
+    "zh-Hans": "不支持通配符主机和否定主机",
+    "zh-Hant": "不支援萬用字元主機和否定主機"
+  },
+  "expected host, key type, and public key": {
+    "de": "erwartet wurden Host, Key-Typ und Public Key",
+    "es": "se esperaban host, tipo de clave y clave pública",
+    "fr": "hôte, type de clé et clé publique attendus",
+    "ja": "ホスト、キーの種類、公開鍵が必要です",
+    "zh-Hans": "需要主机、密钥类型和公钥",
+    "zh-Hant": "需要主機、金鑰類型和公鑰"
+  },
+  "OpenSSH marker entries are not supported": {
+    "de": "OpenSSH-Marker-Einträge werden nicht unterstützt",
+    "es": "no se admiten las entradas con marcador de OpenSSH",
+    "fr": "les entrées avec marqueur OpenSSH ne sont pas prises en charge",
+    "ja": "OpenSSH のマーカー行には対応していません",
+    "zh-Hans": "不支持 OpenSSH 标记条目",
+    "zh-Hant": "不支援 OpenSSH 標記項目"
+  },
+  "invalid or unsupported OpenSSH public key": {
+    "de": "ungültiger oder nicht unterstützter OpenSSH-Public-Key",
+    "es": "clave pública OpenSSH no válida o no compatible",
+    "fr": "clé publique OpenSSH non valide ou non prise en charge",
+    "ja": "無効または未対応の OpenSSH 公開鍵です",
+    "zh-Hans": "无效或不受支持的 OpenSSH 公钥",
+    "zh-Hant": "無效或不支援的 OpenSSH 公鑰"
+  },
+  "ambiguous: multiple different keys were supplied for this endpoint": {
+    "de": "mehrdeutig: für diesen Endpunkt wurden mehrere unterschiedliche Keys angegeben",
+    "es": "ambiguo: se proporcionaron varias claves distintas para este endpoint",
+    "fr": "ambigu : plusieurs clés différentes ont été fournies pour ce point de terminaison",
+    "ja": "あいまいです: このエンドポイントに複数の異なるキーが指定されました",
+    "zh-Hans": "有歧义：为此端点提供了多个不同的密钥",
+    "zh-Hant": "有歧義：為此端點提供了多個不同的金鑰"
+  }
+}

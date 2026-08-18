@@ -142,6 +142,7 @@ struct TesseraApp: App {
     @State private var bellController: BellController
     @State private var tunnelsRegistry: TunnelsRegistry
     @State private var swipePadStore: SwipePadProfileStore
+    @State private var shortcutStore: ShortcutStore
     @State private var dictationController: SpeechDictationController
     @State private var hostBackgrounds: HostTerminalBackgroundStore
     @State private var connectionActivity: ConnectionActivityStore
@@ -184,6 +185,7 @@ struct TesseraApp: App {
                 bellController: bellController,
                 tunnelsRegistry: tunnelsRegistry,
                 swipePadStore: swipePadStore,
+                shortcutStore: shortcutStore,
                 dictationController: dictationController,
                 hostBackgrounds: hostBackgrounds,
                 connectionActivity: connectionActivity,
@@ -245,6 +247,7 @@ struct TesseraApp: App {
         _bellController = State(initialValue: BellController(appearance: appearance, appPhase: appPhase))
         _tunnelsRegistry = State(initialValue: TunnelsRegistry())
         _swipePadStore = State(initialValue: SwipePadProfileStore())
+        _shortcutStore = State(initialValue: ShortcutStore())
         _dictationController = State(initialValue: SpeechDictationController(appearance: appearance))
         _hostBackgrounds = State(initialValue: HostTerminalBackgroundStore())
         _connectionActivity = State(initialValue: ConnectionActivityStore.shared)
@@ -495,6 +498,7 @@ struct RootView: View {
     @Bindable var bellController: BellController
     @Bindable var tunnelsRegistry: TunnelsRegistry
     @Bindable var swipePadStore: SwipePadProfileStore
+    @Bindable var shortcutStore: ShortcutStore
     @Bindable var dictationController: SpeechDictationController
     @Bindable var hostBackgrounds: HostTerminalBackgroundStore
     @Bindable var connectionActivity: ConnectionActivityStore
@@ -573,6 +577,7 @@ struct RootView: View {
         .environment(bellController)
         .environment(tunnelsRegistry)
         .environment(swipePadStore)
+        .environment(shortcutStore)
         .environment(dictationController)
         .environment(hostBackgrounds)
         .environment(connectionActivity)
@@ -802,9 +807,9 @@ struct SwipePadOverflowHarnessView: View {
             Color(white: 0.08).ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("SWIPEPAD OVERFLOW HIT TEST")
+                Text(verbatim: "SWIPEPAD OVERFLOW HIT TEST")
                     .font(Typography.tesseraMono(size: 16, weight: .bold))
-                Text("more \(moreOpenCount) · sent \(lastSentBytes)")
+                Text(verbatim: "more \(moreOpenCount) · sent \(lastSentBytes)")
                     .font(Typography.tesseraMono(size: 14))
                     .accessibilityIdentifier("swipepad-overflow-outcome")
             }
@@ -1224,7 +1229,15 @@ struct FilesPanelHarnessView: View {
 
     init() {
         let controller = FilesPanelController()
-        controller.attach(bridge: MockFileBridge())
+        let bridge = MockFileBridge()
+        controller.attach(bridge: bridge)
+        // Wire the real file actions over the mock bridge so row taps stage
+        // and present for real — that's what makes Quick Look (and its size
+        // toggle) verifiable here without an SSH host.
+        controller.configureFileActions(
+            transfers: TransferQueue(bridge: bridge),
+            hostFolderName: "MockHost"
+        )
         controller.open()
         controller.terminalReportedDirectory("/home/mock/projects/dashboard")
         _controller = State(initialValue: controller)
@@ -1244,7 +1257,7 @@ struct FilesPanelHarnessView: View {
             // The harness renders the panel unconditionally (the glass
             // captures need it on screen), so `close()` is otherwise
             // invisible. Surface the state for hit-test probes.
-            Text("isOpen: \(controller.isOpen ? "true" : "false")")
+            Text(verbatim: "isOpen: \(controller.isOpen ? "true" : "false")")
                 .font(Typography.tesseraMonoFixed(size: 15, weight: .bold))
                 .foregroundStyle(.white)
                 .padding(6)
@@ -1392,11 +1405,11 @@ struct HostAccessHarnessView: View {
     /// kind of flat dark surface they cover in production.
     private var hostsBackdrop: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("hosts")
+            Text(verbatim: "hosts")
                 .font(Typography.tesseraMonoFixed(size: 22, weight: .bold))
                 .foregroundStyle(T.fg)
             ForEach(0..<max(scenario.seededHostCount, 1), id: \.self) { index in
-                Text("harness host \(index + 1)  192.0.2.\(index + 1)")
+                Text(verbatim: "harness host \(index + 1)  192.0.2.\(index + 1)")
                     .font(Typography.tesseraMonoFixed(size: 13, weight: .medium))
                     .foregroundStyle(T.fgMuted)
             }
@@ -1591,7 +1604,7 @@ struct LiveScrollVisualHarnessView: View {
                 #endif
             }
         } else {
-            Text("LIVE SCROLL HARNESS CONFIGURATION ERROR")
+            Text(verbatim: "LIVE SCROLL HARNESS CONFIGURATION ERROR")
                 .font(Typography.tesseraMonoFixed(size: 18, weight: .bold))
                 .foregroundStyle(.red)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1779,7 +1792,7 @@ private struct LiveScrollStatusProbe: View {
     @State private var foregroundProbeValue: String?
 
     var body: some View {
-        Text("scroll")
+        Text(verbatim: "scroll")
             .font(.system(size: 1))
             .foregroundStyle(Color.white.opacity(0.01))
             .frame(width: 2, height: 2)
@@ -2467,7 +2480,7 @@ struct SwipePadStatusHarnessView: View {
             Color(white: 0.08).ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("SWIPEPAD STATUS")
+                Text(verbatim: "SWIPEPAD STATUS")
                     .font(Typography.tesseraMono(size: 16, weight: .bold))
                 Text(String(describing: requestedStatus))
                     .font(Typography.tesseraMono(size: 14))
@@ -2546,9 +2559,9 @@ struct SwipePadFanHarnessView: View {
             Color(white: 0.08).ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("SWIPEPAD FAN")
+                Text(verbatim: "SWIPEPAD FAN")
                     .font(Typography.tesseraMono(size: 16, weight: .bold))
-                Text("sent \(lastSentBytes)")
+                Text(verbatim: "sent \(lastSentBytes)")
                     .font(Typography.tesseraMono(size: 14))
                     .accessibilityIdentifier("swipepad-fan-outcome")
             }
@@ -2668,9 +2681,9 @@ struct SwipePadDictationHarnessView: View {
             stripes
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("SWIPEPAD DICTATION HIT TEST")
+                Text(verbatim: "SWIPEPAD DICTATION HIT TEST")
                     .font(Typography.tesseraMono(size: 16, weight: .bold))
-                Text("outcome: \(lastOutcome)  ·  taps: \(tapCount)")
+                Text(verbatim: "outcome: \(lastOutcome)  ·  taps: \(tapCount)")
                     .font(Typography.tesseraMono(size: 14))
                     .accessibilityIdentifier("swipepad-harness-outcome")
                 Button("RESTART DICTATION") { startFakeDictation() }

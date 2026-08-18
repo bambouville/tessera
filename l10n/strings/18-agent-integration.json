@@ -1,0 +1,618 @@
+{
+  "Agent integration inactive here": {
+    "de": "Agent-Integration hier inaktiv",
+    "es": "Integración de agentes inactiva aquí",
+    "fr": "Intégration des agents inactive ici",
+    "ja": "ここではエージェント連携が無効です",
+    "zh-Hans": "此处未启用智能体集成",
+    "zh-Hant": "此處未啟用智慧體整合"
+  },
+  "Agent integration needs an update": {
+    "de": "Agent-Integration braucht ein Update",
+    "es": "La integración de agentes necesita una actualización",
+    "fr": "L'intégration des agents doit être mise à jour",
+    "ja": "エージェント連携の更新が必要です",
+    "zh-Hans": "智能体集成需要更新",
+    "zh-Hant": "智慧體整合需要更新"
+  },
+  "Agent integration not installed": {
+    "de": "Agent-Integration nicht installiert",
+    "es": "Integración de agentes no instalada",
+    "fr": "Intégration des agents non installée",
+    "ja": "エージェント連携が未インストールです",
+    "zh-Hans": "尚未安装智能体集成",
+    "zh-Hant": "尚未安裝智慧體整合"
+  },
+  "Agent integration ready": {
+    "de": "Agent-Integration bereit",
+    "es": "Integración de agentes lista",
+    "fr": "Intégration des agents prête",
+    "ja": "エージェント連携の準備ができました",
+    "zh-Hans": "智能体集成已就绪",
+    "zh-Hant": "智慧體整合已就緒"
+  },
+  "Agent lifecycle hook inactive": {
+    "de": "Agent-Lifecycle-Hook inaktiv",
+    "es": "Hook de ciclo de vida del agente inactivo",
+    "fr": "Hook de cycle de vie de l'agent inactif",
+    "ja": "エージェントのライフサイクルフックが無効です",
+    "zh-Hans": "智能体生命周期钩子未激活",
+    "zh-Hant": "智慧體生命週期掛鉤未啟用"
+  },
+  "Check agent integration": {
+    "de": "Agent-Integration prüfen",
+    "es": "Comprobar la integración de agentes",
+    "fr": "Vérifier l'intégration des agents",
+    "ja": "エージェント連携を確認",
+    "zh-Hans": "检查智能体集成",
+    "zh-Hant": "檢查智慧體整合"
+  },
+  "Checking agent integration": {
+    "de": "Agent-Integration wird geprüft",
+    "es": "Comprobando la integración de agentes",
+    "fr": "Vérification de l'intégration des agents",
+    "ja": "エージェント連携を確認中",
+    "zh-Hans": "正在检查智能体集成",
+    "zh-Hant": "正在檢查智慧體整合"
+  },
+  "Could not verify agent integration": {
+    "de": "Agent-Integration konnte nicht überprüft werden",
+    "es": "No se pudo verificar la integración de agentes",
+    "fr": "Impossible de vérifier l'intégration des agents",
+    "ja": "エージェント連携を検証できませんでした",
+    "zh-Hans": "无法验证智能体集成",
+    "zh-Hant": "無法驗證智慧體整合"
+  },
+  "Check now": {
+    "de": "Jetzt prüfen",
+    "es": "Comprobar ahora",
+    "fr": "Vérifier maintenant",
+    "ja": "今すぐ確認",
+    "zh-Hans": "立即检查",
+    "zh-Hant": "立即檢查"
+  },
+  "Integration check paused": {
+    "de": "Integrationsprüfung pausiert",
+    "es": "Comprobación de integración en pausa",
+    "fr": "Vérification de l'intégration en pause",
+    "ja": "連携チェックを一時停止しました",
+    "zh-Hans": "集成检查已暂停",
+    "zh-Hant": "整合檢查已暫停"
+  },
+  "Install agent status hook?": {
+    "de": "Agent-Status-Hook installieren?",
+    "es": "¿Instalar el hook de estado del agente?",
+    "fr": "Installer le hook d'état de l'agent ?",
+    "ja": "エージェントのステータスフックをインストールしますか？",
+    "zh-Hans": "要安装智能体状态钩子吗？",
+    "zh-Hant": "要安裝智慧體狀態掛鉤嗎？"
+  },
+  "Update agent status hook?": {
+    "de": "Agent-Status-Hook aktualisieren?",
+    "es": "¿Actualizar el hook de estado del agente?",
+    "fr": "Mettre à jour le hook d'état de l'agent ?",
+    "ja": "エージェントのステータスフックを更新しますか？",
+    "zh-Hans": "要更新智能体状态钩子吗？",
+    "zh-Hant": "要更新智慧體狀態掛鉤嗎？"
+  },
+  "Install integration": {
+    "de": "Integration installieren",
+    "es": "Instalar integración",
+    "fr": "Installer l'intégration",
+    "ja": "連携をインストール",
+    "zh-Hans": "安装集成",
+    "zh-Hant": "安裝整合"
+  },
+  "Update integration": {
+    "de": "Integration aktualisieren",
+    "es": "Actualizar integración",
+    "fr": "Mettre à jour l'intégration",
+    "ja": "連携を更新",
+    "zh-Hans": "更新集成",
+    "zh-Hant": "更新整合"
+  },
+  "Enable in this shell": {
+    "de": "In dieser Shell aktivieren",
+    "es": "Activar en este shell",
+    "fr": "Activer dans ce shell",
+    "ja": "このシェルで有効にする",
+    "zh-Hans": "在此 shell 中启用",
+    "zh-Hant": "在此 shell 中啟用"
+  },
+  "Update and enable": {
+    "de": "Aktualisieren und aktivieren",
+    "es": "Actualizar y activar",
+    "fr": "Mettre à jour et activer",
+    "ja": "更新して有効にする",
+    "zh-Hans": "更新并启用",
+    "zh-Hant": "更新並啟用"
+  },
+  "Installs Tessera's hook files now. Relaunch this running agent afterward so it can report lifecycle status.": {
+    "de": "Installiert jetzt die Hook-Dateien von Tessera. Starte den laufenden Agenten danach neu, damit er den Lifecycle-Status melden kann.",
+    "es": "Instala ahora los archivos de hook de Tessera. Reinicia después el agente en ejecución para que pueda informar del estado del ciclo de vida.",
+    "fr": "Installe maintenant les fichiers de hook de Tessera. Relancez ensuite l'agent en cours pour qu'il puisse remonter son état de cycle de vie.",
+    "ja": "Tessera のフックファイルを今すぐインストールします。その後、実行中のエージェントを再起動すると、ライフサイクル状態を報告できるようになります。",
+    "zh-Hans": "立即安装 Tessera 的钩子文件。之后请重新启动正在运行的智能体，使其能够上报生命周期状态。",
+    "zh-Hant": "立即安裝 Tessera 的掛鉤檔案。之後請重新啟動執行中的智慧體，使其能夠回報生命週期狀態。"
+  },
+  "Updates Tessera's hook files now. Relaunch this running agent afterward so it uses the new integration.": {
+    "de": "Aktualisiert jetzt die Hook-Dateien von Tessera. Starte den laufenden Agenten danach neu, damit er die neue Integration nutzt.",
+    "es": "Actualiza ahora los archivos de hook de Tessera. Reinicia después el agente en ejecución para que use la nueva integración.",
+    "fr": "Met à jour maintenant les fichiers de hook de Tessera. Relancez ensuite l'agent en cours pour qu'il utilise la nouvelle intégration.",
+    "ja": "Tessera のフックファイルを今すぐ更新します。その後、実行中のエージェントを再起動すると、新しい連携が使われます。",
+    "zh-Hans": "立即更新 Tessera 的钩子文件。之后请重新启动正在运行的智能体，使其使用新的集成。",
+    "zh-Hant": "立即更新 Tessera 的掛鉤檔案。之後請重新啟動執行中的智慧體，使其使用新的整合。"
+  },
+  "Installs Tessera's local hook files and PATH shims, then loads them here so future agents report accurate status.": {
+    "de": "Installiert die lokalen Hook-Dateien und PATH-Shims von Tessera und lädt sie hier, damit künftige Agenten korrekten Status melden.",
+    "es": "Instala los archivos de hook locales y los shims de PATH de Tessera, y los carga aquí para que los agentes futuros informen del estado con precisión.",
+    "fr": "Installe les fichiers de hook locaux et les shims de PATH de Tessera, puis les charge ici afin que les futurs agents remontent un état exact.",
+    "ja": "Tessera のローカルフックファイルと PATH シムをインストールし、ここで読み込みます。以降のエージェントは正確な状態を報告します。",
+    "zh-Hans": "安装 Tessera 的本地钩子文件和 PATH 垫片，并在此加载，使后续智能体能上报准确状态。",
+    "zh-Hant": "安裝 Tessera 的本機掛鉤檔案和 PATH 墊片，並在此載入，使後續智慧體能回報準確狀態。"
+  },
+  "Updates Tessera's local hook files and PATH shims, then loads them here so future agents report accurate status.": {
+    "de": "Aktualisiert die lokalen Hook-Dateien und PATH-Shims von Tessera und lädt sie hier, damit künftige Agenten korrekten Status melden.",
+    "es": "Actualiza los archivos de hook locales y los shims de PATH de Tessera, y los carga aquí para que los agentes futuros informen del estado con precisión.",
+    "fr": "Met à jour les fichiers de hook locaux et les shims de PATH de Tessera, puis les charge ici afin que les futurs agents remontent un état exact.",
+    "ja": "Tessera のローカルフックファイルと PATH シムを更新し、ここで読み込みます。以降のエージェントは正確な状態を報告します。",
+    "zh-Hans": "更新 Tessera 的本地钩子文件和 PATH 垫片，并在此加载，使后续智能体能上报准确状态。",
+    "zh-Hant": "更新 Tessera 的本機掛鉤檔案和 PATH 墊片，並在此載入，使後續智慧體能回報準確狀態。"
+  },
+  "Installs Tessera's local hook files. Return to a shell prompt afterward to enable this terminal.": {
+    "de": "Installiert die lokalen Hook-Dateien von Tessera. Kehre danach zu einer Shell-Eingabeaufforderung zurück, um dieses Terminal zu aktivieren.",
+    "es": "Instala los archivos de hook locales de Tessera. Vuelve después a un prompt del shell para activar este terminal.",
+    "fr": "Installe les fichiers de hook locaux de Tessera. Revenez ensuite à une invite shell pour activer ce terminal.",
+    "ja": "Tessera のローカルフックファイルをインストールします。その後シェルのプロンプトに戻ると、このターミナルが有効になります。",
+    "zh-Hans": "安装 Tessera 的本地钩子文件。之后回到 shell 提示符即可启用此终端。",
+    "zh-Hant": "安裝 Tessera 的本機掛鉤檔案。之後回到 shell 提示字元即可啟用此終端機。"
+  },
+  "Updates Tessera's local hook files. Return to a shell prompt afterward to enable this terminal.": {
+    "de": "Aktualisiert die lokalen Hook-Dateien von Tessera. Kehre danach zu einer Shell-Eingabeaufforderung zurück, um dieses Terminal zu aktivieren.",
+    "es": "Actualiza los archivos de hook locales de Tessera. Vuelve después a un prompt del shell para activar este terminal.",
+    "fr": "Met à jour les fichiers de hook locaux de Tessera. Revenez ensuite à une invite shell pour activer ce terminal.",
+    "ja": "Tessera のローカルフックファイルを更新します。その後シェルのプロンプトに戻ると、このターミナルが有効になります。",
+    "zh-Hans": "更新 Tessera 的本地钩子文件。之后回到 shell 提示符即可启用此终端。",
+    "zh-Hant": "更新 Tessera 的本機掛鉤檔案。之後回到 shell 提示字元即可啟用此終端機。"
+  },
+  "Loads Tessera's shell marker here. Enable automatically also saves the guarded activation line in this shell's startup file for future windows.": {
+    "de": "Lädt hier den Shell-Marker von Tessera. „Automatisch aktivieren“ speichert zusätzlich die abgesicherte Aktivierungszeile in der Startdatei dieser Shell für künftige Fenster.",
+    "es": "Carga aquí el marcador de shell de Tessera. Activar automáticamente también guarda la línea de activación protegida en el archivo de inicio de este shell para futuras ventanas.",
+    "fr": "Charge ici le marqueur shell de Tessera. « Activer automatiquement » enregistre aussi la ligne d'activation protégée dans le fichier de démarrage de ce shell, pour les futures fenêtres.",
+    "ja": "ここで Tessera のシェルマーカーを読み込みます。「自動的に有効化」を選ぶと、今後のウインドウのために、ガード付きの有効化行がこのシェルの起動ファイルにも保存されます。",
+    "zh-Hans": "在此加载 Tessera 的 shell 标记。选择“自动启用”还会把带保护的激活行写入该 shell 的启动文件，供以后的窗口使用。",
+    "zh-Hant": "在此載入 Tessera 的 shell 標記。選擇「自動啟用」還會把附保護的啟用行寫入該 shell 的啟動檔案，供之後的視窗使用。"
+  },
+  "Tessera preserves other shell configurations and only sources its provider shims into bash or zsh.": {
+    "de": "Tessera lässt andere Shell-Konfigurationen unangetastet und bindet seine Provider-Shims nur in bash oder zsh ein.",
+    "es": "Tessera conserva otras configuraciones de shell y solo carga sus shims de proveedor en bash o zsh.",
+    "fr": "Tessera préserve les autres configurations de shell et ne charge ses shims de fournisseur que dans bash ou zsh.",
+    "ja": "Tessera は他のシェル設定をそのまま保ち、プロバイダのシムは bash または zsh にのみ読み込みます。",
+    "zh-Hans": "Tessera 会保留其他 shell 配置，仅把其提供方垫片加载到 bash 或 zsh 中。",
+    "zh-Hant": "Tessera 會保留其他 shell 設定，僅把其提供者墊片載入到 bash 或 zsh 中。"
+  },
+  "Open bash or zsh to enable integration": {
+    "de": "Öffne bash oder zsh, um die Integration zu aktivieren",
+    "es": "Abre bash o zsh para activar la integración",
+    "fr": "Ouvrez bash ou zsh pour activer l'intégration",
+    "ja": "連携を有効にするには bash か zsh を開いてください",
+    "zh-Hans": "打开 bash 或 zsh 以启用集成",
+    "zh-Hant": "開啟 bash 或 zsh 以啟用整合"
+  },
+  "Host files may have changed, but this shell was not enabled. Recheck from an empty shell prompt.": {
+    "de": "Auf dem Host haben sich vielleicht Dateien geändert, aber diese Shell wurde nicht aktiviert. Prüfe erneut an einer leeren Shell-Eingabeaufforderung.",
+    "es": "Puede que los archivos del host hayan cambiado, pero este shell no se activó. Vuelve a comprobarlo desde un prompt de shell vacío.",
+    "fr": "Les fichiers de l'hôte ont peut-être changé, mais ce shell n'a pas été activé. Revérifiez depuis une invite shell vide.",
+    "ja": "ホスト上のファイルは変更された可能性がありますが、このシェルは有効化されていません。空のシェルプロンプトから再確認してください。",
+    "zh-Hans": "主机文件可能已更改，但此 shell 未被启用。请在空的 shell 提示符下重新检查。",
+    "zh-Hant": "主機檔案可能已變更，但此 shell 未被啟用。請在空白的 shell 提示字元下重新檢查。"
+  },
+  "This keeps future agent status accurate in Agent Center.": {
+    "de": "So bleibt der Agentenstatus im Agent Center künftig korrekt.",
+    "es": "Así el estado de los agentes se mantiene preciso en el Centro de agentes.",
+    "fr": "L'état des agents reste ainsi exact dans le Centre des agents.",
+    "ja": "これにより、Agent Center でのエージェントの状態が今後も正確になります。",
+    "zh-Hans": "这样可以让智能体中心中的状态在今后保持准确。",
+    "zh-Hant": "這樣可以讓智慧體中心的狀態在日後保持準確。"
+  },
+  "The hook files are installed, but this running agent has not reported a trusted lifecycle event. In Codex, review Tessera's hook groups with /hooks; otherwise relaunch the agent.": {
+    "de": "Die Hook-Dateien sind installiert, aber dieser laufende Agent hat noch kein vertrauenswürdiges Lifecycle-Ereignis gemeldet. Prüfe in Codex die Hook-Gruppen von Tessera mit /hooks; andernfalls starte den Agenten neu.",
+    "es": "Los archivos de hook están instalados, pero este agente en ejecución no ha informado de un evento de ciclo de vida de confianza. En Codex, revisa los grupos de hooks de Tessera con /hooks; si no, reinicia el agente.",
+    "fr": "Les fichiers de hook sont installés, mais cet agent en cours n'a signalé aucun événement de cycle de vie fiable. Dans Codex, vérifiez les groupes de hooks de Tessera avec /hooks ; sinon, relancez l'agent.",
+    "ja": "フックファイルはインストールされていますが、実行中のこのエージェントから信頼できるライフサイクルイベントが報告されていません。Codex では /hooks で Tessera のフックグループを確認し、それ以外の場合はエージェントを再起動してください。",
+    "zh-Hans": "钩子文件已安装，但正在运行的这个智能体尚未上报可信的生命周期事件。在 Codex 中可用 /hooks 查看 Tessera 的钩子分组；否则请重新启动该智能体。",
+    "zh-Hant": "掛鉤檔案已安裝，但執行中的這個智慧體尚未回報可信的生命週期事件。在 Codex 中可用 /hooks 檢視 Tessera 的掛鉤群組；否則請重新啟動該智慧體。"
+  },
+  "Reading the integration state for this terminal.": {
+    "de": "Der Integrationszustand dieses Terminals wird gelesen.",
+    "es": "Leyendo el estado de la integración para este terminal.",
+    "fr": "Lecture de l'état de l'intégration pour ce terminal.",
+    "ja": "このターミナルの連携状態を読み取っています。",
+    "zh-Hans": "正在读取此终端的集成状态。",
+    "zh-Hant": "正在讀取此終端機的整合狀態。"
+  },
+  "Tessera will recheck when the foreground program returns to its shell.": {
+    "de": "Tessera prüft erneut, sobald das Vordergrundprogramm zur Shell zurückkehrt.",
+    "es": "Tessera volverá a comprobarlo cuando el programa en primer plano regrese a su shell.",
+    "fr": "Tessera revérifiera lorsque le programme au premier plan reviendra à son shell.",
+    "ja": "フォアグラウンドのプログラムがシェルに戻ると、Tessera が再確認します。",
+    "zh-Hans": "当前台程序回到 shell 后，Tessera 会重新检查。",
+    "zh-Hant": "當前景程式回到 shell 後，Tessera 會重新檢查。"
+  },
+  "The terminal-specific check failed. Tessera will retry after the next command.": {
+    "de": "Die terminalspezifische Prüfung ist fehlgeschlagen. Tessera versucht es nach dem nächsten Befehl erneut.",
+    "es": "Falló la comprobación específica del terminal. Tessera lo reintentará después del siguiente comando.",
+    "fr": "La vérification propre au terminal a échoué. Tessera réessaiera après la prochaine commande.",
+    "ja": "ターミナル固有のチェックに失敗しました。Tessera は次のコマンドの後に再試行します。",
+    "zh-Hans": "针对该终端的检查失败。Tessera 会在下一条命令后重试。",
+    "zh-Hant": "針對該終端機的檢查失敗。Tessera 會在下一個指令後重試。"
+  },
+  "The terminal is connected, but its current pane did not become readable.": {
+    "de": "Das Terminal ist verbunden, aber sein aktueller Bereich wurde nicht lesbar.",
+    "es": "El terminal está conectado, pero su panel actual no llegó a ser legible.",
+    "fr": "Le terminal est connecté, mais son volet actuel n'est pas devenu lisible.",
+    "ja": "ターミナルは接続されていますが、現在のペインを読み取れる状態になりませんでした。",
+    "zh-Hans": "终端已连接，但其当前窗格未能变为可读。",
+    "zh-Hant": "終端機已連線，但其目前窗格未能變為可讀。"
+  },
+  "Retry the check without changing the host.": {
+    "de": "Wiederhole die Prüfung, ohne den Host zu ändern.",
+    "es": "Reintenta la comprobación sin cambiar el host.",
+    "fr": "Relancez la vérification sans modifier l'hôte.",
+    "ja": "ホストを変更せずにチェックを再試行します。",
+    "zh-Hans": "在不更改主机的情况下重试检查。",
+    "zh-Hant": "在不變更主機的情況下重試檢查。"
+  },
+  "Plain mosh needs a secondary SSH check; your key may ask to unlock.": {
+    "de": "Reines mosh braucht eine zusätzliche SSH-Prüfung; dein Key fragt eventuell nach dem Entsperren.",
+    "es": "Mosh sin tmux necesita una comprobación SSH adicional; puede que tu clave pida desbloquearse.",
+    "fr": "Le mosh simple nécessite une vérification SSH supplémentaire ; votre clé peut demander à être déverrouillée.",
+    "ja": "素の mosh には追加の SSH チェックが必要です。キーのロック解除を求められる場合があります。",
+    "zh-Hans": "纯 mosh 需要一次额外的 SSH 检查；你的密钥可能会要求解锁。",
+    "zh-Hant": "純 mosh 需要一次額外的 SSH 檢查；你的金鑰可能會要求解鎖。"
+  },
+  "check this host before installing precise status support": {
+    "de": "diesen Host prüfen, bevor die präzise Statusunterstützung installiert wird",
+    "es": "comprueba este host antes de instalar el soporte de estado preciso",
+    "fr": "vérifiez cet hôte avant d'installer la prise en charge de l'état précis",
+    "ja": "正確な状態表示を導入する前にこのホストを確認",
+    "zh-Hans": "安装精确状态支持前先检查此主机",
+    "zh-Hant": "安裝精確狀態支援前先檢查此主機"
+  },
+  "checking whether precise status support is installed on this host…": {
+    "de": "prüfe, ob die präzise Statusunterstützung auf diesem Host installiert ist…",
+    "es": "comprobando si el soporte de estado preciso está instalado en este host…",
+    "fr": "vérification de la présence de la prise en charge de l'état précis sur cet hôte…",
+    "ja": "このホストに正確な状態表示が導入されているか確認中…",
+    "zh-Hans": "正在检查此主机是否已安装精确状态支持…",
+    "zh-Hant": "正在檢查此主機是否已安裝精確狀態支援…"
+  },
+  "could not check status-hook installation on this host": {
+    "de": "die Status-Hook-Installation auf diesem Host konnte nicht geprüft werden",
+    "es": "no se pudo comprobar la instalación del hook de estado en este host",
+    "fr": "impossible de vérifier l'installation du hook d'état sur cet hôte",
+    "ja": "このホストでステータスフックのインストール状況を確認できませんでした",
+    "zh-Hans": "无法检查此主机上的状态钩子安装情况",
+    "zh-Hant": "無法檢查此主機上的狀態掛鉤安裝情況"
+  },
+  "install status hook": {
+    "de": "Status-Hook installieren",
+    "es": "instalar el hook de estado",
+    "fr": "installer le hook d'état",
+    "ja": "ステータスフックをインストール",
+    "zh-Hans": "安装状态钩子",
+    "zh-Hant": "安裝狀態掛鉤"
+  },
+  "update status hook": {
+    "de": "Status-Hook aktualisieren",
+    "es": "actualizar el hook de estado",
+    "fr": "mettre à jour le hook d'état",
+    "ja": "ステータスフックを更新",
+    "zh-Hans": "更新状态钩子",
+    "zh-Hant": "更新狀態掛鉤"
+  },
+  "status hook installed but inactive here — review Codex /hooks or relaunch the agent": {
+    "de": "Status-Hook installiert, hier aber inaktiv — prüfe Codex /hooks oder starte den Agenten neu",
+    "es": "hook de estado instalado pero inactivo aquí: revisa /hooks en Codex o reinicia el agente",
+    "fr": "hook d'état installé mais inactif ici — vérifiez /hooks dans Codex ou relancez l'agent",
+    "ja": "ステータスフックはインストール済みですが、ここでは無効です — Codex の /hooks を確認するか、エージェントを再起動してください",
+    "zh-Hans": "状态钩子已安装但在此未激活 —— 请查看 Codex 的 /hooks 或重新启动智能体",
+    "zh-Hant": "狀態掛鉤已安裝但在此未啟用 —— 請檢視 Codex 的 /hooks 或重新啟動智慧體"
+  },
+  "status hook is outdated; update it for precise state": {
+    "de": "Status-Hook ist veraltet; aktualisiere ihn für präzisen Status",
+    "es": "el hook de estado está desactualizado; actualízalo para obtener un estado preciso",
+    "fr": "le hook d'état est obsolète ; mettez-le à jour pour un état précis",
+    "ja": "ステータスフックが古くなっています。正確な状態表示のために更新してください",
+    "zh-Hans": "状态钩子已过时；请更新以获得精确状态",
+    "zh-Hant": "狀態掛鉤已過時；請更新以取得精確狀態"
+  },
+  "status hook v%lld is outdated; update to v%lld": {
+    "de": "Status-Hook v%1$lld ist veraltet; aktualisiere auf v%2$lld",
+    "es": "el hook de estado v%1$lld está desactualizado; actualiza a v%2$lld",
+    "fr": "le hook d'état v%1$lld est obsolète ; mettez à jour vers v%2$lld",
+    "ja": "ステータスフック v%1$lld は古いバージョンです。v%2$lld に更新してください",
+    "zh-Hans": "状态钩子 v%1$lld 已过时；请更新到 v%2$lld",
+    "zh-Hant": "狀態掛鉤 v%1$lld 已過時；請更新到 v%2$lld"
+  },
+  "agent found; working/idle is unavailable until its lifecycle hook is installed": {
+    "de": "Agent gefunden; „arbeitet/inaktiv“ ist erst verfügbar, wenn sein Lifecycle-Hook installiert ist",
+    "es": "agente encontrado; «trabajando/inactivo» no estará disponible hasta instalar su hook de ciclo de vida",
+    "fr": "agent détecté ; « en cours/inactif » ne sera disponible qu'une fois son hook de cycle de vie installé",
+    "ja": "エージェントを検出しました。ライフサイクルフックをインストールするまで、動作中／待機中は表示できません",
+    "zh-Hans": "已发现智能体；在安装其生命周期钩子之前无法显示“工作中/空闲”",
+    "zh-Hant": "已發現智慧體；在安裝其生命週期掛鉤之前無法顯示「執行中／閒置」"
+  },
+  "provider lifecycle hook active; waiting for its next state transition": {
+    "de": "Lifecycle-Hook des Anbieters aktiv; warte auf den nächsten Zustandswechsel",
+    "es": "hook de ciclo de vida del proveedor activo; esperando su próxima transición de estado",
+    "fr": "hook de cycle de vie du fournisseur actif ; en attente de sa prochaine transition d'état",
+    "ja": "プロバイダのライフサイクルフックは有効です。次の状態遷移を待っています",
+    "zh-Hans": "提供方的生命周期钩子已激活；正在等待其下一次状态变化",
+    "zh-Hant": "提供者的生命週期掛鉤已啟用；正在等待其下一次狀態變化"
+  },
+  "installing precise status integration…": {
+    "de": "präzise Statusintegration wird installiert…",
+    "es": "instalando la integración de estado preciso…",
+    "fr": "installation de l'intégration d'état précis…",
+    "ja": "正確な状態連携をインストール中…",
+    "zh-Hans": "正在安装精确状态集成…",
+    "zh-Hant": "正在安裝精確狀態整合…"
+  },
+  "status unavailable — open the pane": {
+    "de": "Status nicht verfügbar — öffne den Bereich",
+    "es": "estado no disponible: abre el panel",
+    "fr": "état indisponible — ouvrez le volet",
+    "ja": "状態を取得できません — ペインを開いてください",
+    "zh-Hans": "状态不可用 —— 请打开该窗格",
+    "zh-Hant": "狀態無法取得 —— 請開啟該窗格"
+  },
+  "input requested": {
+    "de": "Eingabe angefordert",
+    "es": "entrada solicitada",
+    "fr": "saisie demandée",
+    "ja": "入力を求めています",
+    "zh-Hans": "请求输入",
+    "zh-Hant": "請求輸入"
+  },
+  "prompt changed": {
+    "de": "Rückfrage geändert",
+    "es": "la pregunta cambió",
+    "fr": "invite modifiée",
+    "ja": "プロンプトが変わりました",
+    "zh-Hans": "提示已变化",
+    "zh-Hant": "提示已變更"
+  },
+  "submission failed — text may still be in the composer": {
+    "de": "Senden fehlgeschlagen — der Text steht eventuell noch im Eingabefeld",
+    "es": "el envío falló: puede que el texto siga en el redactor",
+    "fr": "échec de l'envoi — le texte est peut-être encore dans le champ de saisie",
+    "ja": "送信に失敗しました — テキストが入力欄に残っている可能性があります",
+    "zh-Hans": "提交失败 —— 文本可能仍留在输入框中",
+    "zh-Hant": "送出失敗 —— 文字可能仍留在輸入框中"
+  },
+  "submission not verified — open the pane": {
+    "de": "Senden nicht bestätigt — öffne den Bereich",
+    "es": "envío no verificado: abre el panel",
+    "fr": "envoi non vérifié — ouvrez le volet",
+    "ja": "送信を確認できませんでした — ペインを開いてください",
+    "zh-Hans": "提交未确认 —— 请打开该窗格",
+    "zh-Hant": "送出未確認 —— 請開啟該窗格"
+  },
+  "text landed but the composer did not become ready — open the pane": {
+    "de": "Der Text kam an, aber das Eingabefeld wurde nicht bereit — öffne den Bereich",
+    "es": "el texto llegó, pero el redactor no quedó listo: abre el panel",
+    "fr": "le texte est arrivé, mais le champ de saisie n'est pas devenu prêt — ouvrez le volet",
+    "ja": "テキストは届きましたが、入力欄が準備完了になりませんでした — ペインを開いてください",
+    "zh-Hans": "文本已送达，但输入框未就绪 —— 请打开该窗格",
+    "zh-Hant": "文字已送達，但輸入框未就緒 —— 請開啟該窗格"
+  },
+  "didn't land — open the pane": {
+    "de": "nicht angekommen — öffne den Bereich",
+    "es": "no llegó: abre el panel",
+    "fr": "non transmis — ouvrez le volet",
+    "ja": "届きませんでした — ペインを開いてください",
+    "zh-Hans": "未送达 —— 请打开该窗格",
+    "zh-Hant": "未送達 —— 請開啟該窗格"
+  },
+  "waiting for input": {
+    "de": "wartet auf Eingabe",
+    "es": "esperando entrada",
+    "fr": "en attente d'une saisie",
+    "ja": "入力待ち",
+    "zh-Hans": "等待输入",
+    "zh-Hant": "等待輸入"
+  },
+  "idle at prompt": {
+    "de": "wartet an der Eingabeaufforderung",
+    "es": "inactivo en el prompt",
+    "fr": "inactif à l'invite",
+    "ja": "プロンプトで待機中",
+    "zh-Hans": "在提示符处空闲",
+    "zh-Hant": "在提示字元處閒置"
+  },
+  "blocked %@": {
+    "de": "blockiert seit %@",
+    "es": "bloqueado %@",
+    "fr": "bloqué depuis %@",
+    "ja": "%@ 前からブロック中",
+    "zh-Hans": "已阻塞 %@",
+    "zh-Hant": "已阻塞 %@"
+  },
+  "running %@": {
+    "de": "läuft seit %@",
+    "es": "en marcha %@",
+    "fr": "en cours depuis %@",
+    "ja": "%@ 前から実行中",
+    "zh-Hans": "已运行 %@",
+    "zh-Hant": "已執行 %@"
+  },
+  "finished %@": {
+    "de": "fertig vor %@",
+    "es": "terminado hace %@",
+    "fr": "terminé il y a %@",
+    "ja": "%@ 前に完了",
+    "zh-Hans": "%@ 前完成",
+    "zh-Hant": "%@ 前完成"
+  },
+  "last event %@": {
+    "de": "letztes Ereignis vor %@",
+    "es": "último evento hace %@",
+    "fr": "dernier événement il y a %@",
+    "ja": "最後のイベントは %@ 前",
+    "zh-Hans": "上次事件 %@ 前",
+    "zh-Hant": "上次事件 %@ 前"
+  },
+  "quiet %@": {
+    "de": "still seit %@",
+    "es": "en silencio %@",
+    "fr": "silencieux depuis %@",
+    "ja": "%@ 前から静止",
+    "zh-Hans": "已静默 %@",
+    "zh-Hant": "已靜默 %@"
+  },
+  "message %@…": {
+    "de": "Nachricht an %@…",
+    "es": "mensaje a %@…",
+    "fr": "message à %@…",
+    "ja": "%@ にメッセージ…",
+    "zh-Hans": "给 %@ 发消息…",
+    "zh-Hant": "傳訊息給 %@…"
+  },
+  "prompt %@…": {
+    "de": "%@ etwas fragen…",
+    "es": "preguntar a %@…",
+    "fr": "demander à %@…",
+    "ja": "%@ にプロンプト…",
+    "zh-Hans": "向 %@ 提问…",
+    "zh-Hant": "向 %@ 提問…"
+  },
+  "↩ send": {
+    "de": "↩ senden",
+    "es": "↩ enviar",
+    "fr": "↩ envoyer",
+    "ja": "↩ 送信",
+    "zh-Hans": "↩ 发送",
+    "zh-Hant": "↩ 送出"
+  },
+  "↩ queue": {
+    "de": "↩ einreihen",
+    "es": "↩ poner en cola",
+    "fr": "↩ mettre en file",
+    "ja": "↩ キューに追加",
+    "zh-Hans": "↩ 加入队列",
+    "zh-Hant": "↩ 加入佇列"
+  },
+  "queue": {
+    "de": "einreihen",
+    "es": "poner en cola",
+    "fr": "mettre en file",
+    "ja": "キューに追加",
+    "zh-Hans": "加入队列",
+    "zh-Hant": "加入佇列"
+  },
+  "answer": {
+    "de": "antworten",
+    "es": "responder",
+    "fr": "répondre",
+    "ja": "回答",
+    "zh-Hans": "回答",
+    "zh-Hant": "回答"
+  },
+  "next card": {
+    "de": "nächste Karte",
+    "es": "siguiente tarjeta",
+    "fr": "carte suivante",
+    "ja": "次のカード",
+    "zh-Hans": "下一张卡片",
+    "zh-Hant": "下一張卡片"
+  },
+  "warnings": {
+    "de": "Warnungen",
+    "es": "avisos",
+    "fr": "avertissements",
+    "ja": "警告",
+    "zh-Hans": "警告",
+    "zh-Hant": "警告"
+  },
+  "creates or replaces Tessera-owned hook, launcher, readiness, shell-integration, and provider-shim files under ~/.config/tessera": {
+    "de": "erstellt oder ersetzt die Tessera-eigenen Hook-, Launcher-, Readiness-, Shell-Integrations- und Provider-Shim-Dateien unter ~/.config/tessera",
+    "es": "crea o reemplaza los archivos de hook, lanzador, readiness, integración de shell y shims de proveedor propios de Tessera en ~/.config/tessera",
+    "fr": "crée ou remplace les fichiers de hook, de lanceur, de readiness, d'intégration shell et de shim fournisseur appartenant à Tessera sous ~/.config/tessera",
+    "ja": "~/.config/tessera 配下にある Tessera 所有のフック、ランチャー、readiness、シェル連携、プロバイダシムの各ファイルを作成または置き換えます",
+    "zh-Hans": "在 ~/.config/tessera 下创建或替换 Tessera 自有的钩子、启动器、就绪检测、shell 集成和提供方垫片文件",
+    "zh-Hant": "在 ~/.config/tessera 下建立或取代 Tessera 自有的掛鉤、啟動器、就緒偵測、shell 整合和提供者墊片檔案"
+  },
+  "atomically merges only Tessera's handlers into the active Codex hooks.json and Claude settings.json, preserving unrelated settings, hooks, formatting-independent meaning, and symlink targets": {
+    "de": "führt atomar nur die Handler von Tessera in die aktive Codex-hooks.json und Claude-settings.json ein und bewahrt dabei fremde Einstellungen, Hooks, die formatunabhängige Bedeutung und Symlink-Ziele",
+    "es": "fusiona atómicamente solo los manejadores de Tessera en el hooks.json activo de Codex y el settings.json de Claude, conservando ajustes ajenos, hooks, el significado independiente del formato y los destinos de los enlaces simbólicos",
+    "fr": "fusionne de façon atomique uniquement les gestionnaires de Tessera dans le hooks.json actif de Codex et le settings.json de Claude, en préservant les réglages tiers, les hooks, le sens indépendant du formatage et les cibles des liens symboliques",
+    "ja": "Tessera のハンドラのみを、有効な Codex の hooks.json と Claude の settings.json にアトミックにマージします。無関係な設定、フック、書式に依存しない意味、シンボリックリンクの参照先はそのまま保たれます",
+    "zh-Hans": "只把 Tessera 的处理器原子性地合并进生效的 Codex hooks.json 和 Claude settings.json，同时保留无关的设置、钩子、与格式无关的语义以及符号链接目标",
+    "zh-Hant": "只把 Tessera 的處理常式原子性地合併進生效的 Codex hooks.json 和 Claude settings.json，同時保留無關的設定、掛鉤、與格式無關的語意以及符號連結目標"
+  },
+  "adds one guarded source line to each existing ~/.bashrc and ~/.zshrc; if neither exists, creates ~/.zshrc when $SHELL is zsh, otherwise ~/.bashrc": {
+    "de": "fügt jeder vorhandenen ~/.bashrc und ~/.zshrc eine abgesicherte source-Zeile hinzu; existiert keine davon, wird ~/.zshrc angelegt, wenn $SHELL zsh ist, sonst ~/.bashrc",
+    "es": "añade una línea source protegida a cada ~/.bashrc y ~/.zshrc existente; si no existe ninguna, crea ~/.zshrc cuando $SHELL es zsh y, si no, ~/.bashrc",
+    "fr": "ajoute une ligne source protégée à chaque ~/.bashrc et ~/.zshrc existant ; si aucun n'existe, crée ~/.zshrc quand $SHELL vaut zsh, sinon ~/.bashrc",
+    "ja": "既存の ~/.bashrc と ~/.zshrc それぞれにガード付きの source 行を 1 行追加します。どちらも無い場合、$SHELL が zsh なら ~/.zshrc を、そうでなければ ~/.bashrc を作成します",
+    "zh-Hans": "为每个已存在的 ~/.bashrc 和 ~/.zshrc 各添加一行带保护的 source 语句；若两者都不存在，则在 $SHELL 为 zsh 时创建 ~/.zshrc，否则创建 ~/.bashrc",
+    "zh-Hant": "為每個已存在的 ~/.bashrc 和 ~/.zshrc 各新增一行附保護的 source 敘述；若兩者都不存在，則在 $SHELL 為 zsh 時建立 ~/.zshrc，否則建立 ~/.bashrc"
+  },
+  "records the exact shells that loaded it under ~/.config/tessera/active-shells": {
+    "de": "hält unter ~/.config/tessera/active-shells fest, welche Shells es genau geladen haben",
+    "es": "registra en ~/.config/tessera/active-shells los shells exactos que lo cargaron",
+    "fr": "consigne dans ~/.config/tessera/active-shells les shells exacts qui l'ont chargé",
+    "ja": "読み込んだシェルを ~/.config/tessera/active-shells に正確に記録します",
+    "zh-Hans": "在 ~/.config/tessera/active-shells 中记录确切加载过它的 shell",
+    "zh-Hant": "在 ~/.config/tessera/active-shells 中記錄確切載入過它的 shell"
+  },
+  "prepends optional PATH shims for fast empty-composer detection while resolving the real executable from the live PATH on every launch": {
+    "de": "stellt optionale PATH-Shims voran, um ein leeres Eingabefeld schnell zu erkennen, und ermittelt bei jedem Start die echte ausführbare Datei aus dem aktuellen PATH",
+    "es": "antepone shims de PATH opcionales para detectar rápidamente un redactor vacío, resolviendo el ejecutable real desde el PATH vigente en cada arranque",
+    "fr": "ajoute en tête des shims de PATH facultatifs pour détecter rapidement un champ de saisie vide, tout en résolvant le véritable exécutable depuis le PATH en vigueur à chaque lancement",
+    "ja": "入力欄が空かどうかを素早く判定するために、任意の PATH シムを先頭に追加します。実際の実行ファイルは起動のたびに現在の PATH から解決されます",
+    "zh-Hans": "在 PATH 前置可选垫片以快速检测空输入框，同时每次启动都从当前 PATH 解析真实可执行文件",
+    "zh-Hant": "在 PATH 前置選用墊片以快速偵測空輸入框，同時每次啟動都從目前 PATH 解析真實執行檔"
+  },
+  "leaves every Claude/Codex alias and user-defined function unchanged, including added flags, command/env forms, renamed shortcuts, and version-manager PATH changes": {
+    "de": "lässt jeden Claude-/Codex-Alias und jede selbst definierte Funktion unverändert, einschließlich hinzugefügter Flags, command-/env-Formen, umbenannter Kürzel und PATH-Änderungen von Versionsmanagern",
+    "es": "deja intactos todos los alias de Claude/Codex y las funciones definidas por el usuario, incluidos los flags añadidos, las formas command/env, los atajos renombrados y los cambios de PATH de los gestores de versiones",
+    "fr": "laisse inchangés tous les alias Claude/Codex et les fonctions définies par l'utilisateur, y compris les options ajoutées, les formes command/env, les raccourcis renommés et les modifications de PATH des gestionnaires de versions",
+    "ja": "Claude/Codex のエイリアスとユーザー定義関数はすべてそのままにします。追加されたフラグ、command/env 形式、名前を変えたショートカット、バージョン管理ツールによる PATH の変更も変更しません",
+    "zh-Hans": "保持所有 Claude/Codex 别名和用户自定义函数不变，包括附加的参数、command/env 形式、重命名的快捷方式以及版本管理器对 PATH 的修改",
+    "zh-Hant": "保持所有 Claude/Codex 別名和使用者自訂函式不變，包括附加的參數、command/env 形式、重新命名的捷徑以及版本管理器對 PATH 的修改"
+  },
+  "native provider hooks remain authoritative for launches that bypass the shims, including absolute executable paths, as long as they use the same provider config scope": {
+    "de": "die nativen Provider-Hooks bleiben maßgeblich für Starts, die die Shims umgehen — auch bei absoluten Pfaden zur ausführbaren Datei —, solange sie denselben Provider-Konfigurationsbereich verwenden",
+    "es": "los hooks nativos del proveedor siguen siendo la referencia para los arranques que evitan los shims, incluidas las rutas absolutas al ejecutable, siempre que usen el mismo ámbito de configuración del proveedor",
+    "fr": "les hooks natifs du fournisseur restent la référence pour les lancements qui contournent les shims, y compris les chemins absolus vers l'exécutable, tant qu'ils utilisent la même portée de configuration du fournisseur",
+    "ja": "シムを経由しない起動（実行ファイルの絶対パス指定を含む）でも、同じプロバイダ設定スコープを使う限り、プロバイダのネイティブフックが引き続き正となります",
+    "zh-Hans": "对于绕过垫片的启动（包括使用可执行文件绝对路径的情况），只要使用相同的提供方配置作用域，提供方的原生钩子仍然是权威来源",
+    "zh-Hant": "對於繞過墊片的啟動（包括使用執行檔絕對路徑的情況），只要使用相同的提供者設定範圍，提供者的原生掛鉤仍然是權威來源"
+  },
+  "never changes ~/.codex/config.toml and never injects a competing Claude --settings flag": {
+    "de": "ändert nie ~/.codex/config.toml und schleust nie ein konkurrierendes Claude-Flag --settings ein",
+    "es": "nunca modifica ~/.codex/config.toml ni inyecta un flag --settings de Claude que compita con el tuyo",
+    "fr": "ne modifie jamais ~/.codex/config.toml et n'injecte jamais d'option --settings concurrente pour Claude",
+    "ja": "~/.codex/config.toml を変更することはなく、競合する Claude の --settings フラグを注入することもありません",
+    "zh-Hans": "从不修改 ~/.codex/config.toml，也从不注入相冲突的 Claude --settings 参数",
+    "zh-Hant": "從不修改 ~/.codex/config.toml，也從不注入相衝突的 Claude --settings 參數"
+  },
+  "sets tmux pane options for shell activation and latest agent state, and writes a private OSC status frame to the owning terminal": {
+    "de": "setzt tmux-Bereichsoptionen für die Shell-Aktivierung und den letzten Agentenstatus und schreibt einen privaten OSC-Statusframe an das zugehörige Terminal",
+    "es": "define opciones de panel de tmux para la activación del shell y el último estado del agente, y escribe un frame de estado OSC privado en el terminal propietario",
+    "fr": "définit des options de volet tmux pour l'activation du shell et le dernier état de l'agent, et écrit une trame d'état OSC privée dans le terminal propriétaire",
+    "ja": "シェルの有効化と最新のエージェント状態のために tmux のペインオプションを設定し、所有するターミナルへプライベートな OSC ステータスフレームを書き込みます",
+    "zh-Hans": "为 shell 激活和最新的智能体状态设置 tmux 窗格选项，并向所属终端写入一个私有的 OSC 状态帧",
+    "zh-Hant": "為 shell 啟用和最新的智慧體狀態設定 tmux 窗格選項，並向所屬終端機寫入一個私有的 OSC 狀態訊框"
+  },
+  "emits only provider, lifecycle event, state, reason, timestamp, and local process ID — never prompts, responses, source code, credentials, or API traffic": {
+    "de": "gibt nur Anbieter, Lifecycle-Ereignis, Zustand, Grund, Zeitstempel und lokale Prozess-ID aus — niemals Prompts, Antworten, Quellcode, Anmeldedaten oder API-Traffic",
+    "es": "emite solo el proveedor, el evento de ciclo de vida, el estado, el motivo, la marca de tiempo y el ID de proceso local: nunca prompts, respuestas, código fuente, credenciales ni tráfico de API",
+    "fr": "n'émet que le fournisseur, l'événement de cycle de vie, l'état, la raison, l'horodatage et l'identifiant de processus local — jamais les prompts, les réponses, le code source, les identifiants ni le trafic d'API",
+    "ja": "送信するのはプロバイダ、ライフサイクルイベント、状態、理由、タイムスタンプ、ローカルのプロセス ID だけです。プロンプト、応答、ソースコード、認証情報、API 通信を送ることはありません",
+    "zh-Hans": "只发送提供方、生命周期事件、状态、原因、时间戳和本地进程 ID —— 绝不发送提示词、响应、源代码、凭据或 API 流量",
+    "zh-Hant": "只傳送提供者、生命週期事件、狀態、原因、時間戳記和本機處理程序 ID —— 絕不傳送提示詞、回應、原始碼、憑證或 API 流量"
+  }
+}

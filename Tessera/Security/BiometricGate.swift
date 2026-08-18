@@ -52,11 +52,17 @@ enum BiometricGate {
     /// in-progress system sheet.
     static func evaluateForKeyUse(reason: String) async -> BiometricAuthorizationResult {
         let evaluation = BiometricEvaluation(reason: reason)
-        return await withTaskCancellationHandler {
+        // A Face ID sheet with passcode fallback sits inside the SSH connect
+        // path; without this the handshake budget charges the user's own
+        // deliberation and can cancel the sheet out from under them.
+        await SSHHandshakePromptGate.begin()
+        let result = await withTaskCancellationHandler {
             await evaluation.run()
         } onCancel: {
             evaluation.cancel()
         }
+        await SSHHandshakePromptGate.end()
+        return result
     }
 
     fileprivate static func map(
@@ -98,7 +104,10 @@ private final class BiometricEvaluation: @unchecked Sendable {
             return BiometricGate.map(
                 error: error,
                 fallback: .unavailable(
-                    reason: "Device owner authentication is unavailable."
+                    reason: String(
+                        localized: "Device owner authentication is unavailable.",
+                        comment: "Face ID / passcode cannot be used on this device"
+                    )
                 )
             )
         }
@@ -109,13 +118,13 @@ private final class BiometricEvaluation: @unchecked Sendable {
                 localizedReason: reason
             )
             guard authenticated else {
-                return .failed(reason: "Authentication failed.")
+                return .failed(reason: String(localized: "Authentication failed."))
             }
             return .authenticated(BiometricAuthorization(context: context))
         } catch {
             return BiometricGate.map(
                 error: error,
-                fallback: .failed(reason: "Authentication failed.")
+                fallback: .failed(reason: String(localized: "Authentication failed."))
             )
         }
     }

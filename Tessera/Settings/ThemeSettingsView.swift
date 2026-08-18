@@ -95,7 +95,7 @@ struct ThemeSettingsView: View {
         }
     }
 
-    private func backgroundModeButton(usesImage: Bool, label: String) -> some View {
+    private func backgroundModeButton(usesImage: Bool, label: LocalizedStringKey) -> some View {
         let isSelected = appearance.terminalBackgroundUsesImage == usesImage
         return Btn(
             style: isSelected ? .primary : .default,
@@ -112,11 +112,11 @@ struct ThemeSettingsView: View {
 
         return VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("$ ls -la")
+                Text(verbatim: "$ ls -la")
                     .foregroundStyle(theme.fg)
-                Text("drwxr-xr-x  projects/")
+                Text(verbatim: "drwxr-xr-x  projects/")
                     .foregroundStyle(theme.accent)
-                Text("-rw-r--r--  readme.md")
+                Text(verbatim: "-rw-r--r--  readme.md")
                     .foregroundStyle(theme.fg.opacity(0.6))
             }
             .font(Typography.tesseraMono(size: 11))
@@ -134,7 +134,8 @@ struct ThemeSettingsView: View {
                             .stroke(T.border, lineWidth: 1)
                     )
 
-                Text(theme.name)
+                // Theme names are product names — never translated.
+                Text(verbatim: theme.name)
                     .font(Typography.tesseraMono(size: 12))
                     .foregroundStyle(T.fg)
 

@@ -1,0 +1,10 @@
+{
+  "tmux is attached but the screen has not painted — press any key to wake it": {
+    "de": "tmux ist angehängt, aber der Bildschirm wurde noch nicht gezeichnet – drücke eine beliebige Taste, um ihn aufzuwecken",
+    "es": "tmux está conectado, pero la pantalla sigue sin pintarse: pulsa cualquier tecla para despertarla",
+    "fr": "tmux est attaché, mais l'écran ne s'est pas affiché — appuyez sur n'importe quelle touche pour le réveiller",
+    "ja": "tmux はアタッチ済みですが、画面が描画されていません — 任意のキーを押して表示させてください",
+    "zh-Hans": "tmux 已接入，但屏幕尚未绘制 —— 按任意键将其唤醒",
+    "zh-Hant": "tmux 已接入，但畫面尚未繪製 —— 按任意鍵將其喚醒"
+  }
+}

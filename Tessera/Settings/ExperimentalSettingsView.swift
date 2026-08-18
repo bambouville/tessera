@@ -49,7 +49,7 @@ struct ExperimentalSettingsView: View {
                 }
             }
 
-            Text(agentNotificationCoordinationText)
+            Text(verbatim: agentNotificationCoordinationText)
                 .font(Typography.tesseraMono(size: 10))
                 .foregroundStyle(
                     appearance.bellNotificationEnabled ? T.amber : T.fgDim
@@ -75,10 +75,10 @@ struct ExperimentalSettingsView: View {
             ) {
                 SegmentedStringPicker(
                     options: [
-                        ("topLeft", "topLeft"),
-                        ("topRight", "topRight"),
-                        ("bottomLeft", "bottomLeft"),
-                        ("bottomRight", "bottomRight")
+                        ("topLeft", "top left"),
+                        ("topRight", "top right"),
+                        ("bottomLeft", "bottom left"),
+                        ("bottomRight", "bottom right")
                     ],
                     selection: $appearance.swipePadCorner,
                     columns: UIDevice.current.userInterfaceIdiom == .phone ? 2 : nil
@@ -163,7 +163,7 @@ struct ExperimentalSettingsView: View {
         }
         .sheet(isPresented: $showNotificationDenialSheet) {
             NotificationPermissionDenialSheet(
-                detail: "Tessera can't notify you when an off-screen agent finishes or needs input while the app is backgrounded. Turn notifications on in Settings, then come back."
+                detail: String(localized: "Tessera can't notify you when an off-screen agent finishes or needs input while the app is backgrounded. Turn notifications on in Settings, then come back.")
             )
         }
         .task {
@@ -176,9 +176,9 @@ struct ExperimentalSettingsView: View {
 
     private var agentNotificationCoordinationText: String {
         if appearance.bellNotificationEnabled {
-            return "Terminal-bell background notifications are also enabled by your override. They can duplicate alerts and are less precise because any program can ring BEL. Without a notification server, completions after iPadOS suspends Tessera are recovered when you return."
+            return String(localized: "Terminal-bell background notifications are also enabled by your override. They can duplicate alerts and are less precise because any program can ring BEL. Without a notification server, completions after iPadOS suspends Tessera are recovered when you return.")
         }
-        return "Enabling precise agent alerts automatically turns off terminal-bell background notifications once. You can override that later under Terminal. Without a notification server, completions after iPadOS suspends Tessera are recovered when you return."
+        return String(localized: "Enabling precise agent alerts automatically turns off terminal-bell background notifications once. You can override that later under Terminal. Without a notification server, completions after iPadOS suspends Tessera are recovered when you return.")
     }
 
     private func requestAgentNotificationPermission() {
@@ -212,7 +212,7 @@ struct ExperimentalSettingsView: View {
         Button {
             let profile = SwipePadProfile(
                 id: UUID(),
-                name: "new profile",
+                name: String(localized: "new profile"),
                 matchProcess: "",
                 bindings: [:],
                 isBuiltIn: false
@@ -239,7 +239,7 @@ struct ExperimentalSettingsView: View {
         SpeechDictationController.isOnDeviceAvailable
     }
 
-    private var dictationSubtitle: String {
+    private var dictationSubtitle: LocalizedStringKey {
         if isOnDeviceDictationAvailable {
             return "SFSpeechRecognizer · no audio leaves the device · english"
         }
@@ -279,21 +279,21 @@ private struct GestureVocabularyCard: View {
                 glyph: "↗",
                 title: "tap, hold & drag",
                 subtitle: "opens the radial · drag to a direction and release to fire that macro · release in the dead-zone to cancel",
-                tag: "MACRO"
+                tag: "macro"
             )
             Divider().background(T.border)
             GestureVocabularyRow(
                 glyph: "··",
                 title: "double tap",
                 subtitle: "starts on-device dictation · puck morphs into a live waveform · tap again or pause to commit",
-                tag: "DICTATION"
+                tag: "dictation"
             )
             Divider().background(T.border)
             GestureVocabularyRow(
                 glyph: "⊕",
                 title: "long press",
                 subtitle: "picks up the puck for relocation · drag to any spot and release · snaps to nearest edge",
-                tag: "MOVE"
+                tag: "move"
             )
         }
         .background(T.panelBg)
@@ -306,16 +306,18 @@ private struct GestureVocabularyCard: View {
 }
 
 private struct GestureVocabularyRow: View {
+    /// The glyph is a typographic mark; the tag names what the gesture does,
+    /// so it reads in the reader's language.
     let glyph: String
-    let title: String
-    let subtitle: String
-    let tag: String
+    let title: LocalizedStringKey
+    let subtitle: LocalizedStringKey
+    let tag: LocalizedStringKey
 
     @Environment(\.designTokens) private var T
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            Text(glyph)
+            Text(verbatim: glyph)
                 .font(Typography.tesseraMono(size: glyph == "··" ? 11 : 13, weight: .semibold))
                 .foregroundStyle(T.accent)
                 .frame(width: 28, height: 28)
@@ -336,6 +338,7 @@ private struct GestureVocabularyRow: View {
 
             Text(tag)
                 .font(Typography.tesseraMono(size: 10, weight: .medium))
+                .textCase(.uppercase)
                 .foregroundStyle(T.accent)
                 .tracking(0.5)
         }
@@ -347,7 +350,7 @@ private struct GestureVocabularyRow: View {
 // MARK: - Segmented string picker
 
 private struct SegmentedStringPicker: View {
-    let options: [(value: String, label: String)]
+    let options: [(value: String, label: LocalizedStringResource)]
     @Binding var selection: String
     var columns: Int? = nil
 
@@ -386,7 +389,7 @@ private struct SegmentedStringPicker: View {
         }
     }
 
-    private func segment(_ label: String, value: String) -> some View {
+    private func segment(_ label: LocalizedStringResource, value: String) -> some View {
         let active = selection == value
         return Button {
             selection = value
@@ -506,7 +509,7 @@ private struct ProfileRow: View {
                             }
                         }
 
-                        Text(matchText)
+                        Text(verbatim: matchText)
                             .font(Typography.tesseraMono(size: 10.5))
                             .foregroundStyle(T.fgDim)
                     }
@@ -546,13 +549,13 @@ private struct ProfileRow: View {
 
     private var matchText: String {
         if profile.matchProcess.isEmpty {
-            return "catch-all · used whenever no profile above matches the foreground process. all directions unbound by default — bind any to use the puck outside an agent prompt."
+            return String(localized: "catch-all · used whenever no profile above matches the foreground process. all directions unbound by default — bind any to use the puck outside an agent prompt.")
         }
         if profile.matchProcess.hasPrefix("regex:") {
             let pattern = String(profile.matchProcess.dropFirst(6))
-            return "match: process matches regex /\(pattern)/"
+            return String(localized: "match: process matches regex /\(pattern)/")
         }
-        return "match: process \(profile.matchProcess)"
+        return String(localized: "match: process \(profile.matchProcess)")
     }
 }
 
@@ -623,7 +626,7 @@ private struct CustomAgentRuleEditor: View {
     }
 
     private func profileField(
-        _ placeholder: String,
+        _ placeholder: LocalizedStringKey,
         keyPath: WritableKeyPath<SwipePadProfile, String>
     ) -> some View {
         TextField(
@@ -641,7 +644,7 @@ private struct CustomAgentRuleEditor: View {
     }
 
     private func ruleField(
-        _ placeholder: String,
+        _ placeholder: LocalizedStringKey,
         value: String,
         update: @escaping (String) -> Void
     ) -> some View {
@@ -651,7 +654,7 @@ private struct CustomAgentRuleEditor: View {
     }
 
     private func compactRuleField(
-        _ placeholder: String,
+        _ placeholder: LocalizedStringKey,
         value: String,
         update: @escaping (String) -> Void
     ) -> some View {
@@ -723,10 +726,12 @@ private struct BindingCell: View {
                     )
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(binding.isBound ? direction.roleName : "not bound")
+                    Text(binding.isBound ? direction.roleName : String(localized: "not bound"))
                         .font(Typography.tesseraMono(size: 12, weight: .medium))
                         .foregroundStyle(binding.isBound ? T.fg : T.fgMuted)
-                    Text(binding.isBound ? "drag \(direction.rawValue)" : "drag \(direction.rawValue) · petal hidden until set")
+                    Text(binding.isBound
+                         ? String(localized: "drag \(direction.rawValue)")
+                         : String(localized: "drag \(direction.rawValue) · petal hidden until set"))
                         .font(Typography.tesseraMono(size: 10))
                         .foregroundStyle(T.fgFaint)
                         .tracking(0.5)
@@ -780,10 +785,10 @@ private extension SwipeDirection {
 
     var roleName: String {
         switch self {
-        case .left:  return "deny"
-        case .right: return "approve"
-        case .up:    return "always allow"
-        case .down:  return "custom macro"
+        case .left:  return String(localized: "deny")
+        case .right: return String(localized: "approve")
+        case .up:    return String(localized: "always allow")
+        case .down:  return String(localized: "custom macro")
         }
     }
 }

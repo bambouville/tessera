@@ -1,0 +1,250 @@
+{
+  "Imported %lld hosts, %lld jump routes, and %lld trusted host keys.": {
+    "de": {
+      "value": "%#@hosts@, %#@routes@ und %#@keys@ importiert.",
+      "subs": {
+        "hosts": { "argNum": 1, "one": "%lld Host", "other": "%lld Hosts" },
+        "routes": { "argNum": 2, "one": "%lld Jump-Route", "other": "%lld Jump-Routen" },
+        "keys": { "argNum": 3, "one": "%lld vertrauenswürdigen Host-Key", "other": "%lld vertrauenswürdige Host-Keys" }
+      }
+    },
+    "es": {
+      "value": "Se importaron %#@hosts@, %#@routes@ y %#@keys@.",
+      "subs": {
+        "hosts": { "argNum": 1, "one": "%lld host", "other": "%lld hosts" },
+        "routes": { "argNum": 2, "one": "%lld ruta de salto", "other": "%lld rutas de salto" },
+        "keys": { "argNum": 3, "one": "%lld clave de host de confianza", "other": "%lld claves de host de confianza" }
+      }
+    },
+    "fr": {
+      "value": "%#@hosts@, %#@routes@ et %#@keys@ importés.",
+      "subs": {
+        "hosts": { "argNum": 1, "one": "%lld hôte", "other": "%lld hôtes" },
+        "routes": { "argNum": 2, "one": "%lld route de rebond", "other": "%lld routes de rebond" },
+        "keys": { "argNum": 3, "one": "%lld clé d'hôte de confiance", "other": "%lld clés d'hôte de confiance" }
+      }
+    },
+    "ja": {
+      "value": "%#@hosts@、%#@routes@、%#@keys@ を読み込みました。",
+      "subs": {
+        "hosts": { "argNum": 1, "other": "%lld 台のホスト" },
+        "routes": { "argNum": 2, "other": "%lld 件の踏み台ルート" },
+        "keys": { "argNum": 3, "other": "%lld 件の信頼済みホストキー" }
+      }
+    },
+    "zh-Hans": {
+      "value": "已导入 %#@hosts@、%#@routes@和 %#@keys@。",
+      "subs": {
+        "hosts": { "argNum": 1, "other": "%lld 台主机" },
+        "routes": { "argNum": 2, "other": "%lld 条跳板路由" },
+        "keys": { "argNum": 3, "other": "%lld 个受信任主机密钥" }
+      }
+    },
+    "zh-Hant": {
+      "value": "已輸入 %#@hosts@、%#@routes@和 %#@keys@。",
+      "subs": {
+        "hosts": { "argNum": 1, "other": "%lld 台主機" },
+        "routes": { "argNum": 2, "other": "%lld 條跳板路由" },
+        "keys": { "argNum": 3, "other": "%lld 個受信任主機金鑰" }
+      }
+    }
+  },
+  "Local references: %lld identities and %lld hosts. They will be detached before deletion.": {
+    "de": {
+      "value": "Lokale Verweise: %#@identities@ und %#@hosts@. Sie werden vor dem Löschen getrennt.",
+      "subs": {
+        "identities": { "argNum": 1, "one": "%lld Identität", "other": "%lld Identitäten" },
+        "hosts": { "argNum": 2, "one": "%lld Host", "other": "%lld Hosts" }
+      }
+    },
+    "es": {
+      "value": "Referencias locales: %#@identities@ y %#@hosts@. Se desvincularán antes de eliminar.",
+      "subs": {
+        "identities": { "argNum": 1, "one": "%lld identidad", "other": "%lld identidades" },
+        "hosts": { "argNum": 2, "one": "%lld host", "other": "%lld hosts" }
+      }
+    },
+    "fr": {
+      "value": "Références locales : %#@identities@ et %#@hosts@. Elles seront détachées avant la suppression.",
+      "subs": {
+        "identities": { "argNum": 1, "one": "%lld identité", "other": "%lld identités" },
+        "hosts": { "argNum": 2, "one": "%lld hôte", "other": "%lld hôtes" }
+      }
+    },
+    "ja": {
+      "value": "ローカルの参照: %#@identities@、%#@hosts@。削除前に関連付けを解除します。",
+      "subs": {
+        "identities": { "argNum": 1, "other": "%lld 件の識別情報" },
+        "hosts": { "argNum": 2, "other": "%lld 台のホスト" }
+      }
+    },
+    "zh-Hans": {
+      "value": "本地引用：%#@identities@和 %#@hosts@。删除前会先解除关联。",
+      "subs": {
+        "identities": { "argNum": 1, "other": "%lld 个身份" },
+        "hosts": { "argNum": 2, "other": "%lld 台主机" }
+      }
+    },
+    "zh-Hant": {
+      "value": "本機參照：%#@identities@和 %#@hosts@。刪除前會先解除關聯。",
+      "subs": {
+        "identities": { "argNum": 1, "other": "%lld 個身分" },
+        "hosts": { "argNum": 2, "other": "%lld 台主機" }
+      }
+    }
+  },
+  "%lld windows · %lld agents · %lld sessions": {
+    "de": {
+      "value": "%#@windows@ · %#@agents@ · %#@sessions@",
+      "subs": {
+        "windows": { "argNum": 1, "one": "%lld Fenster", "other": "%lld Fenster" },
+        "agents": { "argNum": 2, "one": "%lld Agent", "other": "%lld Agenten" },
+        "sessions": { "argNum": 3, "one": "%lld Sitzung", "other": "%lld Sitzungen" }
+      }
+    },
+    "es": {
+      "value": "%#@windows@ · %#@agents@ · %#@sessions@",
+      "subs": {
+        "windows": { "argNum": 1, "one": "%lld ventana", "other": "%lld ventanas" },
+        "agents": { "argNum": 2, "one": "%lld agente", "other": "%lld agentes" },
+        "sessions": { "argNum": 3, "one": "%lld sesión", "other": "%lld sesiones" }
+      }
+    },
+    "fr": {
+      "value": "%#@windows@ · %#@agents@ · %#@sessions@",
+      "subs": {
+        "windows": { "argNum": 1, "one": "%lld fenêtre", "other": "%lld fenêtres" },
+        "agents": { "argNum": 2, "one": "%lld agent", "other": "%lld agents" },
+        "sessions": { "argNum": 3, "one": "%lld session", "other": "%lld sessions" }
+      }
+    },
+    "ja": {
+      "value": "%#@windows@ · %#@agents@ · %#@sessions@",
+      "subs": {
+        "windows": { "argNum": 1, "other": "%lld ウインドウ" },
+        "agents": { "argNum": 2, "other": "%lld エージェント" },
+        "sessions": { "argNum": 3, "other": "%lld セッション" }
+      }
+    },
+    "zh-Hans": {
+      "value": "%#@windows@ · %#@agents@ · %#@sessions@",
+      "subs": {
+        "windows": { "argNum": 1, "other": "%lld 个窗口" },
+        "agents": { "argNum": 2, "other": "%lld 个智能体" },
+        "sessions": { "argNum": 3, "other": "%lld 个会话" }
+      }
+    },
+    "zh-Hant": {
+      "value": "%#@windows@ · %#@agents@ · %#@sessions@",
+      "subs": {
+        "windows": { "argNum": 1, "other": "%lld 個視窗" },
+        "agents": { "argNum": 2, "other": "%lld 個智慧體" },
+        "sessions": { "argNum": 3, "other": "%lld 個工作階段" }
+      }
+    }
+  },
+  "Bootstrap manifest is %lld bytes; maximum is %lld.": {
+    "de": {
+      "value": "Das Bootstrap-Manifest hat %#@size@; das Maximum liegt bei %2$lld.",
+      "subs": { "size": { "argNum": 1, "one": "%lld Byte", "other": "%lld Bytes" } }
+    },
+    "es": {
+      "value": "El manifiesto del bootstrap ocupa %#@size@; el máximo es %2$lld.",
+      "subs": { "size": { "argNum": 1, "one": "%lld byte", "other": "%lld bytes" } }
+    },
+    "fr": {
+      "value": "Le manifeste du bootstrap fait %#@size@ ; le maximum est de %2$lld.",
+      "subs": { "size": { "argNum": 1, "one": "%lld octet", "other": "%lld octets" } }
+    },
+    "ja": {
+      "value": "ブートストラップマニフェストは %#@size@ です。上限は %2$lld バイトです。",
+      "subs": { "size": { "argNum": 1, "other": "%lld バイト" } }
+    },
+    "zh-Hans": {
+      "value": "引导清单为 %#@size@，上限为 %2$lld 字节。",
+      "subs": { "size": { "argNum": 1, "other": "%lld 字节" } }
+    },
+    "zh-Hant": {
+      "value": "啟動清單為 %#@size@，上限為 %2$lld 位元組。",
+      "subs": { "size": { "argNum": 1, "other": "%lld 位元組" } }
+    }
+  },
+  "Continuation descriptor is %lld bytes; the limit is %lld.": {
+    "de": {
+      "value": "Der Fortsetzungsdeskriptor hat %#@size@; das Limit liegt bei %2$lld.",
+      "subs": { "size": { "argNum": 1, "one": "%lld Byte", "other": "%lld Bytes" } }
+    },
+    "es": {
+      "value": "El descriptor de continuación ocupa %#@size@; el límite es %2$lld.",
+      "subs": { "size": { "argNum": 1, "one": "%lld byte", "other": "%lld bytes" } }
+    },
+    "fr": {
+      "value": "Le descripteur de reprise fait %#@size@ ; la limite est de %2$lld.",
+      "subs": { "size": { "argNum": 1, "one": "%lld octet", "other": "%lld octets" } }
+    },
+    "ja": {
+      "value": "継続ディスクリプタは %#@size@ です。上限は %2$lld バイトです。",
+      "subs": { "size": { "argNum": 1, "other": "%lld バイト" } }
+    },
+    "zh-Hans": {
+      "value": "继续描述符为 %#@size@，上限为 %2$lld 字节。",
+      "subs": { "size": { "argNum": 1, "other": "%lld 字节" } }
+    },
+    "zh-Hant": {
+      "value": "繼續描述元為 %#@size@，上限為 %2$lld 位元組。",
+      "subs": { "size": { "argNum": 1, "other": "%lld 位元組" } }
+    }
+  },
+  "tmux window %lld of %lld, %@, %lld panes": {
+    "de": {
+      "value": "tmux-Fenster %1$lld von %2$lld, %3$@, %#@panes@",
+      "subs": { "panes": { "argNum": 4, "one": "%lld Bereich", "other": "%lld Bereiche" } }
+    },
+    "es": {
+      "value": "ventana de tmux %1$lld de %2$lld, %3$@, %#@panes@",
+      "subs": { "panes": { "argNum": 4, "one": "%lld panel", "other": "%lld paneles" } }
+    },
+    "fr": {
+      "value": "fenêtre tmux %1$lld sur %2$lld, %3$@, %#@panes@",
+      "subs": { "panes": { "argNum": 4, "one": "%lld volet", "other": "%lld volets" } }
+    },
+    "ja": {
+      "value": "tmux ウインドウ %2$lld 個中 %1$lld 番目、%3$@、%#@panes@",
+      "subs": { "panes": { "argNum": 4, "other": "%lld 個のペイン" } }
+    },
+    "zh-Hans": {
+      "value": "tmux 窗口，第 %1$lld 个，共 %2$lld 个，%3$@，%#@panes@",
+      "subs": { "panes": { "argNum": 4, "other": "%lld 个窗格" } }
+    },
+    "zh-Hant": {
+      "value": "tmux 視窗，第 %1$lld 個，共 %2$lld 個，%3$@，%#@panes@",
+      "subs": { "panes": { "argNum": 4, "other": "%lld 個窗格" } }
+    }
+  },
+  "tmux window %lld of %lld, %@, %lld panes, current": {
+    "de": {
+      "value": "tmux-Fenster %1$lld von %2$lld, %3$@, %#@panes@, aktuell",
+      "subs": { "panes": { "argNum": 4, "one": "%lld Bereich", "other": "%lld Bereiche" } }
+    },
+    "es": {
+      "value": "ventana de tmux %1$lld de %2$lld, %3$@, %#@panes@, actual",
+      "subs": { "panes": { "argNum": 4, "one": "%lld panel", "other": "%lld paneles" } }
+    },
+    "fr": {
+      "value": "fenêtre tmux %1$lld sur %2$lld, %3$@, %#@panes@, actuelle",
+      "subs": { "panes": { "argNum": 4, "one": "%lld volet", "other": "%lld volets" } }
+    },
+    "ja": {
+      "value": "tmux ウインドウ %2$lld 個中 %1$lld 番目、%3$@、%#@panes@、現在",
+      "subs": { "panes": { "argNum": 4, "other": "%lld 個のペイン" } }
+    },
+    "zh-Hans": {
+      "value": "tmux 窗口，第 %1$lld 个，共 %2$lld 个，%3$@，%#@panes@，当前",
+      "subs": { "panes": { "argNum": 4, "other": "%lld 个窗格" } }
+    },
+    "zh-Hant": {
+      "value": "tmux 視窗，第 %1$lld 個，共 %2$lld 個，%3$@，%#@panes@，目前",
+      "subs": { "panes": { "argNum": 4, "other": "%lld 個窗格" } }
+    }
+  }
+}

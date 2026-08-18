@@ -132,29 +132,32 @@ struct SessionActivityDescriptor: Codable, Equatable, Sendable {
         var errorDescription: String? {
             switch self {
             case .unsupportedSchemaVersion(let version):
-                return "Unsupported continuation schema version \(version)."
+                return String(localized: "Unsupported continuation schema version \(version).")
             case .invalidPort(let port):
-                return "Continuation endpoint has invalid port \(port)."
+                return String(localized: "Continuation endpoint has invalid port \(port).")
             case .emptyConnectionKey:
-                return "Continuation endpoint has an empty connection key."
+                return String(localized: "Continuation endpoint has an empty connection key.")
             case .invalidHostKeyFingerprint:
-                return "Continuation endpoint has an empty host-key fingerprint."
+                return String(localized: "Continuation endpoint has an empty host-key fingerprint.")
             case .brokenJumpChain(let reason):
-                return "Continuation route is unavailable: \(reason)"
+                return String(localized: "Continuation route is unavailable: \(reason)")
             case .duplicateRouteHostID(let id):
-                return "Continuation route repeats host \(id.uuidString)."
+                return String(localized: "Continuation route repeats host \(id.uuidString).")
             case .tooManyViaEndpoints(let count):
-                return "Continuation route contains \(count) jump hosts."
+                return String(
+                    localized: "Continuation route contains \(count) jump hosts.",
+                    comment: "Continuity validation error. Pluralized on the jump-host count."
+                )
             case .missingTmuxSessionName:
-                return "A tmux continuation requires its resolved session name."
+                return String(localized: "A tmux continuation requires its resolved session name.")
             case .invalidTmuxSessionName:
-                return "The continuation tmux session name contains unsafe characters."
+                return String(localized: "The continuation tmux session name contains unsafe characters.")
             case .unexpectedTmuxSessionName:
-                return "A plain reconnect cannot advertise a tmux session."
+                return String(localized: "A plain reconnect cannot advertise a tmux session.")
             case .connectionKeyMismatch:
-                return "Continuation connection key does not match its endpoint route."
+                return String(localized: "Continuation connection key does not match its endpoint route.")
             case .exceedsHandoffBudget(let actual, let maximum):
-                return "Continuation descriptor is \(actual) bytes; the limit is \(maximum)."
+                return String(localized: "Continuation descriptor is \(actual) bytes; the limit is \(maximum).")
             }
         }
     }
@@ -445,8 +448,10 @@ enum ContinuationAction: String, Codable, Equatable, Sendable {
 
     var label: String {
         switch self {
-        case .continueSession: "Continue"
-        case .reconnect: "Reconnect"
+        case .continueSession:
+            String(localized: "Continue", comment: "Continuation action name")
+        case .reconnect:
+            String(localized: "Reconnect", comment: "Continuation action name")
         }
     }
 }

@@ -85,6 +85,35 @@ struct TerminalSettingsView: View {
                 .padding(.bottom, 24)
             }
 
+            // §agent scroll lock — opt out of the working-agent scroll freeze
+            // per provider. Detection, cards, and attention notifications are
+            // untouched; only the frozen viewport goes away.
+            SettingsH("agent scroll lock")
+                .padding(.top, 6)
+
+            Text("hold the terminal still while an agent is working, so streaming output stays put. requires agent center.")
+                .font(Typography.tesseraMono(size: 11))
+                .foregroundStyle(T.fgDim)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 14)
+
+            ToggleRow(
+                title: "claude code",
+                subtitle: "freeze scrolling while claude code is working",
+                isOn: $appearance.agentScrollLockClaudeCodeEnabled
+            )
+            .disabled(!appearance.agentCenterEnabled)
+            .padding(.bottom, 12)
+
+            ToggleRow(
+                title: "codex",
+                subtitle: "freeze scrolling while codex is working",
+                isOn: $appearance.agentScrollLockCodexEnabled
+            )
+            .disabled(!appearance.agentCenterEnabled)
+            .padding(.bottom, 24)
+
             SettingsH("startup")
                 .padding(.top, 6)
 
@@ -166,7 +195,7 @@ struct TerminalSettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .sheet(isPresented: $showDenialSheet) {
             NotificationPermissionDenialSheet(
-                detail: "Tessera can't send terminal-bell banners while iOS notifications are off. Turn notifications on in Settings, then come back."
+                detail: String(localized: "Tessera can't send terminal-bell banners while iOS notifications are off. Turn notifications on in Settings, then come back.")
             )
         }
         .task {
@@ -194,7 +223,7 @@ struct TerminalSettingsView: View {
         )
     }
 
-    private var startupPolicyDescription: String {
+    private var startupPolicyDescription: LocalizedStringKey {
         switch appearance.sessionRestorePolicy {
         case .ask:
             return "ask before reopening saved-host sessions on fresh launch"
@@ -210,7 +239,7 @@ struct TerminalSettingsView: View {
     /// are also fixed (white text on black bg) instead of following T tokens.
     private var cursorPreview: some View {
         HStack(alignment: .center, spacing: 0) {
-            Text("$ echo hello")
+            Text(verbatim: "$ echo hello")
                 .font(Typography.tesseraMono(size: appearance.fontSize))
                 .foregroundStyle(.white.opacity(0.85))
 
@@ -237,7 +266,7 @@ struct TerminalSettingsView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Text(style.rawValue)
+            Text(style.displayName)
                 .font(Typography.tesseraMono(size: 12))
                 .foregroundStyle(selected ? T.accent : T.fgMuted)
                 .padding(.vertical, 8)
@@ -259,7 +288,7 @@ struct TerminalSettingsView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Text(policy.rawValue)
+            Text(policy.displayName)
                 .font(Typography.tesseraMono(size: 12))
                 .foregroundStyle(selected ? T.accent : T.fgMuted)
                 .padding(.vertical, 8)
@@ -333,6 +362,7 @@ private struct BlinkingCursor: View {
 /// Sends them straight to Settings.app for tessera so they can flip
 /// it back on without hunting through the menu tree.
 struct NotificationPermissionDenialSheet: View {
+    /// Already resolved by the caller — each surface explains its own feature.
     let detail: String
 
     @Environment(\.dismiss) private var dismiss
@@ -344,7 +374,7 @@ struct NotificationPermissionDenialSheet: View {
                 .font(Typography.sheetTitle)
                 .foregroundStyle(T.fg)
 
-            Text(detail)
+            Text(verbatim: detail)
                 .font(Typography.tesseraMono(size: 13))
                 .foregroundStyle(T.fgMuted)
                 .fixedSize(horizontal: false, vertical: true)

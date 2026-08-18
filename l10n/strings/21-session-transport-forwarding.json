@@ -1,0 +1,610 @@
+{
+  "%@ — continue session": {
+    "de": "%@ — Sitzung fortsetzen",
+    "es": "%@ — continuar la sesión",
+    "fr": "%@ — poursuivre la session",
+    "ja": "%@ — セッションを続ける",
+    "zh-Hans": "%@ —— 继续会话",
+    "zh-Hant": "%@ —— 繼續工作階段"
+  },
+  "%@ — reconnect": {
+    "de": "%@ — neu verbinden",
+    "es": "%@ — volver a conectar",
+    "fr": "%@ — se reconnecter",
+    "ja": "%@ — 再接続",
+    "zh-Hans": "%@ —— 重新连接",
+    "zh-Hant": "%@ —— 重新連線"
+  },
+  "continued on another %@": {
+    "de": "auf einem anderen %@ fortgesetzt",
+    "es": "continuado en otro %@",
+    "fr": "poursuivi sur un autre %@",
+    "ja": "別の %@ で続行中",
+    "zh-Hans": "已在另一台 %@ 上继续",
+    "zh-Hant": "已在另一台 %@ 上繼續"
+  },
+  "your other device": {
+    "de": "dein anderes Gerät",
+    "es": "tu otro dispositivo",
+    "fr": "votre autre appareil",
+    "ja": "もう一方のデバイス",
+    "zh-Hans": "你的另一台设备",
+    "zh-Hant": "你的另一台裝置"
+  },
+  "A saved host already uses this continuation identifier but does not match its endpoint. Review that host before reconnecting.": {
+    "de": "Ein gesicherter Host verwendet diese Fortsetzungs-Kennung bereits, passt aber nicht zu ihrem Endpunkt. Prüfe diesen Host, bevor du dich neu verbindest.",
+    "es": "Un host guardado ya usa este identificador de continuación, pero no coincide con su endpoint. Revísalo antes de volver a conectar.",
+    "fr": "Un hôte enregistré utilise déjà cet identifiant de continuation mais ne correspond pas à son point de terminaison. Vérifiez cet hôte avant de vous reconnecter.",
+    "ja": "保存済みのホストがこの継続 ID をすでに使用していますが、エンドポイントが一致しません。再接続する前にそのホストを確認してください。",
+    "zh-Hans": "已有一台已保存的主机在使用该接续标识符，但其端点并不匹配。请先检查该主机再重新连接。",
+    "zh-Hant": "已有一台已儲存的主機在使用該接續識別碼，但其端點並不相符。請先檢查該主機再重新連線。"
+  },
+  "The matching saved host disappeared before the continuation could start.": {
+    "de": "Der passende gesicherte Host ist verschwunden, bevor die Fortsetzung starten konnte.",
+    "es": "El host guardado correspondiente desapareció antes de que pudiera iniciarse la continuación.",
+    "fr": "L'hôte enregistré correspondant a disparu avant que la continuation puisse démarrer.",
+    "ja": "継続を開始する前に、該当する保存済みホストが失われました。",
+    "zh-Hans": "在接续开始之前，匹配的已保存主机已消失。",
+    "zh-Hant": "在接續開始之前，相符的已儲存主機已消失。"
+  },
+  "Finish the current continuation before opening another.": {
+    "de": "Schließe die aktuelle Fortsetzung ab, bevor du eine weitere öffnest.",
+    "es": "Termina la continuación actual antes de abrir otra.",
+    "fr": "Terminez la continuation en cours avant d'en ouvrir une autre.",
+    "ja": "別の継続を開く前に、現在の継続を完了してください。",
+    "zh-Hans": "请先完成当前的接续，再开始下一个。",
+    "zh-Hant": "請先完成目前的接續，再開始下一個。"
+  },
+  "Finish the current host setup, then try Handoff again.": {
+    "de": "Schließe die aktuelle Host-Einrichtung ab und versuche Handoff dann erneut.",
+    "es": "Termina la configuración del host actual y vuelve a intentar Handoff.",
+    "fr": "Terminez la configuration de l'hôte en cours, puis réessayez Handoff.",
+    "ja": "現在のホスト設定を完了してから、もう一度 Handoff を試してください。",
+    "zh-Hans": "请先完成当前主机的设置，然后再试一次接力。",
+    "zh-Hant": "請先完成目前主機的設定，然後再試一次 Handoff。"
+  },
+  "Authentication or transport setup failed. Review this device's credential and try again.": {
+    "de": "Authentifizierung oder Transportaufbau ist fehlgeschlagen. Prüfe die Anmeldeinformation dieses Geräts und versuche es erneut.",
+    "es": "Falló la autenticación o la configuración del transporte. Revisa la credencial de este dispositivo e inténtalo de nuevo.",
+    "fr": "L'authentification ou la mise en place du transport a échoué. Vérifiez l'identifiant de cet appareil et réessayez.",
+    "ja": "認証またはトランスポートの確立に失敗しました。このデバイスの資格情報を確認して、もう一度お試しください。",
+    "zh-Hans": "认证或传输建立失败。请检查本设备的凭据后重试。",
+    "zh-Hant": "驗證或傳輸建立失敗。請檢查本裝置的憑證後重試。"
+  },
+  "Enter a password or authorize this device from your other device.": {
+    "de": "Gib ein Passwort ein oder autorisiere dieses Gerät von deinem anderen Gerät aus.",
+    "es": "Introduce una contraseña o autoriza este dispositivo desde tu otro dispositivo.",
+    "fr": "Saisissez un mot de passe ou autorisez cet appareil depuis votre autre appareil.",
+    "ja": "パスワードを入力するか、もう一方のデバイスからこのデバイスを承認してください。",
+    "zh-Hans": "请输入密码，或从你的另一台设备授权本设备。",
+    "zh-Hant": "請輸入密碼，或從你的另一台裝置授權本裝置。"
+  },
+  "Enter a password or choose a key before connecting.": {
+    "de": "Gib vor dem Verbinden ein Passwort ein oder wähle einen Key.",
+    "es": "Introduce una contraseña o elige una clave antes de conectar.",
+    "fr": "Saisissez un mot de passe ou choisissez une clé avant de vous connecter.",
+    "ja": "接続する前にパスワードを入力するか、キーを選択してください。",
+    "zh-Hans": "连接前请输入密码或选择一个密钥。",
+    "zh-Hant": "連線前請輸入密碼或選擇一個金鑰。"
+  },
+  "Enter a password for every unconfigured jump host.": {
+    "de": "Gib für jeden nicht konfigurierten Jump-Host ein Passwort ein.",
+    "es": "Introduce una contraseña para cada host de salto sin configurar.",
+    "fr": "Saisissez un mot de passe pour chaque hôte de rebond non configuré.",
+    "ja": "未設定の踏み台ホストごとにパスワードを入力してください。",
+    "zh-Hans": "请为每台未配置的跳板主机输入密码。",
+    "zh-Hant": "請為每台未設定的跳板主機輸入密碼。"
+  },
+  "A configured jump host no longer exists.": {
+    "de": "Ein konfigurierter Jump-Host existiert nicht mehr.",
+    "es": "Un host de salto configurado ya no existe.",
+    "fr": "Un hôte de rebond configuré n'existe plus.",
+    "ja": "設定済みの踏み台ホストが存在しなくなりました。",
+    "zh-Hans": "已配置的某台跳板主机不再存在。",
+    "zh-Hant": "已設定的某台跳板主機不再存在。"
+  },
+  "A saved jump host has different connection details. Tessera did not change it.": {
+    "de": "Ein gesicherter Jump-Host hat andere Verbindungsdaten. Tessera hat ihn nicht geändert.",
+    "es": "Un host de salto guardado tiene otros datos de conexión. Tessera no lo modificó.",
+    "fr": "Un hôte de rebond enregistré a d'autres informations de connexion. Tessera ne l'a pas modifié.",
+    "ja": "保存済みの踏み台ホストの接続情報が異なります。Tessera は変更していません。",
+    "zh-Hans": "某台已保存的跳板主机连接信息不同。Tessera 未做修改。",
+    "zh-Hant": "某台已儲存的跳板主機連線資訊不同。Tessera 未做修改。"
+  },
+  "The saved jump host %@ has different connection details. Tessera did not change it.": {
+    "de": "Der gesicherte Jump-Host %@ hat andere Verbindungsdaten. Tessera hat ihn nicht geändert.",
+    "es": "El host de salto guardado %@ tiene otros datos de conexión. Tessera no lo modificó.",
+    "fr": "L'hôte de rebond enregistré %@ a d'autres informations de connexion. Tessera ne l'a pas modifié.",
+    "ja": "保存済みの踏み台ホスト %@ の接続情報が異なります。Tessera は変更していません。",
+    "zh-Hans": "已保存的跳板主机 %@ 连接信息不同。Tessera 未做修改。",
+    "zh-Hant": "已儲存的跳板主機 %@ 連線資訊不同。Tessera 未做修改。"
+  },
+  "A saved jump route differs from the other device. Tessera did not reroute it.": {
+    "de": "Eine gesicherte Jump-Route weicht von der des anderen Geräts ab. Tessera hat sie nicht umgeleitet.",
+    "es": "Una ruta de salto guardada difiere de la del otro dispositivo. Tessera no la redirigió.",
+    "fr": "Un itinéraire de rebond enregistré diffère de celui de l'autre appareil. Tessera ne l'a pas modifié.",
+    "ja": "保存済みの踏み台経路が、もう一方のデバイスのものと異なります。Tessera は経路を変更していません。",
+    "zh-Hans": "某条已保存的跳转路径与另一台设备上的不同。Tessera 未重新路由。",
+    "zh-Hant": "某條已儲存的跳轉路徑與另一台裝置上的不同。Tessera 未重新路由。"
+  },
+  "The saved jump route for %@ differs from the other device. Tessera did not reroute it.": {
+    "de": "Die gesicherte Jump-Route für %@ weicht von der des anderen Geräts ab. Tessera hat sie nicht umgeleitet.",
+    "es": "La ruta de salto guardada para %@ difiere de la del otro dispositivo. Tessera no la redirigió.",
+    "fr": "L'itinéraire de rebond enregistré pour %@ diffère de celui de l'autre appareil. Tessera ne l'a pas modifié.",
+    "ja": "%@ の保存済み踏み台経路が、もう一方のデバイスのものと異なります。Tessera は経路を変更していません。",
+    "zh-Hans": "%@ 的已保存跳转路径与另一台设备上的不同。Tessera 未重新路由。",
+    "zh-Hant": "%@ 的已儲存跳轉路徑與另一台裝置上的不同。Tessera 未重新路由。"
+  },
+  "Could not read the jump-host configuration.": {
+    "de": "Die Jump-Host-Konfiguration konnte nicht gelesen werden.",
+    "es": "No se pudo leer la configuración del host de salto.",
+    "fr": "Impossible de lire la configuration de l'hôte de rebond.",
+    "ja": "踏み台ホストの設定を読み取れませんでした。",
+    "zh-Hans": "无法读取跳板主机配置。",
+    "zh-Hant": "無法讀取跳板主機設定。"
+  },
+  "Jump chain contains a cycle.": {
+    "de": "Die Jump-Kette enthält einen Zyklus.",
+    "es": "La cadena de saltos contiene un ciclo.",
+    "fr": "La chaîne de rebonds contient un cycle.",
+    "ja": "踏み台チェーンに循環があります。",
+    "zh-Hans": "跳板链中存在环路。",
+    "zh-Hant": "跳板鏈中存在環路。"
+  },
+  "The jump-host chain could not be resolved.": {
+    "de": "Die Jump-Host-Kette konnte nicht aufgelöst werden.",
+    "es": "No se pudo resolver la cadena de hosts de salto.",
+    "fr": "Impossible de résoudre la chaîne d'hôtes de rebond.",
+    "ja": "踏み台ホストのチェーンを解決できませんでした。",
+    "zh-Hans": "无法解析跳板主机链。",
+    "zh-Hant": "無法解析跳板主機鏈。"
+  },
+  "the jump chain could not be resolved.": {
+    "de": "Die Jump-Kette konnte nicht aufgelöst werden.",
+    "es": "no se pudo resolver la cadena de saltos.",
+    "fr": "impossible de résoudre la chaîne de rebonds.",
+    "ja": "踏み台チェーンを解決できませんでした。",
+    "zh-Hans": "无法解析跳板链。",
+    "zh-Hant": "無法解析跳板鏈。"
+  },
+  "path: %@": {
+    "de": "Pfad: %@",
+    "es": "ruta: %@",
+    "fr": "chemin : %@",
+    "ja": "経路: %@",
+    "zh-Hans": "路径：%@",
+    "zh-Hant": "路徑：%@"
+  },
+  "path: %@ (the jump host's own jump host extends the chain)": {
+    "de": "Pfad: %@ (der eigene Jump-Host des Jump-Hosts verlängert die Kette)",
+    "es": "ruta: %@ (el propio host de salto del host de salto alarga la cadena)",
+    "fr": "chemin : %@ (l'hôte de rebond de l'hôte de rebond prolonge la chaîne)",
+    "ja": "経路: %@（踏み台ホスト自身の踏み台がチェーンを延長します）",
+    "zh-Hans": "路径：%@（跳板主机自身的跳板会延长这条链）",
+    "zh-Hant": "路徑：%@（跳板主機自身的跳板會延長這條鏈）"
+  },
+  "connect through another saved host (SSH bastion / ProxyJump).": {
+    "de": "über einen anderen gesicherten Host verbinden (SSH-Bastion / ProxyJump).",
+    "es": "conectar a través de otro host guardado (bastión SSH / ProxyJump).",
+    "fr": "se connecter via un autre hôte enregistré (bastion SSH / ProxyJump).",
+    "ja": "別の保存済みホスト経由で接続します（SSH の踏み台 / ProxyJump）。",
+    "zh-Hans": "通过另一台已保存的主机连接（SSH 堡垒机 / ProxyJump）。",
+    "zh-Hant": "透過另一台已儲存的主機連線（SSH 堡壘機 / ProxyJump）。"
+  },
+  "mosh UDP cannot traverse bastions — if the mosh server is unreachable the session falls back to SSH.": {
+    "de": "mosh-UDP kann Bastionen nicht durchqueren — ist der mosh-Server nicht erreichbar, fällt die Sitzung auf SSH zurück.",
+    "es": "el UDP de mosh no puede atravesar bastiones — si el servidor mosh es inalcanzable, la sesión recurre a SSH.",
+    "fr": "l'UDP de mosh ne peut pas traverser les bastions — si le serveur mosh est injoignable, la session bascule sur SSH.",
+    "ja": "mosh の UDP は踏み台を越えられません。mosh サーバーに到達できない場合、セッションは SSH にフォールバックします。",
+    "zh-Hans": "mosh 的 UDP 无法穿过堡垒机 —— 若 mosh 服务器不可达，会话会回退到 SSH。",
+    "zh-Hant": "mosh 的 UDP 無法穿過堡壘機 —— 若 mosh 伺服器無法連線，工作階段會回退到 SSH。"
+  },
+  "mosh is unreachable through the jump chain — UDP cannot traverse SSH bastions. Reconnecting over SSH…": {
+    "de": "mosh ist über die Jump-Kette nicht erreichbar — UDP kann SSH-Bastionen nicht durchqueren. Verbindung wird über SSH neu aufgebaut …",
+    "es": "mosh es inalcanzable a través de la cadena de saltos — el UDP no puede atravesar bastiones SSH. Reconectando por SSH…",
+    "fr": "mosh est injoignable via la chaîne de rebonds — l'UDP ne peut pas traverser les bastions SSH. Reconnexion en SSH…",
+    "ja": "踏み台チェーン越しでは mosh に到達できません。UDP は SSH の踏み台を越えられないためです。SSH で再接続しています…",
+    "zh-Hans": "经跳板链无法访问 mosh —— UDP 无法穿过 SSH 堡垒机。正在改用 SSH 重新连接…",
+    "zh-Hant": "經跳板鏈無法存取 mosh —— UDP 無法穿過 SSH 堡壘機。正在改用 SSH 重新連線…"
+  },
+  "⚠ %@ connections fail until this is fixed.": {
+    "de": "⚠ %@-Verbindungen schlagen fehl, bis das behoben ist.",
+    "es": "⚠ las conexiones %@ fallarán hasta que se corrija.",
+    "fr": "⚠ les connexions %@ échouent tant que ce n'est pas corrigé.",
+    "ja": "⚠ これが解決するまで %@ の接続は失敗します。",
+    "zh-Hans": "⚠ 在此问题解决前，%@ 连接都会失败。",
+    "zh-Hant": "⚠ 在此問題解決前，%@ 連線都會失敗。"
+  },
+  "Could not start mosh: the host accepted the SSH connection but never opened the command channel (15 s). It may be overloaded or limiting sessions.": {
+    "de": "mosh konnte nicht gestartet werden: Der Host hat die SSH-Verbindung angenommen, aber nie den Befehlskanal geöffnet (15 s). Er ist vielleicht überlastet oder begrenzt Sitzungen.",
+    "es": "No se pudo iniciar mosh: el host aceptó la conexión SSH pero nunca abrió el canal de comandos (15 s). Puede estar sobrecargado o limitando sesiones.",
+    "fr": "Impossible de démarrer mosh : l'hôte a accepté la connexion SSH mais n'a jamais ouvert le canal de commande (15 s). Il est peut-être surchargé ou limite les sessions.",
+    "ja": "mosh を起動できませんでした: ホストは SSH 接続を受け入れましたが、コマンドチャネルを開きませんでした（15 秒）。負荷が高いか、セッション数が制限されている可能性があります。",
+    "zh-Hans": "无法启动 mosh：主机接受了 SSH 连接，但始终没有打开命令通道（15 秒）。它可能负载过高或限制了会话数。",
+    "zh-Hant": "無法啟動 mosh：主機接受了 SSH 連線，但始終沒有開啟命令通道（15 秒）。它可能負載過高或限制了工作階段數。"
+  },
+  "The remote mosh-server PID was unavailable, so Tessera did not start a second login command automatically.": {
+    "de": "Die PID des entfernten mosh-server war nicht verfügbar, daher hat Tessera keinen zweiten Login-Befehl automatisch gestartet.",
+    "es": "El PID del mosh-server remoto no estaba disponible, así que Tessera no inició automáticamente un segundo comando de inicio de sesión.",
+    "fr": "Le PID du mosh-server distant était indisponible, Tessera n'a donc pas lancé automatiquement une seconde commande de connexion.",
+    "ja": "リモートの mosh-server の PID を取得できなかったため、Tessera は 2 つ目のログインコマンドを自動的に開始しませんでした。",
+    "zh-Hans": "无法获取远程 mosh-server 的 PID，因此 Tessera 没有自动启动第二条登录命令。",
+    "zh-Hant": "無法取得遠端 mosh-server 的 PID，因此 Tessera 沒有自動啟動第二條登入指令。"
+  },
+  "Mosh session key is unavailable.": {
+    "de": "Der mosh-Sitzungsschlüssel ist nicht verfügbar.",
+    "es": "La clave de sesión de mosh no está disponible.",
+    "fr": "La clé de session mosh est indisponible.",
+    "ja": "mosh のセッションキーを利用できません。",
+    "zh-Hans": "mosh 会话密钥不可用。",
+    "zh-Hant": "mosh 工作階段金鑰無法使用。"
+  },
+  "The remote session disconnected before it was ready.": {
+    "de": "Die entfernte Sitzung wurde getrennt, bevor sie bereit war.",
+    "es": "La sesión remota se desconectó antes de estar lista.",
+    "fr": "La session distante s'est déconnectée avant d'être prête.",
+    "ja": "リモートセッションは準備が整う前に切断されました。",
+    "zh-Hans": "远程会话在就绪之前就已断开。",
+    "zh-Hant": "遠端工作階段在就緒之前就已中斷。"
+  },
+  "Remote exit monitor finished without an exit marker.": {
+    "de": "Die Überwachung der Gegenstelle endete ohne Exit-Marker.",
+    "es": "El monitor de salida remoto terminó sin marcador de salida.",
+    "fr": "Le moniteur de sortie distant s'est terminé sans marqueur de sortie.",
+    "ja": "リモートの終了監視が、終了マーカーなしで終わりました。",
+    "zh-Hans": "远程退出监视器结束时没有退出标记。",
+    "zh-Hant": "遠端結束監視器結束時沒有結束標記。"
+  },
+  "Tessera could not create the requested session.": {
+    "de": "Tessera konnte die angeforderte Sitzung nicht erstellen.",
+    "es": "Tessera no pudo crear la sesión solicitada.",
+    "fr": "Tessera n'a pas pu créer la session demandée.",
+    "ja": "Tessera は要求されたセッションを作成できませんでした。",
+    "zh-Hans": "Tessera 无法创建所请求的会话。",
+    "zh-Hant": "Tessera 無法建立所請求的工作階段。"
+  },
+  "The tmux control channel is not connected.": {
+    "de": "Der tmux-Steuerkanal ist nicht verbunden.",
+    "es": "El canal de control de tmux no está conectado.",
+    "fr": "Le canal de contrôle tmux n'est pas connecté.",
+    "ja": "tmux のコントロールチャネルが接続されていません。",
+    "zh-Hans": "tmux 控制通道未连接。",
+    "zh-Hant": "tmux 控制通道未連線。"
+  },
+  "Listener cancelled.": {
+    "de": "Listener abgebrochen.",
+    "es": "Escucha cancelada.",
+    "fr": "Écoute annulée.",
+    "ja": "リスナーをキャンセルしました。",
+    "zh-Hans": "监听已取消。",
+    "zh-Hant": "監聽已取消。"
+  },
+  "Terminal state changed, action not sent": {
+    "de": "Terminalzustand geändert, Aktion nicht gesendet",
+    "es": "El estado del terminal cambió; no se envió la acción",
+    "fr": "L'état du terminal a changé, action non envoyée",
+    "ja": "ターミナルの状態が変わったため、操作は送信されませんでした",
+    "zh-Hans": "终端状态已改变，未发送该操作",
+    "zh-Hant": "終端機狀態已改變，未傳送該操作"
+  },
+  "ssh: connected": {
+    "de": "ssh: verbunden",
+    "es": "ssh: conectado",
+    "fr": "ssh : connecté",
+    "ja": "ssh: 接続済み",
+    "zh-Hans": "ssh：已连接",
+    "zh-Hant": "ssh：已連線"
+  },
+  "ssh: disconnected": {
+    "de": "ssh: getrennt",
+    "es": "ssh: desconectado",
+    "fr": "ssh : déconnecté",
+    "ja": "ssh: 未接続",
+    "zh-Hans": "ssh：已断开",
+    "zh-Hant": "ssh：已中斷"
+  },
+  "mosh: connected": {
+    "de": "mosh: verbunden",
+    "es": "mosh: conectado",
+    "fr": "mosh : connecté",
+    "ja": "mosh: 接続済み",
+    "zh-Hans": "mosh：已连接",
+    "zh-Hant": "mosh：已連線"
+  },
+  "mosh: disconnected": {
+    "de": "mosh: getrennt",
+    "es": "mosh: desconectado",
+    "fr": "mosh : déconnecté",
+    "ja": "mosh: 未接続",
+    "zh-Hans": "mosh：已断开",
+    "zh-Hant": "mosh：已中斷"
+  },
+  "tcp control: connected": {
+    "de": "TCP-Steuerkanal: verbunden",
+    "es": "control TCP: conectado",
+    "fr": "contrôle TCP : connecté",
+    "ja": "TCP コントロール: 接続済み",
+    "zh-Hans": "TCP 控制：已连接",
+    "zh-Hant": "TCP 控制：已連線"
+  },
+  "tcp control: disconnected": {
+    "de": "TCP-Steuerkanal: getrennt",
+    "es": "control TCP: desconectado",
+    "fr": "contrôle TCP : déconnecté",
+    "ja": "TCP コントロール: 未接続",
+    "zh-Hans": "TCP 控制：已断开",
+    "zh-Hant": "TCP 控制：已中斷"
+  },
+  "tcp control: retrying": {
+    "de": "TCP-Steuerkanal: neuer Versuch",
+    "es": "control TCP: reintentando",
+    "fr": "contrôle TCP : nouvelle tentative",
+    "ja": "TCP コントロール: 再試行中",
+    "zh-Hans": "TCP 控制：正在重试",
+    "zh-Hant": "TCP 控制：正在重試"
+  },
+  "connecting": {
+    "de": "verbinde",
+    "es": "conectando",
+    "fr": "connexion",
+    "ja": "接続中",
+    "zh-Hans": "正在连接",
+    "zh-Hant": "正在連線"
+  },
+  "connecting…": {
+    "de": "verbinde …",
+    "es": "conectando…",
+    "fr": "connexion…",
+    "ja": "接続中…",
+    "zh-Hans": "正在连接…",
+    "zh-Hant": "正在連線…"
+  },
+  "connection failed": {
+    "de": "Verbindung fehlgeschlagen",
+    "es": "falló la conexión",
+    "fr": "échec de la connexion",
+    "ja": "接続に失敗しました",
+    "zh-Hans": "连接失败",
+    "zh-Hant": "連線失敗"
+  },
+  "reconnect failed": {
+    "de": "erneutes Verbinden fehlgeschlagen",
+    "es": "falló la reconexión",
+    "fr": "échec de la reconnexion",
+    "ja": "再接続に失敗しました",
+    "zh-Hans": "重新连接失败",
+    "zh-Hant": "重新連線失敗"
+  },
+  "not connected": {
+    "de": "nicht verbunden",
+    "es": "sin conexión",
+    "fr": "non connecté",
+    "ja": "未接続",
+    "zh-Hans": "未连接",
+    "zh-Hant": "未連線"
+  },
+  "connected · active session": {
+    "de": "verbunden · aktive Sitzung",
+    "es": "conectado · sesión activa",
+    "fr": "connecté · session active",
+    "ja": "接続済み · セッション実行中",
+    "zh-Hans": "已连接 · 会话进行中",
+    "zh-Hant": "已連線 · 工作階段進行中"
+  },
+  "attaching tmux": {
+    "de": "hänge tmux an",
+    "es": "conectando a tmux",
+    "fr": "attachement de tmux",
+    "ja": "tmux にアタッチ中",
+    "zh-Hans": "正在接入 tmux",
+    "zh-Hant": "正在接入 tmux"
+  },
+  "attaching pane": {
+    "de": "hänge Bereich an",
+    "es": "conectando al panel",
+    "fr": "attachement du volet",
+    "ja": "ペインにアタッチ中",
+    "zh-Hans": "正在接入窗格",
+    "zh-Hant": "正在接入窗格"
+  },
+  "starting tmux": {
+    "de": "starte tmux",
+    "es": "iniciando tmux",
+    "fr": "démarrage de tmux",
+    "ja": "tmux を起動中",
+    "zh-Hans": "正在启动 tmux",
+    "zh-Hant": "正在啟動 tmux"
+  },
+  "tmux attach": {
+    "de": "tmux anhängen",
+    "es": "conectar a tmux",
+    "fr": "attacher tmux",
+    "ja": "tmux にアタッチ",
+    "zh-Hans": "接入 tmux",
+    "zh-Hant": "接入 tmux"
+  },
+  "tmux sync offline": {
+    "de": "tmux-Sync offline",
+    "es": "sincronización de tmux sin conexión",
+    "fr": "synchro tmux hors ligne",
+    "ja": "tmux の同期がオフライン",
+    "zh-Hans": "tmux 同步已离线",
+    "zh-Hant": "tmux 同步已離線"
+  },
+  "tmux window": {
+    "de": "tmux-Fenster",
+    "es": "ventana de tmux",
+    "fr": "fenêtre tmux",
+    "ja": "tmux ウインドウ",
+    "zh-Hans": "tmux 窗口",
+    "zh-Hant": "tmux 視窗"
+  },
+  "named tmux": {
+    "de": "benanntes tmux",
+    "es": "tmux con nombre",
+    "fr": "tmux nommé",
+    "ja": "名前付き tmux",
+    "zh-Hans": "具名 tmux",
+    "zh-Hant": "具名 tmux"
+  },
+  "auto-tmux": {
+    "de": "Auto-tmux",
+    "es": "tmux automático",
+    "fr": "tmux automatique",
+    "ja": "自動 tmux",
+    "zh-Hans": "自动 tmux",
+    "zh-Hant": "自動 tmux"
+  },
+  "missing host": {
+    "de": "Host fehlt",
+    "es": "falta el host",
+    "fr": "hôte manquant",
+    "ja": "ホストがありません",
+    "zh-Hans": "缺少主机",
+    "zh-Hant": "缺少主機"
+  },
+  "queued": {
+    "de": "in Warteschlange",
+    "es": "en cola",
+    "fr": "en file d'attente",
+    "ja": "待機中",
+    "zh-Hans": "排队中",
+    "zh-Hant": "排隊中"
+  },
+  "failed": {
+    "de": "fehlgeschlagen",
+    "es": "falló",
+    "fr": "échec",
+    "ja": "失敗",
+    "zh-Hans": "失败",
+    "zh-Hant": "失敗"
+  },
+  "cancelled": {
+    "de": "abgebrochen",
+    "es": "cancelado",
+    "fr": "annulé",
+    "ja": "キャンセル済み",
+    "zh-Hans": "已取消",
+    "zh-Hant": "已取消"
+  },
+  "downloading": {
+    "de": "lade herunter",
+    "es": "descargando",
+    "fr": "téléchargement",
+    "ja": "ダウンロード中",
+    "zh-Hans": "正在下载",
+    "zh-Hant": "正在下載"
+  },
+  "active": {
+    "de": "aktiv",
+    "es": "activo",
+    "fr": "actif",
+    "ja": "有効",
+    "zh-Hans": "已启用",
+    "zh-Hant": "已啟用"
+  },
+  "suppressed": {
+    "de": "unterdrückt",
+    "es": "silenciado",
+    "fr": "supprimé",
+    "ja": "抑制中",
+    "zh-Hans": "已抑制",
+    "zh-Hant": "已抑制"
+  },
+  "armed": {
+    "de": "scharf",
+    "es": "armado",
+    "fr": "armé",
+    "ja": "待機状態",
+    "zh-Hans": "已就绪",
+    "zh-Hant": "已就緒"
+  },
+  "not armed": {
+    "de": "nicht scharf",
+    "es": "no armado",
+    "fr": "non armé",
+    "ja": "待機していません",
+    "zh-Hans": "未就绪",
+    "zh-Hant": "未就緒"
+  },
+  "idle prompt": {
+    "de": "Prompt im Leerlauf",
+    "es": "prompt inactivo",
+    "fr": "invite au repos",
+    "ja": "待機中のプロンプト",
+    "zh-Hans": "空闲提示符",
+    "zh-Hant": "閒置提示符"
+  },
+  "try again · %@": {
+    "de": "erneut versuchen · %@",
+    "es": "reintentar · %@",
+    "fr": "réessayer · %@",
+    "ja": "もう一度試す · %@",
+    "zh-Hans": "重试 · %@",
+    "zh-Hant": "重試 · %@"
+  },
+  "back to the tab bar · session keeps running": {
+    "de": "zurück zur Tab-Leiste · Sitzung läuft weiter",
+    "es": "volver a la barra de pestañas · la sesión sigue activa",
+    "fr": "retour à la barre d'onglets · la session continue",
+    "ja": "タブバーに戻る · セッションは動き続けます",
+    "zh-Hans": "返回标签栏 · 会话继续运行",
+    "zh-Hant": "返回標籤列 · 工作階段繼續執行"
+  },
+  "endpoint": {
+    "de": "Endpunkt",
+    "es": "endpoint",
+    "fr": "point de terminaison",
+    "ja": "エンドポイント",
+    "zh-Hans": "端点",
+    "zh-Hant": "端點"
+  },
+  "listening · 0 active": {
+    "de": "lauscht · 0 aktiv",
+    "es": "escuchando · 0 activas",
+    "fr": "à l'écoute · 0 active",
+    "ja": "待ち受け中 · アクティブ 0",
+    "zh-Hans": "监听中 · 0 个活动连接",
+    "zh-Hant": "監聽中 · 0 個作用中連線"
+  },
+  "another rule on this host already uses that local port": {
+    "de": "eine andere Regel auf diesem Host nutzt diesen lokalen Port bereits",
+    "es": "otra regla de este host ya usa ese puerto local",
+    "fr": "une autre règle de cet hôte utilise déjà ce port local",
+    "ja": "このホストの別のルールがそのローカルポートをすでに使用しています",
+    "zh-Hans": "此主机上已有另一条规则占用该本地端口",
+    "zh-Hant": "此主機上已有另一條規則占用該本地連接埠"
+  },
+  "local port must be at least 1024 (iOS sandbox can't bind below 1024)": {
+    "de": "der lokale Port muss mindestens 1024 sein (die iOS-Sandbox kann unterhalb von 1024 nicht binden)",
+    "es": "el puerto local debe ser 1024 como mínimo (el sandbox de iOS no puede enlazar por debajo de 1024)",
+    "fr": "le port local doit être au moins 1024 (le bac à sable iOS ne peut pas se lier en dessous de 1024)",
+    "ja": "ローカルポートは 1024 以上である必要があります（iOS のサンドボックスは 1024 未満をバインドできません）",
+    "zh-Hans": "本地端口至少要为 1024（iOS 沙盒无法绑定 1024 以下的端口）",
+    "zh-Hant": "本地連接埠至少要為 1024（iOS 沙箱無法綁定 1024 以下的連接埠）"
+  },
+  "ports must be numbers between 1 and 65535": {
+    "de": "Ports müssen Zahlen zwischen 1 und 65535 sein",
+    "es": "los puertos deben ser números entre 1 y 65535",
+    "fr": "les ports doivent être des nombres entre 1 et 65535",
+    "ja": "ポートは 1 〜 65535 の数値である必要があります",
+    "zh-Hans": "端口必须是 1 到 65535 之间的数字",
+    "zh-Hant": "連接埠必須是 1 到 65535 之間的數字"
+  },
+  "remote host can't be empty": {
+    "de": "der entfernte Host darf nicht leer sein",
+    "es": "el host remoto no puede estar vacío",
+    "fr": "l'hôte distant ne peut pas être vide",
+    "ja": "リモートホストを空にはできません",
+    "zh-Hans": "远程主机不能为空",
+    "zh-Hant": "遠端主機不能為空"
+  },
+  "remote port must be between 1 and 65535": {
+    "de": "der entfernte Port muss zwischen 1 und 65535 liegen",
+    "es": "el puerto remoto debe estar entre 1 y 65535",
+    "fr": "le port distant doit être compris entre 1 et 65535",
+    "ja": "リモートポートは 1 〜 65535 の範囲である必要があります",
+    "zh-Hans": "远程端口必须介于 1 和 65535 之间",
+    "zh-Hant": "遠端連接埠必須介於 1 和 65535 之間"
+  }
+}

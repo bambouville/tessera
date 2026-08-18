@@ -676,10 +676,7 @@ final class SidebarToggleHarnessTests: XCTestCase {
 /// responder after dismissal and show the keyboard again.
 final class IPhoneKeyboardHarnessTests: XCTestCase {
     func testKeyboardButtonTogglesDismissalAndRestoration() throws {
-        let simulatorName = ProcessInfo.processInfo.environment[
-            "SIMULATOR_DEVICE_NAME"
-        ] ?? ""
-        guard simulatorName.localizedCaseInsensitiveContains("iPhone") else {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
             throw XCTSkip("iPhone keyboard harness requires an iPhone simulator")
         }
 
@@ -744,13 +741,25 @@ final class IPhoneKeyboardHarnessTests: XCTestCase {
         _ = try waitForRows(
             on: viewportRows,
             timeout: 8,
-            where: { $0 > keyboardVisibleRows },
-            description: "increase after hiding the keyboard"
+            where: { $0 == keyboardVisibleRows },
+            description: "remain stable after hiding the keyboard"
         )
 
         let show = app.buttons["Show keyboard"]
         XCTAssertTrue(show.waitForExistence(timeout: 5))
         XCTAssertTrue(show.isHittable)
+        let escape = app.descendants(matching: .any)["Escape"]
+        XCTAssertTrue(escape.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(
+            escape.frame.minX,
+            app.frame.minX + 12,
+            "the collapsed bar must clear the iPhone's leading display curve"
+        )
+        XCTAssertLessThanOrEqual(
+            show.frame.maxX,
+            app.frame.maxX - 12,
+            "the collapsed bar must clear the iPhone's trailing display curve"
+        )
         show.tap()
         try waitForValue("visible", on: state, timeout: 8)
         _ = try waitForRows(
@@ -760,6 +769,44 @@ final class IPhoneKeyboardHarnessTests: XCTestCase {
             description: "return after showing the keyboard"
         )
         XCTAssertTrue(app.buttons["Hide keyboard"].waitForExistence(timeout: 5))
+    }
+
+    func testOptInResizeChangesViewportRows() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("iPhone keyboard harness requires an iPhone simulator")
+        }
+
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchEnvironment["TESSERA_IPHONE_KEYBOARD_HARNESS"] = "1"
+        app.launchEnvironment["TESSERA_KEYBOARD_RESIZE_HARNESS"] = "1"
+        app.launch()
+        defer { app.terminate() }
+
+        let state = app.descendants(matching: .any)["iphone-keyboard-state"]
+        XCTAssertTrue(state.waitForExistence(timeout: 10))
+        try waitForValue("visible", on: state, timeout: 8)
+        let viewportRows = app.descendants(matching: .any)[
+            "iphone-terminal-viewport-rows"
+        ]
+        XCTAssertTrue(viewportRows.waitForExistence(timeout: 5))
+        let keyboardVisibleRows = try waitForRows(
+            on: viewportRows,
+            timeout: 8,
+            where: { $0 > 0 },
+            description: "become positive"
+        )
+
+        let hide = app.buttons["Hide keyboard"]
+        XCTAssertTrue(hide.waitForExistence(timeout: 5))
+        hide.tap()
+        try waitForValue("hidden", on: state, timeout: 8)
+        _ = try waitForRows(
+            on: viewportRows,
+            timeout: 8,
+            where: { $0 > keyboardVisibleRows },
+            description: "increase after opting into keyboard resize"
+        )
     }
 
     private func waitForValue(
@@ -798,6 +845,211 @@ final class IPhoneKeyboardHarnessTests: XCTestCase {
             domain: "IPhoneKeyboardHarnessTests",
             code: 1,
             userInfo: [NSLocalizedDescriptionKey: "Viewport row expectation failed"]
+        )
+    }
+}
+
+/// The session's keyboard translation deliberately pushes the composed surface
+/// up behind the software keyboard so SwiftTerm's grid never reflows. Find is
+/// the one thing that trade-off cannot cover: the query field and match counter
+/// are an input the user has to *read* while typing into it, and before
+/// `KeyboardLiftExemptChrome` they rode the translation ~336 pt above the top of
+/// the screen.
+///
+/// Frames, not existence: the field stayed hittable off-screen the whole time,
+/// which is exactly why this went unnoticed.
+final class IPhoneFindBarKeyboardHarnessTests: XCTestCase {
+    func testFindFieldStaysOnScreenWithTheSoftwareKeyboardUp() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("software-keyboard find acceptance requires an iPhone simulator")
+        }
+
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchEnvironment["TESSERA_IPHONE_KEYBOARD_HARNESS"] = "1"
+        app.launch()
+        defer { app.terminate() }
+
+        let state = app.descendants(matching: .any)["iphone-keyboard-state"]
+        XCTAssertTrue(state.waitForExistence(timeout: 10))
+        let visible = NSPredicate(format: "value == %@", "visible")
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [XCTNSPredicateExpectation(predicate: visible, object: state)],
+                timeout: 8
+            ),
+            .completed,
+            "the harness terminal must have raised the software keyboard"
+        )
+
+        let viewportRows = app.descendants(matching: .any)[
+            "iphone-terminal-viewport-rows"
+        ]
+        XCTAssertTrue(viewportRows.waitForExistence(timeout: 5))
+
+        let openFind = app.buttons["iphone-keyboard-open-find"]
+        XCTAssertTrue(openFind.waitForExistence(timeout: 5))
+        openFind.tap()
+
+        let field = app.textFields["find-query-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        // Focus (and therefore the keyboard) belongs to the find field now.
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [XCTNSPredicateExpectation(predicate: visible, object: state)],
+                timeout: 8
+            ),
+            .completed
+        )
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 8))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+
+        let screen = app.frame
+        let frame = field.frame
+        XCTAssertGreaterThanOrEqual(
+            frame.minY,
+            screen.minY,
+            "the find query field must not sit above the top of the screen"
+        )
+        XCTAssertLessThanOrEqual(
+            frame.maxY,
+            keyboard.frame.minY,
+            "the find query field must not sit under the software keyboard"
+        )
+
+        // The translation still has to be doing its job: a grid that reflowed to
+        // fit above the keyboard would report roughly the 18–24 rows the phone
+        // viewport holds, not the retained window-bottom height.
+        let rows = Int(String(describing: viewportRows.value ?? "")) ?? 0
+        XCTAssertGreaterThan(
+            rows,
+            26,
+            "pinning the chrome must not reintroduce a keyboard-driven grid reflow"
+        )
+
+        // Reachable, not merely on screen: an element whose centre falls outside
+        // the window is not hittable, which is the other half of the regression.
+        // Focus is deliberately not asserted here — the harness terminal mounts
+        // with the reclaim policy of an unfocused pane surface, not a live
+        // session's, so who holds first responder is not a faithful signal.
+        XCTAssertTrue(
+            field.isHittable,
+            "the find query field must be reachable where it renders"
+        )
+    }
+}
+
+/// Rendering acceptance for the accessory bar against the real software
+/// keyboard. Unlike existence/hittability checks, this compares the rendered
+/// frames so the keyboard cannot cover even a still-accessible portion of a
+/// chip or the keyboard toggle.
+final class KeyboardAccessoryOcclusionHarnessTests: XCTestCase {
+    func testAccessoryBarClearsKeyboardInPortrait() throws {
+        try assertAccessoryBarClearsKeyboard(orientation: .portrait)
+    }
+
+    func testAccessoryBarClearsKeyboardInLandscape() throws {
+        try assertAccessoryBarClearsKeyboard(orientation: .landscapeLeft)
+    }
+
+    private func assertAccessoryBarClearsKeyboard(
+        orientation: UIDeviceOrientation
+    ) throws {
+        XCUIDevice.shared.orientation = orientation
+        let app = XCUIApplication()
+        app.launchEnvironment["TESSERA_IPHONE_KEYBOARD_HARNESS"] = "1"
+        app.launch()
+        defer { app.terminate() }
+
+        let state = app.descendants(matching: .any)["iphone-keyboard-state"]
+        XCTAssertTrue(state.waitForExistence(timeout: 10))
+        let visible = NSPredicate(format: "value == %@", "visible")
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [XCTNSPredicateExpectation(predicate: visible, object: state)],
+                timeout: 8
+            ),
+            .completed
+        )
+
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 8))
+        let escape = app.descendants(matching: .any)["Escape"]
+        XCTAssertTrue(escape.waitForExistence(timeout: 5))
+        let toggleLabel = UIDevice.current.userInterfaceIdiom == .phone
+            ? "Hide keyboard"
+            : "Hide accessory bar"
+        let toggle = app.buttons[toggleLabel]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+
+        let keyboardTop = keyboard.frame.minY
+        for element in [escape, toggle] {
+            XCTAssertLessThanOrEqual(
+                element.frame.maxY,
+                keyboardTop + 1,
+                "\(element.label) must remain fully above the software keyboard"
+            )
+            XCTAssertTrue(
+                element.isHittable,
+                "\(element.label) must remain tappable above the software keyboard"
+            )
+        }
+    }
+}
+
+/// The collapsed iPhone bar is intentionally translated instead of inserted
+/// into layout: its controls must clear the Home-indicator gesture region
+/// without changing SwiftTerm's viewport rows.
+final class IPhoneCollapsedAccessorySafeAreaHarnessTests: XCTestCase {
+    func testCollapsedAccessoryBarClearsSystemGestureRegionInPortrait() throws {
+        try assertCollapsedAccessoryBarClearsSystemGestureRegion(
+            orientation: .portrait
+        )
+    }
+
+    func testCollapsedAccessoryBarClearsSystemGestureRegionInLandscape() throws {
+        try assertCollapsedAccessoryBarClearsSystemGestureRegion(
+            orientation: .landscapeLeft
+        )
+    }
+
+    private func assertCollapsedAccessoryBarClearsSystemGestureRegion(
+        orientation: UIDeviceOrientation
+    ) throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("collapsed accessory safe-area acceptance requires an iPhone simulator")
+        }
+
+        XCUIDevice.shared.orientation = orientation
+        let app = XCUIApplication()
+        app.launchEnvironment["TESSERA_IPHONE_KEYBOARD_HARNESS"] = "1"
+        app.launch()
+        defer { app.terminate() }
+
+        let state = app.descendants(matching: .any)["iphone-keyboard-state"]
+        XCTAssertTrue(state.waitForExistence(timeout: 10))
+        let hide = app.buttons["Hide keyboard"]
+        XCTAssertTrue(hide.waitForExistence(timeout: 8))
+        hide.tap()
+
+        let hidden = NSPredicate(format: "value == %@", "hidden")
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [XCTNSPredicateExpectation(predicate: hidden, object: state)],
+                timeout: 8
+            ),
+            .completed
+        )
+
+        let show = app.buttons["Show keyboard"]
+        XCTAssertTrue(show.waitForExistence(timeout: 5))
+        XCTAssertTrue(show.isHittable)
+        let clearance = app.frame.maxY - show.frame.maxY
+        XCTAssertGreaterThanOrEqual(
+            clearance,
+            20,
+            "collapsed accessory controls must clear the Home-indicator safe area"
         )
     }
 }

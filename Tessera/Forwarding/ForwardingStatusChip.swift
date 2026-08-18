@@ -38,7 +38,7 @@ struct ForwardingStatusChip: View {
 
         Button { sheetVisible = true } label: {
             HStack(spacing: 5 * scale) {
-                Text("\u{21C4}")
+                Text(verbatim: "\u{21C4}")
                     .font(.system(size: 12 * scale, weight: .semibold))
                     .foregroundStyle(isError ? T.amber : T.accent)
                 Text(isError ? "!" : String(count))
@@ -180,14 +180,14 @@ private struct ForwardingStatusSheet: View {
                 Text(String(rule.localPort))
                     .font(Typography.tesseraMono(size: 13, weight: .semibold))
                     .foregroundStyle(T.accent)
-                Text(" → ")
+                Text(verbatim: " → ")
                     .font(Typography.tesseraMono(size: 13))
                     .foregroundStyle(T.fgDim)
                 Text(verbatim: "\(rule.remoteHost):\(rule.remotePort)")
                     .font(Typography.tesseraMono(size: 13))
                     .foregroundStyle(T.fg)
                 if !rule.label.isEmpty {
-                    Text("  \"\(rule.label)\"")
+                    Text(verbatim: "  \"\(rule.label)\"")
                         .font(Typography.tesseraMono(size: 12))
                         .foregroundStyle(T.fgMuted)
                 }
@@ -230,8 +230,8 @@ private struct ForwardingStatusSheet: View {
 
     private func statusText(for forwarder: PortForwarder) -> String {
         switch forwarder.state {
-        case .idle: return "idle"
-        case .listening: return "listening · 0 active"
+        case .idle: return String(localized: "idle")
+        case .listening: return String(localized: "listening · 0 active")
         case .active(let n): return "\u{2191} \(byteString(forwarder.bytesUp))   \u{2193} \(byteString(forwarder.bytesDown))   ·   \(n) active"
         case .error(let reason): return reason
         }

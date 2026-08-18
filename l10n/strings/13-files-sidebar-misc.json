@@ -1,0 +1,402 @@
+{
+  "Not connected to the host.": {
+    "de": "Keine Verbindung zum Host.",
+    "es": "No hay conexión con el host.",
+    "fr": "Non connecté à l'hôte.",
+    "ja": "ホストに接続していません。",
+    "zh-Hans": "未连接到该主机。",
+    "zh-Hant": "未連線到該主機。"
+  },
+  "Authentication failed: %@": {
+    "de": "Authentifizierung fehlgeschlagen: %@",
+    "es": "Falló la autenticación: %@",
+    "fr": "Échec de l'authentification : %@",
+    "ja": "認証に失敗しました: %@",
+    "zh-Hans": "认证失败：%@",
+    "zh-Hant": "驗證失敗：%@"
+  },
+  "Network error: %@": {
+    "de": "Netzwerkfehler: %@",
+    "es": "Error de red: %@",
+    "fr": "Erreur réseau : %@",
+    "ja": "ネットワークエラー: %@",
+    "zh-Hans": "网络错误：%@",
+    "zh-Hant": "網路錯誤：%@"
+  },
+  "SFTP is unavailable on this host: %@": {
+    "de": "SFTP ist auf diesem Host nicht verfügbar: %@",
+    "es": "SFTP no está disponible en este host: %@",
+    "fr": "SFTP est indisponible sur cet hôte : %@",
+    "ja": "このホストでは SFTP を利用できません: %@",
+    "zh-Hans": "此主机上无法使用 SFTP：%@",
+    "zh-Hant": "此主機上無法使用 SFTP：%@"
+  },
+  "This host's key isn't trusted yet. Open a terminal session to it first to review the key, then retry.": {
+    "de": "Dem Key dieses Hosts wird noch nicht vertraut. Öffne zuerst eine Terminal-Sitzung dorthin, um den Key zu prüfen, und versuche es dann erneut.",
+    "es": "Todavía no se confía en la clave de este host. Abre primero una sesión de terminal para revisarla y vuelve a intentarlo.",
+    "fr": "La clé de cet hôte n'est pas encore approuvée. Ouvrez d'abord une session de terminal pour la vérifier, puis réessayez.",
+    "ja": "このホストのキーはまだ信頼されていません。先にターミナルセッションを開いてキーを確認してから、やり直してください。",
+    "zh-Hans": "尚未信任此主机的密钥。请先打开一个终端会话核对密钥，然后重试。",
+    "zh-Hant": "尚未信任此主機的金鑰。請先打開一個終端機工作階段核對金鑰，然後重試。"
+  },
+  "default upload destination": {
+    "de": "Standardziel für Uploads",
+    "es": "destino de subida por omisión",
+    "fr": "destination de téléversement par défaut",
+    "ja": "アップロード先のデフォルト",
+    "zh-Hans": "默认上传目的地",
+    "zh-Hant": "預設上傳目的地"
+  },
+  "where the upload sheet starts for each host": {
+    "de": "wo das Upload-Fenster für jeden Host beginnt",
+    "es": "dónde empieza la hoja de subida para cada host",
+    "fr": "où démarre la feuille de téléversement pour chaque hôte",
+    "ja": "ホストごとに、アップロードシートが最初に開く場所",
+    "zh-Hans": "每台主机的上传面板从哪里开始",
+    "zh-Hant": "每台主機的上傳面板從哪裡開始"
+  },
+  "temp file cleanup": {
+    "de": "Bereinigung temporärer Dateien",
+    "es": "limpieza de archivos temporales",
+    "fr": "nettoyage des fichiers temporaires",
+    "ja": "一時ファイルの整理",
+    "zh-Hans": "临时文件清理",
+    "zh-Hant": "暫存檔案清理"
+  },
+  "how many days paste/temp files survive on hosts before the reaper deletes them on connect": {
+    "de": "wie viele Tage Einfüge-/Temp-Dateien auf Hosts überleben, bevor die Bereinigung sie beim Verbinden löscht",
+    "es": "cuántos días sobreviven en los hosts los archivos pegados o temporales antes de que el recolector los elimine al conectar",
+    "fr": "combien de jours les fichiers collés ou temporaires survivent sur les hôtes avant que le nettoyeur ne les supprime à la connexion",
+    "ja": "ペースト・一時ファイルがホスト上で残る日数。これを過ぎると、接続時に自動削除されます",
+    "zh-Hans": "粘贴/临时文件在主机上保留多少天，之后会在连接时被清理程序删除",
+    "zh-Hant": "貼上／暫存檔案在主機上保留多少天，之後會在連線時被清理程式刪除"
+  },
+  "cwd-follow shell integration lives in the Files panel. when no directory signal exists, the panel shows an Install button there.": {
+    "de": "Die Shell-Integration für das Mitlaufen des Arbeitsverzeichnisses sitzt im Dateibereich. Fehlt ein Verzeichnissignal, zeigt der Bereich dort eine Schaltfläche „Installieren“.",
+    "es": "la integración con el shell que sigue el directorio actual está en el panel de archivos. cuando no hay ninguna señal de directorio, el panel muestra allí un botón Instalar.",
+    "fr": "l'intégration au shell qui suit le répertoire courant se trouve dans le panneau de fichiers. en l'absence de signal de répertoire, le panneau y affiche un bouton Installer.",
+    "ja": "カレントディレクトリに追従するシェル統合は、「ファイル」パネルにあります。ディレクトリの信号がない場合、パネルにインストールボタンが表示されます。",
+    "zh-Hans": "跟随当前目录的 shell 集成位于文件面板中。当没有目录信号时，面板会在那里显示「安装」按钮。",
+    "zh-Hant": "跟隨目前目錄的 shell 整合位於檔案面板中。當沒有目錄訊號時，面板會在那裡顯示「安裝」按鈕。"
+  },
+  "Active tunnels": {
+    "de": "Aktive Tunnel",
+    "es": "Túneles activos",
+    "fr": "Tunnels actifs",
+    "ja": "アクティブなトンネル",
+    "zh-Hans": "活动隧道",
+    "zh-Hant": "使用中的通道"
+  },
+  "active tunnels": {
+    "de": "aktive Tunnel",
+    "es": "túneles activos",
+    "fr": "tunnels actifs",
+    "ja": "アクティブなトンネル",
+    "zh-Hans": "活动隧道",
+    "zh-Hant": "使用中的通道"
+  },
+  "no active tunnels": {
+    "de": "keine aktiven Tunnel",
+    "es": "no hay túneles activos",
+    "fr": "aucun tunnel actif",
+    "ja": "アクティブなトンネルはありません",
+    "zh-Hans": "没有活动的隧道",
+    "zh-Hant": "沒有使用中的通道"
+  },
+  "create and edit forwarding rules from iPad.": {
+    "de": "Weiterleitungsregeln lassen sich auf dem iPad anlegen und bearbeiten.",
+    "es": "crea y edita reglas de reenvío desde el iPad.",
+    "fr": "créez et modifiez les règles de redirection depuis l'iPad.",
+    "ja": "転送ルールの作成と編集は iPad で行えます。",
+    "zh-Hans": "可在 iPad 上创建和编辑转发规则。",
+    "zh-Hant": "可在 iPad 上製作和編輯轉發規則。"
+  },
+  "↗ open in safari": {
+    "de": "↗ in Safari öffnen",
+    "es": "↗ abrir en safari",
+    "fr": "↗ ouvrir dans safari",
+    "ja": "↗ safari で開く",
+    "zh-Hans": "↗ 在 safari 中打开",
+    "zh-Hant": "↗ 在 safari 中打開"
+  },
+  "Delete %@?": {
+    "de": "%@ löschen?",
+    "es": "¿Eliminar %@?",
+    "fr": "Supprimer %@ ?",
+    "ja": "%@ を削除しますか？",
+    "zh-Hans": "要删除 %@ 吗？",
+    "zh-Hant": "要刪除 %@ 嗎？"
+  },
+  "view all": {
+    "de": "alle anzeigen",
+    "es": "ver todo",
+    "fr": "tout afficher",
+    "ja": "すべて表示",
+    "zh-Hans": "查看全部",
+    "zh-Hant": "查看全部"
+  },
+  "view all hosts": {
+    "de": "alle Hosts anzeigen",
+    "es": "ver todos los hosts",
+    "fr": "afficher tous les hôtes",
+    "ja": "すべてのホストを表示",
+    "zh-Hans": "查看全部主机",
+    "zh-Hant": "查看全部主機"
+  },
+  "Could not read from the enrollment continuation stream.": {
+    "de": "Aus dem Enrollment-Fortsetzungsstream konnte nicht gelesen werden.",
+    "es": "No se pudo leer del flujo de continuación de la inscripción.",
+    "fr": "Impossible de lire depuis le flux de reprise d'inscription.",
+    "ja": "登録の継続ストリームから読み取れませんでした。",
+    "zh-Hans": "无法从注册接力流中读取。",
+    "zh-Hant": "無法從註冊接續串流中讀取。"
+  },
+  "Could not write to the enrollment continuation stream.": {
+    "de": "In den Enrollment-Fortsetzungsstream konnte nicht geschrieben werden.",
+    "es": "No se pudo escribir en el flujo de continuación de la inscripción.",
+    "fr": "Impossible d'écrire dans le flux de reprise d'inscription.",
+    "ja": "登録の継続ストリームに書き込めませんでした。",
+    "zh-Hans": "无法写入注册接力流。",
+    "zh-Hant": "無法寫入註冊接續串流。"
+  },
+  "The enrollment continuation stream is closed.": {
+    "de": "Der Enrollment-Fortsetzungsstream ist geschlossen.",
+    "es": "El flujo de continuación de la inscripción está cerrado.",
+    "fr": "Le flux de reprise d'inscription est fermé.",
+    "ja": "登録の継続ストリームは閉じられています。",
+    "zh-Hans": "注册接力流已关闭。",
+    "zh-Hant": "註冊接續串流已關閉。"
+  },
+  "The enrollment continuation stream stopped accepting data.": {
+    "de": "Der Enrollment-Fortsetzungsstream nimmt keine Daten mehr an.",
+    "es": "El flujo de continuación de la inscripción dejó de aceptar datos.",
+    "fr": "Le flux de reprise d'inscription n'accepte plus de données.",
+    "ja": "登録の継続ストリームがデータを受け付けなくなりました。",
+    "zh-Hans": "注册接力流已停止接收数据。",
+    "zh-Hant": "註冊接續串流已停止接收資料。"
+  },
+  "Authorize with Face ID / Passcode": {
+    "de": "Mit Face ID / Code autorisieren",
+    "es": "Autorizar con Face ID / código",
+    "fr": "Autoriser avec Face ID / code",
+    "ja": "Face ID / パスコードで認可",
+    "zh-Hans": "使用 Face ID / 密码授权",
+    "zh-Hant": "使用 Face ID / 密碼授權"
+  },
+  "Deny": {
+    "de": "Ablehnen",
+    "es": "Denegar",
+    "fr": "Refuser",
+    "ja": "拒否",
+    "zh-Hans": "拒绝",
+    "zh-Hant": "拒絕"
+  },
+  "Approve sends only this public key to the host. No password or private key crosses devices.": {
+    "de": "„Bestätigen“ sendet nur diesen Public Key an den Host. Weder Passwort noch privater Key wechseln zwischen den Geräten.",
+    "es": "Aprobar envía únicamente esta clave pública al host. Ninguna contraseña ni clave privada pasa de un dispositivo a otro.",
+    "fr": "Approuver n'envoie que cette clé publique à l'hôte. Aucun mot de passe ni clé privée ne circule entre les appareils.",
+    "ja": "「承認」すると、この公開鍵だけがホストに送られます。パスワードや秘密鍵がデバイス間を移動することはありません。",
+    "zh-Hans": "「批准」只会把这个公钥发送到主机。密码和私钥都不会在设备之间传递。",
+    "zh-Hant": "「核准」只會把這個公開金鑰傳送到主機。密碼和私密金鑰都不會在裝置之間傳遞。"
+  },
+  "find in scrollback": {
+    "de": "im Scrollback suchen",
+    "es": "buscar en el historial",
+    "fr": "rechercher dans l'historique",
+    "ja": "スクロールバック内を検索",
+    "zh-Hans": "在回滚缓冲中查找",
+    "zh-Hant": "在回捲緩衝中尋找"
+  },
+  "%lld of %lld": {
+    "de": "%lld von %lld",
+    "es": "%lld de %lld",
+    "fr": "%lld sur %lld",
+    "ja": "%2$lld 件中 %1$lld 件目",
+    "zh-Hans": "第 %1$lld 个，共 %2$lld 个",
+    "zh-Hant": "第 %1$lld 個，共 %2$lld 個"
+  },
+  "Rendering Markdown…": {
+    "de": "Markdown wird dargestellt…",
+    "es": "Representando Markdown…",
+    "fr": "Rendu du Markdown…",
+    "ja": "Markdown を描画中…",
+    "zh-Hans": "正在渲染 Markdown…",
+    "zh-Hant": "正在算繪 Markdown…"
+  },
+  "Unable to Render Markdown": {
+    "de": "Markdown kann nicht dargestellt werden",
+    "es": "No se puede representar el Markdown",
+    "fr": "Impossible de rendre le Markdown",
+    "ja": "Markdown を描画できません",
+    "zh-Hans": "无法渲染 Markdown",
+    "zh-Hant": "無法算繪 Markdown"
+  },
+  "Share %@": {
+    "de": "%@ teilen",
+    "es": "Compartir %@",
+    "fr": "Partager %@",
+    "ja": "%@ を共有",
+    "zh-Hans": "共享 %@",
+    "zh-Hant": "共享 %@"
+  },
+  "Show keyboard": {
+    "de": "Tastatur einblenden",
+    "es": "Mostrar el teclado",
+    "fr": "Afficher le clavier",
+    "ja": "キーボードを表示",
+    "zh-Hans": "显示键盘",
+    "zh-Hant": "顯示鍵盤"
+  },
+  "Hide keyboard": {
+    "de": "Tastatur ausblenden",
+    "es": "Ocultar el teclado",
+    "fr": "Masquer le clavier",
+    "ja": "キーボードを非表示",
+    "zh-Hans": "隐藏键盘",
+    "zh-Hant": "隱藏鍵盤"
+  },
+  "Hide accessory bar": {
+    "de": "Zubehörleiste ausblenden",
+    "es": "Ocultar la barra accesoria",
+    "fr": "Masquer la barre d'accessoires",
+    "ja": "アクセサリバーを非表示",
+    "zh-Hans": "隐藏辅助栏",
+    "zh-Hant": "隱藏輔助列"
+  },
+  "reopen previous connections": {
+    "de": "frühere Verbindungen wieder öffnen",
+    "es": "reabrir las conexiones anteriores",
+    "fr": "rouvrir les connexions précédentes",
+    "ja": "以前の接続を再開",
+    "zh-Hans": "重新打开先前的连接",
+    "zh-Hant": "重新打開先前的連線"
+  },
+  "reopen": {
+    "de": "wieder öffnen",
+    "es": "reabrir",
+    "fr": "rouvrir",
+    "ja": "再開",
+    "zh-Hans": "重新打开",
+    "zh-Hant": "重新打開"
+  },
+  "always reopen": {
+    "de": "immer wieder öffnen",
+    "es": "reabrir siempre",
+    "fr": "toujours rouvrir",
+    "ja": "常に再開",
+    "zh-Hans": "始终重新打开",
+    "zh-Hant": "始終重新打開"
+  },
+  "the App Store could not verify existing purchase status": {
+    "de": "Der App Store konnte den bestehenden Kaufstatus nicht prüfen",
+    "es": "el app store no pudo verificar el estado de compra existente",
+    "fr": "l'app store n'a pas pu vérifier l'état d'achat existant",
+    "ja": "App Store が既存の購入状況を確認できませんでした",
+    "zh-Hans": "app store 无法验证已有的购买状态",
+    "zh-Hant": "app store 無法驗證既有的購買狀態"
+  },
+  "the App Store did not return the unlimited saved hosts product": {
+    "de": "Der App Store hat das Produkt für unbegrenzt gesicherte Hosts nicht zurückgeliefert",
+    "es": "el app store no devolvió el producto de hosts guardados ilimitados",
+    "fr": "l'app store n'a pas renvoyé le produit hôtes enregistrés illimités",
+    "ja": "App Store から「保存できるホスト数が無制限」の製品情報が返されませんでした",
+    "zh-Hans": "app store 未返回「无限量保存主机」这一项目",
+    "zh-Hant": "app store 未回傳「無限量儲存主機」這一項目"
+  },
+  "the App Store returned a purchase that failed verification": {
+    "de": "Der App Store hat einen Kauf zurückgeliefert, der die Prüfung nicht bestanden hat",
+    "es": "el app store devolvió una compra que no superó la verificación",
+    "fr": "l'app store a renvoyé un achat qui n'a pas passé la vérification",
+    "ja": "App Store から返された購入情報が検証に失敗しました",
+    "zh-Hans": "app store 返回的购买未通过验证",
+    "zh-Hant": "app store 回傳的購買未通過驗證"
+  },
+  "your access": {
+    "de": "dein Zugang",
+    "es": "tu acceso",
+    "fr": "votre accès",
+    "ja": "あなたの利用権",
+    "zh-Hans": "你的权限",
+    "zh-Hant": "你的權限"
+  },
+  "Couldn't continue session": {
+    "de": "Sitzung konnte nicht fortgesetzt werden",
+    "es": "No se pudo continuar la sesión",
+    "fr": "Impossible de poursuivre la session",
+    "ja": "セッションを引き継げませんでした",
+    "zh-Hans": "无法继续该会话",
+    "zh-Hant": "無法繼續該工作階段"
+  },
+  "Couldn't make session available": {
+    "de": "Sitzung konnte nicht bereitgestellt werden",
+    "es": "No se pudo poner la sesión a disposición",
+    "fr": "Impossible de rendre la session disponible",
+    "ja": "セッションを利用可能にできませんでした",
+    "zh-Hans": "无法让该会话可用",
+    "zh-Hant": "無法讓該工作階段可用"
+  },
+  "Unsupported nearby-handshake version %lld.": {
+    "de": "Nicht unterstützte Version %lld des Nearby-Handshakes.",
+    "es": "Versión %lld del protocolo de enlace cercano no admitida.",
+    "fr": "Version %lld de la poignée de main à proximité non prise en charge.",
+    "ja": "サポートされていない近接ハンドシェイクのバージョン %lld です。",
+    "zh-Hans": "不支持的附近握手版本 %lld。",
+    "zh-Hant": "不支援的鄰近交握版本 %lld。"
+  },
+  "Invalid nearby frame length %lld.": {
+    "de": "Ungültige Nearby-Frame-Länge %lld.",
+    "es": "Longitud de trama cercana no válida: %lld.",
+    "fr": "Longueur de trame à proximité invalide : %lld.",
+    "ja": "近接フレームの長さ %lld が不正です。",
+    "zh-Hans": "附近帧长度 %lld 无效。",
+    "zh-Hant": "鄰近影格長度 %lld 無效。"
+  },
+  "Unsupported bootstrap manifest version %lld.": {
+    "de": "Nicht unterstützte Version %lld des Bootstrap-Manifests.",
+    "es": "Versión %lld del manifiesto del bootstrap no admitida.",
+    "fr": "Version %lld du manifeste du bootstrap non prise en charge.",
+    "ja": "サポートされていないブートストラップマニフェストのバージョン %lld です。",
+    "zh-Hans": "不支持的引导清单版本 %lld。",
+    "zh-Hant": "不支援的啟動清單版本 %lld。"
+  },
+  "single SSH connection; tmux tabs stay on the main session.": {
+    "de": "eine einzige SSH-Verbindung; tmux-Tabs bleiben auf der Hauptsitzung.",
+    "es": "una sola conexión SSH; las pestañas de tmux se quedan en la sesión principal.",
+    "fr": "une seule connexion SSH ; les onglets tmux restent sur la session principale.",
+    "ja": "SSH 接続は 1 本で、tmux のタブはメインセッション上に留まります。",
+    "zh-Hans": "单条 SSH 连接；tmux 标签停留在主会话上。",
+    "zh-Hant": "單條 SSH 連線；tmux 標籤停留在主工作階段上。"
+  },
+  "mosh terminal over UDP; tmux tabs use a second SSH side channel.": {
+    "de": "mosh-Terminal über UDP; tmux-Tabs nutzen einen zweiten SSH-Seitenkanal.",
+    "es": "terminal mosh sobre UDP; las pestañas de tmux usan un segundo canal lateral SSH.",
+    "fr": "terminal mosh sur UDP ; les onglets tmux utilisent un second canal SSH secondaire.",
+    "ja": "UDP 上の mosh ターミナル。tmux のタブは 2 本目の SSH サイドチャネルを使います。",
+    "zh-Hans": "基于 UDP 的 mosh 终端；tmux 标签使用第二条 SSH 侧信道。",
+    "zh-Hant": "基於 UDP 的 mosh 終端機；tmux 標籤使用第二條 SSH 側通道。"
+  },
+  "record shortcut": {
+    "de": "Kurzbefehl aufnehmen",
+    "es": "grabar el atajo",
+    "fr": "enregistrer le raccourci",
+    "ja": "ショートカットを記録",
+    "zh-Hans": "录制快捷键",
+    "zh-Hant": "錄製快速鍵"
+  },
+  "RESTART DICTATION": {
+    "de": "DIKTAT NEU STARTEN",
+    "es": "REINICIAR EL DICTADO",
+    "fr": "REDÉMARRER LA DICTÉE",
+    "ja": "音声入力を再開",
+    "zh-Hans": "重新开始听写",
+    "zh-Hant": "重新開始聽寫"
+  },
+  "Home directory is unavailable for paste upload.": {
+    "de": "Das Home-Verzeichnis steht für den Einfüge-Upload nicht zur Verfügung.",
+    "es": "El directorio personal no está disponible para la subida por pegado.",
+    "fr": "Le répertoire personnel est indisponible pour le téléversement par collage.",
+    "ja": "ペーストによるアップロードに使うホームディレクトリを利用できません。",
+    "zh-Hans": "粘贴上传所需的主目录不可用。",
+    "zh-Hant": "貼上上傳所需的主目錄不可用。"
+  }
+}

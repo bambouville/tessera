@@ -106,7 +106,7 @@ struct UnlimitedHostsSettingsView: View {
         }
     }
 
-    private var planTitle: String {
+    private var planTitle: LocalizedStringResource {
         switch store.accessState {
         case .checking:
             return "checking…"
@@ -117,7 +117,7 @@ struct UnlimitedHostsSettingsView: View {
         }
     }
 
-    private var planStatus: String? {
+    private var planStatus: LocalizedStringResource? {
         switch store.accessState {
         case .checking:
             return nil
@@ -133,7 +133,7 @@ struct UnlimitedHostsSettingsView: View {
 
     /// Plain muted copy shown under the title for the free and checking
     /// states. Legacy/purchased copy lives in the accent status box instead.
-    private var planCopy: String? {
+    private var planCopy: LocalizedStringResource? {
         switch store.accessState {
         case .checking:
             return "checking the app store for product and purchase status…"
@@ -144,7 +144,7 @@ struct UnlimitedHostsSettingsView: View {
         }
     }
 
-    private func statusCopy(for source: HostUnlimitedSource) -> String {
+    private func statusCopy(for source: HostUnlimitedSource) -> LocalizedStringResource {
         switch source {
         case .legacyPaid:
             return "unlimited hosts are included with your original paid tessera purchase. thank you for supporting the app early."
@@ -172,7 +172,7 @@ struct UnlimitedHostsSettingsView: View {
         }
     }
 
-    private func featureRow(_ title: String, value: String) -> some View {
+    private func featureRow(_ title: LocalizedStringKey, value: LocalizedStringKey) -> some View {
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .firstTextBaseline, spacing: 16) {
                 featureTitle(title)
@@ -187,20 +187,20 @@ struct UnlimitedHostsSettingsView: View {
         }
     }
 
-    private func featureTitle(_ title: String) -> some View {
+    private func featureTitle(_ title: LocalizedStringKey) -> some View {
         Text(title)
             .font(Typography.tesseraMono(size: 11))
             .foregroundStyle(T.fg)
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func featureValue(_ value: String) -> some View {
+    private func featureValue(_ value: LocalizedStringKey) -> some View {
         Text(value)
             .font(Typography.tesseraMono(size: 11))
             .foregroundStyle(T.green)
     }
 
-    private func statusBox(copy: String) -> some View {
+    private func statusBox(copy: LocalizedStringResource) -> some View {
         Text(copy)
             .font(Typography.tesseraMono(size: 11))
             .foregroundStyle(T.fgMuted)

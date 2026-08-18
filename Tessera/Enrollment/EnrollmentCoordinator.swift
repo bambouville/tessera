@@ -58,7 +58,7 @@ enum DeviceEnrollmentKeyFactory {
         case invalidPublicKey
 
         var errorDescription: String? {
-            "The local device key has invalid public metadata."
+            String(localized: "The local device key has invalid public metadata.")
         }
     }
 
@@ -203,14 +203,14 @@ enum DeviceEnrollmentKeyProvisioningError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .authorizationCancelled:
-            return "Device authentication was cancelled. The device key was not shared."
+            return String(localized: "Device authentication was cancelled. The device key was not shared.")
         case .authorizationUnavailable(let reason):
             return Self.message(
                 reason,
-                fallback: "Device owner authentication is unavailable."
+                fallback: String(localized: "Device owner authentication is unavailable.")
             )
         case .authorizationFailed(let reason):
-            return Self.message(reason, fallback: "Device authentication failed.")
+            return Self.message(reason, fallback: String(localized: "Device authentication failed."))
         }
     }
 
@@ -232,7 +232,7 @@ enum DeviceEnrollmentKeyProvisioner {
     typealias KeyProvider = @MainActor @Sendable () throws -> StoredKey
 
     static let authorizationReason =
-        "Authorize Tessera to protect and use this device key for SSH connections."
+        String(localized: "Authorize Tessera to protect and use this device key for SSH connections.")
 
     static func requiresFreshAuthorization(
         globalPreference: Bool,
@@ -294,7 +294,7 @@ struct EnrollmentLiveBiometricAuthorizer: EnrollmentBiometricAuthorizing {
         case .authenticated:
             return EnrollmentFreshBiometricAuthorization()
         case .userCancelled:
-            throw AuthorizationError.denied("Authorization was cancelled.")
+            throw AuthorizationError.denied(String(localized: "Authorization was cancelled."))
         case .unavailable(let reason), .failed(let reason):
             throw AuthorizationError.denied(reason)
         }
@@ -355,15 +355,15 @@ final class EnrollmentCoordinator {
         var errorDescription: String? {
             switch self {
             case .continuationStreamsUnavailable(let reason):
-                return "Could not open the secure continuation channel: \(reason)"
+                return String(localized: "Could not open the secure continuation channel: \(reason)")
             case .hostMismatch:
-                return "The peer requested a different host than the focused session."
+                return String(localized: "The peer requested a different host than the focused session.")
             case .missingHost:
-                return "The enrollment host is no longer available."
+                return String(localized: "The enrollment host is no longer available.")
             case .requestNotReady:
-                return "The enrollment request is not ready for this action."
+                return String(localized: "The enrollment request is not ready for this action.")
             case .existingAccessConflict:
-                return "This key has tracked access for an earlier version of the host route. Revoke or resolve that access before requesting a new grant."
+                return String(localized: "This key has tracked access for an earlier version of the host route. Revoke or resolve that access before requesting a new grant.")
             }
         }
     }
@@ -471,7 +471,7 @@ final class EnrollmentCoordinator {
                         self.pendingRequesterStreamAttempt = nil
                         guard let input, let output else {
                             self.fail(CoordinatorError.continuationStreamsUnavailable(
-                                error?.localizedDescription ?? "The peer did not provide streams."
+                                error?.localizedDescription ?? String(localized: "The peer did not provide streams.")
                             ))
                             return
                         }
@@ -709,7 +709,7 @@ final class EnrollmentCoordinator {
             phase = .syncingRecords(hostName: localHostName(fallback: grant.hostName))
         case .recordingRequester:
             guard role == .requester, !requesterCompletionPersisted else {
-                phase = .failed("Enrollment persistence changed state unexpectedly.")
+                phase = .failed(String(localized: "Enrollment persistence changed state unexpectedly."))
                 return
             }
             do {
@@ -730,7 +730,7 @@ final class EnrollmentCoordinator {
         case .completed:
             if role == .requester {
                 guard requesterCompletionPersisted else {
-                    phase = .failed("The origin completed before local enrollment was recorded.")
+                    phase = .failed(String(localized: "The origin completed before local enrollment was recorded."))
                     return
                 }
                 if !requesterCompletionDelivered, let requesterHost {
@@ -990,33 +990,33 @@ final class EnrollmentCoordinator {
     private func message(for failure: EnrollmentService.Failure) -> String {
         switch failure {
         case .peerBindingRequired:
-            return "The continuation channel could not prove its Apple peer binding."
+            return String(localized: "The continuation channel could not prove its Apple peer binding.")
         case .invalidTransition:
-            return "Enrollment changed state unexpectedly."
+            return String(localized: "Enrollment changed state unexpectedly.")
         case .invalidRequest:
-            return "The peer sent an invalid enrollment request."
+            return String(localized: "The peer sent an invalid enrollment request.")
         case .protocolViolation:
-            return "The peer sent an invalid enrollment message."
+            return String(localized: "The peer sent an invalid enrollment message.")
         case .transportFailure:
-            return "The continuation channel closed before enrollment completed."
+            return String(localized: "The continuation channel closed before enrollment completed.")
         case .authorizationFailed:
-            return "Device-owner authorization failed."
+            return String(localized: "Device-owner authorization failed.")
         case .staleAuthorization:
-            return "Device-owner authorization expired before installation began."
+            return String(localized: "Device-owner authorization expired before installation began.")
         case .installationFailed:
-            return "The public key could not be installed on the host."
+            return String(localized: "The public key could not be installed on the host.")
         case .persistenceFailed:
-            return "The requesting device could not record the authorization."
+            return String(localized: "The requesting device could not record the authorization.")
         case .remote(let remote):
             switch remote {
             case .authorizationFailed:
-                return "The other device did not authorize this request."
+                return String(localized: "The other device did not authorize this request.")
             case .installationFailed:
-                return "The other device could not install this public key."
+                return String(localized: "The other device could not install this public key.")
             case .persistenceFailed:
-                return "The other device could not record this authorization."
+                return String(localized: "The other device could not record this authorization.")
             case .protocolViolation:
-                return "The other device rejected the enrollment protocol."
+                return String(localized: "The other device rejected the enrollment protocol.")
             }
         }
     }

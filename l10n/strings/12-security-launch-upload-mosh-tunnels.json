@@ -1,0 +1,410 @@
+{
+  "require device owner authentication to unlock": {
+    "de": "zum Entsperren Authentifizierung des Gerätebesitzers verlangen",
+    "es": "exigir la autenticación del propietario del dispositivo para desbloquear",
+    "fr": "exiger l'authentification du propriétaire de l'appareil pour déverrouiller",
+    "ja": "ロック解除にデバイス所有者の認証を要求",
+    "zh-Hans": "解锁时要求设备所有者认证",
+    "zh-Hant": "解鎖時要求裝置擁有者驗證"
+  },
+  "Face ID first, with device-passcode fallback": {
+    "de": "zuerst Face ID, ersatzweise der Gerätecode",
+    "es": "primero Face ID, con el código del dispositivo como alternativa",
+    "fr": "Face ID d'abord, avec le code de l'appareil en secours",
+    "ja": "まず Face ID、だめならデバイスのパスコード",
+    "zh-Hans": "优先使用 Face ID，回退到设备密码",
+    "zh-Hant": "優先使用 Face ID，回退到裝置密碼"
+  },
+  "auto-lock after idle": {
+    "de": "nach Inaktivität automatisch sperren",
+    "es": "bloquear automáticamente tras la inactividad",
+    "fr": "verrouiller automatiquement après inactivité",
+    "ja": "一定時間操作がないと自動でロック",
+    "zh-Hans": "闲置后自动锁定",
+    "zh-Hant": "閒置後自動鎖定"
+  },
+  "lock when backgrounded": {
+    "de": "im Hintergrund sperren",
+    "es": "bloquear al pasar a segundo plano",
+    "fr": "verrouiller en arrière-plan",
+    "ja": "バックグラウンドに移ったらロック",
+    "zh-Hans": "进入后台时锁定",
+    "zh-Hant": "進入背景時鎖定"
+  },
+  "authorize key connection bursts": {
+    "de": "Verbindungsschübe mit einem Key autorisieren",
+    "es": "autorizar ráfagas de conexión con la clave",
+    "fr": "autoriser des salves de connexions avec la clé",
+    "ja": "キーによる連続接続をまとめて認可",
+    "zh-Hans": "为密钥的连续连接授权",
+    "zh-Hant": "為金鑰的連續連線授權"
+  },
+  "Face ID or passcode; a grant may cover the same endpoint and key for 30 seconds": {
+    "de": "Face ID oder Code; eine Freigabe kann denselben Endpunkt und Key 30 Sekunden lang abdecken",
+    "es": "Face ID o código; una concesión puede cubrir el mismo extremo y la misma clave durante 30 segundos",
+    "fr": "Face ID ou code ; une autorisation peut couvrir le même point de terminaison et la même clé pendant 30 secondes",
+    "ja": "Face ID またはパスコード。1 回の許可で、同じエンドポイントとキーを 30 秒間カバーできます",
+    "zh-Hans": "Face ID 或密码；一次授权可在 30 秒内覆盖同一端点和同一密钥",
+    "zh-Hant": "Face ID 或密碼；一次授權可在 30 秒內涵蓋同一端點和同一金鑰"
+  },
+  "also enables device owner authentication": {
+    "de": "aktiviert außerdem die Authentifizierung des Gerätebesitzers",
+    "es": "también activa la autenticación del propietario del dispositivo",
+    "fr": "active également l'authentification du propriétaire de l'appareil",
+    "ja": "デバイス所有者の認証も有効になります",
+    "zh-Hans": "同时会启用设备所有者认证",
+    "zh-Hant": "同時會啟用裝置擁有者驗證"
+  },
+  "connecting — %@": {
+    "de": "verbinde – %@",
+    "es": "conectando: %@",
+    "fr": "connexion — %@",
+    "ja": "接続中 — %@",
+    "zh-Hans": "正在连接 —— %@",
+    "zh-Hant": "正在連線 —— %@"
+  },
+  "possible WSL2 / Tailscale MTU issue": {
+    "de": "mögliches MTU-Problem mit WSL2 / Tailscale",
+    "es": "posible problema de MTU con WSL2 / Tailscale",
+    "fr": "problème de MTU possible avec WSL2 / Tailscale",
+    "ja": "WSL2 / Tailscale の MTU の問題の可能性があります",
+    "zh-Hans": "可能是 WSL2 / Tailscale 的 MTU 问题",
+    "zh-Hant": "可能是 WSL2 / Tailscale 的 MTU 問題"
+  },
+  "Dismiss network warning": {
+    "de": "Netzwerkwarnung ausblenden",
+    "es": "Descartar el aviso de red",
+    "fr": "Masquer l'avertissement réseau",
+    "ja": "ネットワークの警告を閉じる",
+    "zh-Hans": "关闭网络警告",
+    "zh-Hant": "關閉網路警告"
+  },
+  "edit host": {
+    "de": "Host bearbeiten",
+    "es": "editar el host",
+    "fr": "modifier l'hôte",
+    "ja": "ホストを編集",
+    "zh-Hans": "编辑主机",
+    "zh-Hant": "編輯主機"
+  },
+  "learn more": {
+    "de": "mehr erfahren",
+    "es": "más información",
+    "fr": "en savoir plus",
+    "ja": "詳しい情報",
+    "zh-Hans": "了解更多",
+    "zh-Hant": "了解更多"
+  },
+  "Could not encode the non-secret key deletion journal.": {
+    "de": "Das nicht geheime Journal der Key-Löschungen konnte nicht codiert werden.",
+    "es": "No se pudo codificar el registro no secreto de eliminación de claves.",
+    "fr": "Impossible d'encoder le journal non secret des suppressions de clés.",
+    "ja": "秘密情報を含まないキー削除ジャーナルをエンコードできませんでした。",
+    "zh-Hans": "无法编码非机密的密钥删除日志。",
+    "zh-Hant": "無法編碼非機密的金鑰刪除日誌。"
+  },
+  "Could not persist the non-secret key deletion journal.": {
+    "de": "Das nicht geheime Journal der Key-Löschungen konnte nicht gesichert werden.",
+    "es": "No se pudo guardar el registro no secreto de eliminación de claves.",
+    "fr": "Impossible d'enregistrer le journal non secret des suppressions de clés.",
+    "ja": "秘密情報を含まないキー削除ジャーナルを保存できませんでした。",
+    "zh-Hans": "无法持久化非机密的密钥删除日志。",
+    "zh-Hant": "無法持續保存非機密的金鑰刪除日誌。"
+  },
+  "Key metadata was removed, but secure private-material cleanup is pending and will retry at next launch. %@": {
+    "de": "Die Key-Metadaten wurden entfernt, die sichere Bereinigung des privaten Materials steht aber noch aus und wird beim nächsten Start erneut versucht. %@",
+    "es": "Se eliminaron los metadatos de la clave, pero la limpieza segura del material privado sigue pendiente y se reintentará en el próximo inicio. %@",
+    "fr": "Les métadonnées de la clé ont été supprimées, mais le nettoyage sécurisé du matériel privé reste en attente et sera retenté au prochain lancement. %@",
+    "ja": "キーのメタデータは削除しましたが、秘密情報の安全な後始末はまだ完了しておらず、次回の起動時に再試行します。%@",
+    "zh-Hans": "已移除密钥元数据，但私密材料的安全清理仍待完成，将在下次启动时重试。%@",
+    "zh-Hant": "已移除金鑰中繼資料，但私密材料的安全清理仍待完成，將在下次啟動時重試。%@"
+  },
+  "The key metadata could not be saved, so the Keychain protection change was reversed. %@": {
+    "de": "Die Key-Metadaten konnten nicht gesichert werden, daher wurde die Änderung des Schlüsselbund-Schutzes zurückgenommen. %@",
+    "es": "No se pudieron guardar los metadatos de la clave, así que se revirtió el cambio de protección del llavero. %@",
+    "fr": "Les métadonnées de la clé n'ont pas pu être enregistrées, le changement de protection du trousseau a donc été annulé. %@",
+    "ja": "キーのメタデータを保存できなかったため、キーチェーンの保護設定の変更を取り消しました。%@",
+    "zh-Hans": "无法保存密钥元数据，因此已撤销钥匙串保护的更改。%@",
+    "zh-Hant": "無法儲存金鑰中繼資料，因此已撤銷鑰匙圈保護的更改。%@"
+  },
+  "The key metadata could not be saved. Secure key material was removed. %@": {
+    "de": "Die Key-Metadaten konnten nicht gesichert werden. Das sichere Key-Material wurde entfernt. %@",
+    "es": "No se pudieron guardar los metadatos de la clave. Se eliminó el material seguro de la clave. %@",
+    "fr": "Les métadonnées de la clé n'ont pas pu être enregistrées. Le matériel de clé sécurisé a été supprimé. %@",
+    "ja": "キーのメタデータを保存できませんでした。安全に保管されていたキー情報は削除されました。%@",
+    "zh-Hans": "无法保存密钥元数据。安全存放的密钥材料已被移除。%@",
+    "zh-Hant": "無法儲存金鑰中繼資料。安全存放的金鑰材料已被移除。%@"
+  },
+  "The metadata save failed (%@) and protection rollback failed (%@). %@": {
+    "de": "Das Sichern der Metadaten ist fehlgeschlagen (%@), und das Zurücknehmen des Schutzes ebenfalls (%@). %@",
+    "es": "Falló el guardado de los metadatos (%@) y también la reversión de la protección (%@). %@",
+    "fr": "L'enregistrement des métadonnées a échoué (%@) et l'annulation de la protection aussi (%@). %@",
+    "ja": "メタデータの保存に失敗し（%@）、保護設定の巻き戻しにも失敗しました（%@）。%@",
+    "zh-Hans": "元数据保存失败（%@），保护设置回滚也失败了（%@）。%@",
+    "zh-Hant": "中繼資料儲存失敗（%@），保護設定回滾也失敗了（%@）。%@"
+  },
+  "The key metadata could not be saved (%@), and secure cleanup also failed (%@). No success was reported.": {
+    "de": "Die Key-Metadaten konnten nicht gesichert werden (%@), und auch die sichere Bereinigung ist fehlgeschlagen (%@). Es wurde kein Erfolg gemeldet.",
+    "es": "No se pudieron guardar los metadatos de la clave (%@) y la limpieza segura también falló (%@). No se informó de ningún éxito.",
+    "fr": "Les métadonnées de la clé n'ont pas pu être enregistrées (%@) et le nettoyage sécurisé a également échoué (%@). Aucun succès n'a été signalé.",
+    "ja": "キーのメタデータを保存できず（%@）、安全な後始末にも失敗しました（%@）。成功は報告されていません。",
+    "zh-Hans": "无法保存密钥元数据（%@），安全清理也失败了（%@）。未报告任何成功。",
+    "zh-Hant": "無法儲存金鑰中繼資料（%@），安全清理也失敗了（%@）。未回報任何成功。"
+  },
+  "upload to host": {
+    "de": "auf Host hochladen",
+    "es": "subir al host",
+    "fr": "téléverser vers l'hôte",
+    "ja": "ホストにアップロード",
+    "zh-Hans": "上传到主机",
+    "zh-Hant": "上傳到主機"
+  },
+  "Upload": {
+    "de": "Hochladen",
+    "es": "Subir",
+    "fr": "Téléverser",
+    "ja": "アップロード",
+    "zh-Hans": "上传",
+    "zh-Hant": "上傳"
+  },
+  "Connect & upload": {
+    "de": "Verbinden und hochladen",
+    "es": "Conectar y subir",
+    "fr": "Se connecter et téléverser",
+    "ja": "接続してアップロード",
+    "zh-Hans": "连接并上传",
+    "zh-Hant": "連線並上傳"
+  },
+  "needs a live session on the selected host": {
+    "de": "erfordert eine laufende Sitzung auf dem gewählten Host",
+    "es": "necesita una sesión activa en el host seleccionado",
+    "fr": "nécessite une session active sur l'hôte sélectionné",
+    "ja": "選択したホストで実行中のセッションが必要です",
+    "zh-Hans": "需要所选主机上有一个活动会话",
+    "zh-Hant": "需要所選主機上有一個進行中的工作階段"
+  },
+  "Paste path into active session": {
+    "de": "Pfad in die aktive Sitzung einsetzen",
+    "es": "Pegar la ruta en la sesión activa",
+    "fr": "Coller le chemin dans la session active",
+    "ja": "アクティブなセッションにパスをペースト",
+    "zh-Hans": "将路径粘贴到活动会话",
+    "zh-Hant": "將路徑貼上到進行中的工作階段"
+  },
+  "types the file's remote path into %@ after upload — on by default for temp": {
+    "de": "tippt den entfernten Pfad der Datei nach dem Hochladen in %@ ein – für temporäre Uploads standardmäßig an",
+    "es": "escribe la ruta remota del archivo en %@ tras la subida: activado por omisión para los temporales",
+    "fr": "saisit le chemin distant du fichier dans %@ après le téléversement — activé par défaut pour les fichiers temporaires",
+    "ja": "アップロード後、ファイルのリモートパスを %@ に入力します。一時ファイルでは初期状態でオンです",
+    "zh-Hans": "上传后把文件的远程路径输入到 %@ —— 临时文件默认开启",
+    "zh-Hant": "上傳後把檔案的遠端路徑輸入到 %@ —— 暫存檔案預設開啟"
+  },
+  "types the file's remote path into %@ once its session finishes connecting": {
+    "de": "tippt den entfernten Pfad der Datei in %@ ein, sobald deren Sitzung verbunden ist",
+    "es": "escribe la ruta remota del archivo en %@ en cuanto su sesión termine de conectarse",
+    "fr": "saisit le chemin distant du fichier dans %@ dès que sa session est connectée",
+    "ja": "そのセッションの接続が完了したら、ファイルのリモートパスを %@ に入力します",
+    "zh-Hans": "该会话连接完成后，把文件的远程路径输入到 %@",
+    "zh-Hant": "該工作階段連線完成後，把檔案的遠端路徑輸入到 %@"
+  },
+  "Could not open the secure continuation channel: %@": {
+    "de": "Der sichere Fortsetzungskanal konnte nicht geöffnet werden: %@",
+    "es": "No se pudo abrir el canal seguro de continuación: %@",
+    "fr": "Impossible d'ouvrir le canal de reprise sécurisé : %@",
+    "ja": "安全な継続チャネルを開けませんでした: %@",
+    "zh-Hans": "无法打开安全接力通道：%@",
+    "zh-Hant": "無法打開安全接續通道：%@"
+  },
+  "Device authentication was cancelled. The device key was not shared.": {
+    "de": "Die Geräteauthentifizierung wurde abgebrochen. Der Geräte-Key wurde nicht geteilt.",
+    "es": "Se canceló la autenticación del dispositivo. La clave del dispositivo no se compartió.",
+    "fr": "L'authentification de l'appareil a été annulée. La clé de l'appareil n'a pas été partagée.",
+    "ja": "デバイスの認証がキャンセルされました。デバイスキーは共有されていません。",
+    "zh-Hans": "设备认证已取消。设备密钥未被共享。",
+    "zh-Hant": "裝置驗證已取消。裝置金鑰未被共享。"
+  },
+  "The enrollment host is no longer available.": {
+    "de": "Der Enrollment-Host ist nicht mehr verfügbar.",
+    "es": "El host de la inscripción ya no está disponible.",
+    "fr": "L'hôte d'inscription n'est plus disponible.",
+    "ja": "登録先のホストはもう利用できません。",
+    "zh-Hans": "注册主机已不可用。",
+    "zh-Hant": "註冊主機已不可用。"
+  },
+  "The enrollment request is not ready for this action.": {
+    "de": "Die Enrollment-Anfrage ist für diese Aktion noch nicht bereit.",
+    "es": "La solicitud de inscripción no está lista para esta acción.",
+    "fr": "La demande d'inscription n'est pas prête pour cette action.",
+    "ja": "登録リクエストは、この操作を行える状態ではありません。",
+    "zh-Hans": "注册请求尚未就绪，无法执行此操作。",
+    "zh-Hant": "註冊請求尚未就緒，無法執行此操作。"
+  },
+  "The peer requested a different host than the focused session.": {
+    "de": "Die Gegenstelle hat einen anderen Host angefragt als den der aktiven Sitzung.",
+    "es": "El par solicitó un host distinto al de la sesión en primer plano.",
+    "fr": "Le pair a demandé un hôte différent de celui de la session active.",
+    "ja": "相手のデバイスは、現在のセッションとは別のホストを要求しました。",
+    "zh-Hans": "对端请求的主机与当前会话的主机不同。",
+    "zh-Hant": "對端請求的主機與目前工作階段的主機不同。"
+  },
+  "This key has tracked access for an earlier version of the host route. Revoke or resolve that access before requesting a new grant.": {
+    "de": "Für diesen Key ist Zugang zu einer früheren Fassung der Host-Route erfasst. Widerrufe oder kläre diesen Zugang, bevor du eine neue Freigabe anforderst.",
+    "es": "Esta clave tiene acceso registrado para una versión anterior de la ruta del host. Revoca o resuelve ese acceso antes de solicitar una nueva concesión.",
+    "fr": "Cette clé possède un accès suivi pour une version antérieure de la route d'hôte. Révoquez ou résolvez cet accès avant de demander une nouvelle autorisation.",
+    "ja": "このキーには、以前のバージョンのホスト経路に対する記録済みアクセスがあります。新しい付与を要求する前に、そのアクセスを失効させるか解消してください。",
+    "zh-Hans": "此密钥在主机路由的早期版本上有已记录的访问权限。请先吊销或处理该权限，再申请新的授权。",
+    "zh-Hant": "此金鑰在主機路由的早期版本上有已記錄的存取權限。請先撤銷或處理該權限，再申請新的授權。"
+  },
+  "Could not start mosh: `mosh-server` never printed a MOSH CONNECT line.": {
+    "de": "mosh konnte nicht gestartet werden: `mosh-server` hat nie eine MOSH-CONNECT-Zeile ausgegeben.",
+    "es": "No se pudo iniciar mosh: `mosh-server` nunca imprimió una línea MOSH CONNECT.",
+    "fr": "Impossible de démarrer mosh : `mosh-server` n'a jamais affiché de ligne MOSH CONNECT.",
+    "ja": "mosh を起動できませんでした: `mosh-server` が MOSH CONNECT 行を出力しませんでした。",
+    "zh-Hans": "无法启动 mosh：`mosh-server` 始终没有输出 MOSH CONNECT 行。",
+    "zh-Hant": "無法啟動 mosh：`mosh-server` 始終沒有輸出 MOSH CONNECT 行。"
+  },
+  "Could not start mosh: `mosh-server` printed a malformed MOSH CONNECT line.": {
+    "de": "mosh konnte nicht gestartet werden: `mosh-server` hat eine fehlerhafte MOSH-CONNECT-Zeile ausgegeben.",
+    "es": "No se pudo iniciar mosh: `mosh-server` imprimió una línea MOSH CONNECT mal formada.",
+    "fr": "Impossible de démarrer mosh : `mosh-server` a affiché une ligne MOSH CONNECT mal formée.",
+    "ja": "mosh を起動できませんでした: `mosh-server` が不正な形式の MOSH CONNECT 行を出力しました。",
+    "zh-Hans": "无法启动 mosh：`mosh-server` 输出了格式错误的 MOSH CONNECT 行。",
+    "zh-Hant": "無法啟動 mosh：`mosh-server` 輸出了格式錯誤的 MOSH CONNECT 行。"
+  },
+  "Could not start mosh: the remote host does not have `mosh-server` installed or on PATH.": {
+    "de": "mosh konnte nicht gestartet werden: Auf dem entfernten Host ist `mosh-server` nicht installiert oder nicht im PATH.",
+    "es": "No se pudo iniciar mosh: el host remoto no tiene `mosh-server` instalado ni en el PATH.",
+    "fr": "Impossible de démarrer mosh : l'hôte distant n'a pas `mosh-server` installé ou dans son PATH.",
+    "ja": "mosh を起動できませんでした: リモートホストに `mosh-server` がインストールされていないか、PATH に含まれていません。",
+    "zh-Hans": "无法启动 mosh：远程主机未安装 `mosh-server`，或它不在 PATH 中。",
+    "zh-Hant": "無法啟動 mosh：遠端主機未安裝 `mosh-server`，或它不在 PATH 中。"
+  },
+  "Could not start mosh: the remote bootstrap command failed with exit status %lld.": {
+    "de": "mosh konnte nicht gestartet werden: Der entfernte Bootstrap-Befehl endete mit Status %lld.",
+    "es": "No se pudo iniciar mosh: el comando de arranque remoto terminó con el estado %lld.",
+    "fr": "Impossible de démarrer mosh : la commande d'amorçage distante s'est terminée avec le statut %lld.",
+    "ja": "mosh を起動できませんでした: リモートのブートストラップコマンドが終了ステータス %lld で失敗しました。",
+    "zh-Hans": "无法启动 mosh：远程引导命令以退出状态 %lld 失败。",
+    "zh-Hant": "無法啟動 mosh：遠端啟動指令以結束狀態 %lld 失敗。"
+  },
+  "Connection cancelled because the server's host key was not trusted.": {
+    "de": "Die Verbindung wurde abgebrochen, weil dem Host-Key des Servers nicht vertraut wurde.",
+    "es": "Se canceló la conexión porque no se confió en la clave de host del servidor.",
+    "fr": "Connexion annulée car la clé d'hôte du serveur n'a pas été approuvée.",
+    "ja": "サーバーのホストキーが信頼されなかったため、接続をキャンセルしました。",
+    "zh-Hans": "由于未信任服务器的主机密钥，已取消连接。",
+    "zh-Hant": "由於未信任伺服器的主機金鑰，已取消連線。"
+  },
+  "Jump host %@: connection cancelled because its host key was not trusted.": {
+    "de": "Jump-Host %@: Die Verbindung wurde abgebrochen, weil seinem Host-Key nicht vertraut wurde.",
+    "es": "Host de salto %@: se canceló la conexión porque no se confió en su clave de host.",
+    "fr": "Hôte de rebond %@ : connexion annulée car sa clé d'hôte n'a pas été approuvée.",
+    "ja": "踏み台ホスト %@: そのホストキーが信頼されなかったため、接続をキャンセルしました。",
+    "zh-Hans": "跳板主机 %@：由于未信任其主机密钥，已取消连接。",
+    "zh-Hant": "跳板主機 %@：由於未信任其主機金鑰，已取消連線。"
+  },
+  "Could not install Tessera shell integration.": {
+    "de": "Die Tessera-Shell-Integration konnte nicht installiert werden.",
+    "es": "No se pudo instalar la integración de Tessera con el shell.",
+    "fr": "Impossible d'installer l'intégration Tessera au shell.",
+    "ja": "Tessera のシェル統合をインストールできませんでした。",
+    "zh-Hans": "无法安装 Tessera shell 集成。",
+    "zh-Hant": "無法安裝 Tessera shell 整合。"
+  },
+  "Could not install Tessera shell integration: %@": {
+    "de": "Die Tessera-Shell-Integration konnte nicht installiert werden: %@",
+    "es": "No se pudo instalar la integración de Tessera con el shell: %@",
+    "fr": "Impossible d'installer l'intégration Tessera au shell : %@",
+    "ja": "Tessera のシェル統合をインストールできませんでした: %@",
+    "zh-Hans": "无法安装 Tessera shell 集成：%@",
+    "zh-Hant": "無法安裝 Tessera shell 整合：%@"
+  },
+  "Could not verify Tessera shell integration.": {
+    "de": "Die Tessera-Shell-Integration konnte nicht geprüft werden.",
+    "es": "No se pudo verificar la integración de Tessera con el shell.",
+    "fr": "Impossible de vérifier l'intégration Tessera au shell.",
+    "ja": "Tessera のシェル統合を確認できませんでした。",
+    "zh-Hans": "无法校验 Tessera shell 集成。",
+    "zh-Hant": "無法檢驗 Tessera shell 整合。"
+  },
+  "Could not verify Tessera shell integration: %@": {
+    "de": "Die Tessera-Shell-Integration konnte nicht geprüft werden: %@",
+    "es": "No se pudo verificar la integración de Tessera con el shell: %@",
+    "fr": "Impossible de vérifier l'intégration Tessera au shell : %@",
+    "ja": "Tessera のシェル統合を確認できませんでした: %@",
+    "zh-Hans": "无法校验 Tessera shell 集成：%@",
+    "zh-Hant": "無法檢驗 Tessera shell 整合：%@"
+  },
+  "background": {
+    "de": "Hintergrund",
+    "es": "fondo",
+    "fr": "arrière-plan",
+    "ja": "背景",
+    "zh-Hans": "背景",
+    "zh-Hant": "背景"
+  },
+  "solid color from the selected theme.": {
+    "de": "einfarbig in der Farbe des gewählten Themas.",
+    "es": "color sólido del tema seleccionado.",
+    "fr": "couleur unie issue du thème sélectionné.",
+    "ja": "選択したテーマの単色を使います。",
+    "zh-Hans": "使用所选主题的纯色。",
+    "zh-Hant": "使用所選主題的純色。"
+  },
+  "applies to every session unless a host overrides it. full-screen apps that set their own colors (vim, htop) paint over the picture.": {
+    "de": "gilt für jede Sitzung, sofern ein Host es nicht überschreibt. Vollbild-Programme mit eigenen Farben (vim, htop) übermalen das Bild.",
+    "es": "se aplica a todas las sesiones salvo que un host lo anule. las apps a pantalla completa que fijan sus propios colores (vim, htop) pintan por encima de la imagen.",
+    "fr": "s'applique à toutes les sessions, sauf si un hôte le remplace. les apps en plein écran qui définissent leurs propres couleurs (vim, htop) recouvrent l'image.",
+    "ja": "ホスト側で上書きしない限り、すべてのセッションに適用されます。独自の色を設定する全画面アプリ（vim、htop）は、この画像の上に描画します。",
+    "zh-Hans": "适用于所有会话，除非某台主机另行覆盖。自行设置颜色的全屏程序（vim、htop）会盖住图片。",
+    "zh-Hant": "適用於所有工作階段，除非某台主機另行覆蓋。自行設定顏色的全螢幕程式（vim、htop）會蓋住圖片。"
+  },
+  "tunnels": {
+    "de": "Tunnel",
+    "es": "túneles",
+    "fr": "tunnels",
+    "ja": "トンネル",
+    "zh-Hans": "隧道",
+    "zh-Hant": "通道"
+  },
+  "no tunnels yet": {
+    "de": "noch keine Tunnel",
+    "es": "aún no hay túneles",
+    "fr": "aucun tunnel pour l'instant",
+    "ja": "トンネルはまだありません",
+    "zh-Hans": "还没有隧道",
+    "zh-Hant": "還沒有通道"
+  },
+  "all forwarding rules across your hosts.": {
+    "de": "alle Weiterleitungsregeln über deine Hosts hinweg.",
+    "es": "todas las reglas de reenvío de todos tus hosts.",
+    "fr": "toutes les règles de redirection de vos hôtes.",
+    "ja": "すべてのホストにまたがる転送ルール。",
+    "zh-Hans": "你所有主机上的全部转发规则。",
+    "zh-Hant": "你所有主機上的全部轉發規則。"
+  },
+  "open a host's editor → forwarding tab to add a rule. tunnels start automatically when you connect.": {
+    "de": "öffne den Editor eines Hosts → Tab „Weiterleitung“, um eine Regel hinzuzufügen. Tunnel starten automatisch, sobald du dich verbindest.",
+    "es": "abre el editor de un host → pestaña de reenvío para añadir una regla. los túneles se inician automáticamente al conectar.",
+    "fr": "ouvrez l'éditeur d'un hôte → onglet redirection pour ajouter une règle. les tunnels démarrent automatiquement à la connexion.",
+    "ja": "ホストの編集画面 → 「転送」タブでルールを追加します。トンネルは接続時に自動的に開始します。",
+    "zh-Hans": "打开某台主机的编辑器 → 转发标签即可添加规则。连接时隧道会自动启动。",
+    "zh-Hant": "打開某台主機的編輯器 → 轉發標籤即可加入規則。連線時通道會自動啟動。"
+  },
+  "connected": {
+    "de": "verbunden",
+    "es": "conectado",
+    "fr": "connecté",
+    "ja": "接続済み",
+    "zh-Hans": "已连接",
+    "zh-Hant": "已連線"
+  },
+  "disconnected": {
+    "de": "getrennt",
+    "es": "desconectado",
+    "fr": "déconnecté",
+    "ja": "未接続",
+    "zh-Hans": "已断开",
+    "zh-Hant": "已中斷"
+  }
+}

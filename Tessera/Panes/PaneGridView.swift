@@ -545,7 +545,7 @@ struct PaneHeaderView: View {
             }
             .buttonStyle(.plain)
 
-            Text(title)
+            Text(verbatim: title)
                 .font(Typography.tesseraMonoFixed(size: max(8, height * 0.52), weight: .medium))
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -1314,7 +1314,7 @@ struct PaneCommandToast: View {
     let T: DesignTokens
 
     var body: some View {
-        Text(message)
+        Text(verbatim: message)
             .font(Typography.tesseraMono(size: 13, weight: .medium))
             .foregroundStyle(T.fg)
             .lineLimit(2)

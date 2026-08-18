@@ -236,7 +236,7 @@ enum SwipePadPetalLayout {
     private static func modeSwitchPetal() -> SwipePadPetalModel {
         SwipePadPetalModel(
             direction: .up,
-            label: "switch mode",
+            label: String(localized: "switch mode"),
             caption: "shift-tab",
             action: .macro("shift-tab"),
             tint: .neutral

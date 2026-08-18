@@ -89,87 +89,67 @@ extension OnboardingStep {
     /// (files panel / share / paste a screenshot) came from the approved mockup
     /// `docs/mockups/onboarding-files/index.html`. Shortcut chords are verified
     /// against `TesseraTerminalView.swift` (⌘⇧E → Files panel).
-    static let firstRun: [OnboardingStep] = [
+    /// Chords in the body copy follow the user's `modifierNotation`, so the
+    /// tour reads the way the rest of the app is written. Taking the notation
+    /// as a parameter keeps this type pure data — `OnboardingController`
+    /// supplies it from the preference it already holds.
+    static func firstRun(_ notation: ModifierNotation) -> [OnboardingStep] { [
+
         OnboardingStep(
-            title: "add your first host",
-            body: "Start here. Name it, drop in an address, pick an SSH key, "
-                + "then connect. ⌘N works from anywhere.",
+            title: String(localized: "add your first host"),
+            body: String(localized: "Start here. Name it, drop in an address, pick an SSH key, then connect. \(Chord.cmd("n").rendered(notation)) works from anywhere."),
             kind: .spotlight(.addHost, .below),
-            compactBody: "Start here. Name it, enter an address, choose an SSH key, "
-                + "then connect.",
+            compactBody: String(localized: "Start here. Name it, enter an address, choose an SSH key, then connect."),
             compactKind: .spotlight(.addHost, .below)
         ),
         OnboardingStep(
-            title: "keys, protected your way",
-            body: "Create recoverable Ed25519 keys or device-bound P-256 keys. "
-                + "Biometrics or passcode are optional, and Tessera can install "
-                + "the public key for you.",
+            title: String(localized: "keys, protected your way"),
+            body: String(localized: "Create recoverable Ed25519 keys or device-bound P-256 keys. Biometrics or passcode are optional, and Tessera can install the public key for you."),
             kind: .spotlight(.keysNav, .right),
             compactKind: .illustration(.keySecurity)
         ),
         OnboardingStep(
-            title: "tmux windows & panes",
-            body: "In tmux sessions, every window is a tab up top — ⌘T opens one, "
-                + "⌘1–9 jumps, and ⌘D splits a pane. Native control mode, not "
-                + "a passthrough.",
+            title: String(localized: "tmux windows & panes"),
+            body: String(localized: "In tmux sessions, every window is a tab up top — \(Chord.cmd("t").rendered(notation)) opens one, \(ChordRange(modifiers: [.command], from: "1", to: "9").rendered(notation, compact: true)) jumps, and \(Chord.cmd("d").rendered(notation)) splits a pane. Native control mode, not a passthrough."),
             kind: .illustration(.mockTerminal),
-            compactBody: "Open and switch tmux windows from the top bar. Split panes "
-                + "stay intact while the focused pane fits the phone viewport."
+            compactBody: String(localized: "Open and switch tmux windows from the top bar. Split panes stay intact while the focused pane fits the phone viewport.")
         ),
         OnboardingStep(
-            title: "agent center",
-            body: "Follow Claude Code and Codex across every session. See who "
-                + "needs input, answer a prompt, or jump straight to the right terminal.",
+            title: String(localized: "agent center"),
+            body: String(localized: "Follow Claude Code and Codex across every session. See who needs input, answer a prompt, or jump straight to the right terminal."),
             kind: .illustration(.agentCenter)
         ),
         OnboardingStep(
-            title: "swipe pad",
-            body: "Touch the center puck, then swipe toward an option and release "
-                + "to send it. The layout follows live prompts; double-tap the "
-                + "center for dictation.",
+            title: String(localized: "swipe pad"),
+            body: String(localized: "Touch the center puck, then swipe toward an option and release to send it. The layout follows live prompts; double-tap the center for dictation."),
             kind: .illustration(.swipePad)
         ),
         OnboardingStep(
-            title: "files, beside your shell",
-            body: "A folder glyph up top — or ⌘⇧E — slides out a panel that "
-                + "tracks your shell's directory. Browse, download, and Quick "
-                + "Look files on the host, over SSH and mosh alike.",
+            title: String(localized: "files, beside your shell"),
+            body: String(localized: "A folder glyph up top — or \(Chord.cmdShift("e").rendered(notation)) — slides out a panel that tracks your shell's directory. Browse, download, and Quick Look files on the host, over SSH and mosh alike."),
             kind: .illustration(.filesPanel),
-            compactTitle: "files from your phone",
-            compactBody: "Open Files from the terminal top bar to browse, download, "
-                + "and Quick Look remote files. SSH, tmux, and mosh sessions share "
-                + "the same file tools."
+            compactTitle: String(localized: "files from your phone"),
+            compactBody: String(localized: "Open Files from the terminal top bar to browse, download, and Quick Look remote files. SSH, tmux, and mosh sessions share the same file tools.")
         ),
         OnboardingStep(
-            title: "share, in and out",
-            body: "Drag or share a remote file out to Files, Mail, or Photos. "
-                + "Share a file into Tessera from any app and it lands on the "
-                + "host — the native iOS share sheet, both directions.",
+            title: String(localized: "share, in and out"),
+            body: String(localized: "Drag or share a remote file out to Files, Mail, or Photos. Share a file into Tessera from any app and it lands on the host — the native iOS share sheet, both directions."),
             kind: .illustration(.shareInOut),
-            compactBody: "Send a remote file to another app, or share a local file "
-                + "into Tessera and choose its host. The native iOS share sheet "
-                + "works in both directions."
+            compactBody: String(localized: "Send a remote file to another app, or share a local file into Tessera and choose its host. The native iOS share sheet works in both directions.")
         ),
         OnboardingStep(
-            title: "paste a screenshot",
-            body: "Share an image in, or drop one on the terminal — Tessera "
-                + "uploads it and types the path. Claude Code and Codex pick it "
-                + "up automatically, just like dragging a file in on the desktop.",
+            title: String(localized: "paste a screenshot"),
+            body: String(localized: "Share an image in, or drop one on the terminal — Tessera uploads it and types the path. Claude Code and Codex pick it up automatically, just like dragging a file in on the desktop."),
             kind: .illustration(.agentImagePaste),
-            compactBody: "Share an image into Tessera and choose an active session. "
-                + "Tessera uploads it, types the path, and Claude Code or Codex "
-                + "attaches it automatically."
+            compactBody: String(localized: "Share an image into Tessera and choose an active session. Tessera uploads it, types the path, and Claude Code or Codex attaches it automatically.")
         ),
         OnboardingStep(
-            title: "keyboard shortcuts",
-            body: "With a Magic Keyboard, global and context-aware actions stay a "
-                + "chord away:",
+            title: String(localized: "keyboard shortcuts"),
+            body: String(localized: "With a Magic Keyboard, global and context-aware actions stay a chord away:"),
             kind: .illustration(.shortcuts),
-            compactTitle: "terminal controls",
-            compactBody: "The keyboard bar keeps Escape, arrows, Tab, Control, and "
-                + "other shell keys within reach. Tap a modifier once for the next "
-                + "key, or twice to lock it.",
+            compactTitle: String(localized: "terminal controls"),
+            compactBody: String(localized: "The keyboard bar keeps Escape, arrows, Tab, Control, and other shell keys within reach. Tap a modifier once for the next key, or twice to lock it."),
             compactKind: .illustration(.phoneControls)
         )
-    ]
+    ] }
 }

@@ -75,17 +75,17 @@ enum MoshBootstrapError: Error, Equatable, LocalizedError, Sendable {
             return reason
         case .hostKeyRejected(let hopLabel):
             if let hopLabel {
-                return "Jump host \(hopLabel): connection cancelled because its host key was not trusted."
+                return HostKeyRejectionMessage.jumpHost(hopLabel)
             }
-            return "Connection cancelled because the server's host key was not trusted."
+            return HostKeyRejectionMessage.server
         case .missingServer:
-            return "Could not start mosh: the remote host does not have `mosh-server` installed or on PATH."
+            return String(localized: "Could not start mosh: the remote host does not have `mosh-server` installed or on PATH.")
         case .missingConnect:
-            return "Could not start mosh: `mosh-server` never printed a MOSH CONNECT line."
+            return String(localized: "Could not start mosh: `mosh-server` never printed a MOSH CONNECT line.")
         case .malformedConnect:
-            return "Could not start mosh: `mosh-server` printed a malformed MOSH CONNECT line."
+            return String(localized: "Could not start mosh: `mosh-server` printed a malformed MOSH CONNECT line.")
         case .remoteCommandFailed(let exitCode):
-            return "Could not start mosh: the remote bootstrap command failed with exit status \(exitCode)."
+            return String(localized: "Could not start mosh: the remote bootstrap command failed with exit status \(exitCode).")
         }
     }
 }
@@ -479,7 +479,10 @@ enum MoshBootstrap {
         let marker = "tessera-geometry:"
         guard let markerRange = output.range(of: marker, options: .backwards) else {
             throw MoshBootstrapError.connectionFailed(
-                "Could not read the existing tmux session size without changing it."
+                String(
+                    localized: "Could not read the existing tmux session size without changing it.",
+                    comment: "mosh bootstrap could not probe an existing tmux session"
+                )
             )
         }
         let suffix = output[markerRange.upperBound...]
@@ -502,7 +505,10 @@ enum MoshBootstrap {
               (1...10_000).contains(rows)
         else {
             throw MoshBootstrapError.connectionFailed(
-                "The existing tmux session reported an invalid size."
+                String(
+                    localized: "The existing tmux session reported an invalid size.",
+                    comment: "mosh bootstrap read an unusable tmux session geometry"
+                )
             )
         }
         return MoshBootstrapGeometry(
@@ -606,26 +612,26 @@ enum MoshBootstrap {
             )
 
         case is AuthenticationFailed:
-            return .authenticationFailed("Authentication failed.")
+            return .authenticationFailed(String(localized: "Authentication failed.", comment: "SSH auth failure"))
 
         case let error as SSHClientError:
             switch error {
             case .unsupportedPasswordAuthentication:
-                return .authenticationFailed("The server does not accept password authentication.")
+                return .authenticationFailed(String(localized: "The server does not accept password authentication.", comment: "SSH auth failure"))
             case .unsupportedPrivateKeyAuthentication:
-                return .authenticationFailed("The server does not accept public-key authentication.")
+                return .authenticationFailed(String(localized: "The server does not accept public-key authentication.", comment: "SSH auth failure"))
             case .unsupportedHostBasedAuthentication:
-                return .authenticationFailed("The server does not accept host-based authentication.")
+                return .authenticationFailed(String(localized: "The server does not accept host-based authentication.", comment: "SSH auth failure"))
             case .allAuthenticationOptionsFailed:
-                return .authenticationFailed("Authentication failed.")
+                return .authenticationFailed(String(localized: "Authentication failed.", comment: "SSH auth failure"))
             case .channelCreationFailed:
-                return .connectionFailed("Failed to open the SSH exec channel.")
+                return .connectionFailed(String(localized: "Failed to open the SSH exec channel.", comment: "SSH channel failure"))
             }
 
         case let error as CitadelError:
             switch error {
             case .unauthorized:
-                return .authenticationFailed("Authentication failed.")
+                return .authenticationFailed(String(localized: "Authentication failed.", comment: "SSH auth failure"))
             default:
                 return .connectionFailed(SensitiveDataRedactor.redact(describeSSHError(error)))
             }

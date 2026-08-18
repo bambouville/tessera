@@ -171,7 +171,7 @@ struct BootstrapFlowView: View {
                     // the row always stays tappable and the handshake's
                     // version check produces the authoritative refusal.
                     let flagged = peer.compatibility.indicatesVersionMismatch
-                    let subtitle = peerSubtitle(for: peer.compatibility)
+                    let subtitle = String(localized: peerSubtitle(for: peer.compatibility))
                     Button {
                         coordinator.selectPeer(peer)
                     } label: {
@@ -184,7 +184,7 @@ struct BootstrapFlowView: View {
                                 Text(peer.displayName)
                                     .font(Typography.tesseraMono(size: 13, weight: .medium))
                                     .foregroundStyle(T.fg)
-                                Text(subtitle)
+                                Text(verbatim: subtitle)
                                     .font(Typography.tesseraMono(size: 11))
                                     .foregroundStyle(T.fgDim)
                             }
@@ -208,7 +208,7 @@ struct BootstrapFlowView: View {
         }
     }
 
-    private func peerSubtitle(for compatibility: NearbyPeerCompatibility) -> String {
+    private func peerSubtitle(for compatibility: NearbyPeerCompatibility) -> LocalizedStringResource {
         switch compatibility {
         case .unknown, .compatible:
             return "tap to connect · name is not trusted"
@@ -349,11 +349,21 @@ struct BootstrapFlowView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     receiptLine("hosts, jump routes, port forwards, and portable appearance", symbol: "server.rack")
                     receiptLine(
-                        "\(selection.selectedOptionalTransfers.count) optional data categor\(selection.selectedOptionalTransfers.count == 1 ? "y" : "ies") selected",
+                        resolved: String(
+                            localized: "\(selection.selectedOptionalTransfers.count) optional data categories selected",
+                            comment: "Bootstrap receipt line. Pluralized on the category count."
+                        ),
                         symbol: "checklist"
                     )
                     receiptLine("no passwords or private keys move", symbol: "lock.fill", color: T.green)
-                    receiptLine("\(selection.selectedCount) public-key grant\(selection.selectedCount == 1 ? "" : "s") selected", symbol: "key", color: T.green)
+                    receiptLine(
+                        resolved: String(
+                            localized: "\(selection.selectedCount) public-key grants selected",
+                            comment: "Bootstrap receipt line. Pluralized on the grant count."
+                        ),
+                        symbol: "key",
+                        color: T.green
+                    )
                 }
             }
             Btn("approve selected batch", style: .primary, full: true) {
@@ -366,7 +376,7 @@ struct BootstrapFlowView: View {
         }
     }
 
-    private func progress(title: String, detail: String) -> some View {
+    private func progress(title: LocalizedStringKey, detail: LocalizedStringKey) -> some View {
         card {
             HStack(alignment: .top, spacing: 14) {
                 ProgressView().tint(T.fg)
@@ -387,22 +397,32 @@ struct BootstrapFlowView: View {
         VStack(alignment: .leading, spacing: 22) {
             switch receipt.direction {
             case .sent(let hostCount):
+                // Receipt heading on the sending device.
                 title(
                     "Setup sent",
-                    detail: "\(hostCount) host\(hostCount == 1 ? "" : "s") sent securely. Credentials remain local to each device."
+                    resolvedDetail: String(
+                        localized: "\(hostCount) hosts sent securely. Credentials remain local to each device.",
+                        comment: "Bootstrap receipt detail. Pluralized on the host count."
+                    )
                 )
             case .received(let imported):
+                // Receipt heading on the receiving device. Three
+                // independently pluralized counts share one sentence — the
+                // catalog carries a substitution for each.
                 title(
                     "Setup inherited",
-                    detail: "Imported \(imported.insertedHosts) host\(imported.insertedHosts == 1 ? "" : "s"), \(imported.insertedJumpLinks) jump route\(imported.insertedJumpLinks == 1 ? "" : "s"), and \(imported.insertedKnownHosts) trusted host key\(imported.insertedKnownHosts == 1 ? "" : "s")."
+                    resolvedDetail: String(
+                        localized: "Imported \(imported.insertedHosts) hosts, \(imported.insertedJumpLinks) jump routes, and \(imported.insertedKnownHosts) trusted host keys.",
+                        comment: "Bootstrap import summary. Each count pluralizes independently."
+                    )
                 )
                 if imported.skippedKnownHosts > 0 {
-                    Text("\(imported.skippedKnownHosts) identical trusted host key\(imported.skippedKnownHosts == 1 ? " was" : "s were") already present.")
+                    Text("\(imported.skippedKnownHosts) identical trusted host keys were already present.")
                         .tesseraSansScaled(size: 13)
                         .foregroundStyle(T.fgMuted)
                 }
                 if imported.conflictingKnownHosts > 0 {
-                    Text("\(imported.conflictingKnownHosts) local trusted host key conflict\(imported.conflictingKnownHosts == 1 ? " was" : "s were") preserved for review in Known Hosts.")
+                    Text("\(imported.conflictingKnownHosts) local trusted host key conflicts were preserved for review in Known Hosts.")
                         .tesseraSansScaled(size: 13, weight: .semibold)
                         .foregroundStyle(T.amber)
                 }
@@ -429,7 +449,7 @@ struct BootstrapFlowView: View {
                                         .font(Typography.tesseraMono(size: 10, weight: .semibold))
                                         .foregroundStyle(grantResultColor(result.status))
                                 }
-                                Text(result.detail ?? grantResultDetail(result.status))
+                                grantResultDetailText(result)
                                     .tesseraSansScaled(size: 13)
                                     .foregroundStyle(T.fgMuted)
                                 if result.status.offersConfigureLater,
@@ -456,7 +476,7 @@ struct BootstrapFlowView: View {
         VStack(alignment: .leading, spacing: 22) {
             title(
                 "Nearby setup stopped",
-                detail: message
+                resolvedDetail: message
             )
             card {
                 HStack(alignment: .top, spacing: 12) {
@@ -490,7 +510,7 @@ struct BootstrapFlowView: View {
                         .font(Typography.tesseraMono(size: 20, weight: .medium))
                         .foregroundStyle(T.fg)
                 }
-                Text(message)
+                Text(verbatim: message)
                     .tesseraSansScaled(size: 15)
                     .foregroundStyle(T.fgMuted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -518,12 +538,24 @@ struct BootstrapFlowView: View {
         .zIndex(10)
     }
 
-    private func title(_ value: String, detail: String) -> some View {
+    /// Both halves are literals — the common case, and the one string
+    /// extraction can see.
+    private func title(_ value: LocalizedStringKey, detail: LocalizedStringKey) -> some View {
+        titleView(Text(value), detail: Text(detail))
+    }
+
+    /// The detail is already resolved: a thrown error's message, or a count
+    /// sentence whose plural form the catalog already picked.
+    private func title(_ value: LocalizedStringKey, resolvedDetail: String) -> some View {
+        titleView(Text(value), detail: Text(verbatim: resolvedDetail))
+    }
+
+    private func titleView(_ value: Text, detail: Text) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(value)
+            value
                 .font(Typography.pageTitle)
                 .foregroundStyle(T.fg)
-            Text(detail)
+            detail
                 .tesseraSansScaled(size: 15)
                 .foregroundStyle(T.fgMuted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -531,7 +563,7 @@ struct BootstrapFlowView: View {
     }
 
     private func codeCard(_ code: String) -> some View {
-        Text(code)
+        Text(verbatim: code)
             .font(Typography.tesseraMono(size: 38, weight: .semibold))
             .tracking(4)
             .foregroundStyle(T.fg)
@@ -560,7 +592,7 @@ struct BootstrapFlowView: View {
             )
     }
 
-    private func label(_ value: String) -> some View {
+    private func label(_ value: LocalizedStringKey) -> some View {
         Text(value)
             .font(Typography.kicker)
             .tracking(0.6)
@@ -568,7 +600,24 @@ struct BootstrapFlowView: View {
     }
 
     private func receiptLine(
-        _ value: String,
+        _ value: LocalizedStringKey,
+        symbol: String,
+        color: Color? = nil
+    ) -> some View {
+        receiptLine(Text(value), symbol: symbol, color: color)
+    }
+
+    /// A count sentence the catalog already pluralized and resolved.
+    private func receiptLine(
+        resolved value: String,
+        symbol: String,
+        color: Color? = nil
+    ) -> some View {
+        receiptLine(Text(verbatim: value), symbol: symbol, color: color)
+    }
+
+    private func receiptLine(
+        _ value: Text,
         symbol: String,
         color: Color? = nil
     ) -> some View {
@@ -576,7 +625,7 @@ struct BootstrapFlowView: View {
             Image(systemName: symbol)
                 .frame(width: 18)
                 .foregroundStyle(color ?? T.fgMuted)
-            Text(value)
+            value
                 .tesseraSansScaled(size: 14)
                 .foregroundStyle(T.fgMuted)
         }
@@ -591,7 +640,7 @@ struct BootstrapFlowView: View {
             ? "checkmark.square.fill" : "square"
     }
 
-    private func optionalTransferTitle(_ transfer: BootstrapOptionalTransfer) -> String {
+    private func optionalTransferTitle(_ transfer: BootstrapOptionalTransfer) -> LocalizedStringResource {
         switch transfer {
         case .launchCommands: "launch commands"
         case .notes: "notes"
@@ -601,7 +650,7 @@ struct BootstrapFlowView: View {
         }
     }
 
-    private func optionalTransferDetail(_ transfer: BootstrapOptionalTransfer) -> String {
+    private func optionalTransferDetail(_ transfer: BootstrapOptionalTransfer) -> LocalizedStringResource {
         switch transfer {
         case .launchCommands:
             "Custom shell commands. These may contain secrets."
@@ -626,7 +675,7 @@ struct BootstrapFlowView: View {
         }
     }
 
-    private func grantResultLabel(_ status: BootstrapHostGrantStatus) -> String {
+    private func grantResultLabel(_ status: BootstrapHostGrantStatus) -> LocalizedStringResource {
         switch status {
         case .installed: return "AUTHORIZED"
         case .failed: return "FAILED"
@@ -636,7 +685,7 @@ struct BootstrapFlowView: View {
         }
     }
 
-    private func grantResultDetail(_ status: BootstrapHostGrantStatus) -> String {
+    private func grantResultDetail(_ status: BootstrapHostGrantStatus) -> LocalizedStringResource {
         switch status {
         case .installed:
             return "The recipient device key was installed and recorded on both devices."
@@ -649,6 +698,15 @@ struct BootstrapFlowView: View {
         case .excludedAuthentication:
             return "Passwords and unavailable credentials cannot be reused for a bootstrap grant."
         }
+    }
+
+    /// The installer's own message when it produced one — already resolved
+    /// by the error that threw it — otherwise the localized status copy.
+    private func grantResultDetailText(_ result: BootstrapHostGrantResult) -> Text {
+        if let detail = result.detail {
+            return Text(verbatim: detail)
+        }
+        return Text(grantResultDetail(result.status))
     }
 
     private func grantResultColor(_ status: BootstrapHostGrantStatus) -> Color {

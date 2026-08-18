@@ -22,6 +22,8 @@ final class ModifierState {
             armed.alt.toggle()
         case .shift:
             armed.shift.toggle()
+        case .cmd:
+            armed.cmd.toggle()
         default:
             precondition(false, "ModifierState.tap requires a modifier chip")
         }

@@ -3,6 +3,8 @@ import Observation
 import TmuxControl
 
 struct CommandPaletteNotice: Equatable {
+    /// Already-resolved copy: the notice's source stores it as a
+    /// `LocalizedStringResource` and resolves it on the way in.
     let title: String
     let message: String
     let actionLabel: String?
@@ -359,13 +361,16 @@ final class CommandPalette {
         }
     }
 
+    /// Search synonyms, not display copy: whatever a user might type to find
+    /// an agent in this state. Each language gets its own word list rather
+    /// than a translation of the English one.
     private static func statusSearchText(_ status: AgentStatus) -> String {
         switch status {
-        case .waitingForInput: return "needs input waiting blocked"
-        case .justFinished: return "just finished completed done feedback"
-        case .working: return "working running"
-        case .idle: return "idle prompt"
-        case .unavailable: return "status unavailable"
+        case .waitingForInput: return String(localized: "needs input waiting blocked")
+        case .justFinished: return String(localized: "just finished completed done feedback")
+        case .working: return String(localized: "working running")
+        case .idle: return String(localized: "idle prompt")
+        case .unavailable: return String(localized: "status unavailable")
         }
     }
 }

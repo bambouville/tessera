@@ -5,6 +5,19 @@ enum SessionRestorePolicy: String, CaseIterable, Codable {
     case ask
     case always
     case never
+
+    /// The raw value is persisted and synced between devices; the picker
+    /// shows this.
+    var displayName: LocalizedStringResource {
+        switch self {
+        case .ask:    return LocalizedStringResource(
+            "ask", comment: "Session-restore policy: ask on every launch")
+        case .always: return LocalizedStringResource(
+            "always", comment: "Session-restore policy")
+        case .never:  return LocalizedStringResource(
+            "never", comment: "Session-restore policy")
+        }
+    }
 }
 
 enum SessionRestorePresentationPolicy {

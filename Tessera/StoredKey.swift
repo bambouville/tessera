@@ -727,9 +727,9 @@ struct KeyDeletionIntentStore {
         var errorDescription: String? {
             switch self {
             case .encodingFailed:
-                return "Could not encode the non-secret key deletion journal."
+                return String(localized: "Could not encode the non-secret key deletion journal.")
             case .persistenceFailed:
-                return "Could not persist the non-secret key deletion journal."
+                return String(localized: "Could not persist the non-secret key deletion journal.")
             }
         }
     }
@@ -783,26 +783,26 @@ enum KeyLifecycleError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .creationPersistenceFailed(let primary, nil):
-            return "The key metadata could not be saved. Secure key material was removed. \(primary.localizedDescription)"
+            return String(localized: "The key metadata could not be saved. Secure key material was removed. \(primary.localizedDescription)")
         case .creationPersistenceFailed(let primary, let cleanup?):
-            return "The key metadata could not be saved (\(primary.localizedDescription)), and secure cleanup also failed (\(cleanup.localizedDescription)). No success was reported."
+            return String(localized: "The key metadata could not be saved (\(primary.localizedDescription)), and secure cleanup also failed (\(cleanup.localizedDescription)). No success was reported.")
         case .protectionPersistenceFailed(let primary):
-            return "The key metadata could not be saved, so the Keychain protection change was reversed. \(primary.localizedDescription)"
+            return String(localized: "The key metadata could not be saved, so the Keychain protection change was reversed. \(primary.localizedDescription)")
         case .protectionRollbackFailed(let primary, let compensation, let actual):
             let boundary: String
             switch actual {
             case .userPresence?:
-                boundary = "The actual Keychain boundary currently requires biometrics (Face ID/Touch ID) or passcode."
+                boundary = String(localized: "The actual Keychain boundary currently requires biometrics (Face ID/Touch ID) or passcode.")
             case .deviceUnlocked?:
-                boundary = "The actual Keychain boundary currently uses device-unlocked protection."
+                boundary = String(localized: "The actual Keychain boundary currently uses device-unlocked protection.")
             case .missing?:
-                boundary = "The private material is now missing from Keychain."
+                boundary = String(localized: "The private material is now missing from Keychain.")
             case nil:
-                boundary = "The actual Keychain boundary could not be determined."
+                boundary = String(localized: "The actual Keychain boundary could not be determined.")
             }
-            return "The metadata save failed (\(primary.localizedDescription)) and protection rollback failed (\(compensation.localizedDescription)). \(boundary)"
+            return String(localized: "The metadata save failed (\(primary.localizedDescription)) and protection rollback failed (\(compensation.localizedDescription)). \(boundary)")
         case .deletionPending(let primary):
-            return "Key metadata was removed, but secure private-material cleanup is pending and will retry at next launch. \(primary.localizedDescription)"
+            return String(localized: "Key metadata was removed, but secure private-material cleanup is pending and will retry at next launch. \(primary.localizedDescription)")
         }
     }
 }

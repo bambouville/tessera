@@ -401,13 +401,16 @@ final class FilesPanelController {
             do {
                 try await bridge.connect()
                 guard let candidate = RemotePathResolver.pathCandidate(from: selection) else {
-                    onMiss("Selection doesn't look like a path.")
+                    onMiss(String(localized: "Selection doesn't look like a path."))
                     return
                 }
                 guard let absolute = RemotePathResolver.expand(
                     candidate, home: bridge.homeDirectory,
                     cwd: cwd ?? terminalDirectory) else {
-                    onMiss("Can't resolve \(candidate) — no directory signal for relative paths.")
+                    onMiss(String(
+                        localized: "Can't resolve \(candidate) — no directory signal for relative paths.",
+                        comment: "A relative path could not be resolved; the argument is the text the user selected"
+                    ))
                     return
                 }
                 switch (try await RemotePathResolver.resolve(absolute: absolute, bridge: bridge), intent) {
@@ -605,7 +608,7 @@ final class FilesPanelController {
     func uploadLocalFiles(_ urls: [URL]) {
         guard transfers != nil else { return }
         guard let dir = currentDirectory else {
-            lastError = "No destination directory yet."
+            lastError = String(localized: "No destination directory yet.")
             return
         }
         for url in urls {
@@ -859,9 +862,8 @@ private final class TerminalDropBatch {
 
         let unreadable = staged.count - staged.compactMap { $0 }.count
         if unreadable > 0 {
-            reportFailure(unreadable == 1
-                ? "Couldn't read the dropped file."
-                : "Couldn't read \(unreadable) dropped files.")
+            // The catalog's plural variation covers the single-file case.
+            reportFailure(String(localized: "Couldn't read \(unreadable) dropped files."))
         }
         let items = staged.compactMap { $0 }.map {
             queue.enqueuePasteUpload(localURL: $0)

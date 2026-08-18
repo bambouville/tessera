@@ -72,7 +72,7 @@ enum BootstrapImportRestrictionError: Error, Equatable, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .incompleteRoute(let hostID, let missingAncestorID):
-            return "A restricted import of \(hostID) also requires jump host \(missingAncestorID)."
+            return String(localized: "A restricted import of \(hostID) also requires jump host \(missingAncestorID).")
         }
     }
 }

@@ -1,5 +1,6 @@
 // Tessera/Settings/SettingsPageView.swift
 import Foundation
+import MessageUI
 import SwiftUI
 import UIKit
 
@@ -66,7 +67,7 @@ struct SettingsPageView: View {
                                     .foregroundStyle(T.fgMuted)
                                     .frame(width: 24)
 
-                                Text(section.rawValue)
+                                Text(section.title)
                                     .font(Typography.tesseraMono(size: 13))
                                     .foregroundStyle(T.fg)
 
@@ -126,6 +127,11 @@ struct SettingsPageView: View {
             Text("settings")
                 .font(Typography.pageTitle)
                 .foregroundStyle(T.fg)
+                // The rail is a fixed-width column, so a longer translation
+                // ("Einstellungen") wraps mid-word rather than reflowing.
+                // Shrink the title instead of breaking the word.
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
                 .padding(.top, 28)
                 .padding(.horizontal, 20)
                 .padding(.bottom, 18)
@@ -176,7 +182,7 @@ struct SettingsPageView: View {
                     .font(Typography.tesseraMono(size: 12))
                     .foregroundStyle(isSelected ? T.accent : T.fgMuted)
 
-                Text(section.rawValue)
+                Text(section.title)
                     .font(Typography.tesseraMono(size: 13))
                     .foregroundStyle(isSelected ? T.accent : T.fgMuted)
 
@@ -227,11 +233,11 @@ struct SettingsPageView: View {
 }
 
 struct SettingsH: View {
-    let title: String
+    let title: LocalizedStringKey
 
     @Environment(\.designTokens) private var T
 
-    init(_ title: String) {
+    init(_ title: LocalizedStringKey) {
         self.title = title
     }
 
@@ -255,6 +261,24 @@ private enum SettingsSection: String, CaseIterable {
     case diagnostics
     case unlimited = "unlimited hosts"
     case about
+
+    /// The nav label. Separate from `rawValue`, which is the stable
+    /// persistence/identity token and must not change with the language.
+    var title: LocalizedStringResource {
+        switch self {
+        case .appearance:   return "appearance"
+        case .continuity:   return "sync & continuity"
+        case .terminal:     return "terminal"
+        case .files:        return "files"
+        case .themes:       return "themes"
+        case .keyboard:     return "keyboard & input"
+        case .security:     return "security"
+        case .experimental: return "experimental"
+        case .diagnostics:  return "diagnostics"
+        case .unlimited:    return "unlimited hosts"
+        case .about:        return "about"
+        }
+    }
 }
 
 struct DiagnosticLogInfo: Equatable {
@@ -267,12 +291,12 @@ struct DiagnosticLogInfo: Equatable {
     }
 
     var displaySize: String {
-        guard exists else { return "no file" }
+        guard exists else { return String(localized: "no file") }
         return ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file)
     }
 
     var displayUpdatedAt: String {
-        guard let modifiedAt else { return "not written" }
+        guard let modifiedAt else { return String(localized: "not written") }
         return modifiedAt.formatted(date: .abbreviated, time: .shortened)
     }
 }
@@ -298,6 +322,7 @@ enum DiagnosticLogStore {
     static let scrollDiagnosticsDefaultsKey = "Diagnostics.ScrollEnabled"
 
     private static let maxBytes: Int64 = 20_000_000
+    private static let maxAttachmentBytes = 4_000_000
     private static let maxLineCharacters = 900
     private static let retainedTailLineCount = 100
     private static let maxEntriesPerSignaturePerWindow = 18
@@ -434,6 +459,33 @@ enum DiagnosticLogStore {
                 byteCount: byteCount,
                 modifiedAt: modifiedAt
             )
+        }
+    }
+
+    /// A snapshot of the log for attaching to a message, read on the same
+    /// serial queue the writers use so a rotation can never tear the read.
+    /// Returns `nil` when the file is missing, empty, or unreadable — callers
+    /// send the report without it rather than trapping on a force-unwrap. A
+    /// log longer than `maxAttachmentBytes` is cut down to its tail at a line
+    /// boundary, so an oversized attachment stays a parseable log instead of
+    /// bouncing off a mail server.
+    static func attachmentData() -> Data? {
+        queue.sync { () -> Data? in
+            guard
+                let data = try? Data(contentsOf: logFileURL),
+                !data.isEmpty
+            else {
+                return nil
+            }
+
+            guard data.count > maxAttachmentBytes else { return data }
+
+            let tail = data.suffix(maxAttachmentBytes)
+            guard let firstNewline = tail.firstIndex(of: UInt8(ascii: "\n")) else {
+                return tail
+            }
+
+            return tail[tail.index(after: firstNewline)...]
         }
     }
 
@@ -664,6 +716,12 @@ enum DiagnosticLogStore {
             || lower.contains("unknown")
             || lower.contains("not-in-tmux")
             || lower.contains("no-active-pane")
+            // Root-cause markers for a host whose tmux mangles command
+            // replies (2026-08-17 field report): rare, bounded, and the
+            // exact evidence a stuck-launch report needs.
+            || lower.contains("separator-probe")
+            || lower.contains("fallback engaged")
+            || lower.contains("force-recovery")
     }
 
     private static func sanitize(_ message: String) -> String {
@@ -740,6 +798,11 @@ private struct DiagnosticsSettingsView: View {
     var onUploadLog: () -> Void
 
     @State private var logInfo = DiagnosticLogStore.info()
+    @State private var mailComposerVisible = false
+    @State private var mailUnavailableVisible = false
+    /// Snapshotted when the composer is presented, because
+    /// `MFMailComposeViewController` refuses edits once it is on screen.
+    @State private var mailAttachment: Data?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -775,6 +838,25 @@ private struct DiagnosticsSettingsView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .sheet(isPresented: $mailComposerVisible) {
+            DiagnosticsMailComposer(
+                recipient: developerEmailAddress,
+                subject: mailSubject,
+                body: mailBody(attachmentBytes: mailAttachment?.count),
+                attachment: mailAttachment,
+                attachmentFileName: diagnosticLogFileName
+            ) { result in
+                DiagnosticLogStore.appendApp(
+                    "diagnostics mail composer finished result=\(Self.label(for: result))"
+                )
+                mailComposerVisible = false
+                mailAttachment = nil
+                refresh()
+            }
+        }
+        .sheet(isPresented: $mailUnavailableVisible) {
+            DiagnosticsMailUnavailableSheet(address: developerEmailAddress)
+        }
         .onAppear {
             refresh()
         }
@@ -788,11 +870,19 @@ private struct DiagnosticsSettingsView: View {
         }
     }
 
+    /// The exported file's actual name — the same on every device in every
+    /// language, so it is never a translatable key.
+    private let diagnosticLogFileName = "tessera-diagnostics.log"
+
+    /// Where reports go. An address is data, not prose, so it is never a
+    /// translatable key either.
+    private let developerEmailAddress = "dev@bambouville.com"
+
     @ViewBuilder private var logActions: some View {
         ShareLink(
             item: DiagnosticLogStore.logFileURL,
             preview: SharePreview(
-                "tessera-diagnostics.log",
+                diagnosticLogFileName,
                 icon: Image(systemName: "doc.text")
             )
         ) {
@@ -821,6 +911,12 @@ private struct DiagnosticsSettingsView: View {
         .disabled(logInfo.isEmpty)
         .opacity(logInfo.isEmpty ? 0.45 : 1)
 
+        Btn("send to developer", compact: true) {
+            presentDeveloperMail()
+        }
+        .disabled(logInfo.isEmpty)
+        .opacity(logInfo.isEmpty ? 0.45 : 1)
+
         Btn("refresh", compact: true) {
             refresh()
         }
@@ -835,5 +931,169 @@ private struct DiagnosticsSettingsView: View {
 
     private func refresh() {
         logInfo = DiagnosticLogStore.info()
+    }
+
+    /// Hands the log to Mail when iOS has an account to send it from. Without
+    /// one — no account configured, or a simulator that never has one —
+    /// `canSendMail()` is false and the composer would come up blank, so the
+    /// sheet points at "export log" and spells out the address instead.
+    private func presentDeveloperMail() {
+        guard MFMailComposeViewController.canSendMail() else {
+            DiagnosticLogStore.appendApp("diagnostics mail unavailable canSendMail=false")
+            mailUnavailableVisible = true
+            return
+        }
+
+        mailAttachment = DiagnosticLogStore.attachmentData()
+        DiagnosticLogStore.appendApp(
+            "diagnostics mail composer presented attachmentBytes=\(mailAttachment?.count ?? 0)"
+        )
+        mailComposerVisible = true
+    }
+
+    /// The subject and the signature block are read by the developer, not by
+    /// the user, so they stay English for the same reason the diagnostics log
+    /// does — a translated bug report is harder to act on, not easier.
+    /// `String(localized:)` is deliberately absent from both.
+    private var mailSubject: String {
+        "Tessera diagnostics \(versionLine)"
+    }
+
+    /// The opening line is the exception: it is an instruction the *user*
+    /// reads and acts on in the compose sheet before sending, so it is
+    /// translated even though everything below the separator is not.
+    private func mailBody(attachmentBytes: Int?) -> String {
+        let attachmentLine = attachmentBytes.map { "\(diagnosticLogFileName) attached (\($0) bytes)" }
+            ?? "\(diagnosticLogFileName) could not be read — nothing attached"
+        let prompt = String(
+            localized: "Describe what happened above this line.",
+            comment: "First line of the diagnostics report email, addressed to the user composing it"
+        )
+
+        return """
+        \(prompt)
+
+        --
+        Tessera \(versionLine)
+        \(deviceModelIdentifier) · \(UIDevice.current.systemName) \(UIDevice.current.systemVersion)
+        \(attachmentLine)
+        """
+    }
+
+    private var versionLine: String {
+        "v\(AppVersion.marketing ?? "0.0.0") (build \(AppVersion.build ?? "0"))"
+    }
+
+    /// The hardware identifier ("iPad16,3"), not the marketing name: it is
+    /// what pins a rendering or performance report to a chip, and UIKit has no
+    /// API for it.
+    private var deviceModelIdentifier: String {
+        var info = utsname()
+        uname(&info)
+        return withUnsafeBytes(of: &info.machine) { raw in
+            String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
+        }
+    }
+
+    private static func label(for result: MFMailComposeResult) -> String {
+        switch result {
+        case .cancelled: return "cancelled"
+        case .saved: return "saved"
+        case .sent: return "sent"
+        case .failed: return "failed"
+        @unknown default: return "unknown"
+        }
+    }
+}
+
+/// Wraps the system mail composer so a diagnostics report can leave the app
+/// without the user hand-assembling one. Every field is set before the
+/// controller is presented — `MFMailComposeViewController` throws if they are
+/// touched afterwards — which is why `updateUIViewController` does nothing.
+private struct DiagnosticsMailComposer: UIViewControllerRepresentable {
+    let recipient: String
+    let subject: String
+    let body: String
+    let attachment: Data?
+    let attachmentFileName: String
+    let onFinish: (MFMailComposeResult) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onFinish: onFinish)
+    }
+
+    func makeUIViewController(context: Context) -> MFMailComposeViewController {
+        let composer = MFMailComposeViewController()
+        composer.mailComposeDelegate = context.coordinator
+        composer.setToRecipients([recipient])
+        composer.setSubject(subject)
+        composer.setMessageBody(body, isHTML: false)
+
+        if let attachment {
+            composer.addAttachmentData(
+                attachment,
+                mimeType: "text/plain",
+                fileName: attachmentFileName
+            )
+        }
+
+        return composer
+    }
+
+    func updateUIViewController(
+        _ uiViewController: MFMailComposeViewController,
+        context: Context
+    ) {}
+
+    final class Coordinator: NSObject, MFMailComposeViewControllerDelegate {
+        let onFinish: (MFMailComposeResult) -> Void
+
+        init(onFinish: @escaping (MFMailComposeResult) -> Void) {
+            self.onFinish = onFinish
+        }
+
+        func mailComposeController(
+            _ controller: MFMailComposeViewController,
+            didFinishWith result: MFMailComposeResult,
+            error: Error?
+        ) {
+            onFinish(result)
+        }
+    }
+}
+
+/// Shown when iOS has no account the composer could send from. The log is
+/// still reachable through "export log", so this hands over the destination
+/// address rather than leaving the button looking broken.
+private struct DiagnosticsMailUnavailableSheet: View {
+    /// Resolved by the caller so the address stays a single constant.
+    let address: String
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.designTokens) private var T
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("mail not set up")
+                .font(Typography.sheetTitle)
+                .foregroundStyle(T.fg)
+
+            Text("Tessera can't open a message because this device has no mail account. Use “export log” to save the diagnostics log, then send the file from any mail app to this address:")
+                .font(Typography.tesseraMono(size: 13))
+                .foregroundStyle(T.fgMuted)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(verbatim: address)
+                .font(Typography.tesseraMono(size: 13, weight: .medium))
+                .foregroundStyle(T.fg)
+                .textSelection(.enabled)
+
+            Btn("close", compact: true) { dismiss() }
+
+            Spacer(minLength: 0)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(T.presentationBg)
     }
 }

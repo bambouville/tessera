@@ -44,6 +44,7 @@ cleanup_test_simulator() {
     "$run_simulator_state/simulator_udid" \
     "$run_simulator_state/visual_simulator_udid" \
     "$run_simulator_state/iphone_keyboard_simulator_udid" \
+    "$run_simulator_state/ipad_keyboard_simulator_udid" \
     "$run_simulator_state/continuity_iphone_simulator_udid" \
     "$run_simulator_state/touch_simulator_udid"; do
     delete_owned_test_simulator "$udid_file" || true

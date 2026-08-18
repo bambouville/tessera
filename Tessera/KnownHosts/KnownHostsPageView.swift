@@ -78,7 +78,10 @@ struct KnownHostsPageView: View {
             defaultFilename: "known_hosts"
         ) { result in
             if case .failure(let error) = result {
-                notice = "Export failed: \(error.localizedDescription)"
+                notice = String(
+                    localized: "Export failed: \(error.localizedDescription)",
+                    comment: "known_hosts export failure"
+                )
             }
             exportDocument = nil
         }
@@ -99,12 +102,24 @@ struct KnownHostsPageView: View {
                                 .applyConfirmedOpenSSHImport(review.plan.entries)
                             importReview = nil
                             await reload()
-                            let conflictSuffix = summary.stalePlanConflicts == 0
-                                ? ""
-                                : ", \(summary.stalePlanConflicts) skipped because Known Hosts changed during review"
-                            notice = "Imported \(summary.added) added, \(summary.replaced) replaced, \(summary.unchanged) unchanged\(conflictSuffix)"
+                            // Whole sentence per outcome. The conflict half
+                            // used to be appended as a clause, which fixes the
+                            // English comma-and-participle shape on every
+                            // language that does not build sentences that way.
+                            notice = summary.stalePlanConflicts == 0
+                                ? String(
+                                    localized: "Imported \(summary.added) added, \(summary.replaced) replaced, \(summary.unchanged) unchanged",
+                                    comment: "known_hosts import result"
+                                )
+                                : String(
+                                    localized: "Imported \(summary.added) added, \(summary.replaced) replaced, \(summary.unchanged) unchanged, \(summary.stalePlanConflicts) skipped because Known Hosts changed during review",
+                                    comment: "known_hosts import result when some entries were skipped"
+                                )
                         } catch {
-                            notice = "Import was not saved and Known Hosts was not changed: \(error.localizedDescription)"
+                            notice = String(
+                                localized: "Import was not saved and Known Hosts was not changed: \(error.localizedDescription)",
+                                comment: "known_hosts import failure"
+                            )
                         }
                     }
                 }
@@ -170,7 +185,7 @@ struct KnownHostsPageView: View {
         HStack(alignment: .center, spacing: 12) {
             StatusDot(color: T.red)
 
-            Text(mismatchMessage)
+            Text(verbatim: mismatchMessage)
                 .font(Typography.tesseraMono(size: 12))
                 .foregroundStyle(T.fg)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -293,7 +308,7 @@ struct KnownHostsPageView: View {
                     .padding(.trailing, 8)
             }
 
-            Tag(text: row.algorithm)
+            Tag(verbatim: row.algorithm)
                 .frame(width: algoColumnWidth, alignment: .leading)
 
             Text(formatDate(row.firstSeen))
@@ -301,7 +316,7 @@ struct KnownHostsPageView: View {
                 .foregroundStyle(T.fgDim)
                 .frame(width: addedColumnWidth, alignment: .leading)
 
-            Text(statusLabel(row.status))
+            Text(verbatim: statusLabel(row.status))
                 .font(Typography.tesseraMono(size: 11))
                 .foregroundStyle(statusColor(row.status))
                 .frame(width: statusColumnWidth, alignment: .leading)
@@ -335,7 +350,7 @@ struct KnownHostsPageView: View {
                     .truncationMode(.middle)
 
                 HStack(spacing: 7) {
-                    Tag(text: row.algorithm)
+                    Tag(verbatim: row.algorithm)
 
                     if row.matchedPeerLabel != nil {
                         Tag(text: "matched peer", color: T.green.opacity(0.12))
@@ -350,7 +365,7 @@ struct KnownHostsPageView: View {
 
             Spacer(minLength: 8)
 
-            Text(statusLabel(row.status))
+            Text(verbatim: statusLabel(row.status))
                 .font(Typography.tesseraMono(size: 10, weight: .medium))
                 .foregroundStyle(statusColor(row.status))
 
@@ -452,10 +467,10 @@ struct KnownHostsPageView: View {
         }
     }
 
-    private func fingerprintLine(label: String, value: String, valueColor: Color) -> some View {
+    private func fingerprintLine(label: LocalizedStringKey, value: String, valueColor: Color) -> some View {
         (Text(label)
             .foregroundColor(T.fgMuted)
-        + Text(value)
+        + Text(verbatim: value)
             .foregroundColor(valueColor))
             .font(Typography.tesseraMono(size: 11))
             .lineLimit(nil)
@@ -481,9 +496,10 @@ struct KnownHostsPageView: View {
     }
 
     private var mismatchMessage: String {
-        let verb = changedCount == 1 ? "has" : "have"
-        let keyLabel = changedCount == 1 ? "host key" : "host keys"
-        return "\(changedCount) \(keyLabel) \(verb) changed since last connect — review before reconnecting"
+        String(
+            localized: "\(changedCount) host keys have changed since last connect — review before reconnecting",
+            comment: "Known Hosts warning banner. Pluralized on the number of changed host keys."
+        )
     }
 
     private func statusColor(_ status: KnownHostsStore.HostStatus) -> Color {
@@ -500,11 +516,11 @@ struct KnownHostsPageView: View {
     private func statusLabel(_ status: KnownHostsStore.HostStatus) -> String {
         switch status {
         case .ok:
-            return "verified"
+            return String(localized: "verified", comment: "Known-host row status")
         case .stale:
-            return "stale"
+            return String(localized: "stale", comment: "Known-host row status")
         case .changed:
-            return "MISMATCH"
+            return String(localized: "MISMATCH", comment: "Known-host row status: the host key changed")
         }
     }
 
@@ -548,16 +564,16 @@ struct KnownHostsPageView: View {
             let maximumImportBytes = 1_048_576
             let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize
             if let fileSize, fileSize > maximumImportBytes {
-                notice = "Import failed: known_hosts files must be 1 MiB or smaller."
+                notice = String(localized: "Import failed: known_hosts files must be 1 MiB or smaller.")
                 return
             }
             let data = try Data(contentsOf: url)
             guard data.count <= maximumImportBytes else {
-                notice = "Import failed: known_hosts files must be 1 MiB or smaller."
+                notice = String(localized: "Import failed: known_hosts files must be 1 MiB or smaller.")
                 return
             }
             guard let text = String(data: data, encoding: .utf8) else {
-                notice = "Import failed: the selected file is not UTF-8 text."
+                notice = String(localized: "Import failed: the selected file is not UTF-8 text.")
                 return
             }
             let plan = KnownHostsOpenSSHCodec.importPlan(
@@ -566,7 +582,7 @@ struct KnownHostsPageView: View {
             )
             importReview = KnownHostsImportReview(plan: plan)
         } catch {
-            notice = "Import failed: \(error.localizedDescription)"
+            notice = String(localized: "Import failed: \(error.localizedDescription)")
         }
     }
 }
@@ -644,7 +660,7 @@ private struct KnownHostsImportReviewSheet: View {
                                             color: actionColor(entry.action)
                                         )
                                     }
-                                    Text(entry.fingerprint)
+                                    Text(verbatim: entry.fingerprint)
                                         .font(Typography.tesseraMono(size: 10))
                                         .foregroundStyle(T.fgDim)
                                         .textSelection(.enabled)
@@ -668,7 +684,7 @@ private struct KnownHostsImportReviewSheet: View {
                                     Text("line \(rejection.lineNumber) · \(rejection.reason)")
                                         .font(Typography.tesseraMono(size: 11, weight: .medium))
                                         .foregroundStyle(T.red)
-                                    Text(rejection.source)
+                                    Text(verbatim: rejection.source)
                                         .font(Typography.tesseraMono(size: 10))
                                         .foregroundStyle(T.fgDim)
                                         .lineLimit(3)
@@ -722,7 +738,10 @@ private struct KnownHostsImportReviewSheet: View {
     }
 
     private var confirmButtonLabel: String {
-        "import \(plan.addCount) · replace \(plan.replaceCount)"
+        String(
+            localized: "import \(plan.addCount) · replace \(plan.replaceCount)",
+            comment: "known_hosts import confirm button; counts of entries to add and to replace"
+        )
     }
 
     @ViewBuilder
@@ -736,7 +755,7 @@ private struct KnownHostsImportReviewSheet: View {
     }
 
     private func summaryTag(_ text: String, color: Color) -> some View {
-        Text(text)
+        Text(verbatim: text)
             .font(Typography.tesseraMono(size: 10, weight: .medium))
             .foregroundStyle(color)
             .padding(.horizontal, 7)
@@ -746,7 +765,7 @@ private struct KnownHostsImportReviewSheet: View {
     }
 
     private func reviewSection<Content: View>(
-        _ title: String,
+        _ title: LocalizedStringKey,
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 4) {

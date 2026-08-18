@@ -44,7 +44,7 @@ struct TerminalFileDropTarget: ViewModifier {
                 } else if let failureMessage {
                     dropPill(
                         icon: "exclamationmark.triangle", iconColor: T.red,
-                        text: failureMessage, stroke: T.red
+                        resolvedText: failureMessage, stroke: T.red
                     )
                 }
             }
@@ -58,13 +58,26 @@ struct TerminalFileDropTarget: ViewModifier {
     }
 
     private func dropPill(
-        icon: String, iconColor: Color, text: String, stroke: Color
+        icon: String, iconColor: Color, text: LocalizedStringKey, stroke: Color
+    ) -> some View {
+        dropPill(icon: icon, iconColor: iconColor, message: Text(text), stroke: stroke)
+    }
+
+    /// The failure variant shows a message the drop handler already produced.
+    private func dropPill(
+        icon: String, iconColor: Color, resolvedText: String, stroke: Color
+    ) -> some View {
+        dropPill(icon: icon, iconColor: iconColor, message: Text(verbatim: resolvedText), stroke: stroke)
+    }
+
+    private func dropPill(
+        icon: String, iconColor: Color, message: Text, stroke: Color
     ) -> some View {
         HStack(spacing: 7) {
             Image(systemName: icon)
                 .font(.system(size: 12, weight: .light))
                 .foregroundStyle(iconColor)
-            Text(text)
+            message
                 .font(Typography.tesseraMono(size: 11.5))
                 .foregroundStyle(T.fg)
                 .lineLimit(2)
@@ -341,10 +354,7 @@ struct FilesPanelView: View {
             .onChange(of: searchFieldFocused) { _, _ in syncTextEntryFlag() }
             .onChange(of: pathFieldFocused) { _, _ in syncTextEntryFlag() }
             .onChange(of: showingQuickOpen) { _, _ in syncTextEntryFlag() }
-            .sheet(item: $controller.presentedPreview) { request in
-                QuickLookPresenter(fileURL: request.localURL, displayTitle: request.title)
-                    .ignoresSafeArea()
-            }
+            .quickLookPreview(item: $controller.presentedPreview)
             .sheet(item: $controller.presentedShare) { request in
                 ActivityShareSheet(items: request.items)
                     .ignoresSafeArea()
@@ -538,7 +548,7 @@ struct FilesPanelView: View {
                     .foregroundStyle(T.fgMuted)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text("· sftp")
+                Text(verbatim: "· sftp")
                     .font(Typography.tesseraMono(size: 10))
                     .foregroundStyle(T.fgDim)
             }
@@ -730,7 +740,7 @@ struct FilesPanelView: View {
         }
     }
 
-    private func followAccessibilityLabel(_ state: FilesPanelController.FollowState) -> String {
+    private func followAccessibilityLabel(_ state: FilesPanelController.FollowState) -> LocalizedStringResource {
         switch state {
         case .following: return "following terminal directory — tap to browse freely"
         case .manual: return "not following — tap to sync to terminal directory"
@@ -751,7 +761,7 @@ struct FilesPanelView: View {
                         Button(crumb.name) { controller.navigate(to: crumb.path) }
                     }
                 } label: {
-                    Text("…")
+                    Text(verbatim: "…")
                         .font(Typography.tesseraMono(size: 10.5))
                         .foregroundStyle(T.fgMuted)
                         .padding(.horizontal, 2)
@@ -773,7 +783,7 @@ struct FilesPanelView: View {
     }
 
     private var crumbSeparator: some View {
-        Text("/")
+        Text(verbatim: "/")
             .font(Typography.tesseraMono(size: 10.5))
             .foregroundStyle(T.fgFaint)
     }
@@ -893,7 +903,7 @@ struct FilesPanelView: View {
 
     private func toolButton(
         _ systemName: String,
-        label: String,
+        label: LocalizedStringKey,
         active: Bool = false,
         accented: Bool = false,
         disabled: Bool = false,
@@ -947,7 +957,7 @@ struct FilesPanelView: View {
                     return .handled
                 }
             if !controller.searchText.isEmpty {
-                Text(matchCountLabel)
+                Text(verbatim: matchCountLabel)
                     .font(Typography.tesseraMono(size: 9))
                     .foregroundStyle(T.fgDim)
             }
@@ -975,8 +985,10 @@ struct FilesPanelView: View {
     }
 
     private var matchCountLabel: String {
-        let count = controller.searchRows.count
-        return count == 1 ? "1 match" : "\(count) matches"
+        String(
+            localized: "\(controller.searchRows.count) matches",
+            comment: "Find-in-files result count. Pluralized on the match count."
+        )
     }
 
     // MARK: - Content
@@ -1002,7 +1014,7 @@ struct FilesPanelView: View {
 
     private func errorBanner(_ message: String) -> some View {
         HStack(spacing: 6) {
-            Text(message)
+            Text(verbatim: message)
                 .font(Typography.tesseraSans(size: 11))
                 .foregroundStyle(T.red)
                 .lineLimit(2)
@@ -1111,13 +1123,14 @@ struct FilesPanelView: View {
         }
     }
 
-    private func statusPlaceholder(_ title: String, detail: String?) -> some View {
+    /// `detail` is a remote path, never prose.
+    private func statusPlaceholder(_ title: LocalizedStringKey, detail: String?) -> some View {
         VStack(spacing: 6) {
             Text(title)
                 .font(Typography.tesseraSans(size: 12))
                 .foregroundStyle(T.fgDim)
             if let detail {
-                Text(detail)
+                Text(verbatim: detail)
                     .font(Typography.tesseraMono(size: 10))
                     .foregroundStyle(T.fgFaint)
                     .lineLimit(1)
@@ -1449,7 +1462,9 @@ struct FilesPanelView: View {
                     .truncationMode(.middle)
                 Spacer(minLength: 6)
                 if highlighted {
-                    Text("tab")
+                    // A keycap badge, not prose — the key is engraved "tab"
+                    // on every keyboard layout Tessera runs against.
+                    Text(verbatim: "tab")
                         .font(Typography.tesseraMono(size: 8.5))
                         .foregroundStyle(T.fgDim)
                         .padding(.horizontal, 4)
@@ -1539,9 +1554,14 @@ struct FilesPanelView: View {
         quickOpenCompletion.clear()
     }
 
+    private let quickOpenPlaceholder = "~/path/to/file"
+
     private var quickOpenField: some View {
         HStack(spacing: 6) {
-            TextField("~/path/to/file", text: $quickOpenText)
+            // A sample path, not prose — it must read the same in every
+            // language, so it goes through `TextField`'s StringProtocol
+            // overload rather than being extracted as a key.
+            TextField(quickOpenPlaceholder, text: $quickOpenText)
                 .font(Typography.tesseraMono(size: 10.5))
                 .foregroundStyle(T.fg)
                 .textInputAutocapitalization(.never)
@@ -1666,7 +1686,7 @@ struct FilesPanelView: View {
                     .foregroundStyle(T.fg)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text(transferDetail(item))
+                transferDetail(item)
                     .font(Typography.tesseraMono(size: 9.5))
                     .foregroundStyle(T.fgDim)
                     .lineLimit(1)
@@ -1709,13 +1729,19 @@ struct FilesPanelView: View {
         }
     }
 
-    private func transferDetail(_ item: TransferItem) -> String {
+    /// A `Text` rather than a `String`: the running-upload case shows a raw
+    /// remote path and the failure case a server message, and neither should
+    /// be looked up as a key.
+    private func transferDetail(_ item: TransferItem) -> Text {
         switch item.phase {
-        case .queued: return "queued"
-        case .running: return item.direction == .upload ? "→ \(item.remotePath)" : "downloading"
-        case .completed: return "done"
-        case .failed(let message): return message
-        case .cancelled: return "cancelled"
+        case .queued: return Text("queued")
+        case .running:
+            return item.direction == .upload
+                ? Text(verbatim: "→ \(item.remotePath)")
+                : Text("downloading")
+        case .completed: return Text("done")
+        case .failed(let message): return Text(verbatim: message)
+        case .cancelled: return Text("cancelled")
         }
     }
 }

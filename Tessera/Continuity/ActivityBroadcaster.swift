@@ -115,11 +115,12 @@ final class ActivityBroadcaster: NSObject, NSUserActivityDelegate {
     }
 
     static func title(for descriptor: SessionActivityDescriptor) -> String {
-        let action = switch descriptor.continuationAction {
-        case .continueSession: "continue session"
-        case .reconnect: "reconnect"
+        // Whole titles, not a name plus an appended verb: the two forms
+        // inflect differently and some languages lead with the action.
+        return switch descriptor.continuationAction {
+        case .continueSession: String(localized: "\(descriptor.name) — continue session")
+        case .reconnect: String(localized: "\(descriptor.name) — reconnect")
         }
-        return "\(descriptor.name) — \(action)"
     }
 
     nonisolated func userActivity(

@@ -11,7 +11,9 @@ Unless a case says otherwise, screenshots and video-derived images use the
 landscape iPad fixture and are physically normalized to landscape pixels before
 attachment. P1-iphone-keyboard includes an unrotated portrait iPhone image plus
 a landscape iPad image of the same live tmux session; judge the phone geometry
-and software-keyboard layout in portrait, then the expanded grid on iPad. Do not
+and software-keyboard layout in portrait—including that the entire accessory
+bar sits above the keyboard with every control fully visible—then the expanded
+grid on iPad. Do not
 infer portrait orientation for any other case from the original iPad simulator
 framebuffer convention.
 

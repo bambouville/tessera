@@ -167,7 +167,7 @@ struct UploadSheetView: View {
                     .font(Typography.tesseraMono(size: 13))
                     .foregroundStyle(T.fg)
                     .lineLimit(1)
-                Text(fileSubtitle)
+                Text(verbatim: fileSubtitle)
                     .font(Typography.tesseraMono(size: 11))
                     .foregroundStyle(T.fgMuted)
             }
@@ -218,7 +218,7 @@ struct UploadSheetView: View {
         return destinationRow(
             kind: .cwd,
             systemImage: "link",
-            title: cwd.map(abbreviateHome) ?? "no session cwd",
+            title: cwd.map(abbreviateHome) ?? String(localized: "no session cwd"),
             detail: "session cwd",
             enabled: cwd != nil
         )
@@ -237,8 +237,9 @@ struct UploadSheetView: View {
     private func destinationRow(
         kind: DestinationKind,
         systemImage: String,
+        /// Already resolved: a remote path, or the empty-state stand-in.
         title: String,
-        detail: String,
+        detail: LocalizedStringKey,
         enabled: Bool
     ) -> some View {
         let selected = destinationKind == kind
@@ -255,7 +256,7 @@ struct UploadSheetView: View {
                     .font(.system(size: 12, weight: .light))
                     .foregroundStyle(selected ? T.accent : T.fgMuted)
                     .frame(width: 16)
-                Text(title)
+                Text(verbatim: title)
                     .font(Typography.tesseraMono(size: 13))
                     .foregroundStyle(T.fg)
                     .lineLimit(1)
@@ -278,7 +279,7 @@ struct UploadSheetView: View {
         .opacity(enabled ? 1 : 0.4)
     }
 
-    private func sectionLabel(_ text: String) -> some View {
+    private func sectionLabel(_ text: LocalizedStringKey) -> some View {
         Text(text)
             .font(Typography.tesseraMono(size: 11, weight: .medium))
             .foregroundStyle(T.fgDim)
@@ -298,14 +299,16 @@ struct UploadSheetView: View {
     }
 
     private func hostStatus(_ candidate: UploadHostCandidate) -> String {
-        if candidate.isActiveSession { return "connected · active session" }
-        if candidate.isConnected { return "connected" }
-        if candidate.isConnecting { return "connecting…" }
-        if candidate.isFailed { return "reconnect failed" }
-        return "connect on upload…"
+        if candidate.isActiveSession { return String(localized: "connected · active session") }
+        if candidate.isConnected { return String(localized: "connected") }
+        if candidate.isConnecting { return String(localized: "connecting…") }
+        if candidate.isFailed { return String(localized: "reconnect failed") }
+        return String(localized: "connect on upload…")
     }
 
-    private var pasteSubtitle: String {
+    /// The session label interpolates in as a `%@` argument, so translators
+    /// can move it to wherever the sentence needs it in their language.
+    private var pasteSubtitle: LocalizedStringKey {
         guard let selection, selectionCanReceivePastePath else {
             return "needs a live session on the selected host"
         }
@@ -315,7 +318,7 @@ struct UploadSheetView: View {
         return "types the file's remote path into \(selection.label) after upload — on by default for temp"
     }
 
-    private var uploadTitle: String {
+    private var uploadTitle: LocalizedStringKey {
         // Connecting counts as "Upload": the transfer rides the file
         // bridge, which connects on its own regardless of the terminal
         // session's reconnect progress.

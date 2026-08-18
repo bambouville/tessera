@@ -50,11 +50,11 @@ struct ContinuationOverlayView: View {
             VStack(spacing: 16) {
                 statusIcon
 
-                Text(title)
+                Text(verbatim: title)
                     .font(Typography.tesseraMono(size: 16, weight: .semibold))
                     .foregroundStyle(T.fg)
 
-                Text("\(presentation.descriptor.name) · \(presentation.descriptor.user)@\(presentation.descriptor.address):\(presentation.descriptor.port)")
+                Text(verbatim: "\(presentation.descriptor.name) · \(presentation.descriptor.user)@\(presentation.descriptor.address):\(presentation.descriptor.port)")
                     .font(Typography.tesseraMono(size: 11))
                     .foregroundStyle(T.fgMuted)
                     .multilineTextAlignment(.center)
@@ -91,7 +91,7 @@ struct ContinuationOverlayView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(T.fgMuted)
 
-                Text(title)
+                Text(verbatim: title)
                     .font(Typography.tesseraMono(size: 11.5, weight: .medium))
                     .foregroundStyle(T.fg)
 
@@ -133,25 +133,54 @@ struct ContinuationOverlayView: View {
         }
     }
 
+    /// Every phase/action pair is spelled out as a whole sentence rather than
+    /// assembled from a stem plus a gerund. Composed sentences cannot be
+    /// translated: the fragments inflect with tense, gender, and word order,
+    /// and languages that put the verb last have nowhere to insert the stem.
     private var title: String {
+        let isContinue = presentation.descriptor.continuationAction == .continueSession
         switch presentation.phase {
         case .resolving:
-            return "preparing \(actionGerund)"
+            return isContinue
+                ? String(
+                    localized: "preparing to continue from your other device",
+                    comment: "Continuity overlay title while the route is being resolved"
+                )
+                : String(
+                    localized: "preparing to reconnect from your other device",
+                    comment: "Continuity overlay title while the route is being resolved"
+                )
         case .connecting:
-            return actionGerund
+            return isContinue
+                ? String(
+                    localized: "continuing from your other device",
+                    comment: "Continuity overlay title while connecting"
+                )
+                : String(
+                    localized: "reconnecting from your other device",
+                    comment: "Continuity overlay title while connecting"
+                )
         case .attached:
-            return presentation.descriptor.continuationAction == .continueSession
-                ? "attached · other device stays attached"
-                : "reconnected on this device"
+            return isContinue
+                ? String(
+                    localized: "attached · other device stays attached",
+                    comment: "Continuity overlay title once the tmux session is shared with the other device"
+                )
+                : String(
+                    localized: "reconnected on this device",
+                    comment: "Continuity overlay title once the session has moved to this device"
+                )
         case .failed:
-            return "could not \(presentation.descriptor.continuationAction.label.lowercased())"
+            return isContinue
+                ? String(
+                    localized: "could not continue",
+                    comment: "Continuity overlay title when continuing the session failed"
+                )
+                : String(
+                    localized: "could not reconnect",
+                    comment: "Continuity overlay title when reconnecting failed"
+                )
         }
-    }
-
-    private var actionGerund: String {
-        presentation.descriptor.continuationAction == .continueSession
-            ? "continuing from your other device"
-            : "reconnecting from your other device"
     }
 
     @ViewBuilder
@@ -165,12 +194,12 @@ struct ContinuationOverlayView: View {
         default:
             VStack(alignment: .leading, spacing: 6) {
                 if let tmux = presentation.descriptor.tmuxSessionName {
-                    detailRow("tmux attach", tmux)
+                    detailRow("tmux attach", verbatimValue: tmux)
                     detailRow("geometry", "fits this device")
                 } else {
                     detailRow("remote shell", "new session")
                 }
-                detailRow("transport", presentation.descriptor.transport.rawValue)
+                detailRow("transport", verbatimValue: presentation.descriptor.transport.rawValue)
                 detailRow("credentials", "stay on each device")
             }
             .padding(12)
@@ -184,12 +213,21 @@ struct ContinuationOverlayView: View {
         }
     }
 
-    private func detailRow(_ key: String, _ value: String) -> some View {
+    private func detailRow(_ key: LocalizedStringKey, _ value: LocalizedStringKey) -> some View {
+        detailRow(key, valueText: Text(value))
+    }
+
+    /// The tmux session name and the transport are literal remote values.
+    private func detailRow(_ key: LocalizedStringKey, verbatimValue: String) -> some View {
+        detailRow(key, valueText: Text(verbatim: verbatimValue))
+    }
+
+    private func detailRow(_ key: LocalizedStringKey, valueText: Text) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(key)
                 .foregroundStyle(T.fgDim)
             Spacer(minLength: 8)
-            Text(value)
+            valueText
                 .foregroundStyle(T.fgMuted)
                 .multilineTextAlignment(.trailing)
         }

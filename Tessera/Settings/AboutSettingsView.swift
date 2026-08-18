@@ -14,9 +14,18 @@ private enum BundledDocument: String, Identifiable, CaseIterable {
 
     var title: String {
         switch self {
+        // "GNU GPL v3" is the licence's proper name — never translated.
         case .gpl: return "GNU GPL v3"
-        case .appStoreException: return "app store exception (COPYING.iOS)"
-        case .thirdPartyNotices: return "third-party licenses & notices"
+        case .appStoreException:
+            return String(
+                localized: "app store exception (COPYING.iOS)",
+                comment: "Bundled document row in About. COPYING.iOS is a filename — keep it verbatim."
+            )
+        case .thirdPartyNotices:
+            return String(
+                localized: "third-party licenses & notices",
+                comment: "Bundled document row in About"
+            )
         }
     }
 
@@ -31,7 +40,7 @@ private enum BundledDocument: String, Identifiable, CaseIterable {
     func loadText() -> String {
         guard let url = Bundle.main.url(forResource: resource.name, withExtension: resource.ext),
               let text = try? String(contentsOf: url, encoding: .utf8) else {
-            return "this document failed to load from the app bundle — please report this build issue at https://github.com/bambouville/tessera/issues"
+            return String(localized: "this document failed to load from the app bundle — please report this build issue at https://github.com/bambouville/tessera/issues")
         }
         return text
     }
@@ -101,7 +110,7 @@ struct AboutSettingsView: View {
                 .foregroundStyle(T.fgMuted)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("© 2026 Bambouville Inc.")
+            Text(verbatim: "© 2026 Bambouville Inc.")
                 .font(Typography.tesseraMono(size: 12))
                 .foregroundStyle(T.fgMuted)
 
@@ -116,7 +125,7 @@ struct AboutSettingsView: View {
         .padding(.horizontal, 4)
     }
 
-    private func linkRow(_ title: String, systemImage: String, url: URL) -> some View {
+    private func linkRow(_ title: LocalizedStringKey, systemImage: String, url: URL) -> some View {
         Button {
             openURL(url)
         } label: {
@@ -131,7 +140,7 @@ struct AboutSettingsView: View {
         .buttonStyle(.plain)
     }
 
-    private func documentRow(_ title: String, systemImage: String, document: BundledDocument) -> some View {
+    private func documentRow(_ title: LocalizedStringKey, systemImage: String, document: BundledDocument) -> some View {
         Button {
             presentedDocument = document
         } label: {
@@ -173,12 +182,14 @@ struct AboutSettingsView: View {
         .padding(.horizontal, 4)
     }
 
+    /// Library and licence names are proper nouns — the same text in every
+    /// language, so both halves render verbatim.
     private func creditLine(_ what: String, _ source: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(what)
+            Text(verbatim: what)
                 .font(Typography.tesseraMono(size: 12))
                 .foregroundStyle(T.fgMuted)
-            Text(source)
+            Text(verbatim: source)
                 .font(Typography.tesseraMono(size: 11))
                 .foregroundStyle(T.fgDim)
         }
@@ -205,7 +216,7 @@ private struct BundledDocumentSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center) {
-                Text(document.title)
+                Text(verbatim: document.title)
                     .font(Typography.tesseraMono(size: 13, weight: .medium))
                     .foregroundStyle(T.fg)
 

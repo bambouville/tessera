@@ -1,12 +1,24 @@
+import Foundation
 struct ArmedModifiers: Equatable {
     var ctrl: Bool = false
     var alt: Bool = false
     var shift: Bool = false
+    /// Command is deliberately NOT part of `isAny`: no terminal encoding
+    /// carries ⌘, so it must never reach the byte transforms below. It arms
+    /// Tessera's own shortcuts instead — `AppShortcutDispatcher` intercepts the
+    /// next key before the wire path is consulted at all.
+    var cmd: Bool = false
 
     static let none = ArmedModifiers()
 
+    /// True when a modifier that *transforms bytes* is armed.
     var isAny: Bool {
         ctrl || alt || shift
+    }
+
+    /// The display/arming state, including Command.
+    var isAnyArmed: Bool {
+        isAny || cmd
     }
 }
 
@@ -17,13 +29,15 @@ enum AccessoryChipEncoder {
         applicationCursor: Bool
     ) -> [UInt8] {
         switch chip {
-        case .ctrl, .alt, .shift:
+        case .ctrl, .alt, .shift, .cmd:
             precondition(false, "modifiers should be routed through ModifierState, not the encoder")
             return []
         case .esc:
             return [0x1B]
         case .ctrlJ:
             return [0x0A]
+        case .ctrlC:
+            return [0x03]
         case .tab:
             return armed.shift ? [0x1B, 0x5B, 0x5A] : [0x09]
         case .left, .down, .up, .right:
@@ -320,6 +334,33 @@ enum SoftwareModifierEncoder {
 }
 
 extension ModifierState {
+    /// Handles a typed key while ⌘ is armed on the accessory bar.
+    ///
+    /// Returns true when the keystroke was consumed as an app shortcut and must
+    /// NOT reach the remote. An unbound chord is consumed too: on a Mac, ⌘ plus
+    /// an unbound key does nothing, and typing the bare letter into a live
+    /// shell is the worse of the two surprises.
+    ///
+    /// Multi-byte payloads (paste, IME commit) are left alone and leave ⌘
+    /// armed, mirroring how `encodeNextKey` treats the wire modifiers.
+    @MainActor
+    func consumeCommandChord(_ bytes: [UInt8], store: ShortcutStore) -> Bool {
+        guard armed.cmd, bytes.count == 1 else { return false }
+        let scalar = UnicodeScalar(bytes[0])
+        guard scalar.isASCII, !CharacterSet.controlCharacters.contains(scalar) else { return false }
+
+        let snapshot = armed
+        _ = consume()
+        // Lower-cased because bindings store `charactersIgnoringModifiers`;
+        // ⇧ stays in the modifier set rather than shifting the base character.
+        let key = BindingKey.character(String(Character(scalar)).lowercased())
+        AppShortcutDispatcher.dispatch(
+            AppShortcutDispatcher.chord(armed: snapshot, key: key),
+            store: store
+        )
+        return true
+    }
+
     /// Shared software-keyboard pipeline used by the terminal delegate. A
     /// one-shot modifier is consumed only when the payload represents one
     /// eligible key and the modifier was actually applied.

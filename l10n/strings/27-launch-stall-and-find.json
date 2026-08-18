@@ -1,0 +1,52 @@
+{
+  "Open find": {
+    "de": "Suche öffnen",
+    "es": "Abrir la búsqueda",
+    "fr": "Ouvrir la recherche",
+    "ja": "検索を開く",
+    "zh-Hans": "打开查找",
+    "zh-Hant": "開啟尋找"
+  },
+  "out of scope": {
+    "de": "nicht im Geltungsbereich",
+    "es": "fuera de alcance",
+    "fr": "hors périmètre",
+    "ja": "対象外",
+    "zh-Hans": "不在适用范围",
+    "zh-Hant": "不在適用範圍"
+  },
+
+  "taking longer than expected. %@": {
+    "de": "dauert länger als erwartet. %@",
+    "es": "está tardando más de lo esperado. %@",
+    "fr": "prend plus de temps que prévu. %@",
+    "ja": "予想より時間がかかっています。%@",
+    "zh-Hans": "耗时超出预期。%@",
+    "zh-Hant": "耗時超出預期。%@"
+  },
+  "still %@ — the handshake has not completed.": {
+    "de": "immer noch %@ — der Handshake ist nicht abgeschlossen.",
+    "es": "sigue en %@: el handshake no ha terminado.",
+    "fr": "toujours %@ — le handshake n'est pas terminé.",
+    "ja": "まだ %@ — ハンドシェイクが完了していません。",
+    "zh-Hans": "仍在 %@ — 握手尚未完成。",
+    "zh-Hant": "仍在 %@ — 交握尚未完成。"
+  },
+  "still %@ — the connection is up but this stage has not completed.": {
+    "de": "immer noch %@ — die Verbindung steht, aber dieser Schritt ist nicht abgeschlossen.",
+    "es": "sigue en %@: la conexión está activa pero esta etapa no ha terminado.",
+    "fr": "toujours %@ — la connexion est établie mais cette étape n'est pas terminée.",
+    "ja": "まだ %@ — 接続は確立していますが、この段階が完了していません。",
+    "zh-Hans": "仍在 %@ — 连接已建立，但这一步尚未完成。",
+    "zh-Hant": "仍在 %@ — 連線已建立，但這一步尚未完成。"
+  },
+
+  "Timed out completing the SSH handshake. The connection opened but never finished negotiating — often a path-MTU blackhole on the route.": {
+    "de": "Zeitüberschreitung beim SSH-Handshake. Die Verbindung kam zustande, wurde aber nie fertig ausgehandelt — oft ein Path-MTU-Blackhole auf der Strecke.",
+    "es": "Se agotó el tiempo al completar el handshake SSH. La conexión se abrió pero nunca terminó de negociarse: suele ser un agujero negro de MTU de ruta en el trayecto.",
+    "fr": "Délai dépassé lors du handshake SSH. La connexion s'est ouverte mais n'a jamais fini de négocier — souvent un trou noir de MTU de chemin sur la route.",
+    "ja": "SSH ハンドシェイクの完了がタイムアウトしました。接続は確立しましたが、ネゴシエーションが完了しませんでした — 経路上のパス MTU ブラックホールであることが多いです。",
+    "zh-Hans": "完成 SSH 握手超时。连接已建立但始终未完成协商 — 通常是路径上的 path-MTU 黑洞。",
+    "zh-Hant": "完成 SSH 交握逾時。連線已建立但始終未完成協商 — 通常是路徑上的 path-MTU 黑洞。"
+  }
+}

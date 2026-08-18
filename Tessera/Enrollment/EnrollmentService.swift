@@ -154,15 +154,15 @@ final class SyncDeviceAccessGrantEngine {
         var errorDescription: String? {
             switch self {
             case .authorizationRequired:
-                return "A fresh device-owner authorization is required."
+                return String(localized: "A fresh device-owner authorization is required.")
             case .grantSnapshotMismatch:
-                return "The host grant changed after device-owner authorization."
+                return String(localized: "The host grant changed after device-owner authorization.")
             case .invalidAuthorizationBatch:
-                return "The host grant selection is invalid."
+                return String(localized: "The host grant selection is invalid.")
             case .invalidRequest:
-                return "The public-key grant request is invalid."
+                return String(localized: "The public-key grant request is invalid.")
             case .trackedAccessConflict:
-                return "Tracked access for an earlier host route must be resolved before granting this key again."
+                return String(localized: "Tracked access for an earlier host route must be resolved before granting this key again.")
             }
         }
     }
@@ -401,17 +401,17 @@ final class EnrollmentService {
         var errorDescription: String? {
             switch self {
             case .peerBindingRequired:
-                return "Enrollment requires an Apple continuation stream or a SAS-bound transport."
+                return String(localized: "Enrollment requires an Apple continuation stream or a SAS-bound transport.")
             case .invalidTransition:
-                return "Enrollment action is invalid in the current state."
+                return String(localized: "Enrollment action is invalid in the current state.")
             case .invalidRequest:
-                return "Enrollment request is invalid."
+                return String(localized: "Enrollment request is invalid.")
             case .transportFailure:
-                return "Enrollment transport failed."
+                return String(localized: "Enrollment transport failed.")
             case .authorizationFailed:
-                return "Fresh biometric authorization failed."
+                return String(localized: "Fresh biometric authorization failed.")
             case .staleAuthorization:
-                return "Biometric authorization was not fresh."
+                return String(localized: "Biometric authorization was not fresh.")
             }
         }
     }
@@ -512,7 +512,7 @@ final class EnrollmentService {
     /// The sole grant boundary. It always performs a new biometric evaluation
     /// and only then emits an installer-ready, public-key-only grant request.
     func approve(
-        authorizationHostName: String = "this host",
+        authorizationHostName: String = String(localized: "this host"),
         grantSnapshot: SyncDeviceAccessGrantEngine.GrantSnapshot
     ) async throws -> EnrollmentGrantRequest {
         guard case .awaitingApproval(let request) = state else {
@@ -525,7 +525,7 @@ final class EnrollmentService {
             let safeHostName = EnrollmentDisplayMetadata.isSafe(authorizationHostName)
                 && !authorizationHostName.isEmpty
                 ? authorizationHostName
-                : "this host"
+                : String(localized: "this host")
             guard grantSnapshot.hostID == request.hostID,
                   grantSnapshot.hostLabel == safeHostName,
                   grantSnapshot.peerDeviceName == request.requestingDeviceName,

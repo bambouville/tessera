@@ -35,17 +35,17 @@ enum KeyStore {
         var errorDescription: String? {
             switch self {
             case .accessControlCreationFailed(let reason):
-                return "Could not create key access control: \(reason)"
+                return String(localized: "Could not create key access control: \(reason)")
             case .privateMaterialMissing:
-                return "The private key material is missing from this device."
+                return String(localized: "The private key material is missing from this device.")
             case .invalidPrivateMaterial:
-                return "The stored private key material is invalid."
+                return String(localized: "The stored private key material is invalid.")
             case .secureEnclaveProtectionRequiresRotation:
-                return "Secure Enclave protection cannot be changed after creation. Rotate the key instead."
+                return String(localized: "Secure Enclave protection cannot be changed after creation. Rotate the key instead.")
             case .unexpectedKeychainResult:
-                return "The Keychain returned an unexpected result."
+                return String(localized: "The Keychain returned an unexpected result.")
             case .compensationFailed(let primary, let compensation):
-                return "The key operation failed (\(primary.localizedDescription)) and its recovery action also failed (\(compensation.localizedDescription))."
+                return String(localized: "The key operation failed (\(primary.localizedDescription)) and its recovery action also failed (\(compensation.localizedDescription)).")
             }
         }
     }
@@ -59,13 +59,13 @@ enum KeyStore {
         var errorDescription: String? {
             switch self {
             case .unsupportedAlgorithm(let algorithm):
-                return "Importing \(algorithm) keys is not supported. Use Ed25519 instead."
+                return String(localized: "Importing \(algorithm) keys is not supported. Use Ed25519 instead.")
             case .rsaNotSupported:
-                return "RSA import is disabled because the current SSH stack can only offer the deprecated RSA/SHA-1 signature. Use Ed25519 instead."
+                return String(localized: "RSA import is disabled because the current SSH stack can only offer the deprecated RSA/SHA-1 signature. Use Ed25519 instead.")
             case .invalidTextEncoding:
-                return "The private key is not valid UTF-8 OpenSSH text."
+                return String(localized: "The private key is not valid UTF-8 OpenSSH text.")
             case .invalidPrivateKeyOrPassphrase:
-                return "The OpenSSH private key or its passphrase is invalid."
+                return String(localized: "The OpenSSH private key or its passphrase is invalid.")
             }
         }
     }
@@ -81,17 +81,17 @@ enum KeyStore {
         var errorDescription: String? {
             switch self {
             case .passphraseRequired:
-                return "A non-empty recovery passphrase is required."
+                return String(localized: "A non-empty recovery passphrase is required.")
             case .unsupportedAlgorithm:
-                return "Encrypted recovery export currently supports Ed25519 software keys only."
+                return String(localized: "Encrypted recovery export currently supports Ed25519 software keys only.")
             case .fingerprintMismatch:
-                return "This recovery key does not match the selected key."
+                return String(localized: "This recovery key does not match the selected key.")
             case .randomGenerationFailed:
-                return "Secure random generation failed."
+                return String(localized: "Secure random generation failed.")
             case .keyDerivationFailed:
-                return "Could not derive the OpenSSH recovery encryption key."
+                return String(localized: "Could not derive the OpenSSH recovery encryption key.")
             case .encryptionFailed:
-                return "Could not encrypt the OpenSSH recovery key."
+                return String(localized: "Could not encrypt the OpenSSH recovery key.")
             }
         }
     }

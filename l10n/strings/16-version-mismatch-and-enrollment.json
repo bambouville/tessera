@@ -1,0 +1,554 @@
+{
+  "%@ is running a newer version of Tessera%@. Update Tessera on this device, then try again.": {
+    "de": "%1$@ verwendet eine neuere Tessera-Version%2$@. Aktualisiere Tessera auf diesem Gerät und versuche es erneut.",
+    "es": "%1$@ ejecuta una versión más reciente de Tessera%2$@. Actualiza Tessera en este dispositivo y vuelve a intentarlo.",
+    "fr": "%1$@ utilise une version plus récente de Tessera%2$@. Mettez Tessera à jour sur cet appareil, puis réessayez.",
+    "ja": "%1$@ はより新しいバージョンの Tessera%2$@ を使用しています。このデバイスの Tessera を更新してからもう一度お試しください。",
+    "zh-Hans": "%1$@ 运行的是更新版本的 Tessera%2$@。请先更新本设备上的 Tessera，然后重试。",
+    "zh-Hant": "%1$@ 執行的是更新版本的 Tessera%2$@。請先更新本裝置上的 Tessera，然後重試。"
+  },
+  "%@ is running an older version of Tessera%@. Update Tessera on %@, then try again.": {
+    "de": "%1$@ verwendet eine ältere Tessera-Version%2$@. Aktualisiere Tessera auf %3$@ und versuche es erneut.",
+    "es": "%1$@ ejecuta una versión anterior de Tessera%2$@. Actualiza Tessera en %3$@ y vuelve a intentarlo.",
+    "fr": "%1$@ utilise une version plus ancienne de Tessera%2$@. Mettez Tessera à jour sur %3$@, puis réessayez.",
+    "ja": "%1$@ は古いバージョンの Tessera%2$@ を使用しています。%3$@ の Tessera を更新してからもう一度お試しください。",
+    "zh-Hans": "%1$@ 运行的是较旧版本的 Tessera%2$@。请先更新 %3$@ 上的 Tessera，然后重试。",
+    "zh-Hant": "%1$@ 執行的是較舊版本的 Tessera%2$@。請先更新 %3$@ 上的 Tessera，然後重試。"
+  },
+  "%@ sent setup data from a newer version of Tessera. Update Tessera on this device, then try again.": {
+    "de": "%@ hat Einrichtungsdaten aus einer neueren Tessera-Version gesendet. Aktualisiere Tessera auf diesem Gerät und versuche es erneut.",
+    "es": "%@ envió datos de configuración de una versión más reciente de Tessera. Actualiza Tessera en este dispositivo y vuelve a intentarlo.",
+    "fr": "%@ a envoyé des données de configuration issues d'une version plus récente de Tessera. Mettez Tessera à jour sur cet appareil, puis réessayez.",
+    "ja": "%@ はより新しいバージョンの Tessera のセットアップデータを送信しました。このデバイスの Tessera を更新してからもう一度お試しください。",
+    "zh-Hans": "%@ 发送的设置数据来自更新版本的 Tessera。请先更新本设备上的 Tessera，然后重试。",
+    "zh-Hant": "%@ 傳送的設定資料來自更新版本的 Tessera。請先更新本裝置上的 Tessera，然後重試。"
+  },
+  "%@ sent setup data from an older version of Tessera. Update Tessera on %@, then try again.": {
+    "de": "%1$@ hat Einrichtungsdaten aus einer älteren Tessera-Version gesendet. Aktualisiere Tessera auf %2$@ und versuche es erneut.",
+    "es": "%1$@ envió datos de configuración de una versión anterior de Tessera. Actualiza Tessera en %2$@ y vuelve a intentarlo.",
+    "fr": "%1$@ a envoyé des données de configuration issues d'une version plus ancienne de Tessera. Mettez Tessera à jour sur %2$@, puis réessayez.",
+    "ja": "%1$@ は古いバージョンの Tessera のセットアップデータを送信しました。%2$@ の Tessera を更新してからもう一度お試しください。",
+    "zh-Hans": "%1$@ 发送的设置数据来自较旧版本的 Tessera。请先更新 %2$@ 上的 Tessera，然后重试。",
+    "zh-Hant": "%1$@ 傳送的設定資料來自較舊版本的 Tessera。請先更新 %2$@ 上的 Tessera，然後重試。"
+  },
+  "%@ sent setup data with a field this version of Tessera does not accept (%@.%@). If %@ is running a newer version of Tessera, update this device, then try again.": {
+    "de": "%1$@ hat Einrichtungsdaten mit einem Feld gesendet, das diese Tessera-Version nicht akzeptiert (%2$@.%3$@). Falls %4$@ eine neuere Tessera-Version verwendet, aktualisiere dieses Gerät und versuche es erneut.",
+    "es": "%1$@ envió datos de configuración con un campo que esta versión de Tessera no acepta (%2$@.%3$@). Si %4$@ ejecuta una versión más reciente de Tessera, actualiza este dispositivo y vuelve a intentarlo.",
+    "fr": "%1$@ a envoyé des données de configuration comportant un champ que cette version de Tessera n'accepte pas (%2$@.%3$@). Si %4$@ utilise une version plus récente de Tessera, mettez cet appareil à jour, puis réessayez.",
+    "ja": "%1$@ は、このバージョンの Tessera が受け付けないフィールド (%2$@.%3$@) を含むセットアップデータを送信しました。%4$@ がより新しいバージョンの Tessera を使用している場合は、このデバイスを更新してからもう一度お試しください。",
+    "zh-Hans": "%1$@ 发送的设置数据包含此版本 Tessera 不接受的字段 (%2$@.%3$@)。如果 %4$@ 运行的是更新版本的 Tessera，请更新本设备后重试。",
+    "zh-Hant": "%1$@ 傳送的設定資料包含此版本 Tessera 不接受的欄位 (%2$@.%3$@)。如果 %4$@ 執行的是更新版本的 Tessera，請更新本裝置後重試。"
+  },
+  "The other device is running a newer version of Tessera%@. Update Tessera on this device, then try again.": {
+    "de": "Das andere Gerät verwendet eine neuere Tessera-Version%@. Aktualisiere Tessera auf diesem Gerät und versuche es erneut.",
+    "es": "El otro dispositivo ejecuta una versión más reciente de Tessera%@. Actualiza Tessera en este dispositivo y vuelve a intentarlo.",
+    "fr": "L'autre appareil utilise une version plus récente de Tessera%@. Mettez Tessera à jour sur cet appareil, puis réessayez.",
+    "ja": "もう一方のデバイスはより新しいバージョンの Tessera%@ を使用しています。このデバイスの Tessera を更新してからもう一度お試しください。",
+    "zh-Hans": "另一台设备运行的是更新版本的 Tessera%@。请先更新本设备上的 Tessera，然后重试。",
+    "zh-Hant": "另一台裝置執行的是更新版本的 Tessera%@。請先更新本裝置上的 Tessera，然後重試。"
+  },
+  "The other device is running an older version of Tessera%@. Update Tessera on the other device, then try again.": {
+    "de": "Das andere Gerät verwendet eine ältere Tessera-Version%@. Aktualisiere Tessera auf dem anderen Gerät und versuche es erneut.",
+    "es": "El otro dispositivo ejecuta una versión anterior de Tessera%@. Actualiza Tessera en el otro dispositivo y vuelve a intentarlo.",
+    "fr": "L'autre appareil utilise une version plus ancienne de Tessera%@. Mettez Tessera à jour sur l'autre appareil, puis réessayez.",
+    "ja": "もう一方のデバイスは古いバージョンの Tessera%@ を使用しています。もう一方のデバイスの Tessera を更新してからもう一度お試しください。",
+    "zh-Hans": "另一台设备运行的是较旧版本的 Tessera%@。请先更新另一台设备上的 Tessera，然后重试。",
+    "zh-Hant": "另一台裝置執行的是較舊版本的 Tessera%@。請先更新另一台裝置上的 Tessera，然後重試。"
+  },
+  "The encrypted channel used an unsupported frame version (%lld). Both devices must run compatible versions of Tessera.": {
+    "de": "Der verschlüsselte Kanal hat eine nicht unterstützte Frame-Version (%lld) verwendet. Beide Geräte müssen kompatible Tessera-Versionen ausführen.",
+    "es": "El canal cifrado usó una versión de trama no compatible (%lld). Ambos dispositivos deben ejecutar versiones compatibles de Tessera.",
+    "fr": "Le canal chiffré a utilisé une version de trame non prise en charge (%lld). Les deux appareils doivent exécuter des versions compatibles de Tessera.",
+    "ja": "暗号化チャネルがサポートされていないフレームバージョン (%lld) を使用しました。両方のデバイスで互換性のあるバージョンの Tessera を実行する必要があります。",
+    "zh-Hans": "加密通道使用了不受支持的帧版本 (%lld)。两台设备必须运行兼容版本的 Tessera。",
+    "zh-Hant": "加密通道使用了不支援的訊框版本 (%lld)。兩台裝置必須執行相容版本的 Tessera。"
+  },
+  "The encrypted channel between the devices is incompatible. Make sure both devices run the same version of Tessera, then try again.": {
+    "de": "Der verschlüsselte Kanal zwischen den Geräten ist inkompatibel. Stelle sicher, dass auf beiden Geräten dieselbe Tessera-Version läuft, und versuche es erneut.",
+    "es": "El canal cifrado entre los dispositivos es incompatible. Asegúrate de que ambos dispositivos ejecuten la misma versión de Tessera y vuelve a intentarlo.",
+    "fr": "Le canal chiffré entre les appareils est incompatible. Assurez-vous que les deux appareils exécutent la même version de Tessera, puis réessayez.",
+    "ja": "デバイス間の暗号化チャネルに互換性がありません。両方のデバイスで同じバージョンの Tessera を実行していることを確認してから、もう一度お試しください。",
+    "zh-Hans": "两台设备之间的加密通道不兼容。请确认两台设备运行相同版本的 Tessera，然后重试。",
+    "zh-Hant": "兩台裝置之間的加密通道不相容。請確認兩台裝置執行相同版本的 Tessera，然後重試。"
+  },
+  "The devices could not understand each other's setup messages. Make sure both devices are running the same version of Tessera, then try again.": {
+    "de": "Die Geräte konnten die Einrichtungsnachrichten des jeweils anderen nicht verstehen. Stelle sicher, dass auf beiden Geräten dieselbe Tessera-Version läuft, und versuche es erneut.",
+    "es": "Los dispositivos no pudieron entender los mensajes de configuración del otro. Asegúrate de que ambos ejecuten la misma versión de Tessera y vuelve a intentarlo.",
+    "fr": "Les appareils n'ont pas pu interpréter leurs messages de configuration respectifs. Assurez-vous qu'ils exécutent la même version de Tessera, puis réessayez.",
+    "ja": "デバイス同士がセットアップメッセージを解釈できませんでした。両方のデバイスで同じバージョンの Tessera を実行していることを確認してから、もう一度お試しください。",
+    "zh-Hans": "两台设备无法理解彼此的设置消息。请确认两台设备运行相同版本的 Tessera，然后重试。",
+    "zh-Hant": "兩台裝置無法理解彼此的設定訊息。請確認兩台裝置執行相同版本的 Tessera，然後重試。"
+  },
+  "Authorize Device": {
+    "de": "Gerät autorisieren",
+    "es": "Autorizar dispositivo",
+    "fr": "Autoriser l'appareil",
+    "ja": "デバイスを承認",
+    "zh-Hans": "授权设备",
+    "zh-Hant": "授權裝置"
+  },
+  "Confirm Your Identity": {
+    "de": "Identität bestätigen",
+    "es": "Confirma tu identidad",
+    "fr": "Confirmez votre identité",
+    "ja": "本人確認",
+    "zh-Hans": "确认你的身份",
+    "zh-Hant": "確認你的身分"
+  },
+  "Installing Public Key": {
+    "de": "Public Key wird installiert",
+    "es": "Instalando la clave pública",
+    "fr": "Installation de la clé publique",
+    "ja": "公開鍵をインストール中",
+    "zh-Hans": "正在安装公钥",
+    "zh-Hant": "正在安裝公鑰"
+  },
+  "Recording Authorization": {
+    "de": "Autorisierung wird erfasst",
+    "es": "Registrando la autorización",
+    "fr": "Enregistrement de l'autorisation",
+    "ja": "承認を記録中",
+    "zh-Hans": "正在记录授权",
+    "zh-Hant": "正在記錄授權"
+  },
+  "Requesting Access": {
+    "de": "Zugriff wird angefragt",
+    "es": "Solicitando acceso",
+    "fr": "Demande d'accès",
+    "ja": "アクセスを要求中",
+    "zh-Hans": "正在请求访问",
+    "zh-Hant": "正在請求存取"
+  },
+  "Access Granted to %@": {
+    "de": "Zugriff auf %@ gewährt",
+    "es": "Acceso concedido a %@",
+    "fr": "Accès accordé à %@",
+    "ja": "%@ へのアクセスが許可されました",
+    "zh-Hans": "已授予对 %@ 的访问权限",
+    "zh-Hant": "已授予對 %@ 的存取權限"
+  },
+  "Request Denied": {
+    "de": "Anfrage abgelehnt",
+    "es": "Solicitud denegada",
+    "fr": "Demande refusée",
+    "ja": "リクエストは拒否されました",
+    "zh-Hans": "请求被拒绝",
+    "zh-Hant": "請求遭拒"
+  },
+  "Enrollment Cancelled": {
+    "de": "Registrierung abgebrochen",
+    "es": "Inscripción cancelada",
+    "fr": "Inscription annulée",
+    "ja": "登録はキャンセルされました",
+    "zh-Hans": "注册已取消",
+    "zh-Hant": "註冊已取消"
+  },
+  "Enrollment Failed": {
+    "de": "Registrierung fehlgeschlagen",
+    "es": "Error en la inscripción",
+    "fr": "Échec de l'inscription",
+    "ja": "登録に失敗しました",
+    "zh-Hans": "注册失败",
+    "zh-Hant": "註冊失敗"
+  },
+  "Enrollment": {
+    "de": "Registrierung",
+    "es": "Inscripción",
+    "fr": "Inscription",
+    "ja": "登録",
+    "zh-Hans": "注册",
+    "zh-Hant": "註冊"
+  },
+  "Review the exact host and public key before granting access.": {
+    "de": "Prüfe Host und Public Key genau, bevor du Zugriff gewährst.",
+    "es": "Revisa el host y la clave pública exactos antes de conceder acceso.",
+    "fr": "Vérifiez précisément l'hôte et la clé publique avant d'accorder l'accès.",
+    "ja": "アクセスを許可する前に、ホストと公開鍵を正確に確認してください。",
+    "zh-Hans": "授予访问权限前，请仔细核对主机和公钥。",
+    "zh-Hant": "授予存取權限前，請仔細核對主機和公鑰。"
+  },
+  "A fresh device-owner check is required for every grant.": {
+    "de": "Für jede Freigabe ist eine erneute Gerätebesitz-Prüfung erforderlich.",
+    "es": "Cada concesión requiere una nueva comprobación del propietario del dispositivo.",
+    "fr": "Chaque autorisation exige une nouvelle vérification du propriétaire de l'appareil.",
+    "ja": "許可のたびにデバイス所有者の確認が必要です。",
+    "zh-Hans": "每次授权都需要重新验证设备所有者。",
+    "zh-Hant": "每次授權都需要重新驗證裝置擁有者。"
+  },
+  "Tessera is adding the approved public key to authorized_keys.": {
+    "de": "Tessera trägt den freigegebenen Public Key in authorized_keys ein.",
+    "es": "Tessera está añadiendo la clave pública aprobada a authorized_keys.",
+    "fr": "Tessera ajoute la clé publique approuvée à authorized_keys.",
+    "ja": "Tessera が承認された公開鍵を authorized_keys に追加しています。",
+    "zh-Hans": "Tessera 正在将已批准的公钥添加到 authorized_keys。",
+    "zh-Hant": "Tessera 正在將已核准的公鑰加入 authorized_keys。"
+  },
+  "Completion waits until both devices durably record the authorization.": {
+    "de": "Der Abschluss wartet, bis beide Geräte die Autorisierung dauerhaft gespeichert haben.",
+    "es": "La finalización espera a que ambos dispositivos registren la autorización de forma duradera.",
+    "fr": "La finalisation attend que les deux appareils aient enregistré durablement l'autorisation.",
+    "ja": "両方のデバイスが承認を永続的に記録するまで完了を待ちます。",
+    "zh-Hans": "完成前会等待两台设备都持久记录该授权。",
+    "zh-Hant": "完成前會等待兩台裝置都持久記錄該授權。"
+  },
+  "Keep Tessera open on both devices.": {
+    "de": "Lass Tessera auf beiden Geräten geöffnet.",
+    "es": "Mantén Tessera abierto en ambos dispositivos.",
+    "fr": "Gardez Tessera ouvert sur les deux appareils.",
+    "ja": "両方のデバイスで Tessera を開いたままにしてください。",
+    "zh-Hans": "请在两台设备上都保持 Tessera 打开。",
+    "zh-Hant": "請在兩台裝置上都保持 Tessera 開啟。"
+  },
+  "Both devices recorded this authorization for later revocation.": {
+    "de": "Beide Geräte haben diese Autorisierung für einen späteren Widerruf gespeichert.",
+    "es": "Ambos dispositivos registraron esta autorización para poder revocarla más tarde.",
+    "fr": "Les deux appareils ont enregistré cette autorisation en vue d'une révocation ultérieure.",
+    "ja": "両方のデバイスが、後で取り消せるようにこの承認を記録しました。",
+    "zh-Hans": "两台设备都已记录此授权，便于日后撤销。",
+    "zh-Hant": "兩台裝置都已記錄此授權，方便日後撤銷。"
+  },
+  "No private key or password was transferred.": {
+    "de": "Es wurden weder Private Key noch Passwort übertragen.",
+    "es": "No se transfirió ninguna clave privada ni contraseña.",
+    "fr": "Aucune clé privée ni aucun mot de passe n'a été transféré.",
+    "ja": "秘密鍵もパスワードも転送されていません。",
+    "zh-Hans": "未传输任何私钥或密码。",
+    "zh-Hant": "未傳輸任何私鑰或密碼。"
+  },
+  "Waiting for your other device…": {
+    "de": "Warte auf dein anderes Gerät…",
+    "es": "Esperando a tu otro dispositivo…",
+    "fr": "En attente de votre autre appareil…",
+    "ja": "もう一方のデバイスを待っています…",
+    "zh-Hans": "正在等待你的另一台设备…",
+    "zh-Hant": "正在等待你的另一台裝置…"
+  },
+  "Confirming both device records…": {
+    "de": "Einträge beider Geräte werden bestätigt…",
+    "es": "Confirmando los registros de ambos dispositivos…",
+    "fr": "Confirmation des enregistrements des deux appareils…",
+    "ja": "両デバイスの記録を確認中…",
+    "zh-Hans": "正在确认两台设备的记录…",
+    "zh-Hant": "正在確認兩台裝置的記錄…"
+  },
+  "The approved public key was installed and recorded on both devices. No private key crossed devices.": {
+    "de": "Der freigegebene Public Key wurde auf beiden Geräten installiert und erfasst. Kein Private Key hat das Gerät verlassen.",
+    "es": "La clave pública aprobada se instaló y registró en ambos dispositivos. Ninguna clave privada cambió de dispositivo.",
+    "fr": "La clé publique approuvée a été installée et enregistrée sur les deux appareils. Aucune clé privée n'a changé d'appareil.",
+    "ja": "承認された公開鍵が両方のデバイスにインストールされ、記録されました。秘密鍵がデバイス間を移動することはありません。",
+    "zh-Hans": "已批准的公钥已在两台设备上安装并记录。没有任何私钥在设备之间传输。",
+    "zh-Hant": "已核准的公鑰已在兩台裝置上安裝並記錄。沒有任何私鑰在裝置之間傳輸。"
+  },
+  "The other device declined the request. No host access changed.": {
+    "de": "Das andere Gerät hat die Anfrage abgelehnt. Am Host-Zugriff hat sich nichts geändert.",
+    "es": "El otro dispositivo rechazó la solicitud. No cambió ningún acceso a hosts.",
+    "fr": "L'autre appareil a refusé la demande. Aucun accès aux hôtes n'a changé.",
+    "ja": "もう一方のデバイスがリクエストを拒否しました。ホストへのアクセスは変更されていません。",
+    "zh-Hans": "另一台设备拒绝了该请求。主机访问权限未发生变化。",
+    "zh-Hant": "另一台裝置拒絕了該請求。主機存取權限未變更。"
+  },
+  "Enrollment was cancelled and the continuation streams were closed.": {
+    "de": "Die Registrierung wurde abgebrochen und die Continuity-Streams geschlossen.",
+    "es": "La inscripción se canceló y se cerraron los flujos de continuidad.",
+    "fr": "L'inscription a été annulée et les flux de continuité ont été fermés.",
+    "ja": "登録がキャンセルされ、継続ストリームが閉じられました。",
+    "zh-Hans": "注册已取消，接续流已关闭。",
+    "zh-Hant": "註冊已取消，接續串流已關閉。"
+  },
+  "device (self-reported)": {
+    "de": "Gerät (selbst gemeldet)",
+    "es": "dispositivo (autoinformado)",
+    "fr": "appareil (auto-déclaré)",
+    "ja": "デバイス（自己申告）",
+    "zh-Hans": "设备（自行报告）",
+    "zh-Hant": "裝置（自行回報）"
+  },
+  "current authenticated session": {
+    "de": "aktuelle authentifizierte Sitzung",
+    "es": "sesión autenticada actual",
+    "fr": "session authentifiée en cours",
+    "ja": "現在の認証済みセッション",
+    "zh-Hans": "当前已认证的会话",
+    "zh-Hant": "目前已驗證的工作階段"
+  },
+  "Secure Enclave (peer-reported)": {
+    "de": "Secure Enclave (vom Peer gemeldet)",
+    "es": "Secure Enclave (informado por el par)",
+    "fr": "Secure Enclave (déclaré par le pair)",
+    "ja": "Secure Enclave（ピア申告）",
+    "zh-Hans": "Secure Enclave（对端报告）",
+    "zh-Hant": "Secure Enclave（對端回報）"
+  },
+  "software key (peer-reported)": {
+    "de": "Software-Key (vom Peer gemeldet)",
+    "es": "clave por software (informada por el par)",
+    "fr": "clé logicielle (déclarée par le pair)",
+    "ja": "ソフトウェアキー（ピア申告）",
+    "zh-Hans": "软件密钥（对端报告）",
+    "zh-Hant": "軟體金鑰（對端回報）"
+  },
+  "The local device key has invalid public metadata.": {
+    "de": "Der lokale Geräte-Key hat ungültige öffentliche Metadaten.",
+    "es": "La clave del dispositivo local tiene metadatos públicos no válidos.",
+    "fr": "La clé de l'appareil local comporte des métadonnées publiques non valides.",
+    "ja": "ローカルデバイスキーの公開メタデータが無効です。",
+    "zh-Hans": "本地设备密钥的公开元数据无效。",
+    "zh-Hant": "本機裝置金鑰的公開中繼資料無效。"
+  },
+  "Authorize Tessera to protect and use this device key for SSH connections.": {
+    "de": "Erlaube Tessera, diesen Geräte-Key für SSH-Verbindungen zu schützen und zu verwenden.",
+    "es": "Autoriza a Tessera a proteger y usar esta clave del dispositivo para conexiones SSH.",
+    "fr": "Autorisez Tessera à protéger et utiliser cette clé d'appareil pour les connexions SSH.",
+    "ja": "SSH 接続でこのデバイスキーを保護して使用することを Tessera に許可します。",
+    "zh-Hans": "授权 Tessera 保护并使用此设备密钥进行 SSH 连接。",
+    "zh-Hant": "授權 Tessera 保護並使用此裝置金鑰進行 SSH 連線。"
+  },
+  "Authorization was cancelled.": {
+    "de": "Die Autorisierung wurde abgebrochen.",
+    "es": "Se canceló la autorización.",
+    "fr": "L'autorisation a été annulée.",
+    "ja": "承認がキャンセルされました。",
+    "zh-Hans": "授权已取消。",
+    "zh-Hant": "授權已取消。"
+  },
+  "Device authentication failed.": {
+    "de": "Die Geräteauthentifizierung ist fehlgeschlagen.",
+    "es": "Falló la autenticación del dispositivo.",
+    "fr": "L'authentification de l'appareil a échoué.",
+    "ja": "デバイス認証に失敗しました。",
+    "zh-Hans": "设备认证失败。",
+    "zh-Hant": "裝置驗證失敗。"
+  },
+  "Device owner authentication is unavailable.": {
+    "de": "Die Gerätebesitzer-Authentifizierung ist nicht verfügbar.",
+    "es": "La autenticación del propietario del dispositivo no está disponible.",
+    "fr": "L'authentification du propriétaire de l'appareil est indisponible.",
+    "ja": "デバイス所有者の認証を利用できません。",
+    "zh-Hans": "设备所有者认证不可用。",
+    "zh-Hant": "裝置擁有者驗證無法使用。"
+  },
+  "Device-owner authorization failed.": {
+    "de": "Die Gerätebesitzer-Autorisierung ist fehlgeschlagen.",
+    "es": "Falló la autorización del propietario del dispositivo.",
+    "fr": "L'autorisation du propriétaire de l'appareil a échoué.",
+    "ja": "デバイス所有者の承認に失敗しました。",
+    "zh-Hans": "设备所有者授权失败。",
+    "zh-Hant": "裝置擁有者授權失敗。"
+  },
+  "Device-owner authorization expired before installation began.": {
+    "de": "Die Gerätebesitzer-Autorisierung ist abgelaufen, bevor die Installation begann.",
+    "es": "La autorización del propietario del dispositivo caducó antes de comenzar la instalación.",
+    "fr": "L'autorisation du propriétaire de l'appareil a expiré avant le début de l'installation.",
+    "ja": "インストール開始前にデバイス所有者の承認が期限切れになりました。",
+    "zh-Hans": "在安装开始前，设备所有者授权已过期。",
+    "zh-Hant": "在安裝開始前，裝置擁有者授權已過期。"
+  },
+  "The continuation channel could not prove its Apple peer binding.": {
+    "de": "Der Continuity-Kanal konnte seine Apple-Peer-Bindung nicht nachweisen.",
+    "es": "El canal de continuidad no pudo demostrar su vínculo de par de Apple.",
+    "fr": "Le canal de continuité n'a pas pu prouver sa liaison de pair Apple.",
+    "ja": "継続チャネルが Apple ピアバインディングを証明できませんでした。",
+    "zh-Hans": "接续通道无法证明其 Apple 对端绑定。",
+    "zh-Hant": "接續通道無法證明其 Apple 對端綁定。"
+  },
+  "Enrollment changed state unexpectedly.": {
+    "de": "Die Registrierung hat unerwartet den Zustand gewechselt.",
+    "es": "La inscripción cambió de estado de forma inesperada.",
+    "fr": "L'inscription a changé d'état de façon inattendue.",
+    "ja": "登録の状態が予期せず変化しました。",
+    "zh-Hans": "注册状态发生了意外变化。",
+    "zh-Hant": "註冊狀態發生了非預期的變化。"
+  },
+  "Enrollment persistence changed state unexpectedly.": {
+    "de": "Die Speicherung der Registrierung hat unerwartet den Zustand gewechselt.",
+    "es": "La persistencia de la inscripción cambió de estado de forma inesperada.",
+    "fr": "La persistance de l'inscription a changé d'état de façon inattendue.",
+    "ja": "登録の保存状態が予期せず変化しました。",
+    "zh-Hans": "注册的持久化状态发生了意外变化。",
+    "zh-Hant": "註冊的持久化狀態發生了非預期的變化。"
+  },
+  "The peer sent an invalid enrollment request.": {
+    "de": "Der Peer hat eine ungültige Registrierungsanfrage gesendet.",
+    "es": "El par envió una solicitud de inscripción no válida.",
+    "fr": "Le pair a envoyé une demande d'inscription non valide.",
+    "ja": "ピアが無効な登録リクエストを送信しました。",
+    "zh-Hans": "对端发送了无效的注册请求。",
+    "zh-Hant": "對端傳送了無效的註冊請求。"
+  },
+  "The peer sent an invalid enrollment message.": {
+    "de": "Der Peer hat eine ungültige Registrierungsnachricht gesendet.",
+    "es": "El par envió un mensaje de inscripción no válido.",
+    "fr": "Le pair a envoyé un message d'inscription non valide.",
+    "ja": "ピアが無効な登録メッセージを送信しました。",
+    "zh-Hans": "对端发送了无效的注册消息。",
+    "zh-Hant": "對端傳送了無效的註冊訊息。"
+  },
+  "The peer did not provide streams.": {
+    "de": "Der Peer hat keine Streams bereitgestellt.",
+    "es": "El par no proporcionó flujos.",
+    "fr": "Le pair n'a fourni aucun flux.",
+    "ja": "ピアがストリームを提供しませんでした。",
+    "zh-Hans": "对端未提供数据流。",
+    "zh-Hant": "對端未提供資料串流。"
+  },
+  "The continuation channel closed before enrollment completed.": {
+    "de": "Der Continuity-Kanal wurde geschlossen, bevor die Registrierung abgeschlossen war.",
+    "es": "El canal de continuidad se cerró antes de completar la inscripción.",
+    "fr": "Le canal de continuité s'est fermé avant la fin de l'inscription.",
+    "ja": "登録が完了する前に継続チャネルが閉じられました。",
+    "zh-Hans": "接续通道在注册完成前已关闭。",
+    "zh-Hant": "接續通道在註冊完成前已關閉。"
+  },
+  "The public key could not be installed on the host.": {
+    "de": "Der Public Key konnte nicht auf dem Host installiert werden.",
+    "es": "No se pudo instalar la clave pública en el host.",
+    "fr": "La clé publique n'a pas pu être installée sur l'hôte.",
+    "ja": "公開鍵をホストにインストールできませんでした。",
+    "zh-Hans": "无法在主机上安装公钥。",
+    "zh-Hant": "無法在主機上安裝公鑰。"
+  },
+  "The requesting device could not record the authorization.": {
+    "de": "Das anfragende Gerät konnte die Autorisierung nicht speichern.",
+    "es": "El dispositivo solicitante no pudo registrar la autorización.",
+    "fr": "L'appareil demandeur n'a pas pu enregistrer l'autorisation.",
+    "ja": "リクエスト元のデバイスが承認を記録できませんでした。",
+    "zh-Hans": "发起请求的设备无法记录该授权。",
+    "zh-Hant": "發起請求的裝置無法記錄該授權。"
+  },
+  "The origin completed before local enrollment was recorded.": {
+    "de": "Die Gegenstelle war fertig, bevor die lokale Registrierung gespeichert wurde.",
+    "es": "El origen terminó antes de que se registrara la inscripción local.",
+    "fr": "La source a terminé avant que l'inscription locale ne soit enregistrée.",
+    "ja": "ローカル登録が記録される前に、送信元が完了しました。",
+    "zh-Hans": "本地注册尚未记录，源端就已完成。",
+    "zh-Hant": "本機註冊尚未記錄，來源端就已完成。"
+  },
+  "The other device did not authorize this request.": {
+    "de": "Das andere Gerät hat diese Anfrage nicht autorisiert.",
+    "es": "El otro dispositivo no autorizó esta solicitud.",
+    "fr": "L'autre appareil n'a pas autorisé cette demande.",
+    "ja": "もう一方のデバイスがこのリクエストを承認しませんでした。",
+    "zh-Hans": "另一台设备未授权此请求。",
+    "zh-Hant": "另一台裝置未授權此請求。"
+  },
+  "The other device could not install this public key.": {
+    "de": "Das andere Gerät konnte diesen Public Key nicht installieren.",
+    "es": "El otro dispositivo no pudo instalar esta clave pública.",
+    "fr": "L'autre appareil n'a pas pu installer cette clé publique.",
+    "ja": "もう一方のデバイスがこの公開鍵をインストールできませんでした。",
+    "zh-Hans": "另一台设备无法安装此公钥。",
+    "zh-Hant": "另一台裝置無法安裝此公鑰。"
+  },
+  "The other device could not record this authorization.": {
+    "de": "Das andere Gerät konnte diese Autorisierung nicht speichern.",
+    "es": "El otro dispositivo no pudo registrar esta autorización.",
+    "fr": "L'autre appareil n'a pas pu enregistrer cette autorisation.",
+    "ja": "もう一方のデバイスがこの承認を記録できませんでした。",
+    "zh-Hans": "另一台设备无法记录此授权。",
+    "zh-Hant": "另一台裝置無法記錄此授權。"
+  },
+  "The other device rejected the enrollment protocol.": {
+    "de": "Das andere Gerät hat das Registrierungsprotokoll abgelehnt.",
+    "es": "El otro dispositivo rechazó el protocolo de inscripción.",
+    "fr": "L'autre appareil a rejeté le protocole d'inscription.",
+    "ja": "もう一方のデバイスが登録プロトコルを拒否しました。",
+    "zh-Hans": "另一台设备拒绝了注册协议。",
+    "zh-Hant": "另一台裝置拒絕了註冊協定。"
+  },
+  "Nearby Tessera device": {
+    "de": "Tessera-Gerät in der Nähe",
+    "es": "Dispositivo Tessera cercano",
+    "fr": "Appareil Tessera à proximité",
+    "ja": "近くの Tessera デバイス",
+    "zh-Hans": "附近的 Tessera 设备",
+    "zh-Hant": "附近的 Tessera 裝置"
+  },
+  "Tessera device": {
+    "de": "Tessera-Gerät",
+    "es": "Dispositivo Tessera",
+    "fr": "Appareil Tessera",
+    "ja": "Tessera デバイス",
+    "zh-Hans": "Tessera 设备",
+    "zh-Hant": "Tessera 裝置"
+  },
+  "Nearby setup was cancelled.": {
+    "de": "Die Einrichtung in der Nähe wurde abgebrochen.",
+    "es": "Se canceló la configuración cercana.",
+    "fr": "La configuration à proximité a été annulée.",
+    "ja": "近くのデバイスでのセットアップがキャンセルされました。",
+    "zh-Hans": "附近设备设置已取消。",
+    "zh-Hant": "附近裝置設定已取消。"
+  },
+  "Nearby setup was not approved.": {
+    "de": "Die Einrichtung in der Nähe wurde nicht genehmigt.",
+    "es": "No se aprobó la configuración cercana.",
+    "fr": "La configuration à proximité n'a pas été approuvée.",
+    "ja": "近くのデバイスでのセットアップが承認されませんでした。",
+    "zh-Hans": "附近设备设置未获批准。",
+    "zh-Hant": "附近裝置設定未獲核准。"
+  },
+  "You rejected the pairing code. No setup data was transferred.": {
+    "de": "Du hast den Kopplungscode abgelehnt. Es wurden keine Einrichtungsdaten übertragen.",
+    "es": "Rechazaste el código de emparejamiento. No se transfirieron datos de configuración.",
+    "fr": "Vous avez refusé le code d'association. Aucune donnée de configuration n'a été transférée.",
+    "ja": "ペアリングコードを拒否しました。セットアップデータは転送されていません。",
+    "zh-Hans": "你拒绝了配对码。未传输任何设置数据。",
+    "zh-Hant": "你拒絕了配對碼。未傳輸任何設定資料。"
+  },
+  "Key installation failed.": {
+    "de": "Die Key-Installation ist fehlgeschlagen.",
+    "es": "Falló la instalación de la clave.",
+    "fr": "L'installation de la clé a échoué.",
+    "ja": "キーのインストールに失敗しました。",
+    "zh-Hans": "密钥安装失败。",
+    "zh-Hant": "金鑰安裝失敗。"
+  },
+  "authorize this device": {
+    "de": "dieses Gerät autorisieren",
+    "es": "autorizar este dispositivo",
+    "fr": "autoriser cet appareil",
+    "ja": "このデバイスを承認",
+    "zh-Hans": "授权此设备",
+    "zh-Hant": "授權此裝置"
+  },
+  "password on first connect": {
+    "de": "Passwort beim ersten Verbinden",
+    "es": "contraseña en la primera conexión",
+    "fr": "mot de passe à la première connexion",
+    "ja": "初回接続時にパスワード",
+    "zh-Hans": "首次连接时输入密码",
+    "zh-Hant": "首次連線時輸入密碼"
+  },
+  "credential on first connect": {
+    "de": "Anmeldedaten beim ersten Verbinden",
+    "es": "credencial en la primera conexión",
+    "fr": "identifiants à la première connexion",
+    "ja": "初回接続時に認証情報",
+    "zh-Hans": "首次连接时提供凭据",
+    "zh-Hant": "首次連線時提供憑證"
+  },
+  "Install the other device's public key using this device's existing access.": {
+    "de": "Installiere den Public Key des anderen Geräts über den vorhandenen Zugriff dieses Geräts.",
+    "es": "Instala la clave pública del otro dispositivo usando el acceso que ya tiene este dispositivo.",
+    "fr": "Installez la clé publique de l'autre appareil grâce à l'accès dont dispose déjà cet appareil.",
+    "ja": "このデバイスの既存のアクセス権を使って、もう一方のデバイスの公開鍵をインストールします。",
+    "zh-Hans": "使用本设备已有的访问权限安装另一台设备的公钥。",
+    "zh-Hant": "使用本裝置既有的存取權限安裝另一台裝置的公鑰。"
+  },
+  "Excluded. Passwords never transfer and will be requested on first connect.": {
+    "de": "Ausgeschlossen. Passwörter werden nie übertragen und beim ersten Verbinden abgefragt.",
+    "es": "Excluido. Las contraseñas nunca se transfieren y se pedirán en la primera conexión.",
+    "fr": "Exclu. Les mots de passe ne sont jamais transférés et seront demandés à la première connexion.",
+    "ja": "対象外です。パスワードは転送されず、初回接続時に入力を求められます。",
+    "zh-Hans": "已排除。密码从不传输，将在首次连接时询问。",
+    "zh-Hant": "已排除。密碼從不傳輸，將在首次連線時詢問。"
+  },
+  "Excluded because this device has no reusable authenticated path.": {
+    "de": "Ausgeschlossen, weil dieses Gerät keinen wiederverwendbaren authentifizierten Weg hat.",
+    "es": "Excluido porque este dispositivo no tiene una ruta autenticada reutilizable.",
+    "fr": "Exclu car cet appareil ne dispose d'aucun chemin authentifié réutilisable.",
+    "ja": "このデバイスには再利用できる認証済み経路がないため、対象外です。",
+    "zh-Hans": "已排除，因为本设备没有可复用的已认证路径。",
+    "zh-Hant": "已排除，因為本裝置沒有可重複使用的已驗證路徑。"
+  }
+}

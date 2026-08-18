@@ -138,14 +138,14 @@ struct TunnelsPageView: View {
                     Text(String(rule.localPort))
                         .font(Typography.tesseraMono(size: 13, weight: .semibold))
                         .foregroundStyle(group.isConnected && rule.enabled ? T.accent : T.fgMuted)
-                    Text(" → ")
+                    Text(verbatim: " → ")
                         .font(Typography.tesseraMono(size: 13))
                         .foregroundStyle(T.fgDim)
                     Text(verbatim: "\(rule.remoteHost):\(rule.remotePort)")
                         .font(Typography.tesseraMono(size: 13))
                         .foregroundStyle(T.fg)
                     if !rule.label.isEmpty {
-                        Text("  \"\(rule.label)\"")
+                        Text(verbatim: "  \"\(rule.label)\"")
                             .font(Typography.tesseraMono(size: 12))
                             .foregroundStyle(T.fgMuted)
                     }
@@ -211,14 +211,14 @@ struct TunnelsPageView: View {
             case .active(let n):
                 let f = group.manager?.forwarders[rule.id]
                 return "\u{2191} \(byteString(f?.bytesUp ?? 0))   \u{2193} \(byteString(f?.bytesDown ?? 0))   ·   \(n) active"
-            case .listening: return "listening · 0 active"
-            case .idle: return "idle"
+            case .listening: return String(localized: "listening · 0 active")
+            case .idle: return String(localized: "idle")
             case .error(let reason): return reason
             }
         }
-        if !rule.enabled { return "disabled" }
-        if !group.isConnected { return "host not connected" }
-        return "idle"
+        if !rule.enabled { return String(localized: "disabled") }
+        if !group.isConnected { return String(localized: "host not connected") }
+        return String(localized: "idle")
     }
 
     private func subStatusColor(runtime: PortForwarder.State?) -> Color {

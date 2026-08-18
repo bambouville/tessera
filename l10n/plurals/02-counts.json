@@ -1,0 +1,63 @@
+{
+  "%lld agents just finished": {
+    "en": { "one": "%lld agent just finished", "other": "%lld agents just finished" },
+    "de": { "one": "%lld Agent gerade fertig", "other": "%lld Agenten gerade fertig" },
+    "es": { "one": "%lld agente acaba de terminar", "other": "%lld agentes acaban de terminar" },
+    "fr": { "one": "%lld agent vient de terminer", "other": "%lld agents viennent de terminer" },
+    "ja": { "other": "%lld 個のエージェントが完了しました" },
+    "zh-Hans": { "other": "%lld 个智能体刚刚完成" },
+    "zh-Hant": { "other": "%lld 個智慧體剛完成" }
+  },
+  "%lld agents total": {
+    "en": { "one": "%lld agent total", "other": "%lld agents total" },
+    "de": { "one": "%lld Agent insgesamt", "other": "%lld Agenten insgesamt" },
+    "es": { "one": "%lld agente en total", "other": "%lld agentes en total" },
+    "fr": { "one": "%lld agent au total", "other": "%lld agents au total" },
+    "ja": { "other": "合計 %lld 個のエージェント" },
+    "zh-Hans": { "other": "共 %lld 个智能体" },
+    "zh-Hant": { "other": "共 %lld 個智慧體" }
+  },
+  "%lld of 1 saved": {
+    "de": { "one": "%lld von 1 gespeichert", "other": "%lld von 1 gespeichert" },
+    "es": { "one": "%lld de 1 guardado", "other": "%lld de 1 guardados" },
+    "fr": { "one": "%lld sur 1 enregistré", "other": "%lld sur 1 enregistrés" },
+    "ja": { "other": "1 件中 %lld 件を保存済み" },
+    "zh-Hans": { "other": "已保存 %lld / 1" },
+    "zh-Hant": { "other": "已儲存 %lld / 1" }
+  },
+  "%lld panes · each opens full-screen": {
+    "en": { "one": "%lld pane · opens full-screen", "other": "%lld panes · each opens full-screen" },
+    "de": { "one": "%lld Pane · öffnet im Vollbild", "other": "%lld Panes · jedes öffnet im Vollbild" },
+    "es": { "one": "%lld panel · se abre a pantalla completa", "other": "%lld paneles · cada uno se abre a pantalla completa" },
+    "fr": { "one": "%lld volet · s'ouvre en plein écran", "other": "%lld volets · chacun s'ouvre en plein écran" },
+    "ja": { "other": "%lld 個のペイン · それぞれ全画面で開きます" },
+    "zh-Hans": { "other": "%lld 个窗格 · 每个都全屏打开" },
+    "zh-Hant": { "other": "%lld 個窗格 · 每個都全螢幕開啟" }
+  },
+  "Couldn't read %lld dropped files.": {
+    "en": { "one": "Couldn't read %lld dropped file.", "other": "Couldn't read %lld dropped files." },
+    "de": { "one": "%lld abgelegte Datei konnte nicht gelesen werden.", "other": "%lld abgelegte Dateien konnten nicht gelesen werden." },
+    "es": { "one": "No se pudo leer %lld archivo soltado.", "other": "No se pudieron leer %lld archivos soltados." },
+    "fr": { "one": "Impossible de lire %lld fichier déposé.", "other": "Impossible de lire %lld fichiers déposés." },
+    "ja": { "other": "ドロップされた %lld 個のファイルを読み取れませんでした。" },
+    "zh-Hans": { "other": "无法读取拖入的 %lld 个文件。" },
+    "zh-Hant": { "other": "無法讀取拖入的 %lld 個檔案。" }
+  },
+  "Jump chain exceeds %lld hops.": {
+    "en": { "one": "Jump chain exceeds %lld hop.", "other": "Jump chain exceeds %lld hops." },
+    "de": { "one": "Die Jump-Kette überschreitet %lld Sprung.", "other": "Die Jump-Kette überschreitet %lld Sprünge." },
+    "es": { "one": "La cadena de salto supera %lld salto.", "other": "La cadena de salto supera %lld saltos." },
+    "fr": { "one": "La chaîne de rebond dépasse %lld saut.", "other": "La chaîne de rebond dépasse %lld sauts." },
+    "ja": { "other": "ジャンプチェーンが %lld ホップを超えています。" },
+    "zh-Hans": { "other": "跳板链超过 %lld 跳。" },
+    "zh-Hant": { "other": "跳板鏈超過 %lld 跳。" }
+  },
+  "temp · auto-cleans after %lld d": {
+    "de": { "one": "temporär · wird nach %lld Tag automatisch aufgeräumt", "other": "temporär · wird nach %lld Tagen automatisch aufgeräumt" },
+    "es": { "one": "temporal · se limpia solo tras %lld día", "other": "temporal · se limpia solo tras %lld días" },
+    "fr": { "one": "temporaire · nettoyé automatiquement après %lld jour", "other": "temporaire · nettoyé automatiquement après %lld jours" },
+    "ja": { "other": "一時 · %lld 日後に自動削除" },
+    "zh-Hans": { "other": "临时 · %lld 天后自动清理" },
+    "zh-Hant": { "other": "暫存 · %lld 天後自動清理" }
+  }
+}

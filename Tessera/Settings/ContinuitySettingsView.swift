@@ -71,9 +71,9 @@ struct ContinuitySettingsView: View {
     }
 
     private func truthRow(
-        title: String,
-        detail: String,
-        subtitle: String
+        title: LocalizedStringKey,
+        detail: LocalizedStringKey,
+        subtitle: LocalizedStringKey
     ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {

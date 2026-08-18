@@ -8,6 +8,7 @@ import TmuxControl
 /// Renders only when `palette.isOpen` — the caller is expected to
 /// mount this in a `.overlay` and gate visibility on that flag.
 struct CommandPaletteView: View {
+    @Environment(AppearancePreferences.self) private var appearance
     @Bindable var palette: CommandPalette
 
     /// Called with the chosen session or agent when the user commits. The
@@ -211,7 +212,7 @@ struct CommandPaletteView: View {
             // doesn't swallow them or surrender first responder.
 
             if !isPhone {
-                Text("esc")
+                Text(verbatim: "esc")
                     .font(Typography.tesseraMono(size: 10))
                     .foregroundStyle(T.fgDim)
                     .padding(.horizontal, 6)
@@ -248,7 +249,7 @@ struct CommandPaletteView: View {
                             }
                         }
                         if !palette.tmuxResults.isEmpty {
-                            sectionHeader(tmuxSectionTitle)
+                            sectionHeader(resolved: tmuxSectionTitle)
                         }
                         ForEach(Array(palette.tmuxResults.enumerated()), id: \.element.id) { offset, entry in
                             let index = palette.homeResults.count + offset
@@ -317,8 +318,18 @@ struct CommandPaletteView: View {
         }
     }
 
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title)
+    private func sectionHeader(_ title: LocalizedStringKey) -> some View {
+        sectionHeader(Text(title))
+    }
+
+    /// The tmux section names the attached session, so its title arrives
+    /// already resolved.
+    private func sectionHeader(resolved title: String) -> some View {
+        sectionHeader(Text(verbatim: title))
+    }
+
+    private func sectionHeader(_ title: Text) -> some View {
+        title
             .font(Typography.kicker)
             .foregroundStyle(T.fgDim)
             .textCase(.uppercase)
@@ -488,24 +499,47 @@ struct CommandPaletteView: View {
         position: Int,
         total: Int
     ) -> String {
+        // VoiceOver reads these, so the "current" marker is part of a whole
+        // localized sentence rather than a suffix glued on afterwards —
+        // appending a fragment strands it at the end regardless of where the
+        // target language would place it.
         switch entry {
         case .window(let window):
-            let current = palette.activeWindowID == window.id ? ", current" : ""
-            return "tmux window \(position) of \(total), \(window.title), \(window.panes.count) pane\(window.panes.count == 1 ? "" : "s")\(current)"
+            let isCurrent = palette.activeWindowID == window.id
+            return isCurrent
+                ? String(
+                    localized: "tmux window \(position) of \(total), \(window.title), \(window.panes.count) panes, current",
+                    comment: "VoiceOver label for the tmux window the session is on. Pluralized on the pane count."
+                )
+                : String(
+                    localized: "tmux window \(position) of \(total), \(window.title), \(window.panes.count) panes",
+                    comment: "VoiceOver label for a tmux window row. Pluralized on the pane count."
+                )
         case .pane(let window, let pane):
-            let current = palette.activeWindowID == window.id
-                && palette.activePaneID == pane.id ? ", current" : ""
-            return "tmux pane \(position) of \(total), \(pane.title), window \(window.title)\(current)"
+            let isCurrent = palette.activeWindowID == window.id
+                && palette.activePaneID == pane.id
+            return isCurrent
+                ? String(
+                    localized: "tmux pane \(position) of \(total), \(pane.title), window \(window.title), current",
+                    comment: "VoiceOver label for the tmux pane the session is on"
+                )
+                : String(
+                    localized: "tmux pane \(position) of \(total), \(pane.title), window \(window.title)",
+                    comment: "VoiceOver label for a tmux pane row"
+                )
         default:
-            return "tmux item \(position) of \(total)"
+            return String(
+                localized: "tmux item \(position) of \(total)",
+                comment: "VoiceOver fallback label for a tmux palette row"
+            )
         }
     }
 
     private func homeRow(isSelected: Bool) -> some View {
         paletteNavigationRow(
             systemName: "house",
-            title: "hosts home",
-            subtitle: "back to the tab bar · session keeps running",
+            title: String(localized: "hosts home"),
+            subtitle: String(localized: "back to the tab bar · session keeps running"),
             indented: false,
             isCurrent: false,
             isSelected: isSelected
@@ -518,11 +552,11 @@ struct CommandPaletteView: View {
     ) -> some View {
         let paneSummary: String
         if window.panes.count > 1 {
-            paneSummary = "\(window.panes.count) panes · each opens full-screen"
+            paneSummary = String(localized: "\(window.panes.count) panes · each opens full-screen")
         } else if let pane = window.panes.first {
             paneSummary = pane.command ?? pane.title
         } else {
-            paneSummary = "tmux window"
+            paneSummary = String(localized: "tmux window")
         }
         return paletteNavigationRow(
             systemName: window.panes.count > 1 ? "rectangle.split.2x1" : "terminal",
@@ -550,6 +584,8 @@ struct CommandPaletteView: View {
         )
     }
 
+    /// Rows name live tmux windows and panes, so both strings arrive already
+    /// resolved — the literal cases resolve at their call site.
     private func paletteNavigationRow(
         systemName: String?,
         title: String,
@@ -560,7 +596,7 @@ struct CommandPaletteView: View {
     ) -> some View {
         HStack(spacing: 12) {
             if indented {
-                Text("↳")
+                Text(verbatim: "↳")
                     .font(Typography.tesseraMono(size: 12))
                     .foregroundStyle(T.fgDim)
                     .frame(width: 14)
@@ -572,18 +608,18 @@ struct CommandPaletteView: View {
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
+                Text(verbatim: title)
                     .font(Typography.tesseraMono(size: 13))
                     .foregroundStyle(T.fg)
                     .lineLimit(1)
-                Text(subtitle)
+                Text(verbatim: subtitle)
                     .font(Typography.tesseraMono(size: 11))
                     .foregroundStyle(T.fgDim)
                     .lineLimit(1)
             }
 
             Spacer(minLength: 0)
-            Text(isCurrent ? "●" : "↩")
+            Text(verbatim: isCurrent ? "●" : "↩")
                 .font(Typography.tesseraMono(size: 11))
                 .foregroundStyle(isCurrent ? T.green : T.accent)
         }
@@ -594,7 +630,9 @@ struct CommandPaletteView: View {
         .background(isSelected ? T.accentSoft : Color.clear)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title), \(subtitle)")
+        // Both halves are already localized where they are produced; this
+        // only joins them, so it must not become a translatable key itself.
+        .accessibilityLabel(Text(verbatim: "\(title), \(subtitle)"))
         .accessibilityValue(isCurrent ? "current" : "")
         .accessibilityAddTraits(isCurrent ? .isSelected : [])
     }
@@ -610,11 +648,11 @@ struct CommandPaletteView: View {
                 .frame(width: 6, height: 6)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
+                Text(verbatim: title)
                     .font(Typography.tesseraMono(size: 13))
                     .foregroundStyle(T.fg)
                     .lineLimit(1)
-                Text(subtitle)
+                Text(verbatim: subtitle)
                     .font(Typography.tesseraMono(size: 11))
                     .foregroundStyle(T.fgDim)
                     .lineLimit(1)
@@ -623,7 +661,7 @@ struct CommandPaletteView: View {
             Spacer(minLength: 0)
 
             if isSelected {
-                Text("↩")
+                Text(verbatim: "↩")
                     .font(Typography.tesseraMono(size: 11))
                     .foregroundStyle(T.accent)
                     .padding(.horizontal, 6)
@@ -697,12 +735,12 @@ struct CommandPaletteView: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(agent.name), \(agentStatusLabel(agent.status)), \(agent.location.addressText)"
+            Text(verbatim: "\(agent.name), \(agentStatusLabel(agent.status)), \(agent.location.addressText)")
         )
     }
 
     private var commitGlyph: some View {
-        Text("↩")
+        Text(verbatim: "↩")
             .font(Typography.tesseraMono(size: 11))
             .foregroundStyle(T.accent)
             .padding(.horizontal, 6)
@@ -727,8 +765,8 @@ struct CommandPaletteView: View {
         HStack(spacing: 16) {
             if !isPhone {
                 footerHint(symbol: "↑↓", label: "navigate")
-                footerHint(symbol: "↩",  label: "switch")
-                footerHint(symbol: "esc", label: "dismiss")
+                footerHint(symbol: KeyToken.return.rendered(appearance.modifierNotation), label: "switch")
+                footerHint(symbol: KeyToken.escape.rendered(appearance.modifierNotation), label: "dismiss")
             }
             Spacer(minLength: 0)
             Text("\(palette.tmuxWindows.count) windows · \(palette.agents.count) agents · \(palette.sessions.count) sessions")
@@ -739,9 +777,9 @@ struct CommandPaletteView: View {
         .padding(.vertical, 9)
     }
 
-    private func footerHint(symbol: String, label: String) -> some View {
+    private func footerHint(symbol: String, label: LocalizedStringKey) -> some View {
         HStack(spacing: 5) {
-            Text(symbol)
+            Text(verbatim: symbol)
                 .font(Typography.tesseraMono(size: 10))
                 .foregroundStyle(T.fgMuted)
                 .padding(.horizontal, 4)

@@ -24,11 +24,14 @@
 import SwiftUI
 
 struct SessionLaunchFailurePresentation: Equatable {
-    let title: String
+    let title: LocalizedStringResource
     let isCancellation: Bool
 
+    /// `reason` is the transport's own message. `HostKeyRejectionMessage` owns
+    /// both that text and the recogniser, so this stays correct in every
+    /// language rather than only in the one the source happens to be written in.
     static func resolve(reason: String) -> Self {
-        let cancellation = reason.localizedCaseInsensitiveContains("connection cancelled")
+        let cancellation = HostKeyRejectionMessage.matches(reason)
         return Self(
             title: cancellation ? "not connected" : "connection failed",
             isCancellation: cancellation
@@ -46,10 +49,10 @@ enum SessionLaunchPhase: Equatable {
     /// crossfade reads as a single line at the overlay's 14pt size.
     var caption: String {
         switch self {
-        case .connecting:           return "connecting"
-        case .startingTmux:         return "starting tmux"
-        case .attachingTmuxChannel: return "attaching tmux"
-        case .attachingPane:        return "attaching pane"
+        case .connecting:           return String(localized: "connecting")
+        case .startingTmux:         return String(localized: "starting tmux")
+        case .attachingTmuxChannel: return String(localized: "attaching tmux")
+        case .attachingPane:        return String(localized: "attaching pane")
         }
     }
 }
@@ -82,6 +85,23 @@ struct SessionLaunchOverlay: View {
     var onRetry: () -> Void = {}
     /// Drop the failed session and return to the host list.
     var onBack: () -> Void = {}
+    /// Other sessions still awaiting a verdict in the same restore window.
+    /// Reconnecting several hosts shows one overlay at a time, so without this
+    /// the rest of the wake looks like nothing is happening.
+    var reconnectingElsewhere: Int = 0
+
+    /// How long a single loading phase may run before the overlay stops
+    /// claiming everything is fine.
+    ///
+    /// A connect that wedges mid-handshake never reaches `.failed`, so without
+    /// this the overlay shows an ordinary spinner forever and offers no way
+    /// out. Mosh has no handshake budget at all on either of its SSH legs, so
+    /// there a wedge is genuinely indefinite; SSH stalls only until its budget
+    /// fires, but that is still far longer than a connect should take.
+    static let stallThreshold: TimeInterval = 12
+
+    @State private var phaseStartedAt = Date()
+    @State private var isStalled = false
 
     var body: some View {
         ZStack {
@@ -106,6 +126,27 @@ struct SessionLaunchOverlay: View {
                     LaunchOverlayIndeterminateBar(T: T)
                         .frame(width: 200, height: 2)
 
+                    if isStalled {
+                        LaunchOverlayStallNotice(
+                            T: T,
+                            phase: phase,
+                            onEditHost: onEditHost,
+                            onRetry: onRetry,
+                            onBack: onBack
+                        )
+                        .frame(maxWidth: 520)
+                    }
+
+                    if reconnectingElsewhere > 0 {
+                        // One key with a plural variation rather than an
+                        // English one-vs-many ternary: which counts take which
+                        // form is the translator's rule, not the call site's.
+                        Text("+\(reconnectingElsewhere) more sessions reconnecting")
+                            .font(Typography.tesseraMono(size: 12))
+                            .foregroundStyle(T.fgMuted)
+                            .accessibilityLabel("\(reconnectingElsewhere) more sessions reconnecting")
+                    }
+
                     if let wslTailscaleMTUWarning {
                         WSLTailscaleMTUWarningView(
                             warning: wslTailscaleMTUWarning,
@@ -123,6 +164,70 @@ struct SessionLaunchOverlay: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
+        .task(id: phase) {
+            // Restarted on every phase change: advancing a stage IS progress,
+            // so a slow-but-moving launch never trips this.
+            phaseStartedAt = Date()
+            isStalled = false
+            try? await Task.sleep(
+                nanoseconds: UInt64(Self.stallThreshold * 1_000_000_000)
+            )
+            guard !Task.isCancelled else { return }
+            isStalled = true
+        }
+    }
+}
+
+/// Shown once a loading phase has outlasted `stallThreshold`. Names the stage
+/// that is stuck rather than guessing a cause, and carries the same recovery
+/// actions the failure state offers — the point is that the user should not
+/// have to force-quit to escape a wedged connect.
+private struct LaunchOverlayStallNotice: View {
+    let T: DesignTokens
+    let phase: SessionLaunchPhase
+    let onEditHost: () -> Void
+    let onRetry: () -> Void
+    let onBack: () -> Void
+
+    private var detail: String {
+        switch phase {
+        case .connecting:
+            return String(
+                localized: "still \(phase.caption) — the handshake has not completed.",
+                comment: "Stalled launch; the argument is the phase caption, e.g. 'connecting'"
+            )
+        case .startingTmux, .attachingTmuxChannel, .attachingPane:
+            return String(
+                localized: "still \(phase.caption) — the connection is up but this stage has not completed.",
+                comment: "Stalled launch after connecting; the argument is the phase caption, e.g. 'starting tmux'"
+            )
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(T.amber)
+                    .padding(.top, 2)
+
+                Text(detail)
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.fgMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            HStack(spacing: 12) {
+                Btn("edit host", action: onEditHost)
+                Btn("retry", action: onRetry)
+                Btn("back", action: onBack)
+            }
+            .environment(\.designTokens, T)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("taking longer than expected. \(detail)")
     }
 }
 
@@ -221,7 +326,7 @@ private struct LaunchOverlayFailure: View {
                     .font(Typography.tesseraMono(size: 14))
                     .foregroundStyle(T.fg)
 
-                Text(reason)
+                Text(verbatim: reason)
                     .font(Typography.tesseraMono(size: 12))
                     .foregroundStyle(T.fgMuted)
                     .multilineTextAlignment(.center)
@@ -251,7 +356,7 @@ private struct LaunchOverlayFailure: View {
         }
         .padding(.horizontal, 24)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(presentation.title). \(reason)")
+        .accessibilityLabel(Text(verbatim: "\(presentation.title). \(reason)"))
     }
 }
 

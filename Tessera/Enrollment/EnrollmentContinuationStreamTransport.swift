@@ -17,13 +17,13 @@ final class EnrollmentContinuationStreamTransport: NSObject, EnrollmentMessageTr
         var errorDescription: String? {
             switch self {
             case .closed:
-                return "The enrollment continuation stream is closed."
+                return String(localized: "The enrollment continuation stream is closed.")
             case .outputBackpressure:
-                return "The enrollment continuation stream stopped accepting data."
+                return String(localized: "The enrollment continuation stream stopped accepting data.")
             case .readFailed:
-                return "Could not read from the enrollment continuation stream."
+                return String(localized: "Could not read from the enrollment continuation stream.")
             case .writeFailed:
-                return "Could not write to the enrollment continuation stream."
+                return String(localized: "Could not write to the enrollment continuation stream.")
             }
         }
     }

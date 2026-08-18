@@ -1,0 +1,20 @@
+{
+  "+%lld more sessions reconnecting": {
+    "en": { "one": "+%lld more session reconnecting", "other": "+%lld more sessions reconnecting" },
+    "de": { "one": "+%lld weitere Sitzung verbindet neu", "other": "+%lld weitere Sitzungen verbinden neu" },
+    "es": { "one": "+%lld sesión más reconectando", "other": "+%lld sesiones más reconectando" },
+    "fr": { "one": "+%lld autre session en reconnexion", "other": "+%lld autres sessions en reconnexion" },
+    "ja": { "other": "+%lld 件のセッションが再接続中" },
+    "zh-Hans": { "other": "+%lld 个会话正在重新连接" },
+    "zh-Hant": { "other": "+%lld 個工作階段正在重新連線" }
+  },
+  "%lld more sessions reconnecting": {
+    "en": { "one": "%lld more session reconnecting", "other": "%lld more sessions reconnecting" },
+    "de": { "one": "%lld weitere Sitzung verbindet neu", "other": "%lld weitere Sitzungen verbinden neu" },
+    "es": { "one": "%lld sesión más reconectando", "other": "%lld sesiones más reconectando" },
+    "fr": { "one": "%lld autre session en reconnexion", "other": "%lld autres sessions en reconnexion" },
+    "ja": { "other": "他に %lld 件のセッションが再接続中" },
+    "zh-Hans": { "other": "另有 %lld 个会话正在重新连接" },
+    "zh-Hant": { "other": "另有 %lld 個工作階段正在重新連線" }
+  }
+}

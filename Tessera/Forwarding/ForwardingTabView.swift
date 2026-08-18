@@ -110,7 +110,7 @@ struct ForwardingTabView: View {
         guard let editing else { return nil }
         guard let draft else {
             if localPortText.isEmpty || remotePortText.isEmpty { return nil }
-            return "ports must be numbers between 1 and 65535"
+            return String(localized: "ports must be numbers between 1 and 65535")
         }
         let siblings: [PortForwardRule]
         switch editing {
@@ -280,14 +280,14 @@ struct ForwardingTabView: View {
             Text(String(rule.localPort))
                 .font(Typography.tesseraMono(size: 13).weight(.semibold))
                 .foregroundStyle(rule.enabled ? T.accent : T.fgMuted)
-            Text(" → ")
+            Text(verbatim: " → ")
                 .font(Typography.tesseraMono(size: 13))
                 .foregroundStyle(T.fgDim)
             Text(verbatim: "\(rule.remoteHost):\(rule.remotePort)")
                 .font(Typography.tesseraMono(size: 13))
                 .foregroundStyle(rule.enabled ? T.fg : T.fgMuted)
             if !rule.label.isEmpty {
-                Text("  \"\(rule.label)\"")
+                Text(verbatim: "  \"\(rule.label)\"")
                     .font(Typography.tesseraMono(size: 12))
                     .foregroundStyle(T.fgMuted)
             }
@@ -321,20 +321,20 @@ struct ForwardingTabView: View {
 
             HStack(alignment: .bottom, spacing: 10) {
                 Field(label: "local port") {
-                    Input(text: $localPortText, placeholder: "8080")
+                    Input(text: $localPortText, verbatimPlaceholder: "8080")
                         .keyboardType(.numberPad)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 }
                 .frame(width: 130)
 
-                Text("→")
+                Text(verbatim: "→")
                     .font(Typography.tesseraMono(size: 16))
                     .foregroundStyle(T.fgDim)
                     .padding(.bottom, 24)
 
                 Field(label: "remote port") {
-                    Input(text: $remotePortText, placeholder: "8080")
+                    Input(text: $remotePortText, verbatimPlaceholder: "8080")
                         .keyboardType(.numberPad)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -345,7 +345,7 @@ struct ForwardingTabView: View {
             }
 
             Field(label: "remote host", sub: "the address as seen from the SSH server") {
-                Input(text: $remoteHost, placeholder: "localhost")
+                Input(text: $remoteHost, verbatimPlaceholder: "localhost")
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
             }
@@ -375,8 +375,12 @@ struct ForwardingTabView: View {
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
                 ForEach(presets, id: \.label) { preset in
-                    Btn(preset.label, style: .default, compact: true) {
+                    // Service name plus port number ("postgres 5432") — an
+                    // identifier, not prose, so it stays verbatim.
+                    Btn(style: .default, compact: true) {
                         applyPreset(preset)
+                    } label: {
+                        Text(verbatim: preset.label)
                     }
                 }
             }
@@ -548,13 +552,13 @@ struct ForwardingTabView: View {
     private func describe(_ error: RuleValidationError) -> String {
         switch error {
         case .localPortOutOfRange:
-            return "local port must be at least 1024 (iOS sandbox can't bind below 1024)"
+            return String(localized: "local port must be at least 1024 (iOS sandbox can't bind below 1024)")
         case .remoteHostEmpty:
-            return "remote host can't be empty"
+            return String(localized: "remote host can't be empty")
         case .remotePortInvalid:
-            return "remote port must be between 1 and 65535"
+            return String(localized: "remote port must be between 1 and 65535")
         case .localPortCollision:
-            return "another rule on this host already uses that local port"
+            return String(localized: "another rule on this host already uses that local port")
         }
     }
 

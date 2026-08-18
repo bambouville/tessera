@@ -104,7 +104,7 @@ struct TerminalBackgroundImageControls: View {
 
     /// Mirrors Btn's compact default style — PhotosPicker needs a plain
     /// label view, not a Button.
-    private func pickerLabel(_ text: String) -> some View {
+    private func pickerLabel(_ text: LocalizedStringKey) -> some View {
         Text(text)
             .font(Typography.tesseraMono(size: 13))
             .foregroundStyle(T.fg)
@@ -133,11 +133,11 @@ struct TerminalBackgroundImageControls: View {
                     .blur(radius: (draggingBlur ?? blur) * Self.previewBlurScale)
                 theme.bg.opacity(dim)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("$ ls -la")
+                    Text(verbatim: "$ ls -la")
                         .foregroundStyle(theme.fg)
-                    Text("drwxr-xr-x  projects/")
+                    Text(verbatim: "drwxr-xr-x  projects/")
                         .foregroundStyle(theme.accent)
-                    Text("-rw-r--r--  readme.md")
+                    Text(verbatim: "-rw-r--r--  readme.md")
                         .foregroundStyle(theme.fg.opacity(0.6))
                 }
                 .font(Typography.tesseraMono(size: 11))
@@ -148,7 +148,7 @@ struct TerminalBackgroundImageControls: View {
             .clipped()
 
             HStack(spacing: 8) {
-                Text("\(Int(image.size.width * image.scale)) × \(Int(image.size.height * image.scale))")
+                Text(verbatim: "\(Int(image.size.width * image.scale)) × \(Int(image.size.height * image.scale))")
                     .foregroundStyle(T.fgMuted)
                 Spacer(minLength: 8)
                 if let bytes = TerminalBackgroundImageStore.byteCount(id: imageID) {
@@ -180,7 +180,7 @@ struct TerminalBackgroundImageControls: View {
                     .font(Typography.tesseraMono(size: 11))
                     .foregroundStyle(T.fgMuted)
                 Spacer()
-                Text("\(Int((dim * 100).rounded()))%")
+                Text(verbatim: "\(Int((dim * 100).rounded()))%")
                     .font(Typography.tesseraMono(size: 11))
                     .foregroundStyle(T.fgMuted)
             }
@@ -256,7 +256,7 @@ struct TerminalBackgroundImageControls: View {
         }
     }
 
-    private func fillButton(_ mode: TerminalBackgroundFillMode, label: String) -> some View {
+    private func fillButton(_ mode: TerminalBackgroundFillMode, label: LocalizedStringKey) -> some View {
         let isSelected = fillMode == mode
         return Btn(
             style: isSelected ? .primary : .default,

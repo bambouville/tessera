@@ -21,10 +21,31 @@ final class AutoTmuxScriptTests: XCTestCase {
                       "happy path attach must use exec so the shell exits with tmux")
     }
 
-    func test_command_createsIfMissing() {
+    func test_command_createsMissingSessionWithAPlainDetachedClient() {
+        // The create step must NOT be a control-mode client: `tmux -CC new`
+        // has to start the server and speak control mode on the same
+        // client, and a server that fails to start leaves the app waiting
+        // on a DCS prologue that never arrives. A plain `new-session -d`
+        // surfaces that failure as ordinary shell output instead.
         let cmd = AutoTmuxScript.command(sessionName: "tessera-12345678")
-        XCTAssertTrue(cmd.contains("exec tmux -CC new -s tessera-12345678"),
-                      "the create branch must use -CC and -s with the session name")
+        XCTAssertTrue(cmd.contains("tmux new-session -d -s tessera-12345678"),
+                      "missing sessions must be created with a plain detached client")
+        XCTAssertFalse(cmd.contains("tmux -CC new"),
+                      "control mode must only ever attach to an already-running server")
+        XCTAssertTrue(cmd.contains("exec tmux -CC attach -t tessera-12345678"),
+                      "both branches converge on the same control-mode attach")
+    }
+
+    func test_command_reportsStartFailureWhenTheSessionCannotBeCreated() {
+        let cmd = AutoTmuxScript.command(sessionName: "tessera-12345678")
+        XCTAssertFalse(
+            cmd.contains(AutoTmuxScript.startFailedSentinel),
+            "the literal marker must not appear — the PTY echo would false-positive it"
+        )
+        XCTAssertTrue(
+            cmd.contains("\\137\\137TESSERA_TMUX_START_FAILED\\137\\137"),
+            "a failed create must print the escaped start-failure marker"
+        )
     }
 
     func test_command_geometryNeutralClientIgnoresSizeOnlyForExistingSession() {
@@ -38,10 +59,59 @@ final class AutoTmuxScriptTests: XCTestCase {
         XCTAssertTrue(cmd.contains("tmux -V 2>/dev/null"))
         XCTAssertTrue(cmd.contains("else exec tmux -CC attach -t tessera-12345678"))
         XCTAssertTrue(
-            cmd.contains("exec tmux -CC new -s tessera-12345678")
+            cmd.contains("tmux new-session -d -s tessera-12345678")
         )
         XCTAssertFalse(
-            cmd.contains("exec tmux -CC new -f ignore-size")
+            cmd.contains("new-session -d -f ignore-size")
+        )
+    }
+
+    // MARK: - failure scanning
+
+    func test_command_reportsNestingInsteadOfAttachingFromInsideTmux() {
+        // A host whose dotfiles `exec tmux` runs this one-liner inside a
+        // pane. Attaching in control mode from there is refused by tmux,
+        // and `exec`ing that refusal takes the login shell — and the
+        // connection — down with it.
+        let cmd = AutoTmuxScript.command(sessionName: "tessera-12345678")
+        XCTAssertTrue(cmd.contains("if [ -n \"$TMUX\" ]; then"),
+                      "the script must check for an inherited tmux client first")
+        XCTAssertTrue(
+            cmd.contains("\\137\\137TESSERA_TMUX_NESTED\\137\\137"),
+            "being inside tmux must report the escaped nested marker"
+        )
+        XCTAssertFalse(
+            cmd.contains(AutoTmuxScript.nestedSentinel),
+            "the literal marker must not appear — the PTY echo would false-positive it"
+        )
+    }
+
+    func test_scanner_distinguishesUnavailableFromStartFailure() {
+        var scanner = AutoTmuxSentinelScanner()
+        XCTAssertEqual(
+            scanner.feedForFailure(Array("noise\n".utf8)),
+            nil
+        )
+        XCTAssertEqual(
+            scanner.feedForFailure(Array(AutoTmuxScript.startFailedSentinel.utf8)),
+            .startFailed
+        )
+
+        var second = AutoTmuxSentinelScanner()
+        XCTAssertEqual(
+            second.feedForFailure(Array(AutoTmuxScript.unavailableSentinel.utf8)),
+            .unavailable
+        )
+    }
+
+    func test_scanner_detectsStartFailureAcrossChunkBoundary() {
+        var scanner = AutoTmuxSentinelScanner()
+        let bytes = Array(AutoTmuxScript.startFailedSentinel.utf8)
+        let split = bytes.count / 2
+        XCTAssertNil(scanner.feedForFailure(Array(bytes[..<split])))
+        XCTAssertEqual(
+            scanner.feedForFailure(Array(bytes[split...])),
+            .startFailed
         )
     }
 
@@ -135,6 +205,53 @@ final class AutoTmuxScriptTests: XCTestCase {
         XCTAssertEqual(hex.count, 8)
         XCTAssertTrue(hex.allSatisfy { "0123456789abcdef".contains($0) },
                       "the hex suffix must be all lowercase hex digits")
+    }
+
+    // MARK: - sessionNameDigest(_:)
+
+    func test_sessionNameDigest_isDeterministic() {
+        // The whole point of the log field: the same session yields the same
+        // token across log lines, across reconnects, and across two reports
+        // from the same user. A non-deterministic token correlates nothing.
+        XCTAssertEqual(
+            AutoTmuxScript.sessionNameDigest("acme-prod-payments"),
+            AutoTmuxScript.sessionNameDigest("acme-prod-payments")
+        )
+    }
+
+    func test_sessionNameDigest_distinguishesSessionsOnOneHost() {
+        XCTAssertNotEqual(
+            AutoTmuxScript.sessionNameDigest("acme-prod-payments"),
+            AutoTmuxScript.sessionNameDigest("acme-prod-billing")
+        )
+    }
+
+    func test_sessionNameDigest_isEightLowercaseHexAndNotTheName() {
+        let name = "acme-prod-payments"
+        let digest = AutoTmuxScript.sessionNameDigest(name)
+        XCTAssertEqual(digest.count, 8)
+        XCTAssertTrue(digest.allSatisfy { "0123456789abcdef".contains($0) })
+        // No dashes, so the sanitizer's full-UUID rule cannot match it, and no
+        // fragment of the user's own label survives.
+        XCTAssertFalse(digest.contains("-"))
+        XCTAssertFalse(digest.contains("acme"))
+        XCTAssertFalse(name.contains(digest))
+    }
+
+    func test_sessionNameDigest_sharesOneDerivationWithDefaultSessionName() {
+        // `defaultSessionName` must keep using the same primitive: two
+        // derivations would silently mint two tokens for one session.
+        let key = "alice@example.com:2222"
+        let name = AutoTmuxScript.defaultSessionName(forHostKey: key)
+        XCTAssertEqual(name, "tessera-\(AutoTmuxScript.sessionNameDigest(key))")
+    }
+
+    func test_sessionNameDigest_ofAutoModeNameHidesTheHostKeyDigest() {
+        // Auto-mode names are themselves `tessera-<8 hex of host key>`. Hashing
+        // again keeps the host-key digest out of the log.
+        let autoName = AutoTmuxScript.defaultSessionName(forHostKey: "user@10.0.0.5:22")
+        let logged = AutoTmuxScript.sessionNameDigest(autoName)
+        XCTAssertFalse(autoName.contains(logged))
     }
 
     // MARK: - chunkContainsSentinel(_:)
