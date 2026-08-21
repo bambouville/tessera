@@ -101,6 +101,127 @@ struct QuickLookPresenterTests {
         #expect(String(document.blocks[5].content.characters).contains("let answer = 42"))
     }
 
+    /// Table cells carry no paragraph/header/code intent, so before tables
+    /// were modelled every cell in a document collapsed into one block whose
+    /// text ran together — and that one oversized `Text` then rendered blank.
+    @Test func markdownDocumentKeepsTableCellsSeparate() throws {
+        let source = """
+        # Register
+
+        | Case | Owner | Status |
+        | --- | --- | --- |
+        | EV-EMP-01 | inbox delivery | open |
+        | EV-EQ-01 | resident-side | closed |
+
+        Trailing paragraph.
+        """
+        let document = try MarkdownDocument(source: source, baseURL: nil)
+
+        #expect(document.blocks.map(\.kind) == [
+            .heading(level: 1),
+            .table(columns: 3),
+            .paragraph,
+        ])
+
+        let table = try #require(document.blocks.first { $0.kind == .table(columns: 3) })
+        #expect(table.rows.count == 3)
+        #expect(table.rows[0].isHeader)
+        #expect(!table.rows[1].isHeader)
+        #expect(table.rows.allSatisfy { $0.cells.count == 3 })
+        #expect(table.rows[0].cells.map { String($0.characters) } == ["Case", "Owner", "Status"])
+        #expect(table.rows[1].cells.map { String($0.characters) }
+            == ["EV-EMP-01", "inbox delivery", "open"])
+        #expect(table.rows[2].cells.map { String($0.characters) }
+            == ["EV-EQ-01", "resident-side", "closed"])
+
+        // The regression itself: no block may swallow the whole table.
+        #expect(!document.blocks.contains {
+            String($0.content.characters).contains("EV-EMP-01inbox delivery")
+        })
+        #expect(String(document.blocks[2].content.characters) == "Trailing paragraph.")
+    }
+
+    /// Two tables in one document must not merge, and inline emphasis inside
+    /// a cell must stay in that cell.
+    @Test func markdownDocumentSeparatesAdjacentTables() throws {
+        let source = """
+        | A |
+        | --- |
+        | **one** |
+
+        Between.
+
+        | B |
+        | --- |
+        | two |
+        """
+        let document = try MarkdownDocument(source: source, baseURL: nil)
+        let tables = document.blocks.filter {
+            if case .table = $0.kind { return true }
+            return false
+        }
+        #expect(tables.count == 2)
+        #expect(tables[0].rows.last?.cells.map { String($0.characters) } == ["one"])
+        #expect(tables[1].rows.last?.cells.map { String($0.characters) } == ["two"])
+    }
+
+    @Test func markdownDocumentPositionsLeadingMiddleAndTrailingEmptyCells() throws {
+        let source = """
+        | A | B | C |
+        | --- | --- | --- |
+        | | middle | tail |
+        | lead | | tail |
+        | lead | middle | |
+        """
+        let document = try MarkdownDocument(source: source, baseURL: nil)
+        let table = try #require(document.blocks.first { $0.kind == .table(columns: 3) })
+        let values = table.rows.map { row in
+            row.cells.map { String($0.characters) }
+        }
+
+        #expect(values == [
+            ["A", "B", "C"],
+            ["", "middle", "tail"],
+            ["lead", "", "tail"],
+            ["lead", "middle", ""],
+        ])
+    }
+
+    @Test func markdownDocumentPreservesAnEntirelyEmptyRowByFoundationIndex() throws {
+        let source = """
+        | A | B | C |
+        | --- | --- | --- |
+        | | | |
+        | lead | | tail |
+        """
+        let document = try MarkdownDocument(source: source, baseURL: nil)
+        let table = try #require(document.blocks.first { $0.kind == .table(columns: 3) })
+        let values = table.rows.map { row in
+            row.cells.map { String($0.characters) }
+        }
+
+        #expect(values == [
+            ["A", "B", "C"],
+            ["", "", ""],
+            ["lead", "", "tail"],
+        ])
+    }
+
+    @Test func markdownDocumentAppendsStyledRunsWithinTheirFoundationColumn() throws {
+        let source = """
+        | A | B | C |
+        | --- | --- | --- |
+        | **bold** and `code` | | *end* |
+        """
+        let document = try MarkdownDocument(source: source, baseURL: nil)
+        let table = try #require(document.blocks.first { $0.kind == .table(columns: 3) })
+        let row = try #require(table.rows.last)
+
+        #expect(row.cells.map { String($0.characters) } == ["bold and code", "", "end"])
+        #expect(row.cells[0].runs.count > 1)
+        #expect(row.cells[2].runs.count >= 1)
+    }
+
     @Test func loadDocumentReadsTheDownloadedPreviewFile() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("QuickLookPresenterTests-\(UUID().uuidString)", isDirectory: true)

@@ -272,6 +272,15 @@ final class TesseraTerminalContainer: UIView {
     override init(frame: CGRect) {
         self.terminalView = TesseraResponderAwareTerminalView(frame: .zero)
         super.init(frame: frame)
+        // SwiftTerm's TerminalView is a UIScrollView whose content is the grid,
+        // and it parks the live tail at `contentSize - rows`. UIKit's automatic
+        // safe-area adjustment fights that: when the no-resize keyboard layout
+        // translates a session up, the surface slides under the notch, UIKit
+        // answers with a top content inset and rewrites contentOffset by the
+        // same amount — which drops the last rows, the prompt among them, below
+        // the visible edge. The grid draws from contentOffset, so a safe-area
+        // inset can only ever misplace it.
+        terminalView.contentInsetAdjustmentBehavior = .never
         terminalView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(terminalView)
         NSLayoutConstraint.activate([

@@ -158,6 +158,14 @@ final class FileBridge: FileBridging {
         }
     }
 
+    func setPermissions(_ permissions: UInt16, at path: String) async throws {
+        try await withSFTPOperation { sftp in
+            var attributes = SFTPFileAttributes()
+            attributes.permissions = UInt32(permissions & 0o7777)
+            try await sftp.setAttributes(at: path, to: attributes)
+        }
+    }
+
     func rename(from oldPath: String, to newPath: String) async throws {
         try await withSFTPOperation {
             try await $0.rename(at: oldPath, to: newPath)
@@ -293,8 +301,18 @@ final class FileBridge: FileBridging {
             kind = .directory
         case .some(0o120000):
             kind = .symlink
-        default:
+        case .some(0o100000):
             kind = .file
+        case .none:
+            // SFTP v3 servers may omit ATTR_PERMISSIONS entirely. That
+            // removes both the file type and the mode bits, so guessing
+            // "regular file" would let replacement uploads bypass the
+            // unsupported-type gate and lose an existing private/executable
+            // mode. Keep the entry visible, but fail closed for actions that
+            // require a known file kind.
+            kind = .other
+        default:
+            kind = .other
         }
 
         return RemoteFileEntry(

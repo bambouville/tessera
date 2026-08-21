@@ -29,7 +29,7 @@ final class TransferQueueTests: XCTestCase {
 
     @MainActor
     func test_uploadSetsResolvedRemotePath() async throws {
-        let bridge = MockFileBridge()
+        let bridge = RecordingUploadBridge()
         let queue = TransferQueue(bridge: bridge)
         let localURL = try temporaryURL(filename: "notes.txt", contents: "hello")
 
@@ -43,11 +43,21 @@ final class TransferQueueTests: XCTestCase {
             item.resolvedRemotePath,
             "/home/mock/projects/dashboard/notes.txt"
         )
+        let uploadedPath = try XCTUnwrap(bridge.uploadedPaths.first)
+        XCTAssertTrue(uploadedPath.hasPrefix("/home/mock/projects/dashboard/.notes.txt.tessera-upload-"))
+        XCTAssertTrue(uploadedPath.hasSuffix(".partial"))
+        XCTAssertFalse(bridge.uploadedPaths.contains(item.resolvedRemotePath ?? ""))
+        XCTAssertTrue(bridge.renamedPaths.contains {
+            $0.from == uploadedPath && $0.to == "/home/mock/projects/dashboard/notes.txt"
+        })
+        XCTAssertFalse(bridge.executedCommands.contains {
+            $0.contains("mv ") || $0.contains("rm ")
+        }, "upload commit and cancellation cleanup must stay on SFTP")
     }
 
     @MainActor
     func test_pasteUploadGeneratesDistinctNamesUnderTempDirectory() async throws {
-        let bridge = MockFileBridge()
+        let bridge = RecordingUploadBridge()
         let queue = TransferQueue(bridge: bridge)
         let localURL = try temporaryURL(filename: "clip.txt", contents: "paste")
 
@@ -114,9 +124,284 @@ final class TransferQueueTests: XCTestCase {
         await assertEventually { item.phase.isRunning }
         queue.cancel(item)
 
-        XCTAssertEqual(item.phase, .cancelled)
-        try await Task.sleep(nanoseconds: 200_000_000)
-        XCTAssertEqual(item.phase, .cancelled)
+        if case .cancelling = item.phase {
+            // Expected: the UI remains in a cancelling state until remote
+            // partial-file cleanup completes.
+        } else {
+            XCTFail("Expected cancelling phase, got \(item.phase)")
+        }
+        await assertEventually { item.phase == .cancelled }
+    }
+
+    @MainActor
+    func test_cancelUploadRemovesRemoteStagingFileBeforeFinishing() async throws {
+        let bridge = RecordingUploadBridge(uploadDelayNanos: 5_000_000_000)
+        let queue = TransferQueue(bridge: bridge)
+        let localURL = try temporaryURL(filename: "large.mov", contents: "video")
+        let item = queue.enqueueUpload(localURL: localURL, toDirectory: "/home/mock/uploads")
+
+        await assertEventually { !bridge.uploadedPaths.isEmpty }
+        let stagingPath = try XCTUnwrap(bridge.uploadedPaths.first)
+        queue.cancel(item)
+
+        await assertEventually { item.phase == .cancelled }
+        XCTAssertTrue(bridge.removedPaths.contains(stagingPath))
+        XCTAssertFalse(bridge.renamedPaths.contains {
+            $0.to == "/home/mock/uploads/large.mov"
+        })
+    }
+
+    @MainActor
+    func test_cancelRejectedAfterRemoteCommitBoundaryPreservesCompletion() async throws {
+        let bridge = RecordingUploadBridge(uploadDelayNanos: 120_000_000)
+        let queue = TransferQueue(bridge: bridge)
+        let localURL = try temporaryURL(filename: "commit.mov", contents: "video")
+        let item = queue.enqueueUpload(localURL: localURL, toDirectory: "/home/mock/uploads")
+
+        await assertEventually { item.phase.isRunning }
+        item.isFinalizingUpload = true
+        XCTAssertFalse(queue.cancel(item), "commit-boundary cancellation must be rejected")
+        item.isFinalizingUpload = false
+
+        await assertEventually { item.phase == .completed }
+    }
+
+    @MainActor
+    func test_lostRenameAcknowledgementReconcilesAsCommitted() async throws {
+        let bridge = RecordingUploadBridge(loseFirstRenameAcknowledgementAfterCommit: true)
+        let queue = TransferQueue(bridge: bridge)
+        let localURL = try temporaryURL(filename: "reconciled.mov", contents: "video")
+        let item = queue.enqueueUpload(localURL: localURL, toDirectory: "/home/mock/uploads")
+
+        await assertEventually { item.phase == .completed }
+        XCTAssertEqual(item.resolvedRemotePath, "/home/mock/uploads/reconciled.mov")
+        XCTAssertTrue(bridge.remoteFiles.contains("/home/mock/uploads/reconciled.mov"))
+        XCTAssertFalse(bridge.remoteFiles.contains { $0.contains(".partial") })
+    }
+
+    @MainActor
+    func test_opportunisticCleanupNeverDeletesActiveUploadPartial() async throws {
+        let bridge = RecordingUploadBridge(uploadDelayNanos: 5_000_000_000)
+        let queue = TransferQueue(bridge: bridge)
+        let localURL = try temporaryURL(filename: "monitored.mov", contents: "video")
+        let item = queue.enqueueUpload(localURL: localURL, toDirectory: "/home/mock/uploads")
+
+        await assertEventually { !bridge.uploadedPaths.isEmpty }
+        let stagingPath = try XCTUnwrap(bridge.uploadedPaths.first)
+        await TransferQueue.retryPendingRemoteUploadCleanups(using: bridge)
+        XCTAssertFalse(bridge.removedPaths.contains(stagingPath))
+
+        queue.cancel(item)
+        await assertEventually { item.phase == .cancelled }
+        XCTAssertTrue(bridge.removedPaths.contains(stagingPath))
+    }
+
+    @MainActor
+    func test_existingDestinationIsNeverDeletedBeforeRename() async throws {
+        let finalPath = "/home/mock/uploads/existing.txt"
+        let bridge = RecordingUploadBridge(remoteFiles: [finalPath])
+        let queue = TransferQueue(bridge: bridge)
+        let localURL = try temporaryURL(filename: "existing.txt", contents: "replacement")
+        let item = queue.enqueueUpload(localURL: localURL, toDirectory: "/home/mock/uploads")
+
+        await assertEventually { item.phase == .completed }
+        XCTAssertFalse(bridge.removedPaths.contains(finalPath))
+        XCTAssertTrue(bridge.remoteFiles.contains(finalPath))
+    }
+
+    @MainActor
+    func test_existingPrivateDestinationPreservesPermissions() async throws {
+        let finalPath = "/home/mock/uploads/private.txt"
+        let bridge = RecordingUploadBridge(remoteEntries: [
+            finalPath: remoteEntry(path: finalPath, kind: .file, permissions: 0o600),
+        ])
+        let queue = TransferQueue(bridge: bridge)
+        let localURL = try temporaryURL(filename: "private.txt", contents: "replacement")
+
+        let item = queue.enqueueUpload(localURL: localURL, toDirectory: "/home/mock/uploads")
+
+        await assertEventually { item.phase == .completed }
+        XCTAssertEqual(bridge.remoteEntries[finalPath]?.permissions, 0o600)
+        XCTAssertTrue(bridge.permissionChanges.contains { $0.permissions == 0o600 })
+        XCTAssertEqual(bridge.remoteContents[finalPath], "replacement")
+        XCTAssertFalse(bridge.remoteFiles.contains { $0.contains(".partial") })
+    }
+
+    @MainActor
+    func test_existingExecutableDestinationPreservesExecutableBits() async throws {
+        let finalPath = "/home/mock/uploads/deploy.sh"
+        let bridge = RecordingUploadBridge(remoteEntries: [
+            finalPath: remoteEntry(path: finalPath, kind: .file, permissions: 0o751),
+        ])
+        let queue = TransferQueue(bridge: bridge)
+        let localURL = try temporaryURL(filename: "deploy.sh", contents: "#!/bin/sh\n")
+
+        let item = queue.enqueueUpload(localURL: localURL, toDirectory: "/home/mock/uploads")
+
+        await assertEventually { item.phase == .completed }
+        XCTAssertEqual(bridge.remoteEntries[finalPath]?.permissions, 0o751)
+        XCTAssertEqual(bridge.remoteContents[finalPath], "#!/bin/sh\n")
+    }
+
+    @MainActor
+    func test_existingSymlinkUpdatesTargetWithoutReplacingLink() async throws {
+        let finalPath = "/home/mock/uploads/current.txt"
+        let targetPath = "/home/mock/releases/actual.txt"
+        let bridge = RecordingUploadBridge(
+            remoteEntries: [
+                finalPath: remoteEntry(path: finalPath, kind: .symlink, permissions: 0o777),
+                targetPath: remoteEntry(path: targetPath, kind: .file, permissions: 0o600),
+            ],
+            remoteContents: [targetPath: "old"],
+            symlinkTargets: [finalPath: targetPath]
+        )
+        let queue = TransferQueue(bridge: bridge)
+        let localURL = try temporaryURL(filename: "current.txt", contents: "new")
+
+        let item = queue.enqueueUpload(localURL: localURL, toDirectory: "/home/mock/uploads")
+
+        await assertEventually { item.phase == .completed }
+        XCTAssertEqual(bridge.remoteEntries[finalPath]?.kind, .symlink)
+        XCTAssertEqual(bridge.remoteContents[targetPath], "new")
+        XCTAssertEqual(bridge.uploadedPaths, [finalPath])
+        XCTAssertTrue(bridge.renamedPaths.isEmpty)
+        XCTAssertFalse(bridge.remoteFiles.contains { $0.contains(".partial") })
+    }
+
+    @MainActor
+    func test_unsupportedDestinationTypeFailsBeforeUpload() async throws {
+        let finalPath = "/home/mock/uploads/events"
+        let bridge = RecordingUploadBridge(remoteEntries: [
+            finalPath: remoteEntry(path: finalPath, kind: .other, permissions: 0o600),
+        ])
+        let queue = TransferQueue(bridge: bridge)
+        let localURL = try temporaryURL(filename: "events", contents: "payload")
+
+        let item = queue.enqueueUpload(localURL: localURL, toDirectory: "/home/mock/uploads")
+
+        await assertEventually {
+            if case .failed = item.phase { return true }
+            return false
+        }
+        XCTAssertTrue(bridge.uploadedPaths.isEmpty)
+        XCTAssertEqual(bridge.remoteEntries[finalPath]?.kind, .other)
+    }
+
+    @MainActor
+    func test_existingRegularDestinationWithoutPermissionsFailsBeforeUpload() async throws {
+        let finalPath = "/home/mock/uploads/unknown-mode.txt"
+        let bridge = RecordingUploadBridge(remoteEntries: [
+            finalPath: remoteEntry(path: finalPath, kind: .file, permissions: nil),
+        ])
+        let queue = TransferQueue(bridge: bridge)
+        let localURL = try temporaryURL(filename: "unknown-mode.txt", contents: "replacement")
+
+        let item = queue.enqueueUpload(localURL: localURL, toDirectory: "/home/mock/uploads")
+
+        await assertEventually {
+            if case .failed = item.phase { return true }
+            return false
+        }
+        XCTAssertTrue(bridge.uploadedPaths.isEmpty)
+        XCTAssertEqual(bridge.remoteContents[finalPath], nil)
+        guard case .failed(let message) = item.phase else {
+            return XCTFail("expected a metadata failure")
+        }
+        XCTAssertEqual(
+            message,
+            String(localized: "The upload destination permissions couldn't be verified.")
+        )
+    }
+
+    @MainActor
+    func test_existingDestinationUsesRecoverableSwapWhenServerRejectsOverwriteRename() async throws {
+        let finalPath = "/home/mock/uploads/existing.txt"
+        let bridge = RecordingUploadBridge(
+            remoteFiles: [finalPath],
+            rejectRenameOverExisting: true
+        )
+        let queue = TransferQueue(bridge: bridge)
+        let localURL = try temporaryURL(filename: "existing.txt", contents: "replacement")
+        let item = queue.enqueueUpload(localURL: localURL, toDirectory: "/home/mock/uploads")
+
+        await assertEventually { item.phase == .completed }
+        XCTAssertTrue(bridge.remoteFiles.contains(finalPath))
+        XCTAssertFalse(bridge.remoteFiles.contains { $0.contains(".partial") || $0.contains(".backup") })
+        XCTAssertFalse(bridge.removedPaths.contains(finalPath))
+        XCTAssertTrue(bridge.renamedPaths.contains { $0.from == finalPath && $0.to.contains(".backup") })
+    }
+
+    @MainActor
+    func test_uploadCompletionDeliveryNeverSilentlyLosesRequestedPath() {
+        var injected: String?
+        var copied: String?
+
+        let terminalOutcome = UploadCompletionDelivery.deliver(
+            path: "/remote/one",
+            delivery: .foreground(pastePath: true),
+            injectIntoTerminal: { injected = $0; return true },
+            copyToClipboard: { copied = $0 }
+        )
+        XCTAssertEqual(terminalOutcome, .terminal)
+        XCTAssertEqual(injected, "/remote/one")
+        XCTAssertNil(copied)
+
+        injected = nil
+        let fallbackOutcome = UploadCompletionDelivery.deliver(
+            path: "/remote/two",
+            delivery: .foreground(pastePath: true),
+            injectIntoTerminal: { _ in false },
+            copyToClipboard: { copied = $0 }
+        )
+        XCTAssertEqual(fallbackOutcome, .clipboardFallback)
+        XCTAssertNil(injected)
+        XCTAssertEqual(copied, "/remote/two")
+
+        copied = nil
+        let backgroundOutcome = UploadCompletionDelivery.deliver(
+            path: "/remote/three",
+            delivery: .background(copyPath: true),
+            injectIntoTerminal: { _ in false },
+            copyToClipboard: { copied = $0 }
+        )
+        XCTAssertEqual(backgroundOutcome, .clipboard)
+        XCTAssertEqual(copied, "/remote/three")
+    }
+
+    @MainActor
+    func test_backgroundUploadCompletionRaisesAndAcknowledgesFilesAttention() async throws {
+        let bridge = RecordingUploadBridge(uploadDelayNanos: 80_000_000)
+        let queue = TransferQueue(bridge: bridge)
+        let localURL = try temporaryURL(filename: "background.zip", contents: "archive")
+        let item = queue.enqueueUpload(localURL: localURL, toDirectory: "/home/mock/uploads")
+        queue.markContinuedInBackground(item)
+
+        await assertEventually { item.phase == .completed }
+        XCTAssertEqual(queue.backgroundAttention, .success)
+
+        queue.acknowledgeBackgroundAttention()
+        XCTAssertEqual(queue.backgroundAttention, .none)
+    }
+
+    @MainActor
+    func test_backgroundExpirationFailsUploadAndRaisesFailureAttention() async throws {
+        let bridge = RecordingUploadBridge(uploadDelayNanos: 5_000_000_000)
+        let queue = TransferQueue(bridge: bridge)
+        let localURL = try temporaryURL(filename: "expired.zip", contents: "archive")
+        let item = queue.enqueueUpload(localURL: localURL, toDirectory: "/home/mock/uploads")
+        queue.markContinuedInBackground(item)
+
+        await assertEventually { item.phase.isRunning }
+        queue.cancel(item, reason: .backgroundTimeExpired)
+
+        await assertEventually {
+            if case .failed = item.phase { return true }
+            return false
+        }
+        XCTAssertEqual(queue.backgroundAttention, .failure)
+        if case .failed(let message) = item.phase {
+            XCTAssertTrue(message.contains("background time expired"))
+        }
     }
 
     @MainActor
@@ -239,6 +524,21 @@ final class TransferQueueTests: XCTestCase {
         return url
     }
 
+    private func remoteEntry(
+        path: String,
+        kind: RemoteFileEntry.Kind,
+        permissions: UInt16?
+    ) -> RemoteFileEntry {
+        RemoteFileEntry(
+            name: (path as NSString).lastPathComponent,
+            path: path,
+            kind: kind,
+            size: 1,
+            modified: nil,
+            permissions: permissions
+        )
+    }
+
     @MainActor
     private func assertEventually(
         timeout: TimeInterval = 2,
@@ -304,6 +604,10 @@ private final class ConnectFailingBridge: FileBridging {
         throw FileBridgeError.notConnected
     }
 
+    func setPermissions(_ permissions: UInt16, at path: String) async throws {
+        throw FileBridgeError.notConnected
+    }
+
     func rename(from oldPath: String, to newPath: String) async throws {
         throw FileBridgeError.notConnected
     }
@@ -365,6 +669,8 @@ private final class ProgressHoldingBridge: FileBridging {
 
     func createDirectory(_ path: String) async throws {}
 
+    func setPermissions(_ permissions: UInt16, at path: String) async throws {}
+
     func rename(from oldPath: String, to newPath: String) async throws {}
 
     func removeFile(_ path: String) async throws {}
@@ -401,5 +707,155 @@ private final class ProgressHoldingBridge: FileBridging {
     @discardableResult
     func exec(_ command: String, inShell: Bool) async throws -> String {
         ""
+    }
+}
+
+@MainActor
+@Observable
+private final class RecordingUploadBridge: FileBridging {
+    let key = FileBridgeKey(user: "recording", address: "recording.local", port: 22)
+    private(set) var state: FileBridgeState = .idle
+    let homeDirectory: String? = "/home/mock"
+    var suppressIdleTeardown = false
+    let uploadDelayNanos: UInt64
+    private(set) var uploadedPaths: [String] = []
+    private(set) var executedCommands: [String] = []
+    private(set) var renamedPaths: [(from: String, to: String)] = []
+    private(set) var removedPaths: [String] = []
+    private(set) var permissionChanges: [(path: String, permissions: UInt16)] = []
+    private(set) var remoteEntries: [String: RemoteFileEntry]
+    private(set) var remoteContents: [String: String]
+    private let symlinkTargets: [String: String]
+    private var loseFirstRenameAcknowledgementAfterCommit: Bool
+    private let rejectRenameOverExisting: Bool
+
+    init(
+        uploadDelayNanos: UInt64 = 0,
+        remoteFiles: Set<String> = [],
+        remoteEntries: [String: RemoteFileEntry] = [:],
+        remoteContents: [String: String] = [:],
+        symlinkTargets: [String: String] = [:],
+        loseFirstRenameAcknowledgementAfterCommit: Bool = false,
+        rejectRenameOverExisting: Bool = false
+    ) {
+        self.uploadDelayNanos = uploadDelayNanos
+        var entries = remoteEntries
+        for path in remoteFiles where entries[path] == nil {
+            entries[path] = Self.entry(path: path, kind: .file, permissions: 0o600)
+        }
+        self.remoteEntries = entries
+        self.remoteContents = remoteContents
+        self.symlinkTargets = symlinkTargets
+        self.loseFirstRenameAcknowledgementAfterCommit = loseFirstRenameAcknowledgementAfterCommit
+        self.rejectRenameOverExisting = rejectRenameOverExisting
+    }
+
+    var remoteFiles: Set<String> { Set(remoteEntries.keys) }
+
+    func connect() async throws { state = .connected }
+    func disconnect() async { state = .idle }
+    func listDirectory(_ path: String) async throws -> [RemoteFileEntry] {
+        remoteEntries.values.compactMap { entry in
+            let remotePath = entry.path
+            guard (remotePath as NSString).deletingLastPathComponent == path else { return nil }
+            return entry
+        }
+    }
+    func realPath(_ path: String) async throws -> String { path }
+    func createDirectory(_ path: String) async throws {}
+    func setPermissions(_ permissions: UInt16, at path: String) async throws {
+        guard let entry = remoteEntries[path] else {
+            throw FileBridgeError.remoteOperationFailed("missing")
+        }
+        permissionChanges.append((path, permissions))
+        remoteEntries[path] = Self.entry(
+            path: path,
+            kind: entry.kind,
+            permissions: permissions
+        )
+    }
+    func rename(from oldPath: String, to newPath: String) async throws {
+        try Task.checkCancellation()
+        renamedPaths.append((oldPath, newPath))
+        if rejectRenameOverExisting, remoteEntries[newPath] != nil {
+            throw FileBridgeError.remoteOperationFailed("destination exists")
+        }
+        let entry = remoteEntries.removeValue(forKey: oldPath)
+        if let entry {
+            remoteEntries[newPath] = Self.entry(
+                path: newPath,
+                kind: entry.kind,
+                permissions: entry.permissions
+            )
+        }
+        if let contents = remoteContents.removeValue(forKey: oldPath) {
+            remoteContents[newPath] = contents
+        }
+        if loseFirstRenameAcknowledgementAfterCommit {
+            loseFirstRenameAcknowledgementAfterCommit = false
+            throw FileBridgeError.network("lost rename reply")
+        }
+    }
+    func removeFile(_ path: String) async throws {
+        try Task.checkCancellation()
+        removedPaths.append(path)
+        remoteEntries.removeValue(forKey: path)
+        remoteContents.removeValue(forKey: path)
+    }
+    func removeDirectory(_ path: String) async throws {}
+
+    func download(
+        remotePath: String,
+        to localURL: URL,
+        progress: TransferProgressHandler?
+    ) async throws {
+        throw FileBridgeError.remoteOperationFailed("unused")
+    }
+
+    func upload(
+        localURL: URL,
+        to remotePath: String,
+        progress: TransferProgressHandler?
+    ) async throws {
+        uploadedPaths.append(remotePath)
+        let contents = (try? String(contentsOf: localURL, encoding: .utf8)) ?? ""
+        if let target = symlinkTargets[remotePath] {
+            remoteContents[target] = contents
+        } else {
+            remoteEntries[remotePath] = Self.entry(
+                path: remotePath,
+                kind: .file,
+                permissions: 0o644
+            )
+            remoteContents[remotePath] = contents
+        }
+        progress?(0, 100)
+        if uploadDelayNanos > 0 {
+            try await Task.sleep(nanoseconds: uploadDelayNanos)
+        }
+        try Task.checkCancellation()
+        progress?(100, 100)
+    }
+
+    private static func entry(
+        path: String,
+        kind: RemoteFileEntry.Kind,
+        permissions: UInt16?
+    ) -> RemoteFileEntry {
+        RemoteFileEntry(
+            name: (path as NSString).lastPathComponent,
+            path: path,
+            kind: kind,
+            size: 1,
+            modified: nil,
+            permissions: permissions
+        )
+    }
+
+    @discardableResult
+    func exec(_ command: String, inShell: Bool) async throws -> String {
+        try Task.checkCancellation()
+        executedCommands.append(command)
+        return ""
     }
 }

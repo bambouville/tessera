@@ -1,0 +1,274 @@
+{
+  "%@, %@": {
+    "de": "%@, %@",
+    "es": "%@, %@",
+    "fr": "%@, %@",
+    "ja": "%@、%@",
+    "zh-Hans": "%@，%@",
+    "zh-Hant": "%@，%@"
+  },
+  "%@, folder": {
+    "de": "%@, Ordner",
+    "es": "%@, carpeta",
+    "fr": "%@, dossier",
+    "ja": "%@、フォルダ",
+    "zh-Hans": "%@，文件夹",
+    "zh-Hant": "%@，資料夾"
+  },
+  "%@, link": {
+    "de": "%@, Link",
+    "es": "%@, enlace simbólico",
+    "fr": "%@, lien symbolique",
+    "ja": "%@、シンボリックリンク",
+    "zh-Hans": "%@，符号链接",
+    "zh-Hant": "%@，符號連結"
+  },
+  "%lld percent uploaded": {
+    "de": "%lld Prozent hochgeladen",
+    "es": "%lld por ciento subido",
+    "fr": "%lld pour cent téléversé",
+    "ja": "%lldパーセントアップロード済み",
+    "zh-Hans": "已上传百分之 %lld",
+    "zh-Hant": "已上傳百分之 %lld"
+  },
+  "Background": {
+    "de": "Hintergrund",
+    "es": "Segundo plano",
+    "fr": "Arrière-plan",
+    "ja": "バックグラウンド",
+    "zh-Hans": "后台",
+    "zh-Hant": "背景"
+  },
+  "Cancel Upload": {
+    "de": "Upload abbrechen",
+    "es": "Cancelar la subida",
+    "fr": "Annuler le téléversement",
+    "ja": "アップロードをキャンセル",
+    "zh-Hans": "取消上传",
+    "zh-Hant": "取消上傳"
+  },
+  "Cancel this upload?": {
+    "de": "Diesen Upload abbrechen?",
+    "es": "¿Cancelar esta subida?",
+    "fr": "Annuler ce téléversement ?",
+    "ja": "このアップロードをキャンセルしますか？",
+    "zh-Hans": "要取消此次上传吗？",
+    "zh-Hant": "要取消這次上傳嗎？"
+  },
+  "Cancelling": {
+    "de": "Wird abgebrochen",
+    "es": "Cancelando",
+    "fr": "Annulation",
+    "ja": "キャンセル中",
+    "zh-Hans": "正在取消",
+    "zh-Hant": "正在取消"
+  },
+  "Continue in Background": {
+    "de": "Im Hintergrund fortsetzen",
+    "es": "Continuar en segundo plano",
+    "fr": "Continuer en arrière-plan",
+    "ja": "バックグラウンドで続ける",
+    "zh-Hans": "在后台继续",
+    "zh-Hant": "在背景繼續"
+  },
+  "Continue upload in background?": {
+    "de": "Upload im Hintergrund fortsetzen?",
+    "es": "¿Continuar la subida en segundo plano?",
+    "fr": "Continuer le téléversement en arrière-plan ?",
+    "ja": "バックグラウンドでアップロードを続けますか？",
+    "zh-Hans": "要在后台继续上传吗？",
+    "zh-Hant": "要在背景繼續上傳嗎？"
+  },
+  "Files, background upload complete": {
+    "de": "Dateien, Hintergrund-Upload abgeschlossen",
+    "es": "Archivos, subida en segundo plano finalizada",
+    "fr": "Fichiers, téléversement en arrière-plan terminé",
+    "ja": "ファイル、バックグラウンドのアップロードが完了しました",
+    "zh-Hans": "文件，后台上传已完成",
+    "zh-Hant": "檔案，背景上傳已完成"
+  },
+  "Files, background upload failed": {
+    "de": "Dateien, Hintergrund-Upload fehlgeschlagen",
+    "es": "Archivos, error en la subida en segundo plano",
+    "fr": "Fichiers, échec du téléversement en arrière-plan",
+    "ja": "ファイル、バックグラウンドのアップロードに失敗しました",
+    "zh-Hans": "文件，后台上传失败",
+    "zh-Hant": "檔案，背景上傳失敗"
+  },
+  "Keep Sheet Open": {
+    "de": "Fenster geöffnet lassen",
+    "es": "Mantener abierta la hoja",
+    "fr": "Garder la feuille ouverte",
+    "ja": "シートを開いたままにする",
+    "zh-Hans": "保持面板打开",
+    "zh-Hant": "保持面板開啟"
+  },
+  "Keep Uploading": {
+    "de": "Weiter hochladen",
+    "es": "Seguir subiendo",
+    "fr": "Poursuivre le téléversement",
+    "ja": "アップロードを続ける",
+    "zh-Hans": "继续上传",
+    "zh-Hant": "繼續上傳"
+  },
+  "No supported photo, video, or file was found.": {
+    "de": "Es wurden keine unterstützten Fotos, Videos oder Dateien gefunden.",
+    "es": "No se encontró ninguna foto, vídeo o archivo compatible.",
+    "fr": "Aucun élément pris en charge (photo, vidéo ou fichier) n'a été trouvé.",
+    "ja": "対応している写真、ビデオ、またはファイルが見つかりませんでした。",
+    "zh-Hans": "未找到支持的照片、视频或文件。",
+    "zh-Hant": "找不到支援的照片、影片或檔案。"
+  },
+  "Tessera couldn't obtain background time. Keep this sheet open or cancel the upload.": {
+    "de": "Tessera konnte keine Hintergrundzeit erhalten. Lass dieses Fenster geöffnet oder brich den Upload ab.",
+    "es": "Tessera no pudo obtener tiempo de ejecución en segundo plano. Mantén abierta esta hoja o cancela la subida.",
+    "fr": "Tessera n'a pas pu obtenir de temps d'exécution en arrière-plan. Gardez cette feuille ouverte ou annulez le téléversement.",
+    "ja": "Tessera はバックグラウンド実行時間を確保できませんでした。このシートを開いたままにするか、アップロードをキャンセルしてください。",
+    "zh-Hans": "Tessera 无法获得后台运行时间。请保持此面板打开，或取消上传。",
+    "zh-Hant": "Tessera 無法取得背景執行時間。請保持此面板開啟，或取消上傳。"
+  },
+  "Tessera file transfer": {
+    "de": "Tessera-Dateiübertragung",
+    "es": "Transferencia de archivos de Tessera",
+    "fr": "Transfert de fichier Tessera",
+    "ja": "Tessera ファイル転送",
+    "zh-Hans": "Tessera 文件传输",
+    "zh-Hant": "Tessera 檔案傳輸"
+  },
+  "Tessera will not paste into the terminal. When the upload finishes, its remote path will be copied to the clipboard instead.": {
+    "de": "Tessera setzt nichts in das Terminal ein. Wenn der Upload abgeschlossen ist, wird stattdessen der entfernte Pfad in die Zwischenablage kopiert.",
+    "es": "Tessera no pegará nada en el terminal. Cuando finalice la subida, la ruta remota se copiará en el portapapeles.",
+    "fr": "Tessera ne collera rien dans le terminal. Une fois le téléversement terminé, le chemin distant sera copié dans le presse-papiers.",
+    "ja": "Tessera はターミナルにペーストしません。アップロードが完了すると、代わりにリモートパスがクリップボードにコピーされます。",
+    "zh-Hans": "Tessera 不会将内容粘贴到终端。上传完成后，远程路径将改为复制到剪贴板。",
+    "zh-Hant": "Tessera 不會將內容貼到終端機。上傳完成後，遠端路徑將改為複製到剪貼簿。"
+  },
+  "The selected host is no longer available.": {
+    "de": "Der ausgewählte Host ist nicht mehr verfügbar.",
+    "es": "El host seleccionado ya no está disponible.",
+    "fr": "L'hôte sélectionné n'est plus disponible.",
+    "ja": "選択したホストはもう利用できません。",
+    "zh-Hans": "所选主机已不可用。",
+    "zh-Hant": "所選主機已無法使用。"
+  },
+  "The terminal is no longer available, so the remote path was copied to the clipboard.": {
+    "de": "Das Terminal ist nicht mehr verfügbar, daher wurde der entfernte Pfad in die Zwischenablage kopiert.",
+    "es": "El terminal ya no está disponible, así que la ruta remota se copió en el portapapeles.",
+    "fr": "Le terminal n'est plus disponible, le chemin distant a donc été copié dans le presse-papiers.",
+    "ja": "ターミナルが利用できなくなったため、リモートパスをクリップボードにコピーしました。",
+    "zh-Hans": "终端已不可用，因此远程路径已复制到剪贴板。",
+    "zh-Hant": "終端機已無法使用，因此遠端路徑已複製到剪貼簿。"
+  },
+  "The transfer will stop, the partial remote file will be removed, and its path will not be pasted into the terminal.": {
+    "de": "Die Übertragung wird beendet, die unvollständige entfernte Datei wird entfernt und ihr Pfad wird nicht in das Terminal eingesetzt.",
+    "es": "La transferencia se detendrá, el archivo remoto incompleto se eliminará y su ruta no se pegará en el terminal.",
+    "fr": "Le transfert s'arrêtera, le fichier distant incomplet sera supprimé et son chemin ne sera pas collé dans le terminal.",
+    "ja": "転送を停止し、不完全なリモートファイルを削除します。そのパスはターミナルにペーストされません。",
+    "zh-Hans": "传输将停止，不完整的远程文件会被移除，其路径不会粘贴到终端。",
+    "zh-Hant": "傳輸將停止，不完整的遠端檔案會被移除，其路徑不會貼到終端機。"
+  },
+  "The upload destination is a directory.": {
+    "de": "Das Upload-Ziel ist ein Ordner.",
+    "es": "El destino de la subida es una carpeta.",
+    "fr": "La destination du téléversement est un dossier.",
+    "ja": "アップロード先はフォルダです。",
+    "zh-Hans": "上传目标是文件夹。",
+    "zh-Hant": "上傳目的地是資料夾。"
+  },
+  "The upload destination isn't a regular file.": {
+    "de": "Das Upload-Ziel ist keine reguläre Datei.",
+    "es": "El destino de la subida no es un archivo normal.",
+    "fr": "La destination du téléversement n'est pas un fichier ordinaire.",
+    "ja": "アップロード先は通常のファイルではありません。",
+    "zh-Hans": "上传目标不是常规文件。",
+    "zh-Hant": "上傳目的地不是一般檔案。"
+  },
+  "The upload destination permissions couldn't be verified.": {
+    "de": "Die Berechtigungen des Upload-Ziels konnten nicht geprüft werden.",
+    "es": "No se pudieron verificar los permisos del destino de la subida.",
+    "fr": "Les autorisations de la destination du téléversement n'ont pas pu être vérifiées.",
+    "ja": "アップロード先のアクセス権を確認できませんでした。",
+    "zh-Hans": "无法验证上传目标的权限。",
+    "zh-Hant": "無法驗證上傳目的地的權限。"
+  },
+  "The upload stopped because iOS background time expired.": {
+    "de": "Der Upload wurde beendet, weil die iOS-Hintergrundzeit abgelaufen ist.",
+    "es": "La subida se detuvo porque se agotó el tiempo de ejecución en segundo plano de iOS.",
+    "fr": "Le téléversement s'est arrêté, car le temps d'exécution en arrière-plan accordé par iOS a expiré.",
+    "ja": "iOS のバックグラウンド実行時間が終了したため、アップロードを停止しました。",
+    "zh-Hans": "由于 iOS 后台运行时间已到，上传已停止。",
+    "zh-Hant": "由於 iOS 背景執行時間已到，上傳已停止。"
+  },
+  "The upload stopped, but cleanup of the temporary remote file will retry on the next connection: %@": {
+    "de": "Der Upload wurde beendet, aber die temporäre entfernte Datei wird bei der nächsten Verbindung erneut bereinigt: %@",
+    "es": "La subida se detuvo, pero se volverá a intentar limpiar el archivo remoto temporal en la próxima conexión: %@",
+    "fr": "Le téléversement s'est arrêté, mais le nettoyage du fichier distant temporaire sera retenté à la prochaine connexion : %@",
+    "ja": "アップロードを停止しましたが、一時リモートファイルの削除は次回の接続時に再試行されます: %@",
+    "zh-Hans": "上传已停止，但下次连接时会再次尝试清理临时远程文件：%@",
+    "zh-Hant": "上傳已停止，但下次連線時會再次嘗試清理暫存遠端檔案：%@"
+  },
+  "The uploaded path was copied to the clipboard because the terminal did not connect.": {
+    "de": "Der hochgeladene Pfad wurde in die Zwischenablage kopiert, weil das Terminal keine Verbindung hergestellt hat.",
+    "es": "La ruta del archivo subido se copió en el portapapeles porque el terminal no se conectó.",
+    "fr": "Le chemin du fichier téléversé a été copié dans le presse-papiers, car le terminal ne s'est pas connecté.",
+    "ja": "ターミナルが接続されなかったため、アップロードしたパスをクリップボードにコピーしました。",
+    "zh-Hans": "由于终端未连接，已上传的路径已复制到剪贴板。",
+    "zh-Hant": "由於終端機未連線，已上傳的路徑已複製到剪貼簿。"
+  },
+  "Try Again": {
+    "de": "Erneut versuchen",
+    "es": "Intentar de nuevo",
+    "fr": "Réessayer",
+    "ja": "もう一度試す",
+    "zh-Hans": "重试",
+    "zh-Hant": "重試"
+  },
+  "Upload %@": {
+    "de": "%@ hochladen",
+    "es": "Subir %@",
+    "fr": "Téléverser %@",
+    "ja": "%@をアップロード",
+    "zh-Hans": "上传 %@",
+    "zh-Hant": "上傳 %@"
+  },
+  "Upload in progress": {
+    "de": "Upload läuft",
+    "es": "Subida en curso",
+    "fr": "Téléversement en cours",
+    "ja": "アップロード中",
+    "zh-Hans": "正在上传",
+    "zh-Hant": "正在上傳"
+  },
+  "Uploading %@": {
+    "de": "%@ wird hochgeladen",
+    "es": "Subiendo %@",
+    "fr": "Téléversement de %@",
+    "ja": "%@をアップロード中",
+    "zh-Hans": "正在上传 %@",
+    "zh-Hant": "正在上傳 %@"
+  },
+  "cancelling…": {
+    "de": "wird abgebrochen…",
+    "es": "cancelando…",
+    "fr": "annulation…",
+    "ja": "キャンセル中…",
+    "zh-Hans": "正在取消…",
+    "zh-Hant": "正在取消…"
+  },
+  "file": {
+    "de": "Datei",
+    "es": "archivo",
+    "fr": "fichier",
+    "ja": "ファイル",
+    "zh-Hans": "文件",
+    "zh-Hant": "檔案"
+  },
+  "upload complete": {
+    "de": "Upload abgeschlossen",
+    "es": "subida finalizada",
+    "fr": "téléversement terminé",
+    "ja": "アップロードが完了しました",
+    "zh-Hans": "上传完成",
+    "zh-Hant": "上傳完成"
+  }
+}

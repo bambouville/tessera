@@ -15,6 +15,99 @@ private var integrationScrollHarnessSuppressesFirstResponder: Bool {
 #endif
 }
 
+/// The caret's clear space inside its own terminal surface, in points.
+///
+/// Both distances are read in the surface's own coordinate space, so they hold
+/// whatever the keyboard layout is doing to the session around it — the caret
+/// and the surface always translate together.
+struct TerminalCaretClearance {
+    /// Surface top edge → top of the caret's row.
+    let above: CGFloat
+    /// Bottom of the caret's row → surface bottom edge.
+    let below: CGFloat
+}
+
+/// Decides how much of a docked keyboard's overlap the terminal layer may
+/// ignore, given where the caret sits inside its surface.
+///
+/// Pure so the rule can be tested without a keyboard, a window, or a session:
+/// everything it needs is three numbers.
+enum TerminalKeyboardCaretPolicy {
+    /// Minimum-movement rule, the same one a text view applies to its caret.
+    /// The hold only shrinks when the caret would otherwise be swallowed by the
+    /// keyboard or the accessory bar, only grows when the caret would otherwise
+    /// be pushed up behind the top chrome, and stays put in between so ordinary
+    /// cursor motion inside the visible band moves nothing.
+    ///
+    /// - Parameters:
+    ///   - previous: hold currently in force, or nil for a keyboard that is
+    ///     only now coming up — which starts from the caret where it stands.
+    ///   - clearance: the caret's clear space inside its surface.
+    ///   - overlap: docked-keyboard overlap with the window.
+    static func hold(
+        previous: CGFloat?,
+        clearance: TerminalCaretClearance,
+        overlap: CGFloat
+    ) -> CGFloat {
+        // Hold at most the space that actually exists below the caret: holding
+        // more would leave the caret under the accessory bar.
+        let ceiling = max(0, clearance.below)
+        // Hold at least enough that the translation cannot lift the caret past
+        // the top of the terminal, where the session chrome sits. The bottom
+        // constraint wins when the two disagree — a caret behind an opaque
+        // keyboard is lost, a caret under the top bar is merely dimmed.
+        let floor = min(ceiling, max(0, overlap - max(0, clearance.above)))
+        guard let previous else { return ceiling }
+        return min(max(previous, floor), ceiling)
+    }
+}
+
+extension TerminalBox {
+    /// Where the caret sits inside this surface right now, or nil when there is
+    /// no surface to ask (not yet mounted, torn down, or zero-sized).
+    ///
+    /// Derived from the scroll geometry rather than SwiftTerm's caret view: the
+    /// caret view is internal to the package, while `contentSize` /
+    /// `contentOffset` are the same numbers the scrollback path already writes,
+    /// so a scrolled-back surface reports the caret where it is actually drawn
+    /// (below the fold) instead of where the live screen would put it.
+    func caretClearance(cellHeight: CGFloat) -> TerminalCaretClearance? {
+        guard cellHeight > 0, let view, view.bounds.height > 0 else { return nil }
+        let terminal = view.getTerminal()
+        let rows = terminal.rows
+        guard rows > 0 else { return nil }
+        // A full-screen app paints every row and keeps what matters — status
+        // line, command line, prompt box — at the BOTTOM, and it parks the
+        // cursor wherever its own redraw left it. Following that cursor would
+        // drag the bottom of vim, htop or Claude Code behind the keyboard, so
+        // an alternate-screen or mouse-reporting surface keeps the whole
+        // translation it has always had. The caret rule is for the primary
+        // screen, where the rows below the prompt are the blank ones.
+        guard !terminal.isCurrentBufferAlternate, terminal.mouseMode == .off else {
+            return nil
+        }
+        // SwiftTerm keeps `contentSize` at an exact multiple of the cell height:
+        // scrollback plus the live screen for the normal buffer, exactly the
+        // screen for the alternate one.
+        let lines = max(rows, Int((view.contentSize.height / cellHeight).rounded()))
+        let caretTopInContent = CGFloat(lines - rows + terminal.getCursorLocation().y) * cellHeight
+        let caretTop = caretTopInContent - view.contentOffset.y
+        return TerminalCaretClearance(
+            above: caretTop,
+            below: view.bounds.height - (caretTop + cellHeight)
+        )
+    }
+}
+
+/// Cell height for the live terminal font — the same metric the pane grid lays
+/// panes out on, so a row measured here lands on SwiftTerm's own grid.
+private func terminalCaretCellHeight(fontSize: Double) -> CGFloat {
+    TerminalCellMetrics.cellSize(
+        font: TesseraTerminalFont.mono(size: CGFloat(fontSize)),
+        scale: UIScreen.main.scale
+    ).height
+}
+
 /// Keeps SwiftTerm's grid geometry stable while the software keyboard moves.
 ///
 /// SwiftUI normally proposes a shorter height when the keyboard appears, which
@@ -37,8 +130,38 @@ private var integrationScrollHarnessSuppressesFirstResponder: Bool {
 /// proposal already reaches the window bottom; what remains of the shrink is
 /// exactly the docked-keyboard overlap. Floating/undocked keyboards do not
 /// inset the bottom edge and therefore do not move the session.
+///
+/// The session translation is deliberately NOT the terminal's translation. The
+/// bar has to stay welded to the keyboard's top edge, so the session still
+/// moves by the whole overlap; the terminal layer is then pushed back down by
+/// the part of that translation the caret does not need (`caretHold`, published
+/// as `terminalKeyboardCaretShift`). A prompt sitting near row 0 on a fresh
+/// session therefore does not move at all — the keyboard covers rows that were
+/// blank anyway — while a prompt at the last row still rides the full overlap
+/// exactly as before.
 private struct TerminalKeyboardLayoutModifier: ViewModifier {
     let resizesTerminal: Bool
+    /// Where the caret sits inside the terminal surface, sampled on demand.
+    /// `nil` means "no surface can answer" (a mounted pane grid, a session
+    /// being torn down) and keeps the pre-caret behavior: move by the full
+    /// overlap.
+    let caretClearance: () -> TerminalCaretClearance?
+
+    /// Clear space held below the caret — how much of the keyboard overlap the
+    /// terminal layer is allowed to ignore. Sampled from the caret, never from
+    /// the animation, so everything rendered from it still interpolates on
+    /// SwiftUI's keyboard curve. `nil` means "nothing sampled for this keyboard
+    /// yet"; the body then reads the caret inline so the very first lifted
+    /// layout is already right, instead of depending on whether the keyboard
+    /// notification beat SwiftUI's inset change to the run loop.
+    @State private var caretHold: CGFloat?
+    /// Docked-keyboard overlap as the keyboard notifications report it. Only
+    /// the sampling math reads this; every rendered dimension still comes from
+    /// the proposal.
+    @State private var reportedOverlap: CGFloat = 0
+    @State private var caretSampler = Timer
+        .publish(every: 0.15, on: .main, in: .common)
+        .autoconnect()
 
     func body(content: Content) -> some View {
         GeometryReader { proxy in
@@ -54,9 +177,12 @@ private struct TerminalKeyboardLayoutModifier: ViewModifier {
             let contentHeight = resizesTerminal
                 ? proposedSize.height
                 : retainedHeight
+            let hold = caretHold ?? caretClearance()?.below ?? 0
+            let caretShift = min(max(0, hold), lift)
 
             content
                 .environment(\.softwareKeyboardLift, lift)
+                .environment(\.terminalKeyboardCaretShift, caretShift)
                 .frame(
                     width: proposedSize.width,
                     height: contentHeight,
@@ -73,26 +199,140 @@ private struct TerminalKeyboardLayoutModifier: ViewModifier {
         // Keeps the resting proposal at the window bottom (the session roots
         // deliberately ignore this inset) while still receiving `.keyboard`.
         .ignoresSafeArea(.container, edges: .bottom)
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: UIResponder.keyboardWillChangeFrameNotification
+            )
+        ) { note in
+            noteKeyboardFrame(note)
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: UIResponder.keyboardWillHideNotification
+            )
+        ) { _ in
+            reportedOverlap = 0
+            caretHold = nil
+        }
+        .onReceive(caretSampler) { _ in
+            // The caret moves under the remote's control, not the user's: a
+            // prompt walks down the screen as output arrives and jumps back to
+            // row 0 on `clear`. Re-reading it while the keyboard is up is what
+            // keeps it in view across both.
+            guard !resizesTerminal, reportedOverlap > 0 else { return }
+            updateCaretHold(reset: false)
+        }
+    }
+
+    /// Overlap of the *docked* keyboard with the window, as the notification
+    /// reports it. Mirrors what the proposal-derived lift above measures, so
+    /// the sampling math and the rendering agree on when a keyboard counts.
+    private func noteKeyboardFrame(_ note: Notification) {
+        guard !resizesTerminal else { return }
+        guard let window = keyWindow,
+              let endFrame = note.userInfo?[
+                UIResponder.keyboardFrameEndUserInfoKey
+              ] as? CGRect
+        else { return }
+        let inWindow = window.convert(endFrame, from: nil)
+        // Floating / undocked keyboards do not inset the bottom edge, so they
+        // move nothing and need no caret work.
+        let docked = inWindow.maxY >= window.bounds.maxY - 1
+        let overlap = docked
+            ? max(0, window.bounds.maxY - max(inWindow.minY, 0))
+            : 0
+        let wasHidden = reportedOverlap <= 0
+        reportedOverlap = overlap
+        guard overlap > 0 else {
+            caretHold = nil
+            return
+        }
+        // A keyboard on its way up starts from wherever the caret already is:
+        // hold everything below it, i.e. move the terminal the least it can.
+        updateCaretHold(reset: wasHidden)
+    }
+
+    private func updateCaretHold(reset: Bool) {
+        guard let clearance = caretClearance() else {
+            // Nothing to ask: hold nothing, i.e. move by the full overlap,
+            // which is what this layout did before it learned about carets.
+            if caretHold != 0 { caretHold = 0 }
+            return
+        }
+        let next = TerminalKeyboardCaretPolicy.hold(
+            previous: reset ? nil : caretHold,
+            clearance: clearance,
+            overlap: reportedOverlap
+        )
+        guard caretHold == nil || abs(next - (caretHold ?? 0)) > 0.5 else { return }
+        caretHold = next
+    }
+
+    private var keyWindow: UIWindow? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: { $0.isKeyWindow })
     }
 
     private func fullHeight(
         proposedHeight: CGFloat,
         globalMinY: CGFloat
     ) -> CGFloat {
-        guard let window = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .flatMap(\.windows)
-            .first(where: { $0.isKeyWindow })
-        else { return proposedHeight }
+        guard let window = keyWindow else { return proposedHeight }
         // Session roots deliberately ignore the container's bottom safe area,
         // so the window bottom is the stable lower edge in every keyboard state.
         return max(proposedHeight, window.bounds.maxY - globalMinY)
     }
 }
 
+/// Pushes the terminal layer back down by the slice of the session's keyboard
+/// translation the caret does not need, and clips it to the region the chrome
+/// leaves free. Without the clip the rows the translation was hiding would draw
+/// straight through the accessory bar's material.
+private struct TerminalKeyboardCaretShift: ViewModifier {
+    @Environment(\.terminalKeyboardCaretShift) private var caretShift
+
+    func body(content: Content) -> some View {
+        content
+            .offset(y: caretShift)
+            // `offset` leaves the layout frame alone, so this clips to the
+            // terminal's own region — the shifted-down rows land behind the
+            // accessory bar instead of through it.
+            .clipped()
+    }
+}
+
+private struct TerminalKeyboardCaretShiftKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+
+extension EnvironmentValues {
+    /// How far the terminal layer is pushed back down inside a session that has
+    /// been translated to clear the docked software keyboard. Zero whenever the
+    /// caret needs the whole translation (the classic prompt-at-the-last-row
+    /// case) and equal to the translation when it needs none of it.
+    var terminalKeyboardCaretShift: CGFloat {
+        get { self[TerminalKeyboardCaretShiftKey.self] }
+        set { self[TerminalKeyboardCaretShiftKey.self] = newValue }
+    }
+}
+
 private extension View {
-    func terminalKeyboardLayout(resizesTerminal: Bool) -> some View {
-        modifier(TerminalKeyboardLayoutModifier(resizesTerminal: resizesTerminal))
+    func terminalKeyboardLayout(
+        resizesTerminal: Bool,
+        caretClearance: @escaping () -> TerminalCaretClearance?
+    ) -> some View {
+        modifier(TerminalKeyboardLayoutModifier(
+            resizesTerminal: resizesTerminal,
+            caretClearance: caretClearance
+        ))
+    }
+
+    /// Applied to the terminal layer of a session (the surface plus whatever
+    /// overlays share its canvas).
+    func terminalKeyboardCaretShift() -> some View {
+        modifier(TerminalKeyboardCaretShift())
     }
 }
 
@@ -488,6 +728,21 @@ struct SessionView: View {
         return compactTmuxWindowRect
     }
 
+    /// Bottom inset for chrome that stacks above the accessory bar. Measured
+    /// from the bar's reserved band, so the swipe pad clears the phone's
+    /// home-indicator strip as well as the chip row.
+    private var swipePadBottomInset: CGFloat {
+        appearance.showAccessoryBar
+            ? SessionAccessoryBar.reservedBandHeight()
+            : max(Self.cornerInset - 8, 4)
+    }
+
+    private var paneToastBottomInset: CGFloat {
+        appearance.showAccessoryBar
+            ? SessionAccessoryBar.reservedBandHeight() + 12
+            : 24
+    }
+
     /// Character-cell size for the live terminal font, used to lay out pane
     /// frames as exact cell multiples (matches SwiftTerm's own grid snapping).
     private var terminalCellSize: CGSize {
@@ -862,7 +1117,13 @@ struct SessionView: View {
         } else if let dir = terminalBox.view?.getTerminal().hostCurrentDirectory {
             filesPanel.terminalReportedDirectory(dir)
         }
+        filesPanel.transfers?.acknowledgeBackgroundAttention()
         withAnimation(.easeInOut(duration: 0.2)) { filesPanel.open() }
+    }
+
+    private var fileTransferAttention: BackgroundTransferAttention {
+        fileBridges.existingTransferQueue(for: FileBridgeKey(host: session.host))?
+            .backgroundAttention ?? .none
     }
 
     private var compactFilesBinding: Binding<Bool> {
@@ -999,9 +1260,16 @@ struct SessionView: View {
     /// active pane under -CC.
     private func consumePendingPathInjection(_ path: String?) {
         guard let path else { return }
-        session.pendingPathInjection = nil
         guard session.state == .connected else { return }
+        session.pendingPathInjection = nil
         tmux.sendInput(Array(FilesPanelController.shellQuoted(path).utf8))
+    }
+
+    private func preservePendingPathAfterConnectionFailure() {
+        guard let path = session.pendingPathInjection else { return }
+        session.pendingPathInjection = nil
+        UIPasteboard.general.string = path
+        terminalDropFailure = String(localized: "The uploaded path was copied to the clipboard because the terminal did not connect.")
     }
 
     /// Plain-SSH follow fallback: OSC 7 stays primary (instant,
@@ -1065,6 +1333,7 @@ struct SessionView: View {
                         },
                         findController: findController,
                         filesPanelOpen: filesPanel.isOpen,
+                        fileTransferAttention: fileTransferAttention,
                         onToggleFiles: toggleFilesPanel,
                         bellController: bellController,
                         forwarderManager: session.portForwarderManager,
@@ -1465,6 +1734,7 @@ struct SessionView: View {
                     }
                 }
                 .padding(.horizontal, isPhone ? 4 : Self.cornerInset)
+                .terminalKeyboardCaretShift()
 
                 if appearance.showAccessoryBar {
                     SessionAccessoryBar(
@@ -1610,7 +1880,7 @@ struct SessionView: View {
                 compact: isPhone
             ))
             .padding(.horizontal, isPhone ? 10 : Self.cornerInset)
-            .padding(.bottom, appearance.showAccessoryBar ? 52 : max(Self.cornerInset - 8, 4))
+            .padding(.bottom, swipePadBottomInset)
             // The puck is terminal input chrome. Move the entire sibling
             // below the terminal layer while yielded so the takeover veil
             // visually owns the full canvas, and disable hit testing as a
@@ -1620,7 +1890,7 @@ struct SessionView: View {
 
             if let toast = paneCommandToast {
                 PaneCommandToast(message: toast, T: themeChromeTokens)
-                    .padding(.bottom, appearance.showAccessoryBar ? 64 : 24)
+                    .padding(.bottom, paneToastBottomInset)
                     .frame(maxHeight: .infinity, alignment: .bottom)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .zIndex(6)
@@ -1632,7 +1902,19 @@ struct SessionView: View {
         .animation(.easeInOut(duration: 0.18), value: agentScrollNotice.prevention)
         .ignoresSafeArea(.container, edges: .bottom)
         .terminalKeyboardLayout(
-            resizesTerminal: appearance.resizeTerminalWithKeyboard
+            resizesTerminal: appearance.resizeTerminalWithKeyboard,
+            caretClearance: {
+                // A mounted pane grid owns the caret; the shared surface behind
+                // it is inert and its cursor is stale, so let the whole
+                // translation stand rather than aim at the wrong row. Find is
+                // the same call for a different reason: it scrolls the surface
+                // to a *match*, which has nothing to do with where the caret
+                // is, so the whole grid has to clear the keyboard.
+                guard activeGridWindow == nil, !findController.isOpen else { return nil }
+                return terminalBox.caretClearance(
+                    cellHeight: terminalCaretCellHeight(fontSize: appearance.fontSize)
+                )
+            }
         )
         .onChange(of: activeGridWindow?.id) { oldValue, newValue in
             reconcileAgentScrollNotice()
@@ -2041,6 +2323,9 @@ struct SessionView: View {
             }
         }
         .onChange(of: session.state) { _, newState in
+            if newState == .connected {
+                consumePendingPathInjection(session.pendingPathInjection)
+            }
             logLaunch(
                 "state-change",
                 // `newState.diagnosticName`, never `String(describing:)` — see
@@ -2051,6 +2336,7 @@ struct SessionView: View {
             // without an error banner. .failed stays put so the user
             // can read the reason before tapping back.
             if newState == .disconnected {
+                preservePendingPathAfterConnectionFailure()
                 tmuxLaunchWatchdog?.cancel()
                 tmuxLaunchWatchdog = nil
                 tmuxHydrationWatchdog?.cancel()
@@ -2061,6 +2347,7 @@ struct SessionView: View {
                 onSessionEnded()
             }
             if case .failed = newState {
+                preservePendingPathAfterConnectionFailure()
                 tmuxLaunchWatchdog?.cancel()
                 tmuxLaunchWatchdog = nil
                 tmuxHydrationWatchdog?.cancel()
@@ -2869,6 +3156,15 @@ struct MoshSessionView: View {
         CompactLayout.isPhone(horizontalSizeClass)
     }
 
+    /// Bottom inset for chrome that stacks above the accessory bar. Measured
+    /// from the bar's reserved band, so the swipe pad clears the phone's
+    /// home-indicator strip as well as the chip row.
+    private var swipePadBottomInset: CGFloat {
+        appearance.showAccessoryBar
+            ? SessionAccessoryBar.reservedBandHeight()
+            : max(SessionView.cornerInset - 8, 4)
+    }
+
     private var filesPanelTokens: DesignTokens {
         isPhone
             ? appDesignTokens
@@ -2944,7 +3240,13 @@ struct MoshSessionView: View {
         } else if let dir = terminalBox.view?.getTerminal().hostCurrentDirectory {
             filesPanel.terminalReportedDirectory(dir)
         }
+        filesPanel.transfers?.acknowledgeBackgroundAttention()
         withAnimation(.easeInOut(duration: 0.2)) { filesPanel.open() }
+    }
+
+    private var fileTransferAttention: BackgroundTransferAttention {
+        fileBridges.existingTransferQueue(for: FileBridgeKey(host: session.host))?
+            .backgroundAttention ?? .none
     }
 
     private var compactMoshFilesBinding: Binding<Bool> {
@@ -3123,14 +3425,21 @@ struct MoshSessionView: View {
     /// the attached modes).
     private func consumePendingPathInjection(_ path: String?) {
         guard let path else { return }
-        session.pendingPathInjection = nil
         guard session.state == .connected else { return }
+        session.pendingPathInjection = nil
         let bytes = Array(FilesPanelController.shellQuoted(path).utf8)
         if tmux.mode == .tmuxControl {
             tmux.sendInput(bytes)
         } else {
             session.send(bytes)
         }
+    }
+
+    private func preservePendingPathAfterConnectionFailure() {
+        guard let path = session.pendingPathInjection else { return }
+        session.pendingPathInjection = nil
+        UIPasteboard.general.string = path
+        terminalDropFailure = String(localized: "The uploaded path was copied to the clipboard because the terminal did not connect.")
     }
 
     // Body is split in two: the stack + the bulk of its modifiers here,
@@ -3163,6 +3472,7 @@ struct MoshSessionView: View {
             },
             findController: findController,
             filesPanelOpen: filesPanel.isOpen,
+            fileTransferAttention: fileTransferAttention,
             onToggleFiles: toggleFilesPanel,
             bellController: bellController,
             forwarderManager: session.portForwarderManager,
@@ -3470,6 +3780,7 @@ struct MoshSessionView: View {
                     }
                 }
                 .padding(.horizontal, isPhone ? 4 : SessionView.cornerInset)
+                .terminalKeyboardCaretShift()
 
                 if appearance.showAccessoryBar {
                     SessionAccessoryBar(
@@ -3651,7 +3962,7 @@ struct MoshSessionView: View {
                 compact: isPhone
             ))
             .padding(.horizontal, isPhone ? 10 : SessionView.cornerInset)
-            .padding(.bottom, appearance.showAccessoryBar ? 52 : max(SessionView.cornerInset - 8, 4))
+            .padding(.bottom, swipePadBottomInset)
             .allowsHitTesting(!tmux.gridAuthority.isPeer)
             .zIndex(tmux.gridAuthority.isPeer ? -1 : 5)
         }
@@ -3693,7 +4004,17 @@ struct MoshSessionView: View {
         }
         .ignoresSafeArea(.container, edges: .bottom)
         .terminalKeyboardLayout(
-            resizesTerminal: appearance.resizeTerminalWithKeyboard
+            resizesTerminal: appearance.resizeTerminalWithKeyboard,
+            caretClearance: {
+                // mosh paints every pane into this one surface, so its caret is
+                // the caret in all layouts — no grid case to exclude. Find
+                // still is one: it scrolls to a match rather than to the caret,
+                // so the whole grid has to clear the keyboard.
+                guard !findController.isOpen else { return nil }
+                return terminalBox.caretClearance(
+                    cellHeight: terminalCaretCellHeight(fontSize: appearance.fontSize)
+                )
+            }
         )
         .statusBarHidden(true)
         .persistentSystemOverlays(isPhone ? .automatic : .hidden)
@@ -4023,16 +4344,21 @@ struct MoshSessionView: View {
             MoshDiagnostics.log("mosh view output stream ended")
         }
         .onChange(of: session.state) { _, newState in
+            if newState == .connected {
+                consumePendingPathInjection(session.pendingPathInjection)
+            }
             MoshDiagnostics.log(
                 "mosh view state=\(MoshDiagnostics.stateDescription(newState))"
             )
             if newState == .disconnected {
+                preservePendingPathAfterConnectionFailure()
                 launchOverlayVisible = false
                 stopTmuxControlChannel()
                 onSessionEnded()
             }
 
             if case .failed = newState {
+                preservePendingPathAfterConnectionFailure()
                 // Keep the overlay up to host the error state + recovery
                 // actions (edit host / retry / back).
                 stopTmuxControlChannel()
@@ -7254,7 +7580,7 @@ struct MoshSessionView: View {
         return EdgeInsets(
             top: topBar + findBar,
             leading: SessionView.cornerInset,
-            bottom: appearance.showAccessoryBar ? 52 : 0,
+            bottom: appearance.showAccessoryBar ? SessionAccessoryBar.reservedBandHeight() : 0,
             trailing: SessionView.cornerInset
         )
     }
@@ -8705,6 +9031,7 @@ private struct SessionTopBar: View {
     /// find and the forwarding chip. Accent-tinted while the panel is
     /// open, mirroring the find button's toggled treatment.
     let filesPanelOpen: Bool
+    var fileTransferAttention: BackgroundTransferAttention = .none
     let onToggleFiles: () -> Void
     /// Drives the per-tab bell glow + badge dot. `bellingWindows` set
     /// on `tmux` accumulates inactive-window bells; `BellController`
@@ -8889,11 +9216,7 @@ private struct SessionTopBar: View {
 
             // Remote Files panel toggle (⌘⇧E). Sits with the other
             // trailing utilities so the home button stays anchored.
-            chromeIconButton(
-                systemName: "folder",
-                isToggled: filesPanelOpen,
-                action: onToggleFiles
-            )
+            filesButton
 
             // Port forwarding indicator. Hides when the session has no
             // forwarders defined; otherwise shows `⇄ N` with the running
@@ -9214,12 +9537,7 @@ private struct SessionTopBar: View {
             }
             .disabled(tmux.gridAuthority.isPeer)
             .opacity(tmux.gridAuthority.isPeer ? 0.45 : 1)
-            compactIconButton(
-                systemName: "folder",
-                label: "Files",
-                isToggled: filesPanelOpen,
-                action: onToggleFiles
-            )
+            compactFilesButton
             CompactForwardingStatusButton(manager: forwarderManager, T: T)
             compactIconButton(
                 systemName: "xmark",
@@ -9255,6 +9573,63 @@ private struct SessionTopBar: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
+    }
+
+    private var filesButton: some View {
+        ZStack(alignment: .topTrailing) {
+            chromeIconButton(
+                systemName: "folder",
+                isToggled: filesPanelOpen,
+                action: onToggleFiles
+            )
+            fileTransferAttentionGlyph(size: 9)
+                .offset(x: -2 * scale, y: 1 * scale)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(filesAccessibilityLabel)
+    }
+
+    private var compactFilesButton: some View {
+        ZStack(alignment: .topTrailing) {
+            compactIconButton(
+                systemName: "folder",
+                label: "Files",
+                isToggled: filesPanelOpen,
+                action: onToggleFiles
+            )
+            fileTransferAttentionGlyph(size: 10)
+                .offset(x: -2, y: 5)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(filesAccessibilityLabel)
+    }
+
+    @ViewBuilder
+    private func fileTransferAttentionGlyph(size: CGFloat) -> some View {
+        switch fileTransferAttention {
+        case .none:
+            EmptyView()
+        case .success:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: size, weight: .semibold))
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(T.presentationBg, T.green)
+                .accessibilityHidden(true)
+        case .failure:
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: size, weight: .semibold))
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(T.presentationBg, T.red)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var filesAccessibilityLabel: LocalizedStringKey {
+        switch fileTransferAttention {
+        case .none: "Files"
+        case .success: "Files, background upload complete"
+        case .failure: "Files, background upload failed"
+        }
     }
 
     private func openCompactSwitcher() {
@@ -10515,6 +10890,10 @@ struct IPhoneKeyboardHarnessView: View {
     @State private var viewportLayoutGeneration = -1
     @State private var lastHarnessViewportSize = CGSize.zero
     @State private var findController = FindController()
+    @State private var harnessFeedCount = 0
+    @State private var harnessOutputFeed = Timer
+        .publish(every: 0.4, on: .main, in: .common)
+        .autoconnect()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -10563,6 +10942,7 @@ struct IPhoneKeyboardHarnessView: View {
                 cellSize: harnessCellSize,
                 onViewportSize: updateOwnerGrid
             ))
+            .terminalKeyboardCaretShift()
 
             SessionAccessoryBar(
                 accent: DesignTokens.make(mode: .dark, accent: .blue).accent,
@@ -10575,7 +10955,12 @@ struct IPhoneKeyboardHarnessView: View {
         .preferredColorScheme(.dark)
         .ignoresSafeArea(.container, edges: .bottom)
         .terminalKeyboardLayout(
-            resizesTerminal: appearance.resizeTerminalWithKeyboard
+            resizesTerminal: appearance.resizeTerminalWithKeyboard,
+            caretClearance: {
+                terminalBox.caretClearance(
+                    cellHeight: terminalCaretCellHeight(fontSize: appearance.fontSize)
+                )
+            }
         )
         .statusBarHidden(true)
         .overlay(alignment: .topLeading) {
@@ -10625,6 +11010,15 @@ struct IPhoneKeyboardHarnessView: View {
             .accessibilityLabel("Open find")
             .accessibilityIdentifier("iphone-keyboard-open-find")
         }
+        .onReceive(harnessOutputFeed) { _ in
+            // Walks the prompt down the screen the way remote output does, so
+            // the caret-following half of the keyboard layout can be exercised
+            // without a host — and without a touch, which would take the
+            // software keyboard down with it.
+            guard ProcessInfo.processInfo.environment["TESSERA_KEYBOARD_HARNESS_FEED"] == "1" else { return }
+            harnessFeedCount += 1
+            terminalBox.view?.feed(text: "harness output line \(harnessFeedCount)\r\n$ ")
+        }
         .overlay(alignment: .topLeading) {
             Text(verbatim: "keyboard hides \(oracle.hideCount)")
                 .foregroundStyle(Color.white.opacity(0.01))
@@ -10633,6 +11027,51 @@ struct IPhoneKeyboardHarnessView: View {
                 .offset(y: 24)
         }
         .onAppear {
+            // Landscape coverage without Simulator.app automation: macOS
+            // refuses Apple events from the agent's shell, so the harness asks
+            // its own scene to rotate. Same geometry path the OS drives on a
+            // real rotation, so safe areas and the keyboard follow. iPadOS
+            // ignores the request for a multitasking-capable app and reports no
+            // error; rotate an iPad through the device instead, with
+            // VisualCaptureProbe/testSetLandscapeOnly.
+            if let orientation = ProcessInfo.processInfo
+                .environment["TESSERA_KEYBOARD_HARNESS_ORIENTATION"] {
+                let mask: UIInterfaceOrientationMask =
+                    orientation == "landscape" ? .landscapeRight : .portrait
+                UIApplication.shared.connectedScenes
+                    .compactMap { $0 as? UIWindowScene }
+                    .forEach { scene in
+                        scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { error in
+                            NSLog("[kbprobe] geometry update refused: %@", "\(error)")
+                        }
+                    }
+                UIApplication.shared.connectedScenes
+                    .compactMap { $0 as? UIWindowScene }
+                    .flatMap(\.windows)
+                    .forEach { window in
+                        window.rootViewController?
+                            .setNeedsUpdateOfSupportedInterfaceOrientations()
+                    }
+            }
+            // `alt` stands in for vim / htop / Claude Code: an alternate-screen
+            // app that paints every row, keeps its status line on the last one,
+            // and parks the cursor wherever its redraw ended — here deliberately
+            // near the top, the case where following the caret would hide the
+            // app's bottom rows behind the keyboard. Painted after the grid has
+            // settled, because an alternate buffer does not survive a resize.
+            if ProcessInfo.processInfo.environment["TESSERA_KEYBOARD_HARNESS_FIXTURE"] == "alt" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    guard let view = terminalBox.view else { return }
+                    let rows = view.getTerminal().rows
+                    var text = "\u{001B}[?1049h\u{001B}[2J\u{001B}[H"
+                    for index in 1..<max(2, rows) {
+                        text += "alt screen row \(index) — tessera keyboard fixture\r\n"
+                    }
+                    text += "STATUS LINE — bottom row must stay visible"
+                    text += "\u{001B}[2;1H"
+                    view.feed(text: text)
+                }
+            }
             appearance.mode = .dark
             appearance.fontSize = 13
             appearance.cursorBlink = false
@@ -10646,6 +11085,27 @@ struct IPhoneKeyboardHarnessView: View {
         .onDisappear {
             oracle.stop()
         }
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
+            guard ProcessInfo.processInfo.environment["TESSERA_KEYBOARD_HARNESS_DEBUG"] == "1" else { return }
+            guard let view = terminalBox.view else { return }
+            let terminal = view.getTerminal()
+            let cell = harnessCellSize
+            let windowFrame = view.superview?.convert(view.frame, to: nil) ?? .zero
+            let window = view.window
+            NSLog("[kbprobe] viewFrameInWindow=%@ bounds=%@ contentSize=%@ contentOffset=%.1f rows=%d cols=%d yDisp=%d cellH=%.2f windowH=%.1f safeBottom=%.1f adjInset=%@ behavior=%d",
+                  NSCoder.string(for: windowFrame),
+                  NSCoder.string(for: view.bounds),
+                  NSCoder.string(for: view.contentSize),
+                  view.contentOffset.y,
+                  terminal.rows,
+                  terminal.cols,
+                  terminal.buffer.yDisp,
+                  cell.height,
+                  window?.bounds.height ?? -1,
+                  window?.safeAreaInsets.bottom ?? -1,
+                  NSCoder.string(for: view.adjustedContentInset),
+                  view.contentInsetAdjustmentBehavior.rawValue)
+        }
         .onChange(of: oracle.settledGeneration) { _, _ in
             guard lastHarnessViewportSize != .zero else { return }
             updateOwnerGrid(lastHarnessViewportSize)
@@ -10655,16 +11115,30 @@ struct IPhoneKeyboardHarnessView: View {
         }
     }
 
-    private static let fixtureBytes = Array(
-        (
-            "\u{001B}[2J\u{001B}[H"
-                + "Tessera iPhone terminal - 13 pt\r\n"
-                + "Readable phone-owned tmux viewport\r\n"
-                + "$ tmux list-windows\r\n"
-                + "0: shell*  1: htop  2: vim\r\n"
-                + "$ _"
-        ).utf8
-    )
+    private static var fixtureBytes: [UInt8] {
+        // `long` stands in for "the user just ran `cat /etc/services`": a full
+        // screen of output with scrollback above it and the prompt parked on
+        // the last row. That is the state the accessory-bar occlusion and the
+        // caret-aware keyboard lift both have to survive.
+        if ProcessInfo.processInfo.environment["TESSERA_KEYBOARD_HARNESS_FIXTURE"] == "long" {
+            var text = "\u{001B}[2J\u{001B}[H"
+            for index in 1...400 {
+                text += "services line \(index) — tessera keyboard fixture\r\n"
+            }
+            text += "$ "
+            return Array(text.utf8)
+        }
+        return Array(
+            (
+                "\u{001B}[2J\u{001B}[H"
+                    + "Tessera iPhone terminal - 13 pt\r\n"
+                    + "Readable phone-owned tmux viewport\r\n"
+                    + "$ tmux list-windows\r\n"
+                    + "0: shell*  1: htop  2: vim\r\n"
+                    + "$ _"
+            ).utf8
+        )
+    }
 
     private var harnessCellSize: CGSize {
         let font = TesseraTerminalFont.mono(size: CGFloat(appearance.fontSize))
@@ -12321,6 +12795,9 @@ struct TerminalSurfaceBound: UIViewRepresentable {
         /// to find a stable reference point.
         weak var container: TesseraTerminalContainer?
 
+        private var resizeCoalescer = TerminalResizeCoalescer()
+        private var pendingResizeWork: DispatchWorkItem?
+
         private var keyboardConnectObserver: NSObjectProtocol?
         private var resignActiveObserver: NSObjectProtocol?
         private weak var hardwareKeyboard: GCKeyboard?
@@ -12538,7 +13015,41 @@ struct TerminalSurfaceBound: UIViewRepresentable {
                 didReportReady = true
                 onReady()
             }
-            onResize(newCols, newRows)
+            deliverSizeChange(cols: newCols, rows: newRows)
+        }
+
+        /// Presenting a modal shrinks the terminal and restores it within a
+        /// few frames. Telling the remote about a size that is about to be
+        /// taken back costs two resizes, two `refresh-client -C` round trips,
+        /// and two full repaints — so a size only reaches the remote once it
+        /// has held still. See `TerminalResizeCoalescer`.
+        private func deliverSizeChange(cols: Int, rows: Int) {
+            pendingResizeWork?.cancel()
+            pendingResizeWork = nil
+
+            let size = TerminalResizeCoalescer.Size(cols: cols, rows: rows)
+            switch resizeCoalescer.note(size) {
+            case .send:
+                emitScrollDiagnostic("resize-sent cols=\(cols) rows=\(rows) why=first")
+                onResize(cols, rows)
+            case .drop:
+                emitScrollDiagnostic("resize-coalesced cols=\(cols) rows=\(rows)")
+            case .wait:
+                let work = DispatchWorkItem { [weak self] in
+                    guard let self else { return }
+                    self.pendingResizeWork = nil
+                    guard self.resizeCoalescer.settle(size) else { return }
+                    self.emitScrollDiagnostic(
+                        "resize-sent cols=\(cols) rows=\(rows) why=settled"
+                    )
+                    self.onResize(cols, rows)
+                }
+                pendingResizeWork = work
+                DispatchQueue.main.asyncAfter(
+                    deadline: .now() + TerminalResizeCoalescer.settleSeconds,
+                    execute: work
+                )
+            }
         }
         func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
             onHostDirectory?(directory)

@@ -339,13 +339,20 @@ struct FilesPanelView: View {
     // inside the type-checker's complexity budget (the session views hit
     // the same wall — see moshTerminalSurface's extraction note).
     var body: some View {
-        panelChrome
+        let _ = FilesUIDiagnostics.shared.panelBodyPass()
+        return panelChrome
             .onAppear {
+                controller.transfers?.acknowledgeBackgroundAttention()
                 #if DEBUG
                 if initiallyShowingQuickOpen {
                     showingQuickOpen = true
                 }
                 #endif
+            }
+            .onChange(of: controller.transfers?.backgroundAttention) { _, attention in
+                if attention != BackgroundTransferAttention.none {
+                    controller.transfers?.acknowledgeBackgroundAttention()
+                }
             }
             .onChange(of: showingNewFolder) { _, _ in syncTextEntryFlag() }
             .onChange(of: showingInstallConfirm) { _, _ in syncTextEntryFlag() }
@@ -1145,11 +1152,60 @@ struct FilesPanelView: View {
         controller.searchActive && !controller.searchText.isEmpty
     }
 
+    private var rowsForDisplay: [FilesPanelController.Row] {
+        let rows = FilesUIDiagnostics.shared.measureRows {
+            filterActive ? controller.searchRows : controller.rows
+        }
+        FilesUIDiagnostics.shared.noteTree(rowCount: rows.count, filtering: filterActive)
+        return rows
+    }
+
+    /// Which context-menu actions the session has wired up. Read once for
+    /// the whole list and handed to each row as a comparable value, so a row
+    /// never reaches into the controller for it.
+    private var menuCapabilities: FileRowView.MenuCapabilities {
+        FileRowView.MenuCapabilities(
+            canPreview: controller.onPreviewFile != nil,
+            canDownload: controller.onDownloadFile != nil,
+            canShare: controller.onShareFile != nil,
+            canSendPath: controller.onSendPathToTerminal != nil
+        )
+    }
+
     private var fileList: some View {
-        ScrollView {
+        let capabilities = menuCapabilities
+        let root = controller.currentDirectory
+        let dragAvailable = controller.bridge != nil
+        let search = filterActive ? controller.searchText : ""
+        return ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(filterActive ? controller.searchRows : controller.rows) { row in
-                    fileRow(row)
+                ForEach(rowsForDisplay) { row in
+                    FileRowView(
+                        row: row,
+                        T: T,
+                        filterActive: filterActive,
+                        searchText: search,
+                        rootDirectory: root,
+                        isExpanded: controller.isExpanded(row.entry),
+                        isLoading: controller.isLoading(row.entry),
+                        // Drag-out: rows are file-promise sources — the
+                        // download runs only when a drop target accepts (no
+                        // pre-fetch on drag start).
+                        canDrag: dragAvailable && row.entry.kind == .file,
+                        capabilities: capabilities,
+                        controller: controller,
+                        renameTarget: $renameTarget,
+                        renameText: $renameText,
+                        deleteTarget: $deleteTarget,
+                        onMenuPresence: { menuPresenceChanged(present: $0) }
+                    )
+                    // The whole fix: an unrelated panel pass must not
+                    // re-enter a row body, because re-entering rebuilds the
+                    // row's `.contextMenu` items and preview, which
+                    // re-publishes the live `UIMenu` — UIKit answers that by
+                    // crossfading the platter and cancelling touch tracking
+                    // on the item under the finger.
+                    .equatable()
                 }
                 if filterActive, controller.searchHiddenCount > 0 {
                     Text("\(controller.searchHiddenCount) rows hidden by filter")
@@ -1164,73 +1220,38 @@ struct FilesPanelView: View {
         }
     }
 
-    @ViewBuilder
-    private func fileRow(_ row: FilesPanelController.Row) -> some View {
-        let entry = row.entry
-        let base = fileRowBase(row)
-        // Drag-out: rows are file-promise sources — the download runs
-        // only when a drop target accepts (no pre-fetch on drag start).
-        if entry.kind == .file, controller.bridge != nil {
-            base.onDrag {
-                controller.dragItemProvider(for: entry) ?? NSItemProvider()
-            }
-        } else {
-            base
+    /// Every backstop transition goes through here so the diagnostics log
+    /// carries a complete timeline, and so a redundant write can never
+    /// invalidate the card for a value it already holds.
+    private func setBackstop(_ requested: Bool, reason: String) {
+        let on = FilesDiagnosticsEnvironment.backstopDisabled ? false : requested
+        guard backstopOn != on else {
+            FilesUIDiagnostics.shared.timeline(
+                "backstop-noop", detail: "want=\(on ? 1 : 0) why=\(reason)"
+            )
+            return
         }
-    }
-
-    private func fileRowBase(_ row: FilesPanelController.Row) -> some View {
-        let entry = row.entry
-        return Button {
-            if entry.kind == .directory {
-                controller.toggleExpanded(entry)
-            } else {
-                controller.onPreviewFile?(entry)
-            }
-        } label: {
-            rowLabel(row)
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            rowMenuItems(for: entry)
-        } preview: {
-            rowMenuPreview(row)
-        }
-    }
-
-    /// The lifted preview shown with the context menu. Doubles as the
-    /// presentation detector: menu ITEMS are bridged to UIKit `UIMenu`
-    /// elements and never get view lifecycle, but the preview is a real
-    /// hosted SwiftUI view — its `onAppear`/`onDisappear` fire exactly at
-    /// present/dismiss, driving the card's opaque backstop. The platter
-    /// background also keeps the row readable while lifted (the default
-    /// preview is the bare row over the terminal). Sim-verified 2026-07-09
-    /// via the `TESSERA_FILES_HARNESS` debug screen.
-    ///
-    /// NOTE: SwiftUI evaluates this closure (and the menu-items builder)
-    /// eagerly for every row during ordinary body evaluation — only the
-    /// `onAppear`/`onDisappear` below track actual presentation. Never put
-    /// side effects in the closure body itself.
-    private func rowMenuPreview(_ row: FilesPanelController.Row) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
-        return rowLabel(row)
-            .padding(.vertical, 3)
-            .frame(width: Self.width - 24)
-            .background(T.isLight ? Color(rgbInt: 0xF2F2F7) : Color(rgbInt: 0x1C1C1E), in: shape)
-            .overlay { shape.stroke(T.border, lineWidth: 0.5) }
-            .onAppear { menuPresenceChanged(present: true) }
-            .onDisappear { menuPresenceChanged(present: false) }
+        backstopOn = on
+        FilesUIDiagnostics.shared.timeline(
+            on ? "backstop-on" : "backstop-off", detail: "why=\(reason)"
+        )
     }
 
     private func panelTouchChanged(_ active: Bool) {
         guard active != panelTouchActive else { return }
         panelTouchActive = active
+        FilesUIDiagnostics.shared.timeline(active ? "touch-down" : "touch-up")
+        if active {
+            FilesUIDiagnostics.shared.scrollBegan(.filesTree)
+        } else {
+            FilesUIDiagnostics.shared.scrollEnded(.filesTree)
+        }
         backstopFailsafeTask?.cancel()
         backstopFailsafeTask = nil
         if active {
             backstopReleaseTask?.cancel()
             backstopReleaseTask = nil
-            backstopOn = true
+            setBackstop(true, reason: "touch-down")
             // A drag-out session or the context-menu interaction claiming
             // the touch can swallow the drag gesture's `onEnded`; don't
             // let a stale touch flag wedge the card opaque forever.
@@ -1238,6 +1259,7 @@ struct FilesPanelView: View {
                 defer { backstopFailsafeTask = nil }
                 try? await Task.sleep(nanoseconds: 15_000_000_000)
                 guard !Task.isCancelled, presentedMenuItemCount == 0 else { return }
+                FilesUIDiagnostics.shared.timeline("backstop-failsafe")
                 panelTouchActive = false
                 scheduleBackstopRelease(after: 0)
             }
@@ -1250,10 +1272,12 @@ struct FilesPanelView: View {
 
     private func menuPresenceChanged(present: Bool) {
         presentedMenuItemCount = max(0, presentedMenuItemCount + (present ? 1 : -1))
+        FilesUIDiagnostics.shared.menuPresenceDidChange(count: presentedMenuItemCount)
+        FilesUIDiagnostics.shared.timeline(present ? "menu-present" : "menu-dismiss")
         if presentedMenuItemCount > 0 {
             backstopReleaseTask?.cancel()
             backstopReleaseTask = nil
-            backstopOn = true
+            setBackstop(true, reason: "menu-present")
         } else {
             // The menu interaction claimed the long-press touch, so the drag
             // sensor's `onEnded` never fired and `panelTouchActive` is stale-
@@ -1270,157 +1294,22 @@ struct FilesPanelView: View {
 
     private func scheduleBackstopRelease(after seconds: Double) {
         backstopReleaseTask?.cancel()
+        FilesUIDiagnostics.shared.timeline(
+            "backstop-release-scheduled", detail: "delayMs=\(Int(seconds * 1_000))"
+        )
         backstopReleaseTask = Task { @MainActor in
             defer { backstopReleaseTask = nil }
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             guard !Task.isCancelled else { return }
-            if !panelTouchActive, presentedMenuItemCount == 0 {
-                backstopOn = false
+            guard !panelTouchActive, presentedMenuItemCount == 0 else {
+                FilesUIDiagnostics.shared.timeline(
+                    "backstop-release-skipped",
+                    detail: "touch=\(panelTouchActive ? 1 : 0) menuUp=\(presentedMenuItemCount)"
+                )
+                return
             }
+            setBackstop(false, reason: "release")
         }
-    }
-
-    @ViewBuilder
-    private func rowLabel(_ row: FilesPanelController.Row) -> some View {
-        let entry = row.entry
-        HStack(spacing: 7) {
-            if row.depth > 0, !filterActive {
-                Spacer().frame(width: CGFloat(row.depth) * 14)
-            }
-            Group {
-                if entry.kind == .directory {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 8.5, weight: .semibold))
-                        .foregroundStyle(T.fgDim)
-                        .rotationEffect(.degrees(controller.isExpanded(entry) ? 90 : 0))
-                } else {
-                    Spacer().frame(width: 9)
-                }
-            }
-            .frame(width: 10)
-            Image(systemName: iconName(for: entry))
-                .font(.system(size: 11))
-                .foregroundStyle(entry.isHidden ? T.fgDim : T.fgMuted)
-                .frame(width: 14)
-            nameText(for: entry)
-                .font(Typography.tesseraMono(size: 11, weight: entry.kind == .directory ? .medium : .regular))
-                .foregroundStyle(entry.isHidden ? T.fgDim : T.fg)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 8)
-            if filterActive, row.depth > 0 {
-                // Flattened match from an expanded subfolder: show where
-                // it lives instead of size (mockup §1).
-                Text(parentTag(for: entry))
-                    .font(Typography.tesseraMono(size: 9))
-                    .foregroundStyle(T.fgFaint)
-                    .lineLimit(1)
-                    .truncationMode(.head)
-            } else if controller.isLoading(entry) {
-                ProgressView()
-                    .controlSize(.mini)
-                    .tint(T.fgDim)
-            } else {
-                Text(meta(for: entry))
-                    .font(Typography.tesseraMono(size: 9.5))
-                    .foregroundStyle(T.fgDim)
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4.5)
-        .contentShape(Rectangle())
-    }
-
-    @ViewBuilder
-    private func rowMenuItems(for entry: RemoteFileEntry) -> some View {
-        if entry.kind != .directory {
-            if let preview = controller.onPreviewFile {
-                Button { preview(entry) } label: { Label("Quick Look", systemImage: "eye") }
-            }
-            if let download = controller.onDownloadFile {
-                Button { download(entry) } label: { Label("Download", systemImage: "arrow.down.circle") }
-            }
-            if let share = controller.onShareFile {
-                Button { share(entry) } label: { Label("Share…", systemImage: "square.and.arrow.up") }
-            }
-        }
-        if let sendPath = controller.onSendPathToTerminal {
-            // Also the Claude Code image-attach gesture (mockup §7's
-            // "Attach to Session" accelerator was dropped as redundant
-            // — the onboarding tour will teach this instead).
-            Button { sendPath(entry.path) } label: { Label("Send Path to Terminal", systemImage: "terminal") }
-        }
-        Button {
-            UIPasteboard.general.string = entry.path
-        } label: {
-            Label("Copy Path", systemImage: "doc.on.doc")
-        }
-        Divider()
-        Button {
-            renameText = entry.name
-            renameTarget = entry
-        } label: {
-            Label("Rename", systemImage: "pencil")
-        }
-        Button(role: .destructive) {
-            deleteTarget = entry
-        } label: {
-            Label("Delete…", systemImage: "trash")
-        }
-    }
-
-    private func iconName(for entry: RemoteFileEntry) -> String {
-        switch entry.kind {
-        case .directory: return "folder"
-        case .symlink: return "arrow.triangle.turn.up.right.diamond"
-        case .file:
-            let ext = (entry.name as NSString).pathExtension.lowercased()
-            switch ext {
-            case "png", "jpg", "jpeg", "gif", "heic", "webp", "svg", "bmp", "tiff":
-                return "photo"
-            case "mp4", "mov", "mkv", "avi", "webm":
-                return "film"
-            case "md", "txt", "log", "rst":
-                return "doc.text"
-            case "zip", "tar", "gz", "bz2", "xz", "7z", "rar":
-                return "shippingbox"
-            case "pdf":
-                return "doc.richtext"
-            default:
-                return "doc"
-            }
-        }
-    }
-
-    private func meta(for entry: RemoteFileEntry) -> String {
-        switch entry.kind {
-        case .directory: return "–"
-        case .symlink: return "link"
-        case .file:
-            guard let size = entry.size else { return "–" }
-            return ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
-        }
-    }
-
-    /// Name label; while filtering, the matched range renders accent.
-    private func nameText(for entry: RemoteFileEntry) -> Text {
-        guard filterActive,
-              let range = entry.name.range(of: controller.searchText, options: .caseInsensitive) else {
-            return Text(entry.name)
-        }
-        var attr = AttributedString(entry.name)
-        if let attrRange = Range(range, in: attr) {
-            attr[attrRange].foregroundColor = T.accent
-        }
-        return Text(attr)
-    }
-
-    /// "src/components/" for a match two levels under the panel root.
-    private func parentTag(for entry: RemoteFileEntry) -> String {
-        guard let root = controller.currentDirectory else { return "" }
-        let parent = (entry.path as NSString).deletingLastPathComponent
-        guard parent.hasPrefix(root), parent.count > root.count else { return "" }
-        return parent.dropFirst(root.count + (root == "/" ? 0 : 1)) + "/"
     }
 
     // MARK: - Completion dropdown (§2, shared with quick open §4)
@@ -1453,7 +1342,7 @@ struct FilesPanelView: View {
     ) -> some View {
         Button { accept(entry) } label: {
             HStack(spacing: 7) {
-                Image(systemName: iconName(for: entry))
+                Image(systemName: filesIconName(for: entry))
                     .font(.system(size: 10))
                     .foregroundStyle(highlighted ? T.accent : T.fgDim)
                     .frame(width: 14)
@@ -1691,7 +1580,7 @@ struct FilesPanelView: View {
                     .foregroundStyle(T.fgDim)
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                if case .running = item.phase {
+                if item.phase.canCancel {
                     Button {
                         transfers.cancel(item)
                     } label: {
@@ -1703,7 +1592,7 @@ struct FilesPanelView: View {
                     .buttonStyle(.plain)
                 }
             }
-            if case .running(let fraction) = item.phase {
+            if let fraction = item.phase.visibleProgressFraction {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule().fill(T.fgFaint)
@@ -1725,7 +1614,7 @@ struct FilesPanelView: View {
         case .completed: return T.green
         case .failed: return T.red
         case .cancelled: return T.fgDim
-        case .queued, .running: return T.accent
+        case .queued, .running, .cancelling: return T.accent
         }
     }
 
@@ -1739,10 +1628,455 @@ struct FilesPanelView: View {
             return item.direction == .upload
                 ? Text(verbatim: "→ \(item.remotePath)")
                 : Text("downloading")
+        case .cancelling: return Text("cancelling…")
         case .completed: return Text("done")
         case .failed(let message): return Text(verbatim: message)
         case .cancelled: return Text("cancelled")
         }
+    }
+}
+
+private extension TransferPhase {
+    var canCancel: Bool {
+        switch self {
+        case .queued, .running: return true
+        case .cancelling, .completed, .failed, .cancelled: return false
+        }
+    }
+
+    var visibleProgressFraction: Double?? {
+        switch self {
+        case .running(let fraction), .cancelling(let fraction): return .some(fraction)
+        case .queued, .completed, .failed, .cancelled: return nil
+        }
+    }
+}
+
+/// SF Symbol for a listing entry. Shared by the outline rows and the path
+/// completion dropdown.
+private func filesIconName(for entry: RemoteFileEntry) -> String {
+    switch entry.kind {
+    case .directory: return "folder"
+    case .symlink: return "arrow.triangle.turn.up.right.diamond"
+    case .other: return "questionmark.square.dashed"
+    case .file:
+        let ext = (entry.name as NSString).pathExtension.lowercased()
+        switch ext {
+        case "png", "jpg", "jpeg", "gif", "heic", "webp", "svg", "bmp", "tiff":
+            return "photo"
+        case "mp4", "mov", "mkv", "avi", "webm":
+            return "film"
+        case "md", "txt", "log", "rst":
+            return "doc.text"
+        case "zip", "tar", "gz", "bz2", "xz", "7z", "rar":
+            return "shippingbox"
+        case "pdf":
+            return "doc.richtext"
+        default:
+            return "doc"
+        }
+    }
+}
+
+/// One outline row, isolated from the panel's own re-render churn.
+///
+/// The panel body re-evaluates on ordinary session traffic — the cwd poller
+/// reports, a transfer finishes, the listing reloads — and SwiftUI builds
+/// `.contextMenu`'s items AND its preview eagerly for every row it touches.
+/// Handing that rebuilt menu to a LIVE `UIContextMenuInteraction` makes UIKit
+/// crossfade the platter (the flicker) and cancel the touch tracking on the
+/// item under the finger, so the tap never lands — measured 2026-08-20 on a
+/// 220-row listing: every panel pass rebuilt all 52 realized rows, and
+/// XCUITest reported the menu item as a zero-size, non-hittable element.
+/// `Equatable` + `.equatable()` at the call site is what stops that: unless
+/// this row's own data changed, SwiftUI never reaches the menu.
+///
+/// Every input the row draws from must therefore be a stored, comparable
+/// property. Reaching into `controller` for display state inside `body` would
+/// both re-register observation and escape the equality check — read it in
+/// the parent and pass the value. Actions are the exception: they run at tap
+/// time, long after the body, so they may go through `controller`.
+private struct FileRowView: View, Equatable {
+
+    /// Which context-menu actions the session wired up. Compared, so a
+    /// handler installed later still rebuilds the menu.
+    struct MenuCapabilities: Equatable {
+        var canPreview = false
+        var canDownload = false
+        var canShare = false
+        var canSendPath = false
+    }
+
+    let row: FilesPanelController.Row
+    let T: DesignTokens
+    let filterActive: Bool
+    /// Empty unless the filter is active; drives the match highlight.
+    let searchText: String
+    /// Panel root — the "src/components/" tag on a flattened match.
+    let rootDirectory: String?
+    let isExpanded: Bool
+    let isLoading: Bool
+    let canDrag: Bool
+    let capabilities: MenuCapabilities
+
+    /// The panel's single long-lived model object; compared by identity.
+    let controller: FilesPanelController
+    @Binding var renameTarget: RemoteFileEntry?
+    @Binding var renameText: String
+    @Binding var deleteTarget: RemoteFileEntry?
+    let onMenuPresence: (Bool) -> Void
+
+    /// Bindings and closures are not comparable. They stay out of `==`
+    /// because they are stable for the lifetime of this row's identity —
+    /// they address the panel's `@State` storage, not a captured snapshot.
+    static func == (a: FileRowView, b: FileRowView) -> Bool {
+        #if DEBUG
+        // Test seam: `TESSERA_FILES_ROW_EQUATABLE=0` forces every comparison
+        // to miss, which reinstates the pre-fix behaviour (every panel pass
+        // rebuilds every realized row) so the probe can record the
+        // bug-present arm from the shipping binary.
+        if FilesDiagnosticsEnvironment.rowEquatableDisabled { return false }
+        #endif
+        return a.row == b.row
+            && a.filterActive == b.filterActive
+            && a.searchText == b.searchText
+            && a.rootDirectory == b.rootDirectory
+            && a.isExpanded == b.isExpanded
+            && a.isLoading == b.isLoading
+            && a.canDrag == b.canDrag
+            && a.capabilities == b.capabilities
+            && a.controller === b.controller
+            && a.T == b.T
+    }
+
+    private var entry: RemoteFileEntry { row.entry }
+
+    @ViewBuilder
+    var body: some View {
+        if FilesDiagnosticsEnvironment.uikitMenuDisabled {
+            swiftUIBody
+        } else {
+            uikitBody
+        }
+    }
+
+    /// Tap, menu, and drag all live on one transparent UIKit view laid over
+    /// the row. SwiftUI's `.contextMenu` repaints its platter for several
+    /// frames after presenting — the single flicker just after the menu
+    /// opens — where UIKit's own interaction settles inside the presentation
+    /// animation. See `FileRowInteraction`.
+    private var uikitBody: some View {
+        let _ = FilesUIDiagnostics.shared.rowBuild()
+        return label
+            .accessibilityHidden(true)
+            .overlay {
+                FileRowInteraction(
+                    identifier: "files.row.\(entry.name)",
+                    accessibilityLabel: accessibilityDescription,
+                    sections: menuSections,
+                    onPrimary: primaryAction,
+                    onMenuPresence: onMenuPresence,
+                    dragProvider: dragProvider,
+                    makePreview: FilesDiagnosticsEnvironment.menuPreviewDisabled
+                        ? nil
+                        : { AnyView(menuPreview) },
+                    previewWidth: FilesPanelView.width - 24
+                )
+            }
+    }
+
+    /// The SwiftUI label is hidden from accessibility so the row is one
+    /// element, not two — so its description has to be rebuilt here.
+    private var accessibilityDescription: String {
+        switch entry.kind {
+        case .directory:
+            return String(
+                localized: "\(entry.name), folder",
+                comment: "VoiceOver description for a named directory in the remote Files browser"
+            )
+        case .symlink:
+            return String(
+                localized: "\(entry.name), link",
+                comment: "VoiceOver description for a named symbolic link in the remote Files browser"
+            )
+        case .other:
+            return entry.name
+        case .file:
+            return meta == "–"
+                ? entry.name
+                : String(
+                    localized: "\(entry.name), \(meta)",
+                    comment: "VoiceOver description for a named remote file followed by its localized metadata"
+                )
+        }
+    }
+
+    private func primaryAction() {
+        if entry.kind == .directory {
+            controller.toggleExpanded(entry)
+        } else if entry.kind != .other {
+            controller.onPreviewFile?(entry)
+        }
+    }
+
+    private var dragProvider: (() -> NSItemProvider?)? {
+        guard canDrag, !FilesDiagnosticsEnvironment.rowDragDisabled else { return nil }
+        return { controller.dragItemProvider(for: entry) }
+    }
+
+    /// The menu, as data. UIKit builds the platter from this only when a
+    /// menu is actually presented, so a row rebuild can no longer reach a
+    /// live `UIMenu` — the repeated flicker is now structurally impossible,
+    /// not just short-circuited by `==`.
+    private var menuSections: [[FileRowMenuAction]] {
+        var primary: [FileRowMenuAction] = []
+        if entry.kind != .directory {
+            if capabilities.canPreview {
+                primary.append(FileRowMenuAction(title: "Quick Look", systemImage: "eye") {
+                    controller.onPreviewFile?(entry)
+                })
+            }
+            if capabilities.canDownload {
+                primary.append(FileRowMenuAction(
+                    title: "Download", systemImage: "arrow.down.circle"
+                ) {
+                    controller.onDownloadFile?(entry)
+                })
+            }
+            if capabilities.canShare {
+                primary.append(FileRowMenuAction(
+                    title: "Share…", systemImage: "square.and.arrow.up"
+                ) {
+                    controller.onShareFile?(entry)
+                })
+            }
+        }
+        if capabilities.canSendPath {
+            primary.append(FileRowMenuAction(
+                title: "Send Path to Terminal", systemImage: "terminal"
+            ) {
+                controller.onSendPathToTerminal?(entry.path)
+            })
+        }
+        primary.append(FileRowMenuAction(title: "Copy Path", systemImage: "doc.on.doc") {
+            UIPasteboard.general.string = entry.path
+        })
+
+        let edits = [
+            FileRowMenuAction(title: "Rename", systemImage: "pencil") {
+                renameText = entry.name
+                renameTarget = entry
+            },
+            FileRowMenuAction(title: "Delete…", systemImage: "trash", isDestructive: true) {
+                deleteTarget = entry
+            },
+        ]
+        return [primary, edits]
+    }
+
+    @ViewBuilder
+    private var swiftUIBody: some View {
+        if canDrag, !FilesDiagnosticsEnvironment.rowDragDisabled {
+            base.onDrag {
+                controller.dragItemProvider(for: entry) ?? NSItemProvider()
+            }
+        } else {
+            base
+        }
+    }
+
+    @ViewBuilder
+    private var base: some View {
+        #if DEBUG
+        if FilesDiagnosticsEnvironment.menuPreviewDisabled {
+            rowButton.contextMenu { menuItems }
+        } else {
+            rowButton.contextMenu { menuItems } preview: { menuPreview }
+        }
+        #else
+        rowButton.contextMenu { menuItems } preview: { menuPreview }
+        #endif
+    }
+
+    private var rowButton: some View {
+        FilesUIDiagnostics.shared.rowBuild()
+        return Button(action: primaryAction) {
+            label
+        }
+        .buttonStyle(.plain)
+        // Stable target for UI tests (the visible label folds in the size
+        // column, so name-based matching is brittle).
+        .accessibilityIdentifier("files.row.\(entry.name)")
+    }
+
+    private var label: some View {
+        HStack(spacing: 7) {
+            if row.depth > 0, !filterActive {
+                Spacer().frame(width: CGFloat(row.depth) * 14)
+            }
+            Group {
+                if entry.kind == .directory {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8.5, weight: .semibold))
+                        .foregroundStyle(T.fgDim)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                } else {
+                    Spacer().frame(width: 9)
+                }
+            }
+            .frame(width: 10)
+            Image(systemName: filesIconName(for: entry))
+                .font(.system(size: 11))
+                .foregroundStyle(entry.isHidden ? T.fgDim : T.fgMuted)
+                .frame(width: 14)
+            nameText
+                .font(Typography.tesseraMono(
+                    size: 11, weight: entry.kind == .directory ? .medium : .regular))
+                .foregroundStyle(entry.isHidden ? T.fgDim : T.fg)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 8)
+            if filterActive, row.depth > 0 {
+                // Flattened match from an expanded subfolder: show where
+                // it lives instead of size (mockup §1).
+                Text(parentTag)
+                    .font(Typography.tesseraMono(size: 9))
+                    .foregroundStyle(T.fgFaint)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            } else if isLoading {
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(T.fgDim)
+            } else {
+                Text(meta)
+                    .font(Typography.tesseraMono(size: 9.5))
+                    .foregroundStyle(T.fgDim)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4.5)
+        .contentShape(Rectangle())
+    }
+
+    /// The lifted preview shown with the context menu. Doubles as the
+    /// presentation detector: menu ITEMS are bridged to UIKit `UIMenu`
+    /// elements and never get view lifecycle, but the preview is a real
+    /// hosted SwiftUI view — its `onAppear`/`onDisappear` fire exactly at
+    /// present/dismiss, driving the card's opaque backstop. The platter
+    /// background also keeps the row readable while lifted (the default
+    /// preview is the bare row over the terminal). Sim-verified 2026-07-09
+    /// via the `TESSERA_FILES_HARNESS` debug screen.
+    ///
+    /// NOTE: SwiftUI evaluates this property (and `menuItems`) eagerly
+    /// whenever it builds the row — only the `onAppear`/`onDisappear` below
+    /// track actual presentation. Never put side effects in the body itself.
+    private var menuPreview: some View {
+        FilesUIDiagnostics.shared.menuPreviewBuild()
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        return label
+            .padding(.vertical, 3)
+            .frame(width: FilesPanelView.width - 24)
+            .background(T.isLight ? Color(rgbInt: 0xF2F2F7) : Color(rgbInt: 0x1C1C1E), in: shape)
+            .overlay { shape.stroke(T.border, lineWidth: 0.5) }
+            .modifier(MenuPresenceReporter(report: onMenuPresence))
+    }
+
+    /// On the UIKit path the interaction's delegate reports presentation, so
+    /// the hosted preview must not report it a second time — a doubled count
+    /// keeps the backstop armed past the dismissal animation.
+    private struct MenuPresenceReporter: ViewModifier {
+        let report: (Bool) -> Void
+
+        @ViewBuilder
+        func body(content: Content) -> some View {
+            if FilesDiagnosticsEnvironment.uikitMenuDisabled {
+                content
+                    .onAppear { report(true) }
+                    .onDisappear { report(false) }
+            } else {
+                content
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var menuItems: some View {
+        let _ = FilesUIDiagnostics.shared.menuBuild()
+        if entry.kind != .directory {
+            if capabilities.canPreview {
+                Button { controller.onPreviewFile?(entry) } label: {
+                    Label("Quick Look", systemImage: "eye")
+                }
+            }
+            if capabilities.canDownload {
+                Button { controller.onDownloadFile?(entry) } label: {
+                    Label("Download", systemImage: "arrow.down.circle")
+                }
+            }
+            if capabilities.canShare {
+                Button { controller.onShareFile?(entry) } label: {
+                    Label("Share…", systemImage: "square.and.arrow.up")
+                }
+            }
+        }
+        if capabilities.canSendPath {
+            // Also the Claude Code image-attach gesture (mockup §7's
+            // "Attach to Session" accelerator was dropped as redundant
+            // — the onboarding tour will teach this instead).
+            Button { controller.onSendPathToTerminal?(entry.path) } label: {
+                Label("Send Path to Terminal", systemImage: "terminal")
+            }
+        }
+        Button {
+            UIPasteboard.general.string = entry.path
+        } label: {
+            Label("Copy Path", systemImage: "doc.on.doc")
+        }
+        Divider()
+        Button {
+            renameText = entry.name
+            renameTarget = entry
+        } label: {
+            Label("Rename", systemImage: "pencil")
+        }
+        Button(role: .destructive) {
+            deleteTarget = entry
+        } label: {
+            Label("Delete…", systemImage: "trash")
+        }
+    }
+
+    /// Name label; while filtering, the matched range renders accent.
+    private var nameText: Text {
+        guard filterActive,
+              let range = entry.name.range(of: searchText, options: .caseInsensitive) else {
+            return Text(entry.name)
+        }
+        var attr = AttributedString(entry.name)
+        if let attrRange = Range(range, in: attr) {
+            attr[attrRange].foregroundColor = T.accent
+        }
+        return Text(attr)
+    }
+
+    private var meta: String {
+        switch entry.kind {
+        case .directory: return "–"
+        case .symlink: return "link"
+        case .other: return "–"
+        case .file:
+            guard let size = entry.size else { return "–" }
+            return ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+        }
+    }
+
+    /// "src/components/" for a match two levels under the panel root.
+    private var parentTag: String {
+        guard let root = rootDirectory else { return "" }
+        let parent = (entry.path as NSString).deletingLastPathComponent
+        guard parent.hasPrefix(root), parent.count > root.count else { return "" }
+        return parent.dropFirst(root.count + (root == "/" ? 0 : 1)) + "/"
     }
 }
 

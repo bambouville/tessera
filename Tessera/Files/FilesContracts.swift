@@ -71,6 +71,9 @@ struct RemoteFileEntry: Identifiable, Hashable, Sendable {
         /// Symlink as reported by the server. Resolution (does it point at
         /// a directory?) is deferred to navigation time via `realPath`.
         case symlink
+        /// FIFO, socket, device, or another server-reported entry kind that
+        /// Tessera cannot safely treat as a regular upload destination.
+        case other
     }
 
     /// Last path component.
@@ -168,6 +171,8 @@ protocol FileBridging: AnyObject, Observable {
     func listDirectory(_ path: String) async throws -> [RemoteFileEntry]
     func realPath(_ path: String) async throws -> String
     func createDirectory(_ path: String) async throws
+    /// Applies only the low 12 POSIX mode bits (rwx plus special bits).
+    func setPermissions(_ permissions: UInt16, at path: String) async throws
     func rename(from oldPath: String, to newPath: String) async throws
     func removeFile(_ path: String) async throws
     /// Non-recursive; a non-empty directory throws `.remoteOperationFailed`.
@@ -193,9 +198,33 @@ enum TransferPhase: Equatable, Sendable {
     case queued
     /// `fraction` is nil while indeterminate (unknown total).
     case running(fraction: Double?)
+    /// The transfer task has been cancelled but remote partial-file cleanup
+    /// has not finished yet. Keep the last progress fraction visible while
+    /// that cleanup runs.
+    case cancelling(fraction: Double?)
     case completed
     case failed(String)
     case cancelled
+}
+
+enum TransferCancellationReason: Equatable, Sendable {
+    case user
+    case backgroundTimeExpired
+
+    var failureMessage: String? {
+        switch self {
+        case .user:
+            return nil
+        case .backgroundTimeExpired:
+            return String(localized: "The upload stopped because iOS background time expired.")
+        }
+    }
+}
+
+enum BackgroundTransferAttention: Equatable, Sendable {
+    case none
+    case success
+    case failure
 }
 
 /// UI-facing record of one transfer. Owned and mutated by the queue on the
@@ -215,6 +244,14 @@ final class TransferItem: Identifiable {
     /// Set on completion of paste/regular uploads: the absolute remote path
     /// of the uploaded file (tilde-free, suitable for terminal injection).
     var resolvedRemotePath: String?
+    /// Internal cancellation bookkeeping. The queue keeps this separate from
+    /// `phase` so cancellation can remain pending until remote cleanup ends.
+    var cancellationReason: TransferCancellationReason?
+    var cleanupFailureMessage: String?
+    /// Once the complete staging file is being atomically renamed, cancelling
+    /// would create an ambiguous "mv succeeded but its reply was cancelled"
+    /// state. This final remote commit is intentionally allowed to finish.
+    var isFinalizingUpload = false
 
     init(direction: TransferDirection, displayName: String, remotePath: String, localURL: URL?) {
         self.direction = direction
@@ -228,6 +265,7 @@ final class TransferItem: Identifiable {
 protocol TransferQueueing: AnyObject, Observable {
     var items: [TransferItem] { get }
     var hasActive: Bool { get }
+    var backgroundAttention: BackgroundTransferAttention { get }
 
     @discardableResult
     func enqueueDownload(remotePath: String, displayName: String, to localURL: URL) -> TransferItem
@@ -238,13 +276,28 @@ protocol TransferQueueing: AnyObject, Observable {
     /// name. On completion `item.resolvedRemotePath` holds the absolute path.
     @discardableResult
     func enqueuePasteUpload(localURL: URL) -> TransferItem
-    func cancel(_ item: TransferItem)
+    /// Returns false only when the transfer has crossed its remote commit
+    /// boundary (or is already terminal), so callers do not suppress normal
+    /// completion delivery after a too-late Cancel tap.
+    @discardableResult
+    func cancel(_ item: TransferItem, reason: TransferCancellationReason) -> Bool
+    /// Marks an already-started upload as intentionally continuing outside
+    /// its foreground sheet. Only those items produce Files-button attention.
+    func markContinuedInBackground(_ item: TransferItem)
+    func acknowledgeBackgroundAttention()
     /// Drop finished (completed/failed/cancelled) items from `items`.
     func clearFinished()
     /// Reap aged paste files in the host temp dir ("auto-cleans after
     /// N d"). Callers pass freshConnect=true when they just dialed the
     /// bridge; otherwise it runs at most once per connection.
     func scheduleReaperIfNeeded(freshConnect: Bool)
+}
+
+extension TransferQueueing {
+    @discardableResult
+    func cancel(_ item: TransferItem) -> Bool {
+        cancel(item, reason: .user)
+    }
 }
 
 // MARK: - Constants & preferences keys
@@ -285,6 +338,9 @@ final class MockFileBridge: FileBridging {
     var tree: [String: [RemoteFileEntry]]
     /// Artificial latency for exercising loading states.
     var latencyNanos: UInt64 = 0
+    /// Optional deterministic upload progress granularity for UI harnesses.
+    /// Production never uses MockFileBridge; ordinary tests keep one step.
+    var uploadProgressSteps = 1
 
     init(key: FileBridgeKey = FileBridgeKey(user: "mock", address: "mock.local", port: 22),
          tree: [String: [RemoteFileEntry]]? = nil) {
@@ -324,9 +380,29 @@ final class MockFileBridge: FileBridging {
             throw FileBridgeError.remoteOperationFailed("No such directory: \(parent)")
         }
         tree[p] = []
-        tree[parent]?.append(RemoteFileEntry(
+        tree[parent, default: []].append(RemoteFileEntry(
             name: (p as NSString).lastPathComponent, path: p, kind: .directory,
             size: nil, modified: Date(), permissions: 0o755))
+    }
+
+    func setPermissions(_ permissions: UInt16, at path: String) async throws {
+        guard state == .connected else { throw FileBridgeError.notConnected }
+        let p = Self.normalize(path)
+        let parent = (p as NSString).deletingLastPathComponent
+        guard var siblings = tree[parent],
+              let index = siblings.firstIndex(where: { $0.path == p }) else {
+            throw FileBridgeError.remoteOperationFailed("No such file: \(path)")
+        }
+        let entry = siblings[index]
+        siblings[index] = RemoteFileEntry(
+            name: entry.name,
+            path: entry.path,
+            kind: entry.kind,
+            size: entry.size,
+            modified: entry.modified,
+            permissions: permissions
+        )
+        tree[parent] = siblings
     }
 
     func rename(from oldPath: String, to newPath: String) async throws {
@@ -378,10 +454,17 @@ final class MockFileBridge: FileBridging {
         guard state == .connected else { throw FileBridgeError.notConnected }
         let size = (try? Data(contentsOf: localURL).count).map(Int64.init) ?? 0
         progress?(0, size)
-        if latencyNanos > 0 { try? await Task.sleep(nanoseconds: latencyNanos) }
+        let steps = max(1, uploadProgressSteps)
+        if latencyNanos > 0 {
+            for step in 1...steps {
+                try await Task.sleep(nanoseconds: latencyNanos / UInt64(steps))
+                progress?(Int64(step) * size / Int64(steps), size)
+            }
+        }
+        try Task.checkCancellation()
         let p = Self.normalize(remotePath)
         let parent = (p as NSString).deletingLastPathComponent
-        tree[parent]?.append(RemoteFileEntry(
+        tree[parent, default: []].append(RemoteFileEntry(
             name: (p as NSString).lastPathComponent, path: p, kind: .file,
             size: UInt64(size), modified: Date(), permissions: 0o644))
         progress?(size, size)

@@ -74,6 +74,20 @@ final class FileBridgeTests: XCTestCase {
             size: 42,
             mtime: modified
         )
+        let fifo = FileBridge.mapEntry(
+            filename: "events",
+            absoluteDirectoryPath: "/home/alice",
+            rawMode: 0o010600,
+            size: 0,
+            mtime: modified
+        )
+        let unknown = FileBridge.mapEntry(
+            filename: "metadata-omitted",
+            absoluteDirectoryPath: "/home/alice",
+            rawMode: nil,
+            size: 42,
+            mtime: modified
+        )
 
         XCTAssertEqual(directory.kind, .directory)
         XCTAssertNil(directory.size)
@@ -87,6 +101,10 @@ final class FileBridgeTests: XCTestCase {
         XCTAssertEqual(file.kind, .file)
         XCTAssertEqual(file.size, 42)
         XCTAssertEqual(file.permissions, 0o644)
+        XCTAssertEqual(fifo.kind, .other)
+        XCTAssertEqual(fifo.permissions, 0o600)
+        XCTAssertEqual(unknown.kind, .other)
+        XCTAssertNil(unknown.permissions)
     }
 
     func test_entryMapping_handlesHiddenNamesAndRootJoining() {

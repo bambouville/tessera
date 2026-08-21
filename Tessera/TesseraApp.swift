@@ -545,6 +545,8 @@ struct RootView: View {
                 AgentNotificationDeliveryHarnessView()
             } else if ProcessInfo.processInfo.environment["TESSERA_AGENT_PALETTE_HARNESS"] == "1" {
                 AgentPaletteHarnessView()
+            } else if ProcessInfo.processInfo.environment["TESSERA_UPLOAD_HARNESS"] == "1" {
+                UploadIngressHarnessView()
             } else if ProcessInfo.processInfo.environment["TESSERA_FILES_HARNESS"] == "1" {
                 FilesPanelHarnessView()
             } else if ProcessInfo.processInfo.environment["TESSERA_SCROLL_HARNESS"] == "1" {
@@ -563,6 +565,8 @@ struct RootView: View {
                 SwipePadDictationHarnessView()
             } else if ProcessInfo.processInfo.environment["TESSERA_SWIPEPAD_FAN_HARNESS"] == "1" {
                 SwipePadFanHarnessView()
+            } else if ProcessInfo.processInfo.environment["TESSERA_MARKDOWN_HARNESS"] == "1" {
+                MarkdownPreviewHarnessView()
             } else {
                 mainContent
             }
@@ -1208,13 +1212,285 @@ struct TerminalCanvasHarnessView: View {
     }
 }
 
+/// Host-free presentation harness for the in-app upload ingress sheet.
+/// Launch with `TESSERA_UPLOAD_HARNESS=1`; its mock bridge publishes twelve
+/// progress steps across six seconds so button fill and warnings are stable
+/// enough for screenshots and UI automation.
+private struct UploadIngressHarnessView: View {
+    private let request: UploadRequest
+    @State private var model: UploadSheetModel
+    @State private var queue: TransferQueue
+    @State private var status = "ready"
+
+    init() {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Tessera-upload-harness-large-video.mov")
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            try? Data(repeating: 0x54, count: 8 * 1_024 * 1_024).write(to: fileURL)
+        }
+        request = UploadRequest(
+            stagedURL: fileURL,
+            displayName: "Summer Trip — 4K.mov",
+            fileSize: 8 * 1_024 * 1_024,
+            sourceHint: "Photos"
+        )
+        let sheetModel = UploadSheetModel()
+        sheetModel.candidates = [
+            UploadHostCandidate(
+                id: UUID(),
+                label: "qi@perch",
+                isConnected: true,
+                isConnecting: false,
+                isActiveSession: true,
+                sessionCwd: "/home/qi/projects/tessera"
+            )
+        ]
+        _model = State(initialValue: sheetModel)
+        let bridge = MockFileBridge()
+        bridge.latencyNanos = 6_000_000_000
+        bridge.uploadProgressSteps = 12
+        _queue = State(initialValue: TransferQueue(bridge: bridge))
+    }
+
+    var body: some View {
+        UploadSheetView(
+            request: request,
+            model: model,
+            onUpload: { candidate, destination, pastePath in
+                let item: TransferItem
+                switch destination {
+                case .sessionCwd(let directory):
+                    item = queue.enqueueUpload(localURL: request.stagedURL, toDirectory: directory)
+                case .temp:
+                    item = queue.enqueuePasteUpload(localURL: request.stagedURL)
+                }
+                status = "uploading"
+                return UploadExecution(
+                    item: item,
+                    queue: queue,
+                    hostID: candidate.id,
+                    displayName: request.displayName,
+                    stagedURL: request.stagedURL,
+                    pastePath: pastePath
+                )
+            },
+            onContinueInBackground: { execution in
+                if ProcessInfo.processInfo.environment["TESSERA_UPLOAD_BACKGROUND_REJECT"] == "1" {
+                    return false
+                }
+                let copyPath: Bool
+                if case .foreground(let pastePath) = execution.delivery {
+                    copyPath = pastePath
+                } else {
+                    copyPath = false
+                }
+                execution.delivery = .background(copyPath: copyPath)
+                queue.markContinuedInBackground(execution.item)
+                status = copyPath ? "background-copy" : "background"
+                return true
+            },
+            onCancel: { status = "dismissed" }
+        )
+        .overlay(alignment: .topTrailing) {
+            Text(verbatim: status)
+                .font(Typography.tesseraMonoFixed(size: 10, weight: .medium))
+                .opacity(0.01)
+                .accessibilityIdentifier("upload.harness.status")
+        }
+        .environment(\.designTokens, DesignTokens.make(mode: .dark, accent: .blue))
+    }
+}
+
 /// Presentation harness for the floating Files card — launch with
 /// `SIMCTL_CHILD_TESSERA_FILES_HARNESS=1 xcrun simctl launch …`. Renders a
 /// high-contrast striped fake "terminal" behind the card so backdrop-loss
 /// bugs (context menu turning the glass transparent) are unmistakable in
 /// simctl screenshots. No SSH — the panel runs on `MockFileBridge`.
+/// DEBUG bisect surface — a plain UIKit label owning a real
+/// `UIContextMenuInteraction`, with no SwiftUI involvement in the menu at all.
+/// DEBUG harness for the Markdown preview. Renders a document whose tables
+/// are the shape that used to collapse into one run-on block — and then
+/// blank out — so the renderer can be checked without a host or a share.
+struct MarkdownPreviewHarnessView: View {
+    @State private var fileURL: URL?
+
+    /// `TESSERA_MARKDOWN_HARNESS_BLOCKS` grows the sample to the size that
+    /// scrolls badly in the field (the reported document parsed to 443
+    /// blocks), so the cost of realising one block is measurable.
+    private static var syntheticBlockCount: Int {
+        Int(ProcessInfo.processInfo.environment["TESSERA_MARKDOWN_HARNESS_BLOCKS"] ?? "") ?? 0
+    }
+
+    /// `TESSERA_MARKDOWN_HARNESS_KIND` pins the document to one block shape
+    /// so a run measures that shape alone. Default is the mixed register.
+    private static var syntheticKind: String {
+        ProcessInfo.processInfo.environment["TESSERA_MARKDOWN_HARNESS_KIND"] ?? "mixed"
+    }
+
+    /// Long paragraphs, code, and tables in the proportions the reported
+    /// register had — or, with `TESSERA_MARKDOWN_HARNESS_KIND`, one shape
+    /// repeated so its per-block cost stands alone.
+    private static func syntheticSource(blocks: Int) -> String {
+        var out = ["# Synthetic register\n"]
+        let sentence = """
+        The document is satisfied only when all 400 ledger rows pass, all 82 \
+        command keys have an accepted real-provider occurrence as defined \
+        above, both catalog equalities still hold for the tested build, every \
+        artifact reference resolves, all R6 rows survive restart/replay, and \
+        no secret appears in retained evidence.
+        """
+        func heading(_ index: Int) -> String { "## Section \(index)\n" }
+        func code(_ index: Int) -> String {
+            "```swift\nlet row\(index) = ledger.row(at: \(index))\n```\n"
+        }
+        func table(_ index: Int) -> String {
+            """
+            | Case | Owner | Status |
+            | --- | --- | --- |
+            | EV-\(index) | inbox delivery | open |
+            | EV-\(index)b | resident-side | closed |
+            """ + "\n"
+        }
+        func paragraph(_ index: Int) -> String {
+            "\(sentence) Paragraph \(index) of the register.\n"
+        }
+
+        let kind = Self.syntheticKind
+        for index in 0..<blocks {
+            switch kind {
+            case "heading": out.append(heading(index))
+            case "code": out.append(code(index))
+            case "table": out.append(table(index))
+            case "paragraph": out.append(paragraph(index))
+            default:
+                switch index % 8 {
+                case 0: out.append(heading(index))
+                case 3: out.append(code(index))
+                case 6: out.append(table(index))
+                default: out.append(paragraph(index))
+                }
+            }
+        }
+        return out.joined(separator: "\n")
+    }
+
+    private static let sample = """
+    # Independent pre-run blocker register
+
+    This register is diagnostic, not a reduced completion target.
+
+    | Case | Owner | Status | Note |
+    | --- | --- | --- | --- |
+    | EV-EMP-01 | offer/proposal inbox delivery | open | accept leg |
+    | EV-EQ-01/02 | resident-side event delivery | closed | planning fallback |
+    | EV-GOV-01 | shipped employment floor | open | recipe/product review |
+    | EV-MKT-03 | conversation.create inbox rows | open | patroned bank-manager yield |
+
+    ## Audit-test traceability
+
+    | Lane | Artifact | Bound |
+    | --- | --- | --- |
+    | A | `scripts/e2e_coverage_audit.py` | 400 rows |
+    | B | journal window | 82 keys |
+
+    No unresolved product or specification blocker remains in this register
+    after the corrections recorded above.
+    """
+
+    var body: some View {
+        Group {
+            if let fileURL {
+                QuickLookPresenter(fileURL: fileURL, displayTitle: "register.md")
+            } else {
+                ProgressView()
+            }
+        }
+        .task {
+            guard fileURL == nil else { return }
+            // A real reported document, staged into the container by the
+            // runner, beats any synthetic one: its inline emphasis, links,
+            // and code spans are what make a block expensive to realise.
+            let staged = FileManager.default.temporaryDirectory
+                .appendingPathComponent("markdown-harness-real.md")
+            if FileManager.default.fileExists(atPath: staged.path) {
+                fileURL = staged
+                return
+            }
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("markdown-harness-register.md")
+            let blocks = Self.syntheticBlockCount
+            let source = blocks > 0 ? Self.syntheticSource(blocks: blocks) : Self.sample
+            try? source.write(to: url, atomically: true, encoding: .utf8)
+            fileURL = url
+        }
+    }
+}
+
+struct UIKitContextMenuProbe: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        let label = ProbeLabel()
+        label.text = "  uikit probe row"
+        label.textColor = .white
+        label.backgroundColor = .black
+        label.isUserInteractionEnabled = true
+        label.accessibilityIdentifier = "files.row.uikit-probe"
+        label.isAccessibilityElement = true
+        label.addInteraction(UIContextMenuInteraction(delegate: label))
+        return label
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {}
+
+    final class ProbeLabel: UILabel, UIContextMenuInteractionDelegate {
+        /// With `TESSERA_FILES_MENU_PROBE_PREVIEW=1` the configuration
+        /// carries a `UIHostingController` preview — the same shape SwiftUI's
+        /// `.contextMenu(preview:)` builds. Isolates whether hosting a
+        /// preview is what stretches the platter's settle.
+        private var usesHostedPreview: Bool {
+            ProcessInfo.processInfo.environment["TESSERA_FILES_MENU_PROBE_PREVIEW"] == "1"
+        }
+
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            configurationForMenuAtLocation location: CGPoint
+        ) -> UIContextMenuConfiguration? {
+            let previewProvider: UIContextMenuContentPreviewProvider? = usesHostedPreview
+                ? {
+                    let controller = UIHostingController(
+                        rootView: Text(verbatim: "uikit probe row")
+                            .font(.system(size: 15, weight: .bold))
+                            .padding(10)
+                            .frame(width: 316, alignment: .leading)
+                            .background(Color(white: 0.11))
+                    )
+                    controller.preferredContentSize = CGSize(width: 316, height: 44)
+                    return controller
+                }
+                : nil
+            return UIContextMenuConfiguration(identifier: nil, previewProvider: previewProvider) { _ in
+                UIMenu(children: [
+                    UIAction(title: "Quick Look") { _ in },
+                    UIAction(title: "Download") { _ in },
+                    UIAction(title: "Share…") { _ in },
+                    UIAction(title: "Send Path to Terminal") { _ in },
+                    UIAction(title: "Copy Path") { _ in },
+                    UIAction(title: "Rename") { _ in },
+                    UIAction(title: "Delete…", attributes: .destructive) { _ in },
+                ])
+            }
+        }
+    }
+}
+
 struct FilesPanelHarnessView: View {
-    @State private var controller: FilesPanelController
+    // Built empty and wired ONCE from `.task`. Doing the wiring in `init()`
+    // ran it on every root body pass, and `terminalReportedDirectory` reads
+    // `currentDirectory` — which registered the ROOT view as an observer of
+    // a property the throwaway controller's own load then wrote, spinning
+    // the app at 100% CPU. Harness-only, but it masks whatever it is
+    // supposed to measure.
+    @State private var controller = FilesPanelController()
+    @State private var configured = false
 
     private var usesLightAppearance: Bool {
         ProcessInfo.processInfo.environment["TESSERA_FILES_HARNESS_LIGHT"] == "1"
@@ -1227,9 +1503,40 @@ struct FilesPanelHarnessView: View {
         )
     }
 
-    init() {
-        let controller = FilesPanelController()
+    /// The residual-flicker controls are off unless asked for — the harness
+    /// also serves glass and quick-open captures, which must keep their
+    /// existing composition.
+    private static var showsMenuBisectProbes: Bool {
+        ProcessInfo.processInfo.environment["TESSERA_FILES_MENU_PROBES"] == "1"
+    }
+
+    /// Row count for the synthetic listing (`TESSERA_FILES_HARNESS_FILECOUNT`).
+    /// 0 keeps the small canned tree; the context-menu churn case needs a
+    /// realistically long directory (the reporter's was ~200 rows).
+    private static var harnessFileCount: Int {
+        Int(ProcessInfo.processInfo.environment["TESSERA_FILES_HARNESS_FILECOUNT"] ?? "") ?? 0
+    }
+
+    /// Milliseconds between synthetic listing refreshes
+    /// (`TESSERA_FILES_HARNESS_CHURN`). Stands in for a live session's
+    /// re-render pressure on the panel — the cwd poller reporting, a
+    /// transfer finishing, the directory reloading — so the context-menu
+    /// flicker reproduces without a host.
+    private static var harnessChurnMilliseconds: Int {
+        Int(ProcessInfo.processInfo.environment["TESSERA_FILES_HARNESS_CHURN"] ?? "") ?? 0
+    }
+
+    /// What the last context-menu action did, surfaced as text so a UI
+    /// test can assert that a menu item actually fired.
+    @State private var lastMenuAction = "none"
+
+    private func configureIfNeeded() {
+        guard !configured else { return }
+        configured = true
         let bridge = MockFileBridge()
+        if Self.harnessFileCount > 0 {
+            bridge.tree = Self.syntheticTree(fileCount: Self.harnessFileCount)
+        }
         controller.attach(bridge: bridge)
         // Wire the real file actions over the mock bridge so row taps stage
         // and present for real — that's what makes Quick Look (and its size
@@ -1238,9 +1545,40 @@ struct FilesPanelHarnessView: View {
             transfers: TransferQueue(bridge: bridge),
             hostFolderName: "MockHost"
         )
+        // Menu-tap oracle: the status label reports which item fired, so a
+        // UI test can prove the platter is still hit-testable.
+        controller.onSendPathToTerminal = { path in
+            lastMenuAction = "send:\((path as NSString).lastPathComponent)"
+        }
         controller.open()
-        controller.terminalReportedDirectory("/home/mock/projects/dashboard")
-        _controller = State(initialValue: controller)
+        controller.terminalReportedDirectory(Self.harnessDirectory)
+    }
+
+    private static let harnessDirectory = "/home/mock/projects/dashboard"
+
+    /// One directory holding `fileCount` files — enough rows that the
+    /// panel body's per-pass row/menu construction is measurable.
+    private static func syntheticTree(fileCount: Int) -> [String: [RemoteFileEntry]] {
+        let home = "/home/mock"
+        let proj = "\(home)/projects/dashboard"
+        let files = (0..<fileCount).map { i in
+            RemoteFileEntry(
+                name: String(format: "report_%04d_analysis.md", i),
+                path: String(format: "\(proj)/report_%04d_analysis.md", i),
+                kind: .file, size: UInt64(1_024 + i * 37), modified: nil,
+                permissions: 0o644
+            )
+        }
+        return [
+            home: [RemoteFileEntry(name: "projects", path: "\(home)/projects",
+                                   kind: .directory, size: nil, modified: nil,
+                                   permissions: 0o755)],
+            "\(home)/projects": [
+                RemoteFileEntry(name: "dashboard", path: proj, kind: .directory,
+                                size: nil, modified: nil, permissions: 0o755)
+            ],
+            proj: files,
+        ]
     }
 
     var body: some View {
@@ -1254,10 +1592,46 @@ struct FilesPanelHarnessView: View {
                 ] == "quick"
             )
 
+            if Self.showsMenuBisectProbes {
+            // UIKit-native control: its `UIMenu` is built once, at press
+            // time, by `UIContextMenuInteraction` — no SwiftUI bridge, no
+            // eager menu building, no deferred elements. If this platter
+            // settles on the same schedule as the SwiftUI one, the settle
+            // belongs to `UIContextMenuInteraction` and no amount of
+            // owning the interaction removes it.
+            UIKitContextMenuProbe()
+                .frame(width: 220, height: 44)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .padding(.bottom, 80)
+
+            // Control surface for the residual-flicker bisect: a bare
+            // SwiftUI view with a context menu, sharing nothing with the
+            // Files panel — no glass card, no drag, no custom preview, no
+            // observable model. If its platter repaints on the same
+            // schedule the panel's does, the repaint is the platform's.
+            Text(verbatim: "plain probe row")
+                .font(Typography.tesseraMonoFixed(size: 15, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(10)
+                .background(.black)
+                .accessibilityIdentifier("files.row.plain-probe")
+                .contextMenu {
+                    Button("Quick Look") {}
+                    Button("Download") {}
+                    Button("Share…") {}
+                    Button("Send Path to Terminal") { lastMenuAction = "send:plain-probe" }
+                    Button("Copy Path") {}
+                    Divider()
+                    Button("Rename") {}
+                    Button("Delete…", role: .destructive) {}
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            }
+
             // The harness renders the panel unconditionally (the glass
             // captures need it on screen), so `close()` is otherwise
             // invisible. Surface the state for hit-test probes.
-            Text(verbatim: "isOpen: \(controller.isOpen ? "true" : "false")")
+            Text(verbatim: "isOpen: \(controller.isOpen ? "true" : "false") action: \(lastMenuAction)")
                 .font(Typography.tesseraMonoFixed(size: 15, weight: .bold))
                 .foregroundStyle(.white)
                 .padding(6)
@@ -1267,6 +1641,22 @@ struct FilesPanelHarnessView: View {
         }
         .environment(\.colorScheme, usesLightAppearance ? .light : .dark)
         .preferredColorScheme(usesLightAppearance ? .light : .dark)
+        .task { configureIfNeeded() }
+        // Reloads the listing on a cadence — the same shape of update a
+        // live panel takes (poller report, transfer completion, refresh).
+        // The mock tree is stable, so every reload yields IDENTICAL rows:
+        // nothing visible should move, and no row's context menu should be
+        // rebuilt.
+        .task {
+            let ms = Self.harnessChurnMilliseconds
+            guard ms > 0 else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(ms) * 1_000_000)
+                guard !Task.isCancelled else { return }
+                controller.terminalReportedDirectory(Self.harnessDirectory)
+                controller.refresh()
+            }
+        }
         .onAppear {
             guard UIDevice.current.userInterfaceIdiom != .phone else { return }
             guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene else {

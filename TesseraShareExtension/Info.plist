@@ -7,7 +7,7 @@
 		<key>NSExtensionAttributes</key>
 		<dict>
 			<key>NSExtensionActivationRule</key>
-			<string>SUBQUERY(extensionItems, $extensionItem, SUBQUERY($extensionItem.attachments, $attachment, (ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.image") AND NOT (ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.file-url")).@count == $extensionItem.attachments.@count).@count == extensionItems.@count AND extensionItems.@count &gt; 0</string>
+			<string>SUBQUERY(extensionItems, $extensionItem, SUBQUERY($extensionItem.attachments, $attachment, ((ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.image") OR (ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.movie")) AND NOT (ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.file-url")).@count == $extensionItem.attachments.@count).@count == extensionItems.@count AND extensionItems.@count &gt; 0</string>
 		</dict>
 		<key>NSExtensionPointIdentifier</key>
 		<string>com.apple.share-services</string>

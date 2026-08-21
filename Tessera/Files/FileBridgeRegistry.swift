@@ -12,13 +12,20 @@ final class FileBridgeRegistry {
     /// One transfer queue per bridge (host endpoint), shared by every
     /// session's panel to that host — transfers ride the bridge, so
     /// their queue has the bridge's lifetime, not a session's.
-    @ObservationIgnored private var transferQueues: [FileBridgeKey: TransferQueue] = [:]
+    private var transferQueues: [FileBridgeKey: TransferQueue] = [:]
 
     func transferQueue(for bridge: FileBridge) -> TransferQueue {
         if let queue = transferQueues[bridge.key] { return queue }
         let queue = TransferQueue(bridge: bridge)
         transferQueues[bridge.key] = queue
         return queue
+    }
+
+    /// Read-only lookup for chrome status. It deliberately does not create a
+    /// bridge or queue: merely rendering a terminal must never open a file
+    /// connection or change the user's connection lifecycle.
+    func existingTransferQueue(for key: FileBridgeKey) -> TransferQueue? {
+        transferQueues[key]
     }
 
     /// The bridge key deliberately strips terminal transport: SSH and mosh
