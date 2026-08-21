@@ -13,6 +13,14 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.bambouville.TesseraApp.upload.*</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>processing</string>
+	</array>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_tessera-bootstrap._tcp</string>
@@ -66,6 +74,21 @@
 				<string>public.heic</string>
 				<string>public.heif</string>
 				<string>com.compuserve.gif</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Video</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.movie</string>
+				<string>public.video</string>
+				<string>public.mpeg-4</string>
+				<string>com.apple.quicktime-movie</string>
 			</array>
 		</dict>
 		<dict>

@@ -126,6 +126,8 @@ enum RemotePathResolver {
             return .directory(path)
         case .file:
             return .file(entry)
+        case .other:
+            throw FileBridgeError.remoteOperationFailed("Unsupported file type: \(path)")
         case .symlink:
             // Directory-ness decides the route; only a listing can tell.
             if (try? await bridge.listDirectory(path)) != nil {

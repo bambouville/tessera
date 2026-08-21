@@ -104,7 +104,7 @@ struct SessionAccessoryBar: View {
 
             keyboardToggleButton
         }
-        .frame(height: 52)
+        .frame(height: Self.chipRowHeight)
         // Same floating material as the sidebar / top bar, driven by the
         // `chromeMaterial` setting so all chrome stays consistent.
         .floatingGlass(
@@ -124,12 +124,20 @@ struct SessionAccessoryBar: View {
         // clipped by the physical display corners. With the keyboard present,
         // keep the edge-to-edge attachment to the keyboard.
         .padding(.horizontal, collapsedPhoneEdgeInset)
-        // The Home indicator is an interactive system region, not usable
-        // control space. When the keyboard is dismissed, translate only the
-        // accessory surface above the system-reported safe-area boundary.
-        // `offset` deliberately leaves the parent layout unchanged so this
-        // transition cannot resize the terminal grid.
-        .offset(y: -collapsedPhoneBottomInset)
+        // The band the session reserves for the bar. Constant across every
+        // keyboard state on purpose — a band that changed with the keyboard
+        // would resize the terminal grid on every show and hide, which is the
+        // one thing the no-resize layout exists to prevent. The bar is a chip
+        // row inside that band, never a slab filling it: a material stretched
+        // to the full band reads as a fat empty shelf above the keys.
+        .frame(height: Self.reservedBandHeight(), alignment: .top)
+        // Where the row sits inside the band. Welded to the keyboard's top edge
+        // while it is up, resting above the home indicator once it is gone, on
+        // the keyboard's own curve. Offsetting DOWN from the band top is what
+        // makes this safe: the row can only ever travel within the band the
+        // session already reserved, so unlike the negative offset this replaces
+        // it can never hang over the live terminal rows above.
+        .offset(y: collapsedPhoneSlide)
         .onChange(of: appearance.accessoryBarKeys) { _, _ in modifierState.cancel() }
         .onChange(of: appearance.modifierBehavior) { _, _ in
             modifierState.behavior = resolvedModifierBehavior
@@ -352,6 +360,30 @@ struct SessionAccessoryBar: View {
         UIDevice.current.userInterfaceIdiom == .phone
     }
 
+    /// The row of chips itself.
+    static let chipRowHeight: CGFloat = 52
+
+    /// Vertical band a session reserves at its bottom edge for the bar. Callers
+    /// that stack their own chrome above the bar (the swipe pad, pane toasts,
+    /// the mosh backdrop bleed) measure from this, not from the chip row, or
+    /// they end up floating over the home-indicator strip on a phone.
+    static func reservedBandHeight() -> CGFloat {
+        chipRowHeight + homeIndicatorReserve()
+    }
+
+    /// Strip the phone's home indicator claims at the bottom of the window.
+    /// Reported by the window and unaffected by the keyboard (UIKit keeps the
+    /// keyboard out of the safe area), so the reserved band stays put while the
+    /// keyboard comes and goes.
+    static func homeIndicatorReserve() -> CGFloat {
+        guard UIDevice.current.userInterfaceIdiom == .phone else { return 0 }
+        return UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .safeAreaInsets.bottom ?? 0
+    }
+
     /// 1 while the bar rests in the phone's curved lower viewport, falling to 0
     /// as the session lifts clear of the home-indicator band. Deriving both
     /// collapsed insets from the lift keeps them on the keyboard's own curve.
@@ -372,8 +404,12 @@ struct SessionAccessoryBar: View {
         12 * collapsedPhoneProgress
     }
 
-    private var collapsedPhoneBottomInset: CGFloat {
-        (keyWindow?.safeAreaInsets.bottom ?? 0) * collapsedPhoneProgress
+    /// How far down its reserved band the chip row travels: the full home
+    /// indicator reserve while the keyboard is up (row flush against the
+    /// keyboard, nothing between them), zero once the keyboard is gone (row
+    /// parked at the band top, the reserve left clear below it).
+    private var collapsedPhoneSlide: CGFloat {
+        Self.homeIndicatorReserve() * (1 - collapsedPhoneProgress)
     }
 
     private var keyWindow: UIWindow? {

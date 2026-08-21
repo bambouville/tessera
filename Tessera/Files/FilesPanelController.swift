@@ -491,6 +491,10 @@ final class FilesPanelController {
         // promise too — the transfer path only reaps when something
         // is actually transferred.
         transfers?.scheduleReaperIfNeeded(freshConnect: !wasConnected)
+        // A cancelled upload whose immediate cleanup lost connectivity keeps
+        // a durable journal entry. Opening Files is the next ordinary bridge
+        // connection, so retry it here even if the user starts no new transfer.
+        await TransferQueue.retryPendingRemoteUploadCleanups(using: bridge)
         let target = (followEnabled ? terminalDirectory : currentDirectory)
             ?? currentDirectory
             ?? terminalDirectory
@@ -890,10 +894,17 @@ private final class TerminalDropBatch {
 /// staging, upload-refresh, and the Upload sheet's paste-path handoff.
 extension TransferItem {
     func awaitFinished() async {
+        await awaitFinished { _ in }
+    }
+
+    /// Variant used by system background progress reporting. The callback is
+    /// invoked for the current phase and every observed transition.
+    func awaitFinished(onPhaseChange: @MainActor (TransferPhase) -> Void) async {
         while true {
+            onPhaseChange(phase)
             switch phase {
             case .completed, .failed, .cancelled: return
-            case .queued, .running:
+            case .queued, .running, .cancelling:
                 await withCheckedContinuation { continuation in
                     withObservationTracking {
                         _ = phase

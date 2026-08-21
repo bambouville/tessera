@@ -39,7 +39,7 @@ private enum ShareInboxError: LocalizedError {
         case .noAppGroupContainer:
             return "Shared container is unavailable."
         case .noSupportedItem:
-            return "No supported file or image was found."
+            return String(localized: "No supported photo, video, or file was found.")
         case .couldNotEncodeImage:
             return "The image could not be prepared."
         }
@@ -214,20 +214,7 @@ final class ShareViewController: UIViewController {
     }
 
     private func preferredTypeIdentifiers(from provider: NSItemProvider) -> [String] {
-        provider.registeredTypeIdentifiers
-            .filter { isSupportedType($0) }
-            .sorted { typeScore($0) < typeScore($1) }
-    }
-
-    private func isSupportedType(_ identifier: String) -> Bool {
-        guard let type = UTType(identifier) else { return false }
-        return type.conforms(to: .image)
-    }
-
-    private func typeScore(_ identifier: String) -> Int {
-        guard let type = UTType(identifier) else { return 100 }
-        if type.conforms(to: .image) { return 0 }
-        return 100
+        ShareItemTypePolicy.preferredTypeIdentifiers(from: provider.registeredTypeIdentifiers)
     }
 
     private func copyFileRepresentation(

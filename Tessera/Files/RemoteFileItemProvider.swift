@@ -87,7 +87,7 @@ enum RemoteFileItemProvider {
         switch entry.kind {
         case .file:
             return itemProvider(for: entry, download: download)
-        case .directory, .symlink:
+        case .directory, .symlink, .other:
             return nil
         }
     }

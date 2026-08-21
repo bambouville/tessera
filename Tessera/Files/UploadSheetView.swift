@@ -17,7 +17,8 @@ struct UploadSheetView: View {
     /// rest). Observed, so state flips land while presented.
     let model: UploadSheetModel
     private var candidates: [UploadHostCandidate] { model.candidates }
-    var onUpload: (UploadHostCandidate, UploadDestination, _ pastePath: Bool) -> Void
+    var onUpload: (UploadHostCandidate, UploadDestination, _ pastePath: Bool) -> UploadExecution?
+    var onContinueInBackground: (UploadExecution) -> Bool
     var onCancel: () -> Void
     /// Asks the owner to fetch the selected host's cwd on demand (one
     /// bridge exec) when the mirror doesn't know it yet; the refreshed
@@ -25,6 +26,7 @@ struct UploadSheetView: View {
     var onResolveCwd: ((UploadHostCandidate) -> Void)? = nil
 
     @Environment(\.designTokens) private var T
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var selectedHostID: UUID?
     private enum DestinationKind: String { case cwd, temp }
@@ -38,6 +40,10 @@ struct UploadSheetView: View {
     /// hosts walking connecting…→connected mid-sheet made rows swap
     /// tiers under the user's finger (they tap a POSITION).
     @State private var frozenOrder: [UUID] = []
+    @State private var execution: UploadExecution?
+    @State private var confirmCancellation = false
+    @State private var confirmBackground = false
+    @State private var backgroundHandoffFailure: String?
 
     private var sortedCandidates: [UploadHostCandidate] {
         candidates.sorted { a, b in
@@ -82,6 +88,14 @@ struct UploadSheetView: View {
 
                     fileRow
 
+                    if let failureMessage {
+                        Label(failureMessage, systemImage: "exclamationmark.triangle")
+                            .font(Typography.tesseraMono(size: 11))
+                            .foregroundStyle(T.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("upload.failure")
+                    }
+
                     sectionLabel("Host")
                     VStack(spacing: 6) {
                         ForEach(displayCandidates) { candidate in
@@ -107,13 +121,18 @@ struct UploadSheetView: View {
                 .padding(24)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+            .disabled(execution?.item.phase.isUploadInProgress == true)
 
             HStack(spacing: 10) {
                 Spacer(minLength: 0)
-                Btn("Cancel", style: .default, action: onCancel)
-                Btn(style: .primary, action: submit) {
-                    Text(uploadTitle)
-                        .font(Typography.tesseraMono(size: 13, weight: .semibold))
+                Btn("Cancel", style: .default, action: cancelTapped)
+                if let execution, execution.item.phase.isUploadInProgress {
+                    backgroundProgressButton(execution)
+                } else {
+                    Btn(style: .primary, action: submit) {
+                        Text(failureMessage == nil ? uploadTitle : "Try Again")
+                            .font(Typography.tesseraMono(size: 13, weight: .semibold))
+                    }
                 }
             }
             .padding(.horizontal, 24)
@@ -125,6 +144,11 @@ struct UploadSheetView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(T.presentationBg)
+        // Every exit must run the owner's staging/inbox cleanup. During a
+        // transfer this also prevents a gesture dismissal from orphaning the
+        // only foreground controls; before/after it, the explicit Cancel
+        // button remains the predictable cleanup path.
+        .interactiveDismissDisabled()
         .onAppear {
             frozenOrder = sortedCandidates.map(\.id)
             adoptSelectionDefaults(for: selection)
@@ -141,6 +165,26 @@ struct UploadSheetView: View {
             // that one is known.
             destinationKind = .cwd
             forcedTempForMissingCwd = false
+        }
+        .confirmationDialog(
+            "Cancel this upload?",
+            isPresented: $confirmCancellation,
+            titleVisibility: .visible
+        ) {
+            Button("Cancel Upload", role: .destructive, action: cancelTransfer)
+            Button("Keep Uploading", role: .cancel) {}
+        } message: {
+            Text("The transfer will stop, the partial remote file will be removed, and its path will not be pasted into the terminal.")
+        }
+        .confirmationDialog(
+            "Continue upload in background?",
+            isPresented: $confirmBackground,
+            titleVisibility: .visible
+        ) {
+            Button("Continue in Background", action: continueInBackground)
+            Button("Keep Sheet Open", role: .cancel) {}
+        } message: {
+            Text("Tessera will not paste into the terminal. When the upload finishes, its remote path will be copied to the clipboard instead.")
         }
     }
 
@@ -294,8 +338,13 @@ struct UploadSheetView: View {
             parts.append(ByteCountFormatter.string(
                 fromByteCount: Int64(size), countStyle: .file))
         }
-        if let hint = request.sourceHint { parts.append("from \(hint)") }
-        return parts.isEmpty ? "file" : parts.joined(separator: " · ")
+        if let hint = request.sourceHint {
+            parts.append(String(
+                localized: "from \(hint)",
+                comment: "Upload-sheet file subtitle naming the source app or ingress surface"
+            ))
+        }
+        return parts.isEmpty ? String(localized: "file") : parts.joined(separator: " · ")
     }
 
     private func hostStatus(_ candidate: UploadHostCandidate) -> String {
@@ -325,6 +374,66 @@ struct UploadSheetView: View {
         guard let selection else { return "Upload" }
         return (selection.isConnected || selection.isConnecting)
             ? "Upload" : "Connect & upload"
+    }
+
+    private var failureMessage: String? {
+        if let backgroundHandoffFailure { return backgroundHandoffFailure }
+        guard let execution else { return nil }
+        if case .failed(let message) = execution.item.phase { return message }
+        return nil
+    }
+
+    @ViewBuilder
+    private func backgroundProgressButton(_ execution: UploadExecution) -> some View {
+        Button {
+            if execution.requestedForegroundPaste {
+                confirmBackground = true
+            } else {
+                continueInBackground()
+            }
+        } label: {
+            ZStack {
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        T.accent.opacity(0.16)
+                        if let fraction = execution.item.phase.uploadProgressFraction {
+                            T.accent.opacity(0.42)
+                                .frame(width: proxy.size.width * max(0, min(1, fraction)))
+                        } else {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(T.fg)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .opacity(0.32)
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                }
+
+                Group {
+                    if horizontalSizeClass == .compact {
+                        Text("Background")
+                    } else {
+                        ViewThatFits(in: .horizontal) {
+                            Text("Continue in Background").fixedSize(horizontal: true, vertical: false)
+                            Text("Background").fixedSize(horizontal: true, vertical: false)
+                        }
+                    }
+                }
+                .font(Typography.tesseraMono(size: 13, weight: .semibold))
+                .foregroundStyle(T.fg)
+                .lineLimit(1)
+                .padding(.horizontal, 13)
+            }
+            .frame(height: 36)
+            .frame(minWidth: 116, maxWidth: 216)
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(T.accent.opacity(0.7), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .disabled(execution.item.phase.isCancellingUpload)
+        .opacity(execution.item.phase.isCancellingUpload ? 0.55 : 1)
+        .accessibilityIdentifier("upload.background")
+        .accessibilityValue(execution.item.phase.uploadAccessibilityProgress)
     }
 
     private var reaperDays: Int {
@@ -381,7 +490,81 @@ struct UploadSheetView: View {
         } else {
             destination = .temp
         }
-        onUpload(selection, destination, pastePath && selectionCanReceivePastePath)
+        execution = onUpload(
+            selection,
+            destination,
+            pastePath && selectionCanReceivePastePath
+        )
+    }
+
+    private func cancelTapped() {
+        guard let execution, execution.item.phase.isUploadInProgress else {
+            onCancel()
+            return
+        }
+        if execution.requestedForegroundPaste {
+            confirmCancellation = true
+        } else {
+            cancelTransfer()
+        }
+    }
+
+    private func cancelTransfer() {
+        guard let execution else { return }
+        if execution.queue.cancel(execution.item, reason: .user) {
+            execution.delivery = .none
+        }
+    }
+
+    private func continueInBackground() {
+        guard let execution else { return }
+        if !onContinueInBackground(execution) {
+            backgroundHandoffFailure = String(localized: "Tessera couldn't obtain background time. Keep this sheet open or cancel the upload.")
+        }
+    }
+}
+
+private extension UploadExecution {
+    var requestedForegroundPaste: Bool {
+        if case .foreground(pastePath: true) = delivery { return true }
+        return false
+    }
+}
+
+private extension TransferPhase {
+    var isUploadInProgress: Bool {
+        switch self {
+        case .queued, .running, .cancelling:
+            return true
+        case .completed, .failed, .cancelled:
+            return false
+        }
+    }
+
+    var isCancellingUpload: Bool {
+        if case .cancelling = self { return true }
+        return false
+    }
+
+    var uploadProgressFraction: Double? {
+        switch self {
+        case .running(let fraction), .cancelling(let fraction):
+            return fraction
+        case .queued:
+            return 0
+        case .completed:
+            return 1
+        case .failed, .cancelled:
+            return nil
+        }
+    }
+
+    var uploadAccessibilityProgress: String {
+        if case .cancelling = self { return String(localized: "Cancelling") }
+        guard let fraction = uploadProgressFraction else {
+            return String(localized: "Upload in progress")
+        }
+        return String(localized: "\(Int((fraction * 100).rounded())) percent uploaded")
     }
 }
 
@@ -406,7 +589,8 @@ struct UploadSheetView: View {
             sourceHint: "Photos"
         ),
         model: model,
-        onUpload: { _, _, _ in },
+        onUpload: { _, _, _ in nil },
+        onContinueInBackground: { _ in true },
         onCancel: {}
     )
     .environment(\.designTokens, DesignTokens.make(mode: .dark, accent: .blue))

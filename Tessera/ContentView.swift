@@ -196,10 +196,11 @@ struct ContentView: View {
     /// app is unlocked — two sheets set in one transaction means one
     /// silently never presents.
     @State private var uploadRequest: UploadRequest?
-    @State private var pendingUploadRequest: UploadRequest?
+    @State private var pendingUploadRequests: [UploadRequest] = []
     /// Share-in transfers can fail with no panel/strip on screen (the
     /// sheet is long dismissed) — this alert is their only surface.
     @State private var uploadFailureMessage: String?
+    @State private var uploadCompletionMessage: String?
     /// Live host rows for the presented Upload sheet. A share often
     /// foregrounds (or relaunches) the app while sessions are still
     /// auto-reconnecting — a snapshot taken at presentation would call
@@ -1082,33 +1083,7 @@ struct ContentView: View {
             .interactiveDismissDisabled()
         }
         .sheet(item: $uploadRequest) { request in
-            UploadSheetView(
-                request: request,
-                model: uploadSheetModel,
-                onUpload: { candidate, destination, pastePath in
-                    let queuedUpload = activeShareQueueUpload
-                    performUpload(
-                        request: request,
-                        candidate: candidate,
-                        destination: destination,
-                        pastePath: pastePath
-                    )
-                    uploadRequest = nil
-                    if let queuedUpload {
-                        finishQueuedShareUpload(queuedUpload, reason: "uploaded")
-                    }
-                },
-                onCancel: {
-                    let queuedUpload = activeShareQueueUpload
-                    uploadRequest = nil
-                    if let queuedUpload {
-                        finishQueuedShareUpload(queuedUpload, reason: "cancelled")
-                    }
-                },
-                onResolveCwd: { candidate in
-                    resolveSessionCwdIfNeeded(for: candidate.id)
-                }
-            )
+            uploadSheetContent(request)
         }
         .onOpenURL { url in
             handleIncomingOpenURL(url)
@@ -1126,15 +1101,22 @@ struct ContentView: View {
             presentQueuedShareForSelectedHostIfClear(reason: "hostkey-cleared")
         }
         .alert(
-            "upload failed",
+            uploadCompletionMessage == nil
+                ? String(localized: "upload failed")
+                : String(localized: "upload complete"),
             isPresented: Binding(
-                get: { uploadFailureMessage != nil },
-                set: { if !$0 { uploadFailureMessage = nil } }
+                get: { uploadFailureMessage != nil || uploadCompletionMessage != nil },
+                set: {
+                    if !$0 {
+                        uploadFailureMessage = nil
+                        uploadCompletionMessage = nil
+                    }
+                }
             )
         ) {
             Button("ok", role: .cancel) {}
         } message: {
-            Text(uploadFailureMessage ?? "")
+            Text(uploadCompletionMessage ?? uploadFailureMessage ?? "")
         }
         .onReceive(hostKeyVerificationPublisher) { request in
             guard let request else {
@@ -1191,6 +1173,58 @@ struct ContentView: View {
             refreshUploadCandidatesIfPresented()
             publishShareExtensionTargets(reason: "remote-cwd")
             presentQueuedShareForSelectedHostIfClear(reason: "remote-cwd")
+        }
+    }
+
+    private func uploadSheetContent(_ request: UploadRequest) -> some View {
+        UploadSheetView(
+            request: request,
+            model: uploadSheetModel,
+            onUpload: { candidate, destination, pastePath in
+                startUpload(
+                    request: request,
+                    candidate: candidate,
+                    destination: destination,
+                    pastePath: pastePath
+                )
+            },
+            onContinueInBackground: continueUploadInBackground,
+            onCancel: { cancelUploadSheet(request) },
+            onResolveCwd: { candidate in
+                resolveSessionCwdIfNeeded(for: candidate.id)
+            }
+        )
+    }
+
+    private func continueUploadInBackground(_ execution: UploadExecution) -> Bool {
+        let copyPath: Bool
+        if case .foreground(let pastePath) = execution.delivery {
+            copyPath = pastePath
+        } else {
+            copyPath = false
+        }
+        guard BackgroundUploadCoordinator.shared.continueUpload(execution) else {
+            return false
+        }
+        execution.delivery = .background(copyPath: copyPath)
+        execution.queue.markContinuedInBackground(execution.item)
+
+        let queuedUpload = activeShareQueueUpload
+        uploadRequest = nil
+        scheduleParkedUploadAfterDismissal()
+        if let queuedUpload {
+            finishQueuedShareUpload(queuedUpload, reason: "backgrounded")
+        }
+        return true
+    }
+
+    private func cancelUploadSheet(_ request: UploadRequest) {
+        let queuedUpload = activeShareQueueUpload
+        discardStagedUpload(request)
+        uploadRequest = nil
+        scheduleParkedUploadAfterDismissal()
+        if let queuedUpload {
+            finishQueuedShareUpload(queuedUpload, reason: "cancelled")
         }
     }
 
@@ -2067,7 +2101,7 @@ struct ContentView: View {
 
     private func presentQueuedShareForSelectedHostIfClear(reason: String) {
         guard !appLockController.isLocked,
-              pendingUploadRequest == nil,
+              pendingUploadRequests.isEmpty,
               uploadRequest == nil,
               restorePrompt == nil,
               hostKeyRequest == nil,
@@ -2292,11 +2326,11 @@ struct ContentView: View {
         cleanupURL: URL?
     ) -> Bool {
         do {
-            pendingUploadRequest = try makeUploadRequest(
+            pendingUploadRequests.append(try makeUploadRequest(
                 from: url,
                 displayName: displayName,
                 sourceHint: sourceHint
-            )
+            ))
             if let cleanupURL {
                 try? FileManager.default.removeItem(at: cleanupURL)
             }
@@ -2331,12 +2365,12 @@ struct ContentView: View {
     /// unlocked and no sibling sheet is up. Re-attempted whenever the
     /// lock, the restore prompt, or the host-key prompt clears.
     private func presentParkedUploadIfClear() {
-        guard let parked = pendingUploadRequest,
+        guard let parked = pendingUploadRequests.first,
               uploadRequest == nil,
               restorePrompt == nil,
               hostKeyRequest == nil,
               !appLockController.isLocked else { return }
-        pendingUploadRequest = nil
+        pendingUploadRequests.removeFirst()
         uploadSheetModel.candidates = uploadHostCandidates()
         uploadRequest = parked
     }
@@ -2499,12 +2533,13 @@ struct ContentView: View {
         }
     }
 
-    private func performUpload(
+    @discardableResult
+    private func startUpload(
         request: UploadRequest,
         candidate: UploadHostCandidate,
         destination: UploadDestination,
         pastePath: Bool
-    ) {
+    ) -> UploadExecution? {
         let bridge: FileBridge
         if let live = activeSessions.first(where: { $0.persistedHostID == candidate.id }) {
             // A live session exists: reuse ITS credential snapshot. The
@@ -2527,7 +2562,10 @@ struct ContentView: View {
                 )
             }
         } else {
-            guard let persistedHost = fetchHost(candidate.id) else { return }
+            guard let persistedHost = fetchHost(candidate.id) else {
+                uploadFailureMessage = String(localized: "The selected host is no longer available.")
+                return nil
+            }
             let storedKey = configuredStoredKey(for: persistedHost)
             bridge = fileBridges.bridge(
                 for: Host(from: persistedHost),
@@ -2544,40 +2582,123 @@ struct ContentView: View {
         case .temp:
             item = queue.enqueuePasteUpload(localURL: request.stagedURL)
         }
-        // The sheet is gone by the time the transfer resolves and there
-        // may be no open panel (no transfer strip) for this host — a
-        // failure MUST surface here or it's silent.
-        let displayName = request.displayName
-        let hostID = candidate.id
+        let execution = UploadExecution(
+            item: item,
+            queue: queue,
+            hostID: candidate.id,
+            displayName: request.displayName,
+            stagedURL: request.stagedURL,
+            pastePath: pastePath
+        )
+        let queuedUpload = activeShareQueueUpload
         Task {
             await item.awaitFinished()
             switch item.phase {
             case .failed(let message):
-                uploadFailureMessage = "\(displayName): \(message)"
-            case .completed:
-                // Paste path: hand the resolved path to the host's live
-                // session; the session view types it (quoted, no Enter).
-                // Target resolved NOW, not at submit — a session that
-                // was still auto-reconnecting when the user tapped
-                // Upload is usually connected by the time the transfer
-                // lands.
-                if pastePath, let path = item.resolvedRemotePath {
-                    uploadTargetSession(for: hostID)?.pendingPathInjection = path
+                switch execution.delivery {
+                case .foreground:
+                    // The sheet stays up and renders the failure beside
+                    // the file, with a retry action that reuses the staged
+                    // local copy.
+                    break
+                case .background:
+                    discardStagedUpload(request)
+                case .none:
+                    uploadFailureMessage = "\(request.displayName): \(message)"
+                    discardStagedUpload(request)
+                    dismissUploadExecution(request: request, queuedUpload: queuedUpload, reason: "cancelled")
                 }
-            default:
-                break
+            case .completed:
+                if let path = item.resolvedRemotePath {
+                    let outcome = UploadCompletionDelivery.deliver(
+                        path: path,
+                        delivery: execution.delivery,
+                        injectIntoTerminal: { path in
+                            guard let target = uploadTargetSession(for: candidate.id) else {
+                                return false
+                            }
+                            // Do not overwrite a path already waiting for a
+                            // connecting terminal. The delivery policy copies
+                            // this later completion to the clipboard instead.
+                            guard target.pendingPathInjection == nil else {
+                                return false
+                            }
+                            // A connecting session retains this injection until
+                            // its connected state arrives.
+                            target.pendingPathInjection = path
+                            return true
+                        },
+                        copyToClipboard: { UIPasteboard.general.string = $0 }
+                    )
+                    if outcome == .clipboardFallback {
+                        uploadCompletionMessage = String(localized: "The terminal is no longer available, so the remote path was copied to the clipboard.")
+                    }
+                }
+                discardStagedUpload(request)
+                if case .foreground = execution.delivery {
+                    dismissUploadExecution(request: request, queuedUpload: queuedUpload, reason: "uploaded")
+                }
+            case .cancelled:
+                discardStagedUpload(request)
+                if case .none = execution.delivery {
+                    dismissUploadExecution(request: request, queuedUpload: queuedUpload, reason: "cancelled")
+                }
+            case .queued, .running, .cancelling:
+                assertionFailure("awaitFinished returned before the upload reached a terminal phase")
             }
+        }
+        return execution
+    }
+
+    private func dismissUploadExecution(
+        request: UploadRequest,
+        queuedUpload: ActiveShareQueueUpload?,
+        reason: String
+    ) {
+        if uploadRequest?.id == request.id {
+            uploadRequest = nil
+            scheduleParkedUploadAfterDismissal()
+        }
+        if let queuedUpload, activeShareQueueUpload?.itemID == queuedUpload.itemID {
+            finishQueuedShareUpload(queuedUpload, reason: reason)
+        }
+    }
+
+    private func discardStagedUpload(_ request: UploadRequest) {
+        do {
+            try FileManager.default.removeItem(at: request.stagedURL)
+        } catch CocoaError.fileNoSuchFile, CocoaError.fileReadNoSuchFile {
+            return
+        } catch {
+            DiagnosticLogStore.appendApp(
+                "share upload staging cleanup failed file=\(request.displayName) error=\(error.localizedDescription)"
+            )
+        }
+    }
+
+    /// Direct document-open and extension-queue arrivals share a single
+    /// presentation slot. If another document arrived while this sheet was
+    /// transferring, wait for UIKit's dismissal transition before promoting
+    /// the parked request; setting a replacement item in the same transaction
+    /// can leave the second sheet silently unpresented.
+    private func scheduleParkedUploadAfterDismissal() {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            presentParkedUploadIfClear()
+            presentQueuedShareForSelectedHostIfClear(reason: "upload-dismissed")
         }
     }
 
     /// The session whose terminal receives a paste-path injection: the
     /// selected one when it belongs to this host, else the newest —
-    /// CONNECTED sessions only (failed/connecting ones linger in
-    /// activeSessions and would swallow the path).
+    /// Connected or actively connecting sessions. SessionView retains a
+    /// pending injection across connecting→connected, so a fast upload cannot
+    /// outrun restore and silently swallow the promised path.
     private func uploadTargetSession(for hostID: UUID) -> (any TerminalSession)? {
         let sessions = activeSessions.filter {
             $0.persistedHostID == hostID
-                && $0.session.terminalSession.state == .connected
+                && ($0.session.terminalSession.state == .connected
+                    || $0.session.terminalSession.state == .connecting)
         }
         if case .session(let id) = selectedItem,
            let selected = sessions.first(where: { $0.id == id }) {

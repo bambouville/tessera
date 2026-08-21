@@ -23,6 +23,80 @@ final class UploadSheetModel {
     var candidates: [UploadHostCandidate] = []
 }
 
+/// One actual in-app remote upload. The share extension never creates this
+/// object: it only stages media into the app-group inbox and dismisses. An
+/// execution begins after Tessera presents the ingress sheet and the user
+/// explicitly taps Upload.
+@Observable
+@MainActor
+final class UploadExecution: Identifiable {
+    enum Delivery {
+        /// Keep the ingress sheet visible and type the path into a live
+        /// terminal when requested.
+        case foreground(pastePath: Bool)
+        /// The sheet was dismissed. Copy the path instead because a terminal
+        /// may no longer be the one the user intended when the upload lands.
+        case background(copyPath: Bool)
+        /// User cancellation: never deliver the remote path.
+        case none
+    }
+
+    let id = UUID()
+    let item: TransferItem
+    let queue: any TransferQueueing
+    let hostID: UUID
+    let displayName: String
+    let stagedURL: URL
+    var delivery: Delivery
+
+    init(
+        item: TransferItem,
+        queue: any TransferQueueing,
+        hostID: UUID,
+        displayName: String,
+        stagedURL: URL,
+        pastePath: Bool
+    ) {
+        self.item = item
+        self.queue = queue
+        self.hostID = hostID
+        self.displayName = displayName
+        self.stagedURL = stagedURL
+        self.delivery = .foreground(pastePath: pastePath)
+    }
+}
+
+enum UploadCompletionDeliveryOutcome: Equatable {
+    case none
+    case terminal
+    case clipboard
+    case clipboardFallback
+}
+
+/// Production policy for the effect that follows a completed upload. This
+/// keeps the no-silent-loss behavior deterministic and directly testable.
+@MainActor
+enum UploadCompletionDelivery {
+    static func deliver(
+        path: String,
+        delivery: UploadExecution.Delivery,
+        injectIntoTerminal: (String) -> Bool,
+        copyToClipboard: (String) -> Void
+    ) -> UploadCompletionDeliveryOutcome {
+        switch delivery {
+        case .foreground(pastePath: true):
+            if injectIntoTerminal(path) { return .terminal }
+            copyToClipboard(path)
+            return .clipboardFallback
+        case .background(copyPath: true):
+            copyToClipboard(path)
+            return .clipboard
+        case .foreground, .background, .none:
+            return .none
+        }
+    }
+}
+
 /// One file shared into Tessera, staged and awaiting a host/destination
 /// choice. Drives `.sheet(item:)` on ContentView (M3 wiring).
 struct UploadRequest: Identifiable {

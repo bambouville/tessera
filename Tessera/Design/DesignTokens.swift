@@ -60,7 +60,9 @@ enum AccentName: String, CaseIterable {
     }
 }
 
-struct DesignTokens {
+/// `Equatable` is load-bearing for `FileRowView`: the Files panel compares
+/// a row (tokens included) to decide whether it may skip rebuilding it.
+struct DesignTokens: Equatable {
     let bg: Color
     let sidebarBg: Color
     let sidebarBorder: Color

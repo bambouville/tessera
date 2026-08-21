@@ -1438,6 +1438,88 @@ final class RealHostTransportIntegrationTests: XCTestCase {
     }
 
     @MainActor
+    func test_liveTransferQueuePreservesModeAndSymlinkTarget() async throws {
+        let config = try Config.load()
+        let endpoint = "\(config.stableHost):\(config.port)"
+        await resetConnectionState(endpoint: endpoint)
+
+        let trustSession = SSHSession(host: makeHost(config: config, transport: .ssh))
+        _ = try await connect(
+            session: trustSession,
+            pendingRequest: { trustSession.pendingHostKeyVerification },
+            timeout: 20
+        )
+        trustSession.disconnect()
+
+        let host = makeHost(config: config, transport: .mosh)
+        let bridge = FileBridge(host: host, requireBiometric: false, isSecureEnclave: false)
+        defer { Task { await bridge.disconnect() } }
+        try await bridge.connect()
+
+        let runName = "upload-semantics-\(UUID().uuidString.lowercased())"
+        let remoteDirectory = "/home/\(config.user)/fixture-files/\(runName)"
+        let privatePath = "\(remoteDirectory)/private.txt"
+        let executablePath = "\(remoteDirectory)/deploy.sh"
+        let targetPath = "\(remoteDirectory)/actual.txt"
+        let symlinkPath = "\(remoteDirectory)/current.txt"
+        let localRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(runName, isDirectory: true)
+        try FileManager.default.createDirectory(at: localRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: localRoot) }
+
+        try await bridge.createDirectory(remoteDirectory)
+        do {
+            _ = try await bridge.exec(
+                "printf old > \(shellQuote(privatePath)); chmod 600 \(shellQuote(privatePath)); "
+                + "printf old > \(shellQuote(executablePath)); chmod 751 \(shellQuote(executablePath)); "
+                + "printf old > \(shellQuote(targetPath)); chmod 600 \(shellQuote(targetPath)); "
+                + "ln -s actual.txt \(shellQuote(symlinkPath))",
+                inShell: false
+            )
+
+            let privateURL = localRoot.appendingPathComponent("private.txt")
+            let executableURL = localRoot.appendingPathComponent("deploy.sh")
+            let symlinkURL = localRoot.appendingPathComponent("current.txt")
+            try Data("private-new".utf8).write(to: privateURL)
+            try Data("#!/bin/sh\nexit 0\n".utf8).write(to: executableURL)
+            try Data("target-new".utf8).write(to: symlinkURL)
+
+            let queue = TransferQueue(bridge: bridge)
+            let privateItem = queue.enqueueUpload(localURL: privateURL, toDirectory: remoteDirectory)
+            let executableItem = queue.enqueueUpload(localURL: executableURL, toDirectory: remoteDirectory)
+            let symlinkItem = queue.enqueueUpload(localURL: symlinkURL, toDirectory: remoteDirectory)
+            try await waitUntil("live staged uploads", timeout: 20) {
+                privateItem.phase == .completed
+                    && executableItem.phase == .completed
+                    && symlinkItem.phase == .completed
+            }
+
+            let entries = try await bridge.listDirectory(remoteDirectory)
+            XCTAssertEqual(entries.first { $0.path == privatePath }?.permissions, 0o600)
+            XCTAssertEqual(entries.first { $0.path == executablePath }?.permissions, 0o751)
+            XCTAssertEqual(entries.first { $0.path == symlinkPath }?.kind, .symlink)
+            XCTAssertFalse(entries.contains {
+                $0.name.contains(".tessera-upload-") || $0.name.contains(".tessera-replaced-")
+            })
+
+            let evidence = try await bridge.exec(
+                "stat -c '%a' \(shellQuote(privatePath)); "
+                + "stat -c '%a' \(shellQuote(executablePath)); "
+                + "readlink \(shellQuote(symlinkPath)); "
+                + "cat \(shellQuote(targetPath))",
+                inShell: false
+            ).split(separator: "\n").map(String.init)
+            XCTAssertEqual(evidence, ["600", "751", "actual.txt", "target-new"])
+        } catch {
+            _ = try? await bridge.exec("rm -rf -- \(shellQuote(remoteDirectory))", inShell: false)
+            throw error
+        }
+        _ = try await bridge.exec("rm -rf -- \(shellQuote(remoteDirectory))", inShell: false)
+        let remainingEntries = try await bridge.listDirectory("/home/\(config.user)/fixture-files")
+        XCTAssertFalse(remainingEntries.contains { $0.path == remoteDirectory })
+    }
+
+    @MainActor
     func test_liveInlineTmuxControllersHydrateBothFixtureVersions() async throws {
         let config = try Config.load()
         try await assertInlineTmuxHydration(config: config, useChaosHost: false)

@@ -105,7 +105,27 @@ private struct QuickLookPreviewPresentation: ViewModifier {
 
     @ViewBuilder
     private func preview(_ request: FilesPanelController.PreviewRequest) -> some View {
+        // Bracket the presentation in the log. The terminal keeps ingesting
+        // and rendering behind a preview, and it resizes when the modal takes
+        // the safe area — a reported repaint artifact after closing a preview
+        // has to be read against those two facts, which need this marker to
+        // line up with the `size-changed` and `terminal-output-burst` lines.
         let presenter = QuickLookPresenter(fileURL: request.localURL, displayTitle: request.title)
+            .onAppear {
+                let surface: FilesUIDiagnostics.Surface = MarkdownPreviewSupport.isMarkdown(
+                    fileURL: request.localURL, displayTitle: request.title
+                ) ? .markdownPreview : .quickLook
+                FilesUIDiagnostics.shared.previewPresentationChanged(surface: surface)
+                FilesUIDiagnostics.shared.timeline(
+                    "preview-present", detail: "mode=\(mode.rawValue) as=\(surface.rawValue)"
+                )
+            }
+            .onDisappear {
+                FilesUIDiagnostics.shared.previewPresentationChanged(surface: nil)
+                FilesUIDiagnostics.shared.timeline(
+                    "preview-dismiss", detail: "mode=\(mode.rawValue)"
+                )
+            }
         switch mode {
         case .popup:
             // The sheet supplies its own inset chrome, so the preview fills it.
@@ -230,12 +250,23 @@ private enum MarkdownDocumentCache {
 /// single `Text(AttributedString)` would retain inline emphasis but flatten
 /// most block structure and spacing.
 struct MarkdownDocument: Sendable {
+    /// One row of a GFM table. Cells stay separate values: folding them into
+    /// a single string is what produced run-on text, and folding a whole
+    /// table into one `Text` is what made it vanish (a very long attributed
+    /// string lays out to the right height and then draws nothing).
+    struct TableRow: Identifiable, Sendable {
+        let id: Int
+        let isHeader: Bool
+        var cells: [AttributedString]
+    }
+
     struct Block: Identifiable, Sendable {
         enum Kind: Equatable, Sendable {
             case paragraph
             case heading(level: Int)
             case code(language: String?)
             case thematicBreak
+            case table(columns: Int)
         }
 
         enum ListStyle: Equatable, Sendable {
@@ -250,6 +281,8 @@ struct MarkdownDocument: Sendable {
         let listDepth: Int
         let quoteDepth: Int
         var content: AttributedString
+        /// Populated only for `.table`.
+        var rows: [TableRow] = []
     }
 
     let blocks: [Block]
@@ -262,11 +295,31 @@ struct MarkdownDocument: Sendable {
         )
 
         var blocks: [Block] = []
+        var table: TableAccumulator?
+
         for run in parsed.runs {
-            let descriptor = Self.descriptor(for: run.presentationIntent)
+            let intent = run.presentationIntent
             var content = AttributedString(parsed[run.range])
             content.presentationIntent = nil
 
+            // Table cells carry only table/tableRow/tableCell components —
+            // no paragraph, header, or code leaf — so the block descriptor
+            // below cannot identify them and every cell in the document
+            // would land in one block.
+            if let cell = Self.tableCell(for: intent) {
+                if table?.id != cell.tableID {
+                    if let finished = table { blocks.append(finished.block) }
+                    table = TableAccumulator(id: cell.tableID, columns: cell.columnCount)
+                }
+                table?.append(content, cell: cell)
+                continue
+            }
+            if let finished = table {
+                blocks.append(finished.block)
+                table = nil
+            }
+
+            let descriptor = Self.descriptor(for: intent)
             if blocks.last?.id == descriptor.id {
                 blocks[blocks.count - 1].content.append(content)
             } else {
@@ -281,7 +334,115 @@ struct MarkdownDocument: Sendable {
                 ))
             }
         }
+        if let finished = table { blocks.append(finished.block) }
         self.blocks = blocks
+    }
+
+    /// Where one run sits inside a table.
+    private struct TableCellPosition {
+        var tableID: Int
+        var columnCount: Int
+        /// Zero-based row index reported by Foundation (`tableHeaderRow` is
+        /// row 0; `tableRow(n)` preserves gaps for entirely empty rows).
+        var rowIndex: Int
+        var isHeader: Bool
+        /// Zero-based column index reported by Foundation's tableCell intent.
+        var columnIndex: Int
+    }
+
+    /// Collects the runs of one table. Foundation omits presentation runs for
+    /// empty cells, so arrival order is not a column position. Runs are placed
+    /// by the tableCell column index; multiple styled runs at that same index
+    /// append into one cell.
+    private struct TableAccumulator {
+        private struct Row {
+            let isHeader: Bool
+            var cellsByColumn: [Int: AttributedString] = [:]
+        }
+
+        let id: Int
+        let columns: Int
+        private var rowsByIndex: [Int: Row] = [:]
+
+        init(id: Int, columns: Int) {
+            self.id = id
+            self.columns = columns
+        }
+
+        mutating func append(_ content: AttributedString, cell: TableCellPosition) {
+            var row = rowsByIndex[cell.rowIndex] ?? Row(isHeader: cell.isHeader)
+            if row.cellsByColumn[cell.columnIndex] != nil {
+                row.cellsByColumn[cell.columnIndex]?.append(content)
+            } else {
+                row.cellsByColumn[cell.columnIndex] = content
+            }
+            rowsByIndex[cell.rowIndex] = row
+        }
+
+        var block: Block {
+            let highestObservedColumn = rowsByIndex.values
+                .compactMap { $0.cellsByColumn.keys.max() }
+                .max()
+                .map { $0 + 1 } ?? 0
+            let width = max(columns, highestObservedColumn)
+            let highestObservedRow = rowsByIndex.keys.max() ?? -1
+            let rowIndices = highestObservedRow >= 0 ? Array(0...highestObservedRow) : []
+            let positioned = rowIndices.map { rowIndex in
+                let row = rowsByIndex[rowIndex]
+                return TableRow(
+                    id: rowIndex,
+                    isHeader: row?.isHeader ?? (rowIndex == 0),
+                    cells: (0..<width).map {
+                        row?.cellsByColumn[$0] ?? AttributedString()
+                    }
+                )
+            }
+            return Block(
+                id: id,
+                kind: .table(columns: width),
+                listStyle: nil,
+                listOrdinal: nil,
+                listDepth: 0,
+                quoteDepth: 0,
+                content: AttributedString(),
+                rows: positioned
+            )
+        }
+    }
+
+    private static func tableCell(for intent: PresentationIntent?) -> TableCellPosition? {
+        guard let intent else { return nil }
+        var position: TableCellPosition?
+        var columnIndex: Int?
+
+        for component in intent.components {
+            switch component.kind {
+            case .tableCell(let index):
+                if columnIndex == nil { columnIndex = index }
+            case .tableHeaderRow:
+                if position == nil, let columnIndex {
+                    position = TableCellPosition(
+                        tableID: 0, columnCount: 0,
+                        rowIndex: 0, isHeader: true, columnIndex: columnIndex
+                    )
+                }
+            case .tableRow(let index):
+                if position == nil, let columnIndex {
+                    position = TableCellPosition(
+                        tableID: 0, columnCount: 0,
+                        rowIndex: index, isHeader: false, columnIndex: columnIndex
+                    )
+                }
+            case .table(let columns):
+                guard position != nil else { return nil }
+                position?.tableID = component.identity
+                position?.columnCount = columns.count
+                return position
+            default:
+                continue
+            }
+        }
+        return nil
     }
 
     private struct BlockDescriptor {
@@ -297,6 +458,9 @@ struct MarkdownDocument: Sendable {
     private static func descriptor(for intent: PresentationIntent?) -> BlockDescriptor {
         guard let intent else { return BlockDescriptor() }
         var descriptor = BlockDescriptor()
+        // Any intent we do not model still gets its own identity, so an
+        // unrecognised block can never merge its text into its neighbour.
+        descriptor.id = intent.components.first?.identity ?? 0
 
         // Components are innermost first. The first paragraph/header/code
         // component identifies the rendered block; later components describe
@@ -339,6 +503,38 @@ struct MarkdownDocument: Sendable {
     }
 }
 
+/// DEBUG seams for the Markdown scroll bisect. Each pins one suspected
+/// per-block cost off, so a run can attribute the frame drops.
+enum MarkdownRenderSeams {
+    #if DEBUG
+    static let textSelectionDisabled =
+        ProcessInfo.processInfo.environment["TESSERA_MARKDOWN_TEXT_SELECTION"] == "0"
+    static let codeScrollDisabled =
+        ProcessInfo.processInfo.environment["TESSERA_MARKDOWN_CODE_SCROLL"] == "0"
+    static let fixedSizeDisabled =
+        ProcessInfo.processInfo.environment["TESSERA_MARKDOWN_FIXED_SIZE"] == "0"
+    static let usesList =
+        ProcessInfo.processInfo.environment["TESSERA_MARKDOWN_LIST"] == "1"
+    /// Replaces every block with a trivial one-line view. The container,
+    /// the document, and the realization cadence stay identical, so what
+    /// remains of the per-block cost belongs to the container, not to us.
+    static let stubBlocks =
+        ProcessInfo.processInfo.environment["TESSERA_MARKDOWN_STUB"] == "1"
+    /// Drops the two things that wrap the document and re-measure whenever
+    /// its content size changes: the navigation chrome, and the diagnostics
+    /// probe stretched across the whole scroll content.
+    static let lean =
+        ProcessInfo.processInfo.environment["TESSERA_MARKDOWN_LEAN"] == "1"
+    #else
+    static let textSelectionDisabled = false
+    static let codeScrollDisabled = false
+    static let fixedSizeDisabled = false
+    static let usesList = false
+    static let stubBlocks = false
+    static let lean = false
+    #endif
+}
+
 private struct MarkdownPreview: View {
     private enum LoadState {
         case loading
@@ -359,6 +555,14 @@ private struct MarkdownPreview: View {
     }
 
     var body: some View {
+        if MarkdownRenderSeams.lean {
+            content.task(id: fileURL) { await load() }
+        } else {
+            chrome
+        }
+    }
+
+    private var chrome: some View {
         NavigationStack {
             content
                 .navigationTitle(title)
@@ -381,24 +585,26 @@ private struct MarkdownPreview: View {
                     }
                 }
         }
-        .task(id: fileURL) {
-            if let cached = MarkdownDocumentCache.document(for: fileURL) {
-                loadState = .loaded(cached)
-                return
-            }
-            loadState = .loading
-            do {
-                let document = try await Task.detached(priority: .userInitiated) {
-                    try MarkdownPreviewSupport.loadDocument(from: fileURL)
-                }.value
-                try Task.checkCancellation()
-                MarkdownDocumentCache.store(document, for: fileURL)
-                loadState = .loaded(document)
-            } catch is CancellationError {
-                return
-            } catch {
-                loadState = .failed(error.localizedDescription)
-            }
+        .task(id: fileURL) { await load() }
+    }
+
+    private func load() async {
+        if let cached = MarkdownDocumentCache.document(for: fileURL) {
+            loadState = .loaded(cached)
+            return
+        }
+        loadState = .loading
+        do {
+            let document = try await Task.detached(priority: .userInitiated) {
+                try MarkdownPreviewSupport.loadDocument(from: fileURL)
+            }.value
+            try Task.checkCancellation()
+            MarkdownDocumentCache.store(document, for: fileURL)
+            loadState = .loaded(document)
+        } catch is CancellationError {
+            return
+        } catch {
+            loadState = .failed(error.localizedDescription)
         }
     }
 
@@ -415,19 +621,78 @@ private struct MarkdownPreview: View {
                 description: Text(message)
             )
         case .loaded(let document):
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    ForEach(document.blocks) { block in
-                        MarkdownBlockView(block: block)
-                    }
+            let _ = FilesUIDiagnostics.shared.noteMarkdown(blockCount: document.blocks.count)
+            if MarkdownRenderSeams.usesList {
+                listBody(document)
+            } else {
+                stackBody(document)
+            }
+        }
+    }
+
+    private func stackBody(_ document: MarkdownDocument) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 14) {
+                ForEach(document.blocks) { block in
+                    MarkdownBlockView(block: block)
                 }
+            }
+            .modifier(MarkdownScrollProbeAttachment())
+            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 24)
+        }
+        .background(Color(uiColor: .systemBackground))
+        .modifier(MarkdownTextSelection())
+    }
+
+    /// `List` is backed by a reusing collection view, so realizing a block
+    /// re-lays out that block instead of every block already on screen.
+    private func listBody(_ document: MarkdownDocument) -> some View {
+        List(document.blocks) { block in
+            MarkdownBlockView(block: block)
                 .frame(maxWidth: 760, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.horizontal, 20)
-                .padding(.vertical, 24)
+                .padding(.vertical, 7)
+                .listRowInsets(EdgeInsets())
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(FilesScrollProbe(surface: .markdownPreview))
+        .background(Color(uiColor: .systemBackground))
+        .modifier(MarkdownTextSelection())
+    }
+}
+
+/// The probe only needs to sit inside the scroll view to find it. Stretched
+/// across the content as a background it is resized on every realization,
+/// which is exactly the work being measured — so it rides in a corner at
+/// zero size instead.
+private struct MarkdownScrollProbeAttachment: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if MarkdownRenderSeams.lean {
+            content.overlay(alignment: .topLeading) {
+                FilesScrollProbe(surface: .markdownPreview)
+                    .frame(width: 1, height: 1)
             }
-            .background(Color(uiColor: .systemBackground))
-            .textSelection(.enabled)
+        } else {
+            content.background(FilesScrollProbe(surface: .markdownPreview))
+        }
+    }
+}
+
+private struct MarkdownTextSelection: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if MarkdownRenderSeams.textSelectionDisabled {
+            content
+        } else {
+            content.textSelection(.enabled)
         }
     }
 }
@@ -435,7 +700,35 @@ private struct MarkdownPreview: View {
 private struct MarkdownBlockView: View {
     let block: MarkdownDocument.Block
 
+    /// The frame sampler charges a slow frame to the shapes it realized, so
+    /// the block has to say which shape it is.
+    private var diagnosticKind: FilesUIDiagnostics.MarkdownBlockKind {
+        switch block.kind {
+        case .paragraph: return .paragraph
+        case .heading: return .heading
+        case .code: return .code
+        case .table: return .table
+        case .thematicBreak: return .rule
+        }
+    }
+
     var body: some View {
+        FilesUIDiagnostics.shared.measureBlockBody(kind: diagnosticKind) {
+            blockContent
+        }
+    }
+
+    @ViewBuilder
+    private var blockContent: some View {
+        if MarkdownRenderSeams.stubBlocks {
+            Text(verbatim: "block")
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            realContent
+        }
+    }
+
+    private var realContent: some View {
         Group {
             if block.quoteDepth > 0 {
                 HStack(alignment: .top, spacing: 12) {
@@ -456,17 +749,27 @@ private struct MarkdownBlockView: View {
     @ViewBuilder
     private var blockBody: some View {
         switch block.kind {
+        case .table(let columns):
+            table(columns: columns)
         case .thematicBreak:
             Divider()
                 .padding(.vertical, 4)
         case .code:
-            ScrollView(.horizontal) {
+            if MarkdownRenderSeams.codeScrollDisabled {
                 Text(block.content)
                     .font(.system(.body, design: .monospaced))
-                    .fixedSize(horizontal: true, vertical: true)
                     .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+            } else {
+                ScrollView(.horizontal) {
+                    Text(block.content)
+                        .font(.system(.body, design: .monospaced))
+                        .fixedSize(horizontal: true, vertical: true)
+                        .padding(12)
+                }
+                .background(.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
             }
-            .background(.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
         case .heading(let level):
             textWithOptionalListMarker
                 .font(headingFont(level: level))
@@ -478,6 +781,30 @@ private struct MarkdownBlockView: View {
         }
     }
 
+    /// Tables scroll horizontally rather than wrap: a register with six
+    /// columns is unreadable once the columns are squeezed into the sheet's
+    /// width, and the code-block path already established the pattern.
+    private func table(columns _: Int) -> some View {
+        ScrollView(.horizontal) {
+            Grid(alignment: .topLeading, horizontalSpacing: 16, verticalSpacing: 7) {
+                ForEach(block.rows) { row in
+                    GridRow {
+                        ForEach(Array(row.cells.enumerated()), id: \.offset) { _, cell in
+                            Text(cell)
+                                .font(row.isHeader ? .body.weight(.semibold) : .body)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    if row.isHeader {
+                        // A view outside a GridRow spans the whole grid.
+                        Divider()
+                    }
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
     @ViewBuilder
     private var textWithOptionalListMarker: some View {
         if let style = block.listStyle {
@@ -486,12 +813,20 @@ private struct MarkdownBlockView: View {
                     .font(.body.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .frame(minWidth: 18, alignment: .trailing)
-                Text(block.content)
-                    .fixedSize(horizontal: false, vertical: true)
+                wrappingText(block.content)
             }
             .padding(.leading, CGFloat(max(0, block.listDepth - 1)) * 20)
         } else {
-            Text(block.content)
+            wrappingText(block.content)
+        }
+    }
+
+    @ViewBuilder
+    private func wrappingText(_ content: AttributedString) -> some View {
+        if MarkdownRenderSeams.fixedSizeDisabled {
+            Text(content)
+        } else {
+            Text(content)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -534,6 +869,7 @@ private struct QuickLookController: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> UINavigationController {
         let previewController = QLPreviewController()
+        FilesUIDiagnostics.shared.timeline("quicklook-present")
         previewController.dataSource = context.coordinator
         previewController.delegate = context.coordinator
         // QuickLook draws its own chrome, so the size toggle rides the nav bar
@@ -545,10 +881,21 @@ private struct QuickLookController: UIViewControllerRepresentable {
             action: #selector(Coordinator.dismissPreview)
         )
 
-        return UINavigationController(rootViewController: previewController)
+        let navigationController = UINavigationController(rootViewController: previewController)
+        // QuickLook owns its scroll view (a web view, PDF view, or image
+        // scroller depending on the file), so the probe rides the nav root —
+        // recognizers fire along the hit-test chain, so any pan inside the
+        // preview still reports.
+        FilesUIDiagnostics.shared.attachProbe(to: navigationController.view, surface: .quickLook)
+        return navigationController
     }
 
     func updateUIViewController(_ controller: UINavigationController, context: Context) {
+        // Runs on every SwiftUI update of everything around the sheet. A high
+        // count during a preview scroll means the session behind it is still
+        // redrawing into the same main thread QuickLook needs.
+        FilesUIDiagnostics.shared.quickLookUpdate()
+        FilesUIDiagnostics.shared.attachProbe(to: controller.view, surface: .quickLook)
         let itemChanged = context.coordinator.update(fileURL: fileURL, displayTitle: displayTitle)
         context.coordinator.onDismiss = onDismiss
         context.coordinator.onToggleMode = onToggleMode
