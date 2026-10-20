@@ -820,7 +820,7 @@ enum DiagnosticLogStore {
     }
 }
 
-private struct DiagnosticsSettingsView: View {
+struct DiagnosticsSettingsView: View {
     @Environment(\.designTokens) private var T
     @AppStorage(DiagnosticLogStore.verboseDiagnosticsDefaultsKey) private var verboseDiagnostics = false
     @AppStorage(DiagnosticLogStore.scrollDiagnosticsDefaultsKey) private var scrollDiagnostics = false
@@ -830,6 +830,7 @@ private struct DiagnosticsSettingsView: View {
     @State private var logInfo = DiagnosticLogStore.info()
     @State private var mailComposerVisible = false
     @State private var mailUnavailableVisible = false
+    @State private var logShareVisible = false
     /// Snapshotted when the composer is presented, because
     /// `MFMailComposeViewController` refuses edits once it is on screen.
     @State private var mailAttachment: Data?
@@ -864,6 +865,10 @@ private struct DiagnosticsSettingsView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         logActions
                     }
+                }
+                // Outside ViewThatFits, which builds both layouts of the row.
+                .systemShareSheet(isPresented: $logShareVisible) {
+                    [DiagnosticLogStore.logFileURL]
                 }
             }
         }
@@ -909,13 +914,9 @@ private struct DiagnosticsSettingsView: View {
     private let developerEmailAddress = "dev@bambouville.com"
 
     @ViewBuilder private var logActions: some View {
-        ShareLink(
-            item: DiagnosticLogStore.logFileURL,
-            preview: SharePreview(
-                diagnosticLogFileName,
-                icon: Image(systemName: "doc.text")
-            )
-        ) {
+        Button {
+            logShareVisible = true
+        } label: {
             Label("export log", systemImage: "square.and.arrow.up")
                 .font(Typography.tesseraMono(size: 13))
                 .lineLimit(1)

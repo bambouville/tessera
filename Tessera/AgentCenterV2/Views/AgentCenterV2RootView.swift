@@ -24,6 +24,29 @@ struct AgentCenterV2RootView<Sidebar: View>: View {
         self.sidebar = sidebar()
     }
 
+    private var fileAttachmentPickerRequest: Binding<AgentCenterV2PresentationModel.AttachmentPickerRequest?> {
+        Binding(
+            get: { model.attachmentPickerRequest?.source == .file ? model.attachmentPickerRequest : nil },
+            set: { request in
+                // A picker UIKit refused to show reports nothing; cancel it.
+                if request == nil, model.attachmentPickerRequest?.source == .file {
+                    model.attachmentPickerDidDismiss()
+                }
+            }
+        )
+    }
+
+    private var photoAttachmentPickerRequest: Binding<AgentCenterV2PresentationModel.AttachmentPickerRequest?> {
+        Binding(
+            get: { model.attachmentPickerRequest?.source == .photo ? model.attachmentPickerRequest : nil },
+            set: { request in
+                if request == nil, model.attachmentPickerRequest?.source == .photo {
+                    model.attachmentPickerRequest = nil
+                }
+            }
+        )
+    }
+
     var body: some View {
         GeometryReader { proxy in
             // ContentView owns the app's existing session sidebar and makes
@@ -72,23 +95,28 @@ struct AgentCenterV2RootView<Sidebar: View>: View {
         .sheet(item: $model.promptOverflow) { overflow in
             AgentPromptOverflowSheet(model: model, overflow: overflow)
         }
-        .sheet(item: $model.attachmentPickerRequest, onDismiss: { model.attachmentPickerDidDismiss() }) { request in
-            Group {
-                switch request.source {
-                case .file:
-                    AgentAttachmentDocumentPicker { urls in model.completeAttachments(request, urls: urls) }
-                case .photo:
-                    AgentAttachmentPhotoPicker(request: request,
-                        onStartLoading: { cancel in model.beginLoadingAttachmentPhotos(request, onCancel: cancel) },
-                        onCompletion: { result in
-                            switch result {
-                            case .success(let urls): model.completeAttachments(request, urls: urls)
-                            case .failure(let error):
-                                model.failPhotoAttachments(request, error: error)
-                            }
-                        })
-                }
-            }
+        // UIKit presents the file picker: hosted in a sheet on a Mac it
+        // dismissed the sheet before reporting, and the dismissal cancelled
+        // the attachment.
+        .systemDocumentPicker(
+            item: fileAttachmentPickerRequest,
+            contentTypes: [.item],
+            allowsMultipleSelection: true,
+            asCopy: false
+        ) { request, urls in
+            model.completeAttachments(request, urls: urls)
+            model.attachmentPickerDidDismiss()
+        }
+        .sheet(item: photoAttachmentPickerRequest, onDismiss: { model.attachmentPickerDidDismiss() }) { request in
+            AgentAttachmentPhotoPicker(request: request,
+                onStartLoading: { cancel in model.beginLoadingAttachmentPhotos(request, onCancel: cancel) },
+                onCompletion: { result in
+                    switch result {
+                    case .success(let urls): model.completeAttachments(request, urls: urls)
+                    case .failure(let error):
+                        model.failPhotoAttachments(request, error: error)
+                    }
+                })
             .overlay {
                 if model.loadingAttachmentPhotos {
                     VStack(spacing: 12) {

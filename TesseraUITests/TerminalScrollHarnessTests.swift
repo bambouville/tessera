@@ -454,7 +454,7 @@ final class KeyImportPickerHarnessTests: XCTestCase {
     }
 
     func testDocumentPickerCancelsAndReopens() {
-        XCUIDevice.shared.orientation = .portrait
+        XCUIDevice.shared.orientation = XCUIDevice.shared.supportsPointerInteraction ? .landscapeLeft : .portrait
         app = XCUIApplication()
         app.launchEnvironment["TESSERA_COMPACT_NAVIGATION_HARNESS"] = "1"
         app.launchEnvironment["TESSERA_COMPACT_NAVIGATION_INITIAL_SIZE"] = "compact"
@@ -493,6 +493,87 @@ final class KeyImportPickerHarnessTests: XCTestCase {
                 "OpenSSH import did not recover after cancelling attempt \(attempt)"
             )
         }
+    }
+
+    /// Presenting is not enough: the picker has to hand a chosen file back.
+    /// run-system-presentation-tests.sh seeds an unencrypted OpenSSH key into
+    /// Tessera's Documents, which Files lists under On My iPhone/iPad › Tessera.
+    func testDocumentPickerImportsSeededKey() throws {
+        guard let fileName = ProcessInfo.processInfo.environment["TESSERA_KEY_IMPORT_SEEDED_FILE"] else {
+            throw XCTSkip("driven by run-system-presentation-tests.sh, which seeds the key file")
+        }
+        XCUIDevice.shared.orientation = XCUIDevice.shared.supportsPointerInteraction ? .landscapeLeft : .portrait
+        app = XCUIApplication()
+        app.launchEnvironment["TESSERA_COMPACT_NAVIGATION_HARNESS"] = "1"
+        app.launchEnvironment["TESSERA_COMPACT_NAVIGATION_INITIAL_SIZE"] = "compact"
+        app.launchArguments += [
+            "-tessera.nearbyBootstrap.completed.v1", "YES",
+            "-tessera.pref.hasSeenWelcome", "YES",
+        ]
+        app.launch()
+
+        let keysTab = app.tabBars.buttons["keys"]
+        XCTAssertTrue(keysTab.waitForExistence(timeout: 10))
+        keysTab.tap()
+        let importButton = app.buttons["import"].firstMatch
+        XCTAssertTrue(importButton.waitForExistence(timeout: 5))
+        importButton.tap()
+        let chooseFile = app.buttons["choose file…"]
+        XCTAssertTrue(chooseFile.waitForExistence(timeout: 5))
+        chooseFile.tap()
+        XCTAssertTrue(
+            app.buttons["Cancel"].firstMatch.waitForExistence(timeout: 10),
+            "system document picker did not present"
+        )
+
+        // iPhone's browser has a Browse tab; iPad's sidebar lists locations.
+        let browse = app.buttons.matching(identifier: "Browse").firstMatch
+        if browse.exists && browse.isHittable {
+            browse.tap()
+        }
+        try tapPickerItem(labelled: ["On My iPhone", "On My iPad"])
+        try tapPickerItem(labelled: ["Tessera"])
+        try tapPickerItem(labelled: [fileName])
+
+        // The file name is also a row in the picker; only read it from the
+        // modal once the picker has gone.
+        XCTAssertTrue(
+            app.buttons["Cancel"].firstMatch.waitForNonExistence(timeout: 10),
+            "the document picker stayed up after choosing the key file"
+        )
+        XCTAssertTrue(
+            app.staticTexts[fileName].waitForExistence(timeout: 10),
+            "the chosen key file never reached the import modal"
+        )
+        let modalImport = app.buttons.matching(identifier: "import").allElementsBoundByIndex
+            .filter { $0.frame.minY > chooseFile.frame.maxY }
+            .last
+        let confirm = try XCTUnwrap(modalImport, "import modal has no import action")
+        confirm.tap()
+        XCTAssertTrue(
+            app.staticTexts["import OpenSSH key"].waitForNonExistence(timeout: 10),
+            "importing the chosen key did not close the modal"
+        )
+    }
+
+    private func tapPickerItem(labelled labels: [String]) throws {
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline {
+            for label in labels {
+                let match = app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "label BEGINSWITH %@", label))
+                    .allElementsBoundByIndex
+                    .first { $0.isHittable }
+                if let match {
+                    match.tap()
+                    return
+                }
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        add(XCTAttachment(string: app.debugDescription))
+        XCTFail("document picker never showed any of \(labels)")
+        throw XCTestError(.failureWhileWaiting)
     }
 }
 
@@ -1901,9 +1982,14 @@ final class ContinuityHarnessTests: XCTestCase {
         scrolled.name = "QR offer scrolled code and next step"
         scrolled.lifetime = .keepAlways
         add(scrolled)
-        app.swipeDown()
-        XCTAssertTrue(app.buttons["cancel"].isHittable)
-        app.buttons["cancel"].tap()
+        // On a landscape iPhone, a default-speed swipe on the app often stops
+        // this sheet partway (cancel left 230 pt above the screen) and further
+        // fast swipes leave it there; a slow swipe on the scroll view returns
+        // to the top every time.
+        let cancel = app.buttons["cancel"]
+        app.scrollViews.firstMatch.swipeDown(velocity: .slow)
+        XCTAssertTrue(cancel.isHittable)
+        cancel.tap()
     }
 
     func testQRManualEntryRemainsUsableWithSoftwareKeyboard() {

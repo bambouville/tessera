@@ -381,6 +381,9 @@ run_case app_compact_navigation_transition \
   "$HERE/run-compact-navigation-transition-tests.sh" "$RUN_DIR" --without-building
 run_case app_continuity_descriptor_routes \
   "$HERE/run-continuity-harness-tests.sh" "$RUN_DIR" --without-building
+# Last on the shared iPad: it leaves an imported key behind.
+run_case app_system_presentation \
+  "$HERE/run-system-presentation-tests.sh" "$RUN_DIR" --without-building
 release_shared_simulator
 export TESSERA_KEEP_TEST_SIM_BOOTED=0
 

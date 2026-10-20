@@ -302,36 +302,6 @@ private struct AgentComposerButtonStyle: ButtonStyle {
     }
 }
 
-/// UIKit's native browser also works when the surrounding SwiftUI content is
-/// embedded in Tessera's custom presentation hierarchy.
-struct AgentAttachmentDocumentPicker: UIViewControllerRepresentable {
-    let onCompletion: ([URL]) -> Void
-
-    func makeCoordinator() -> Coordinator { Coordinator(onCompletion: onCompletion) }
-
-    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: false)
-        picker.allowsMultipleSelection = true
-        picker.delegate = context.coordinator
-        return picker
-    }
-
-    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
-
-    final class Coordinator: NSObject, UIDocumentPickerDelegate {
-        let onCompletion: ([URL]) -> Void
-        private var completed = false
-        init(onCompletion: @escaping ([URL]) -> Void) { self.onCompletion = onCompletion }
-        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { finish(urls) }
-        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { finish([]) }
-        private func finish(_ urls: [URL]) {
-            guard !completed else { return }
-            completed = true
-            onCompletion(urls)
-        }
-    }
-}
-
 struct AgentAttachmentPhotoPicker: UIViewControllerRepresentable {
     let request: AgentCenterV2PresentationModel.AttachmentPickerRequest
     let onStartLoading: (@escaping () -> Void) -> Bool

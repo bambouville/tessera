@@ -67,6 +67,16 @@ struct ImportKeyModal: View {
                         Btn("choose file…", compact: true) {
                             showFileImporter = true
                         }
+                        // UIKit presents the picker: SwiftUI's fileImporter
+                        // beneath this custom modal could silently decline on
+                        // iOS 26, and a picker hosted in a sheet lost the chosen
+                        // file on a Mac.
+                        .systemDocumentPicker(
+                            isPresented: $showFileImporter,
+                            contentTypes: [.data, .plainText]
+                        ) { urls in
+                            handleFileSelection(urls.first)
+                        }
                     }
                     .padding(12)
                     .background(T.inputBg)
@@ -134,16 +144,6 @@ struct ImportKeyModal: View {
                     .transaction { $0.animation = nil }
             }
         }
-        // Present the UIKit document picker explicitly. SwiftUI's fileImporter
-        // modifier is attached beneath this custom full-screen modal and can
-        // silently decline to present on iOS 26.
-        .sheet(isPresented: $showFileImporter) {
-            OpenSSHKeyDocumentPicker { result in
-                showFileImporter = false
-                handleFileSelection(result)
-            }
-            .ignoresSafeArea()
-        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 privacyShielded = UIScreen.main.isCaptured
@@ -162,10 +162,13 @@ struct ImportKeyModal: View {
         .onDisappear(perform: clearSecrets)
     }
 
-    private func handleFileSelection(_ result: Result<[URL], Error>) {
+    private func handleFileSelection(_ url: URL?) {
         importError = nil
+        guard let url else {
+            DiagnosticLogStore.append(.keys, "key-import picker cancelled")
+            return
+        }
         do {
-            guard let url = try result.get().first else { return }
             let accessed = url.startAccessingSecurityScopedResource()
             defer {
                 if accessed { url.stopAccessingSecurityScopedResource() }
@@ -180,7 +183,9 @@ struct ImportKeyModal: View {
             }
             selectedFileData = data
             selectedFilename = url.lastPathComponent
+            DiagnosticLogStore.append(.keys, "key-import file loaded bytes=\(data.count) scoped=\(accessed)")
         } catch {
+            DiagnosticLogStore.append(.keys, "key-import file failed error=\(String(describing: type(of: error)))")
             clearFileData()
             importError = error.localizedDescription
         }
@@ -241,48 +246,6 @@ struct ImportKeyModal: View {
     private func clearSecrets() {
         passphrase = ""
         clearFileData()
-    }
-}
-
-private struct OpenSSHKeyDocumentPicker: UIViewControllerRepresentable {
-    let onCompletion: (Result<[URL], Error>) -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onCompletion: onCompletion)
-    }
-
-    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let picker = UIDocumentPickerViewController(
-            forOpeningContentTypes: [.data, .plainText],
-            asCopy: true
-        )
-        picker.delegate = context.coordinator
-        picker.allowsMultipleSelection = false
-        return picker
-    }
-
-    func updateUIViewController(
-        _ uiViewController: UIDocumentPickerViewController,
-        context: Context
-    ) {}
-
-    final class Coordinator: NSObject, UIDocumentPickerDelegate {
-        let onCompletion: (Result<[URL], Error>) -> Void
-
-        init(onCompletion: @escaping (Result<[URL], Error>) -> Void) {
-            self.onCompletion = onCompletion
-        }
-
-        func documentPicker(
-            _ controller: UIDocumentPickerViewController,
-            didPickDocumentsAt urls: [URL]
-        ) {
-            onCompletion(.success(urls))
-        }
-
-        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-            onCompletion(.success([]))
-        }
     }
 }
 

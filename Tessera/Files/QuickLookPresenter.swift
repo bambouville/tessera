@@ -794,6 +794,7 @@ private struct MarkdownPreview: View {
     let onDone: () -> Void
 
     @State private var loadState: LoadState = .loading
+    @State private var shareVisible = false
 
     private var title: String {
         displayTitle ?? fileURL.lastPathComponent
@@ -820,7 +821,9 @@ private struct MarkdownPreview: View {
                         .accessibilityLabel(mode.toggleLabel)
                     }
                     ToolbarItem(placement: .topBarTrailing) {
-                        ShareLink(item: fileURL) {
+                        Button {
+                            shareVisible = true
+                        } label: {
                             Image(systemName: "square.and.arrow.up")
                         }
                         .accessibilityLabel("Share \(title)")
@@ -829,6 +832,16 @@ private struct MarkdownPreview: View {
                         Button("Done", action: onDone)
                     }
                 }
+        }
+        // Anchored over the trailing bar buttons from outside the stack:
+        // toolbar items and the stack's content are rebuilt as the share
+        // state and the document load change, and a popover left on a
+        // rebuilt view points at nothing.
+        .overlay(alignment: .topTrailing) {
+            Color.clear
+                .frame(width: 88, height: 44)
+                .allowsHitTesting(false)
+                .systemShareSheet(isPresented: $shareVisible) { [fileURL] }
         }
         .task(id: fileURL) { await load() }
     }
@@ -1236,51 +1249,6 @@ private struct QuickLookController: UIViewControllerRepresentable {
             hasDismissed = true
             onDismiss()
         }
-    }
-}
-
-/// Wraps the system share sheet. Prefer presenting this from SwiftUI with `.sheet`,
-/// but keep the popover anchor guard so iPad popover presentation never crashes.
-struct ActivityShareSheet: UIViewControllerRepresentable {
-    let items: [Any]
-    let completion: (() -> Void)?
-
-    init(items: [Any], completion: (() -> Void)? = nil) {
-        self.items = items
-        self.completion = completion
-    }
-
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
-        configure(controller)
-        return controller
-    }
-
-    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {
-        configure(controller)
-    }
-
-    private func configure(_ controller: UIActivityViewController) {
-        controller.completionWithItemsHandler = { _, _, _, _ in
-            completion?()
-        }
-
-        guard let popover = controller.popoverPresentationController else {
-            return
-        }
-
-        controller.loadViewIfNeeded()
-        guard let sourceView = controller.view else {
-            return
-        }
-
-        popover.sourceView = sourceView
-        popover.sourceRect = CGRect(
-            x: sourceView.bounds.midX,
-            y: sourceView.bounds.midY,
-            width: 1,
-            height: 1
-        )
     }
 }
 

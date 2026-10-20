@@ -131,6 +131,7 @@
 		5E0A04000000000000000002 /* SessionShowEdgeTrackerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0A03000000000000000002 /* SessionShowEdgeTrackerTests.swift */; };
 		C40004000000000000000002 /* AppleSessionCommandFacadeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C40003000000000000000002 /* AppleSessionCommandFacadeTests.swift */; };
 		C400040000000000000000F1 /* KeyboardFocusRetentionReproTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C400030000000000000000F1 /* KeyboardFocusRetentionReproTests.swift */; };
+		5E5C0D000000000000000004 /* SystemPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E5C0D000000000000000003 /* SystemPresentationTests.swift */; };
 		1A00040000000000000000F0 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 1A00030000000000000000F0 /* PrivacyInfo.xcprivacy */; };
 		1A00040000000000000000F1 /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = 1A00030000000000000000F1 /* LICENSE */; };
 		1A00040000000000000000F2 /* COPYING.iOS in Resources */ = {isa = PBXBuildFile; fileRef = 1A00030000000000000000F2 /* COPYING.iOS */; };
@@ -153,6 +154,7 @@
 		1A0014000000000000000004 /* Field.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000004 /* Field.swift */; };
 		1A0014000000000000000005 /* Input.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000005 /* Input.swift */; };
 		1A0014000000000000000006 /* Btn.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000006 /* Btn.swift */; };
+		5E5C0D000000000000000002 /* SystemPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E5C0D000000000000000001 /* SystemPresentation.swift */; };
 		1A0014000000000000000007 /* Chip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000007 /* Chip.swift */; };
 		1A0014000000000000000008 /* Tag.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000008 /* Tag.swift */; };
 		1A0014000000000000000009 /* StatusDot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000009 /* StatusDot.swift */; };
@@ -482,6 +484,7 @@
 		5E0A03000000000000000002 /* SessionShowEdgeTrackerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionShowEdgeTrackerTests.swift; sourceTree = "<group>"; };
 		C40003000000000000000002 /* AppleSessionCommandFacadeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSessionCommandFacadeTests.swift; sourceTree = "<group>"; };
 		C400030000000000000000F1 /* KeyboardFocusRetentionReproTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardFocusRetentionReproTests.swift; sourceTree = "<group>"; };
+		5E5C0D000000000000000003 /* SystemPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemPresentationTests.swift; sourceTree = "<group>"; };
 		1A000300000000000000001D /* TesseraTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TesseraTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A000300000000000000001E /* MoshBootstrapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoshBootstrapTests.swift; sourceTree = "<group>"; };
 		7E5501000000000000000002 /* MoshServerLivenessWatchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoshServerLivenessWatchTests.swift; sourceTree = "<group>"; };
@@ -528,6 +531,7 @@
 		1A0013000000000000000004 /* Field.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Field.swift; sourceTree = "<group>"; };
 		1A0013000000000000000005 /* Input.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Input.swift; sourceTree = "<group>"; };
 		1A0013000000000000000006 /* Btn.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Btn.swift; sourceTree = "<group>"; };
+		5E5C0D000000000000000001 /* SystemPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemPresentation.swift; sourceTree = "<group>"; };
 		1A0013000000000000000007 /* Chip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Chip.swift; sourceTree = "<group>"; };
 		1A0013000000000000000008 /* Tag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tag.swift; sourceTree = "<group>"; };
 		1A0013000000000000000009 /* StatusDot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusDot.swift; sourceTree = "<group>"; };
@@ -883,6 +887,7 @@
 				C40003000000000000000002 /* AppleSessionCommandFacadeTests.swift */,
 				5E0A03000000000000000002 /* SessionShowEdgeTrackerTests.swift */,
 				C400030000000000000000F1 /* KeyboardFocusRetentionReproTests.swift */,
+				5E5C0D000000000000000003 /* SystemPresentationTests.swift */,
 				C2000000000000000000000A /* ContinuityFoundationTests.swift */,
 				C2000000000000000000000B /* SyncClassificationTests.swift */,
 				C2000000000000000000FF01 /* TerminalFontCatalogTests.swift */,
@@ -1018,6 +1023,7 @@
 				1A0013000000000000000008 /* Tag.swift */,
 				1A0013000000000000000009 /* StatusDot.swift */,
 				1A001300000000000000000A /* ToggleRow.swift */,
+				5E5C0D000000000000000001 /* SystemPresentation.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -1729,6 +1735,7 @@
 				1A0014000000000000000004 /* Field.swift in Sources */,
 				1A0014000000000000000005 /* Input.swift in Sources */,
 				1A0014000000000000000006 /* Btn.swift in Sources */,
+				5E5C0D000000000000000002 /* SystemPresentation.swift in Sources */,
 				1A0014000000000000000007 /* Chip.swift in Sources */,
 				1A0014000000000000000008 /* Tag.swift in Sources */,
 				1A0014000000000000000009 /* StatusDot.swift in Sources */,
@@ -1846,6 +1853,7 @@
 				C40004000000000000000002 /* AppleSessionCommandFacadeTests.swift in Sources */,
 				5E0A04000000000000000002 /* SessionShowEdgeTrackerTests.swift in Sources */,
 				C400040000000000000000F1 /* KeyboardFocusRetentionReproTests.swift in Sources */,
+				5E5C0D000000000000000004 /* SystemPresentationTests.swift in Sources */,
 				1AFF00000000000000000A12 /* TerminalKeyboardCaretPolicyTests.swift in Sources */,
 				C1000000000000000000000A /* ContinuityFoundationTests.swift in Sources */,
 				C1000000000000000000000B /* SyncClassificationTests.swift in Sources */,
@@ -2098,7 +2106,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Tessera/Tessera.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -2133,7 +2141,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Tessera/Tessera.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -2166,7 +2174,8 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
+				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -2190,7 +2199,8 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
+				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -2250,7 +2260,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = TesseraShareExtension/TesseraShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -2278,7 +2288,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = TesseraShareExtension/TesseraShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;

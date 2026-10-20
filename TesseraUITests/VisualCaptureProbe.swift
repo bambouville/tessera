@@ -1892,8 +1892,7 @@ final class VisualCaptureProbe: XCTestCase {
         let order = app.descendants(matching: .any)["tmux-window-order-value"]
         XCTAssertTrue(order.waitForExistence(timeout: 10))
         func capture(_ label: String) {
-            NSLog("TESSERA_WINDOW_ORDER_CAPTURE %@", label)
-            Thread.sleep(forTimeInterval: 1.5)
+            holdForWindowOrderCapture(label)
             let attachment = XCTAttachment(screenshot: app.screenshot())
             attachment.name = "tmux-order-" + label
             attachment.lifetime = .keepAlways
@@ -1971,8 +1970,7 @@ final class VisualCaptureProbe: XCTestCase {
         XCTAssertTrue(source.isHittable)
         XCTAssertTrue(target.isHittable)
         let before = XCTAttachment(screenshot: app.screenshot())
-        NSLog("TESSERA_WINDOW_ORDER_CAPTURE strip-before")
-        Thread.sleep(forTimeInterval: 1.5)
+        holdForWindowOrderCapture("strip-before")
         before.name = "tmux-order-strip-before"
         before.lifetime = .keepAlways
         add(before)
@@ -1984,8 +1982,7 @@ final class VisualCaptureProbe: XCTestCase {
         waitForExpectations(timeout: 8)
         XCTAssertEqual(app.descendants(matching: .any)["tmux-window-active-value"].value as? String, "@15")
         let after = XCTAttachment(screenshot: app.screenshot())
-        NSLog("TESSERA_WINDOW_ORDER_CAPTURE strip-after")
-        Thread.sleep(forTimeInterval: 1.5)
+        holdForWindowOrderCapture("strip-after")
         after.name = "tmux-order-strip-after"
         after.lifetime = .keepAlways
         add(after)
@@ -2008,8 +2005,7 @@ final class VisualCaptureProbe: XCTestCase {
         XCTAssertTrue(source.waitForExistence(timeout: 5))
         XCTAssertTrue(target.exists)
         let before = XCTAttachment(screenshot: app.screenshot())
-        NSLog("TESSERA_WINDOW_ORDER_CAPTURE compact-before")
-        Thread.sleep(forTimeInterval: 1.5)
+        holdForWindowOrderCapture("compact-before")
         before.name = "tmux-order-compact-before"
         before.lifetime = .keepAlways
         add(before)
@@ -2020,8 +2016,7 @@ final class VisualCaptureProbe: XCTestCase {
         XCTAssertEqual(app.descendants(matching: .any)["tmux-window-active-value"].value as? String, "@1")
         XCTAssertTrue(app.descendants(matching: .any)["command-palette-window-1-reorder"].waitForExistence(timeout: 5))
         let after = XCTAttachment(screenshot: app.screenshot())
-        NSLog("TESSERA_WINDOW_ORDER_CAPTURE compact-after")
-        Thread.sleep(forTimeInterval: 1.5)
+        holdForWindowOrderCapture("compact-after")
         after.name = "tmux-order-compact-after"
         after.lifetime = .keepAlways
         add(after)
@@ -2030,8 +2025,7 @@ final class VisualCaptureProbe: XCTestCase {
         row.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).press(forDuration: 0.85)
         let moveStart = app.buttons["Move to Start"].firstMatch
         XCTAssertTrue(moveStart.waitForExistence(timeout: 4))
-        NSLog("TESSERA_WINDOW_ORDER_CAPTURE compact-menu")
-        Thread.sleep(forTimeInterval: 1.5)
+        holdForWindowOrderCapture("compact-menu")
         moveStart.tap()
         expectation(for: NSPredicate(format: "value == %@", "@1,@2,@3"), evaluatedWith: order)
         waitForExpectations(timeout: 8)
@@ -2040,12 +2034,10 @@ final class VisualCaptureProbe: XCTestCase {
         query.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 4))
         XCTAssertTrue(query.isHittable)
-        NSLog("TESSERA_WINDOW_ORDER_CAPTURE compact-keyboard")
-        Thread.sleep(forTimeInterval: 1.5)
+        holdForWindowOrderCapture("compact-keyboard")
         app.scrollViews["command-palette-results"].swipeUp()
         XCTAssertTrue(app.descendants(matching: .any)["tmux-window-@3"].firstMatch.isHittable)
-        NSLog("TESSERA_WINDOW_ORDER_CAPTURE compact-scrolled")
-        Thread.sleep(forTimeInterval: 1.5)
+        holdForWindowOrderCapture("compact-scrolled")
     }
 
     func testTmuxWindowCloseControls() throws {
@@ -2447,6 +2439,15 @@ final class VisualCaptureProbe: XCTestCase {
     private func mark(_ name: String) {
         lastMarker = name
         print("TESSERA_VISUAL_EVENT \(name) epoch=\(Date().timeIntervalSince1970)")
+    }
+
+    /// Window-ordering milestones are screenshotted from their log marker. A
+    /// fixed 1.5 s hold let a slow screenshot land after the test had ended
+    /// (SpringBoard as strip-after), so the lane acknowledges each one.
+    private func holdForWindowOrderCapture(_ label: String) {
+        NSLog("TESSERA_WINDOW_ORDER_CAPTURE %@", label)
+        lastMarker = label
+        holdForExternalCapture()
     }
 
     private func holdForExternalCapture() {
