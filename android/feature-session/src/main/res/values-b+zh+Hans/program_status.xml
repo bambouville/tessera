@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="program_status_needs_input">等待输入</string>
+    <string name="program_status_needs_approval">等待批准</string>
+    <string name="program_status_needs_answer">等待回答</string>
+    <string name="program_status_sign_in_needed">需要登录</string>
+    <string name="program_status_failed">失败</string>
+    <string name="program_status_finished">已完成</string>
+    <string name="program_status_working">工作中</string>
+    <string name="program_status_ready">就绪</string>
+    <string name="program_status_unavailable">状态不可用</string>
+    <string name="program_status_program">程序</string>
+    <string name="program_status_programs">程序</string>
+    <string name="program_status_needs_attention">需要处理</string>
+    <string name="program_status_visit_checks">访问窗格即标记为已查看</string>
+    <string name="program_status_open_pane">打开窗格</string>
+    <plurals name="program_status_count_need_input">
+        <item quantity="other">%d 项等待输入</item>
+    </plurals>
+    <plurals name="program_status_count_need_approval">
+        <item quantity="other">%d 项等待批准</item>
+    </plurals>
+    <plurals name="program_status_count_need_answer">
+        <item quantity="other">%d 项等待回答</item>
+    </plurals>
+    <plurals name="program_status_count_need_sign_in">
+        <item quantity="other">%d 项需要登录</item>
+    </plurals>
+    <plurals name="program_status_count_failed">
+        <item quantity="other">%d 项失败</item>
+    </plurals>
+    <plurals name="program_status_count_finished">
+        <item quantity="other">%d 项已完成</item>
+    </plurals>
+    <string name="program_status_open_agent_center">打开智能体中心</string>
+    <string name="program_status_raw_session">原始会话</string>
+    <string name="program_status_window">窗口 %1$d</string>
+    <string name="program_status_named_window">窗口 %1$d“%2$s”</string>
+    <string name="program_status_pane">窗格 %1$s</string>
+    <string name="program_status_pane_unavailable">窗格不可用</string>
+    <string name="program_status_all_caught_up">全部已处理</string>
+    <plurals name="program_status_pane_count">
+        <item quantity="other">%d 个窗格</item>
+    </plurals>
+</resources>

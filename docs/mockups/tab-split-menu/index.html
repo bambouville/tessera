@@ -1,0 +1,1106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tessera — Window tab menu: pane splits</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ══════════════════════════════════════════════════════════════════════════
+   Real tokens.
+   Chrome:  TerminalTheme.chromeTokens()      — Terminal/TerminalTheme.swift:150
+   Accent:  DesignTokens.make(mode:accent:)   — Design/DesignTokens.swift:37-60
+   Themes:  Void  bg #000000 fg #D4D4D4  ·  Paper bg #FAFAFA fg #111111
+   Accent:  blue  dark #5B9FFF / light #0060DF
+   ══════════════════════════════════════════════════════════════════════════ */
+:root {
+  --bg:            #000000;
+  --fg:            #D4D4D4;
+  --fg-muted:      rgba(212,212,212,0.65);
+  --fg-dim:        rgba(212,212,212,0.40);
+  --fg-faint:      rgba(212,212,212,0.18);
+  --border:        rgba(212,212,212,0.10);
+  --border-strong: rgba(212,212,212,0.18);
+  --accent:        #5B9FFF;
+  --accent-soft:   rgba(91,159,255,0.14);
+  --panel-bg:      #000000;
+  --input-bg:      rgba(212,212,212,0.06);
+  --glass-tint:    rgba(0,0,0,0.35);
+  --glass-wash-a:  rgba(210,210,214,0.07);
+  --glass-wash-b:  rgba(210,210,214,0.04);
+  --green: #30D158; --amber: #FF9F0A; --red: #FF453A;
+
+  /* UIKit context-menu material (dark) — UIContextMenuInteraction */
+  --menu-bg:    rgba(37,37,37,0.74);
+  --menu-fg:    #FFFFFF;
+  --menu-sep:   rgba(255,255,255,0.11);
+  --menu-hover: rgba(255,255,255,0.11);
+  --menu-hdr:   rgba(235,235,245,0.55);
+  --menu-destructive: #FF453A;
+  --scrim: rgba(0,0,0,0.30);
+
+  /* page chrome (not app tokens) */
+  --page-bg:    #08080A;
+  --page-card:  #0E0E11;
+  --page-fg:    #E8E8EA;
+  --page-mute:  rgba(232,232,234,0.62);
+  --page-dim:   rgba(232,232,234,0.38);
+  --page-line:  rgba(255,255,255,0.09);
+
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Inter, sans-serif;
+}
+body.light {
+  --bg:            #FAFAFA;
+  --fg:            #111111;
+  --fg-muted:      rgba(17,17,17,0.65);
+  --fg-dim:        rgba(17,17,17,0.40);
+  --fg-faint:      rgba(17,17,17,0.18);
+  --border:        rgba(17,17,17,0.10);
+  --border-strong: rgba(17,17,17,0.18);
+  --accent:        #0060DF;
+  --accent-soft:   rgba(0,96,223,0.10);
+  --panel-bg:      #FAFAFA;
+  --input-bg:      rgba(17,17,17,0.06);
+  --glass-tint:    rgba(250,250,250,0.55);
+  --glass-wash-a:  rgba(255,255,255,0.45);
+  --glass-wash-b:  rgba(255,255,255,0.25);
+  --green: #00A63C; --amber: #B26B00; --red: #D70015;
+
+  --menu-bg:    rgba(246,246,246,0.78);
+  --menu-fg:    #000000;
+  --menu-sep:   rgba(0,0,0,0.12);
+  --menu-hover: rgba(0,0,0,0.07);
+  --menu-hdr:   rgba(60,60,67,0.60);
+  --menu-destructive: #D70015;
+  --scrim: rgba(0,0,0,0.16);
+
+  /* the page follows the theme too, so the cards below don't stay dark */
+  --page-bg:   #F6F6F7;
+  --page-card: #FFFFFF;
+  --page-fg:   #1A1A1C;
+  --page-mute: rgba(26,26,28,0.66);
+  --page-dim:  rgba(26,26,28,0.46);
+  --page-line: rgba(0,0,0,0.10);
+}
+body.light .verdict.good { color: #0A7C33; background: rgba(0,166,60,0.12); }
+body.light .verdict.meh  { color: #8A5200; background: rgba(178,107,0,0.12); }
+body.light .verdict.bad  { color: #B00014; background: rgba(215,0,21,0.10); }
+body.light .chip .dot.acc { background: #0060DF; }
+body.light .wire .snd,
+body.light .gcard .cmd,
+body.light table.spec td.cmd { color: #0060DF; }
+body.light ol.decisions li .rec { color: #0A7C33; }
+body.light .seg button.on { background: rgba(0,96,223,0.12); color: #0060DF; }
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { background: var(--page-bg); }
+body {
+  font-family: var(--sans); color: var(--page-fg); background: var(--page-bg);
+  padding: 44px 28px 140px; max-width: 1340px; margin: 0 auto; line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 25px; font-weight: 600; letter-spacing: -0.021em; color: #fff; }
+body.light h1, body.light h2, body.light h3, body.light h4 { color: var(--page-fg); }
+h2 { font-size: 18px; font-weight: 600; letter-spacing: -0.012em; margin: 70px 0 6px;
+     padding-top: 22px; border-top: 1px solid var(--page-line); color: #fff; }
+h3 { font-size: 14.5px; font-weight: 600; margin: 26px 0 8px; color: #fff; }
+h4 { font-size: 12.5px; font-weight: 600; margin: 0 0 4px; color: #fff; }
+p.sub  { color: var(--page-mute); font-size: 14px; margin: 8px 0 0; max-width: 900px; }
+p.note { color: var(--page-dim); font-size: 12.5px; margin: 10px 0 0; max-width: 900px; }
+b { font-weight: 600; color: var(--page-fg); }
+code { font-family: var(--mono); font-size: 0.85em; background: rgba(255,255,255,0.05);
+       border: 1px solid var(--page-line); border-radius: 4px; padding: 1px 5px; color: var(--page-mute); }
+body.light code { background: rgba(0,0,0,0.05); }
+
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
+.chip { font-size: 11.5px; font-family: var(--mono); color: var(--page-mute);
+        border: 1px solid var(--page-line); border-radius: 100px; padding: 3px 10px;
+        display: inline-flex; align-items: center; gap: 6px; }
+.chip .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.dot.ok { background: var(--green); } .dot.acc { background: #5B9FFF; } .dot.mid { background: var(--amber); }
+
+/* ─────────────────────────── controls ─────────────────────────── */
+.controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin: 20px 0 16px; }
+.seg { display: inline-flex; border: 1px solid var(--page-line); border-radius: 9px; overflow: hidden; }
+.seg button { appearance: none; background: none; border: none; color: var(--page-mute);
+  font: 500 12px var(--sans); padding: 7px 13px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--page-line); }
+.seg button.on { background: rgba(91,159,255,0.16); color: #7FB4FF; }
+body.light .seg button.on { background: rgba(0,96,223,0.12); color: #0060DF; }
+.ctl { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--page-mute); cursor: pointer; }
+.ctl input { accent-color: #5B9FFF; }
+.seglbl { font: 500 11px var(--mono); color: var(--page-dim); letter-spacing: 0.03em; text-transform: uppercase; }
+
+/* ─────────────────────────── device ─────────────────────────── */
+.stageWrap { position: relative; margin-top: 6px; }
+.deviceScale { transform-origin: top left; }
+.device {
+  position: relative; overflow: hidden; width: 1194px; height: 740px;
+  border-radius: 20px; border: 1px solid rgba(255,255,255,0.13);
+  box-shadow: 0 20px 64px rgba(0,0,0,0.6); background: var(--bg);
+  font-family: var(--mono);
+  --pill-h: 32px;
+}
+body.light .device { border-color: rgba(0,0,0,0.14); box-shadow: 0 20px 64px rgba(0,0,0,0.22); }
+
+/* terminal canvas below the floating bar */
+.canvas { position: absolute; left: 0; right: 0; top: 48px; bottom: 0; }
+
+/* a pane leaf */
+.pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; flex: 1 1 0;
+        position: relative; background: var(--bg); }
+.pane .phdr { height: 20px; display: flex; align-items: center; gap: 4px; flex: none;
+  background: var(--panel-bg); border-bottom: 1px solid var(--border); padding-right: 6px; }
+.pane.focus .phdr { background: var(--accent-soft); border-bottom-color: rgba(91,159,255,0.5); }
+body.light .pane.focus .phdr { border-bottom-color: rgba(0,96,223,0.5); }
+.pane .phdr .x { width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;
+  color: var(--fg-dim); flex: none; }
+.pane.focus .phdr .x { color: var(--accent); }
+.pane .phdr .x svg { width: 8px; height: 8px; }
+.pane .phdr .t { font: 500 10.4px var(--mono); color: var(--fg-muted); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.pane.focus .phdr .t { color: var(--fg); }
+.pane .pbody { flex: 1 1 auto; overflow: hidden; padding: 6px 9px; font-size: 11.6px; line-height: 1.5;
+  color: var(--fg); white-space: pre; }
+.pane.focus::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  box-shadow: inset 0 0 0 1.5px rgba(91,159,255,0.9); }
+body.light .pane.focus::after { box-shadow: inset 0 0 0 1.5px rgba(0,96,223,0.9); }
+.pane.single .phdr { display: none; }
+.pane.single::after { display: none; }
+
+.split { display: flex; min-width: 0; min-height: 0; flex: 1 1 0; }
+.split.h { flex-direction: row; } .split.v { flex-direction: column; }
+.gut { flex: none; background: var(--bg); }
+.split.h > .gut { width: 2px; } .split.v > .gut { height: 2px; }
+
+.canvas > * { height: 100%; }
+
+/* ghost preview of a split result, painted over the target pane */
+.ghost { position: absolute; z-index: 12; pointer-events: none;
+  background: var(--accent-soft); border: 1.5px dashed var(--accent);
+  border-radius: 3px; transition: all 0.12s ease-out; }
+.ghost .lbl { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+  font: 500 11px var(--mono); color: var(--accent); white-space: nowrap; letter-spacing: 0.02em; }
+
+/* terminal text colours (ANSI VS Code Dark+ / Solarized Light per theme) */
+.p { color: #0DBC79; } .b2 { color: #5B9FFF; } .y { color: #E5E510; } .d { color: var(--fg-dim); }
+.m { color: var(--fg-muted); } .r { color: #CD3131; }
+body.light .p { color: #859900; } body.light .y { color: #B58900; } body.light .r { color: #DC322F; }
+.cur { display: inline-block; width: 6.5px; height: 13px; background: var(--fg);
+  vertical-align: text-bottom; animation: blink 1.1s step-end infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ───────── floating top bar (SessionTopBar) — h32 r13, inset 8/10, pad 0 4 ───────── */
+.pill { position: absolute; top: 8px; left: 10px; right: 10px; height: var(--pill-h); z-index: 30;
+  border-radius: 13px; display: flex; align-items: center; padding: 0 4px;
+  background: linear-gradient(var(--glass-wash-a), var(--glass-wash-b)), var(--glass-tint);
+  -webkit-backdrop-filter: blur(20px) saturate(160%); backdrop-filter: blur(20px) saturate(160%);
+  box-shadow: 0 0 0 0.5px var(--border), 0 6px 22px rgba(0,0,0,0.35); }
+
+.cib { width: 36px; height: var(--pill-h); display: flex; align-items: center; justify-content: center;
+  background: none; border: none; cursor: pointer; color: var(--fg-muted); flex: none; padding: 0; }
+.cib .box { width: 28px; height: 24px; border-radius: 7px; display: flex; align-items: center; justify-content: center; }
+.cib svg { width: 15px; height: 15px; }
+.cib:hover .box { background: var(--input-bg); }
+
+.hostpill { display: flex; align-items: center; gap: 6px; padding: 0 8px; height: var(--pill-h);
+  flex: none; cursor: pointer; background: none; border: none; }
+.hostpill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex: none; }
+.hostpill .name { font: 500 12px var(--mono); color: var(--fg); white-space: nowrap; }
+.hostpill .sep { font: 400 11px var(--mono); color: var(--fg-dim); }
+.hostpill .tag { font: 600 10px var(--sans); letter-spacing: 0.05em; color: var(--fg-muted); }
+
+.stripWrap { flex: 1 1 auto; min-width: 40px; height: var(--pill-h); padding: 0 4px; }
+.strip { display: flex; align-items: center; gap: 6px; height: var(--pill-h);
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.strip::-webkit-scrollbar { display: none; }
+
+/* one tab — 24pt capsule r12, lead pad 11, mono 12, ⌘N mono 10.5 */
+.tab { display: flex; align-items: center; height: 24px; border-radius: 12px; flex: none;
+  padding-left: 11px; background: transparent; border: none; cursor: pointer;
+  transition: transform 0.16s cubic-bezier(.2,.8,.3,1), box-shadow 0.16s ease; position: relative; }
+.tab .ttl  { font: 400 12px var(--mono); color: var(--fg-muted); white-space: nowrap; }
+.tab .hint { font: 400 10.5px var(--mono); color: var(--fg-faint); margin-left: 6px; white-space: nowrap; }
+.tab.active { background: var(--accent-soft); }
+.tab.active .ttl  { font-weight: 500; color: var(--fg); }
+.tab.active .hint { color: var(--accent); }
+.tab.lifted { transform: scale(1.06); z-index: 55;
+  box-shadow: 0 8px 26px rgba(0,0,0,0.55), 0 0 0 0.5px var(--border-strong);
+  background: var(--accent-soft); }
+.tabx { width: 28px; height: 24px; margin-left: 7px; display: flex; align-items: center;
+  justify-content: center; background: none; border: none; cursor: pointer; padding: 0; flex: none; }
+.tabx .circ { width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center;
+  justify-content: center; background: var(--input-bg); box-shadow: 0 0 0 1px var(--fg-faint); color: var(--fg-dim); }
+.tabx svg { width: 8px; height: 8px; }
+.tabx:hover .circ { background: rgba(212,212,212,0.16); color: var(--fg); }
+
+/* ───────── context menu (UIContextMenuInteraction) ───────── */
+.scrim { position: absolute; inset: 0; z-index: 50; background: var(--scrim);
+  -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  opacity: 0; pointer-events: none; transition: opacity 0.18s ease; }
+.scrim.on { opacity: 1; pointer-events: auto; }
+
+.menu { position: absolute; z-index: 60; width: 250px; border-radius: 13px; overflow: hidden;
+  background: var(--menu-bg);
+  -webkit-backdrop-filter: blur(48px) saturate(180%); backdrop-filter: blur(48px) saturate(180%);
+  box-shadow: 0 0 0 0.5px rgba(255,255,255,0.10), 0 16px 48px rgba(0,0,0,0.55);
+  font-family: var(--sans); display: none; transform-origin: top left; }
+body.light .menu { box-shadow: 0 0 0 0.5px rgba(0,0,0,0.08), 0 16px 48px rgba(0,0,0,0.30); }
+.menu.on { display: block; animation: menuIn 0.16s cubic-bezier(.2,.9,.3,1); }
+@keyframes menuIn { from { opacity: 0; transform: scale(0.92) translateY(-6px); } to { opacity: 1; transform: none; } }
+
+.mrow { display: flex; align-items: center; height: 44px; padding: 0 16px; gap: 12px;
+  cursor: pointer; border: none; background: none; width: 100%; text-align: left; }
+.mrow:hover:not(.dis) { background: var(--menu-hover); }
+.mrow .lbl { flex: 1 1 auto; font: 400 16px var(--sans); color: var(--menu-fg); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.01em; }
+.mrow .kbd { font: 400 13px var(--mono); color: var(--menu-hdr); flex: none; }
+.mrow svg { width: 21px; height: 21px; color: var(--menu-fg); flex: none; }
+.mrow.lead { flex-direction: row; }
+.mrow.lead svg { order: -1; }
+.mrow.lead .chev { order: 0; }
+.mrow.lead .lbl { margin-left: 0; }
+.mrow.destructive .lbl, .mrow.destructive svg { color: var(--menu-destructive); }
+.mrow.dis { cursor: default; }
+.mrow.dis .lbl, .mrow.dis svg { opacity: 0.32; }
+.mrow .chev { width: 13px; height: 13px; color: var(--menu-hdr); }
+.msep { height: 0.5px; background: var(--menu-sep); }
+.mhdr { font: 600 12.5px var(--sans); color: var(--menu-hdr); letter-spacing: -0.005em;
+  padding: 11px 16px 3px; }
+
+/* palette row — UIMenu.preferredElementSize = .small / .displayAsPalette */
+.mpal { display: flex; align-items: center; gap: 4px; padding: 4px 8px 10px; }
+.mpal button { flex: 1 1 0; height: 40px; border-radius: 9px; border: none; background: none;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--menu-fg); }
+.mpal button:hover { background: var(--menu-hover); }
+.mpal button svg { width: 25px; height: 25px; }
+.mpal button.dis { opacity: 0.32; cursor: default; }
+.mpal button.dis:hover { background: none; }
+
+
+/* transcript strip under the stage */
+.wire { margin-top: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  font-family: var(--mono); font-size: 12px; color: var(--page-dim); min-height: 22px; }
+.wire .snd { color: #7FB4FF; }
+.wire .tagx { font: 500 10px var(--mono); letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--page-dim); border: 1px solid var(--page-line); border-radius: 4px; padding: 1px 6px; }
+.hintline { font-family: var(--mono); font-size: 11.5px; color: var(--page-dim); margin-top: 8px; }
+
+/* ─────────────────────────── page cards ─────────────────────────── */
+.grid3 { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 22px; align-items: flex-start; }
+.card { border: 1px solid var(--page-line); border-radius: 14px; padding: 16px; background: var(--page-card);
+  flex: 1 1 320px; max-width: 400px; }
+body.light .card { background: #fff; }
+.card p.k { font-size: 12px; color: var(--page-mute); margin: 4px 0 14px; min-height: 34px; }
+.card .menuHolder { border-radius: 12px; padding: 18px 10px; display: flex; justify-content: center;
+  background: repeating-linear-gradient(45deg, rgba(255,255,255,0.028) 0 10px, rgba(255,255,255,0.012) 10px 20px); }
+body.light .card .menuHolder { background: repeating-linear-gradient(45deg, rgba(0,0,0,0.04) 0 10px, rgba(0,0,0,0.015) 10px 20px); }
+.card .menuHolder .menu { position: relative; display: block; animation: none; }
+.verdict { display: inline-flex; align-items: center; gap: 6px; font: 500 11px var(--mono);
+  border-radius: 100px; padding: 3px 9px; margin-top: 12px; }
+.verdict.good { color: #6FE08F; background: rgba(48,209,88,0.13); }
+.verdict.meh  { color: #FFC061; background: rgba(255,159,10,0.13); }
+.verdict.bad  { color: #FF8A80; background: rgba(255,69,58,0.13); }
+
+/* glyph sheet */
+.glyphs { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 20px; }
+.gcard { border: 1px solid var(--page-line); border-radius: 12px; padding: 16px 14px; background: var(--page-card);
+  width: 178px; text-align: center; }
+body.light .gcard { background: #fff; }
+.gcard .art { height: 74px; display: flex; align-items: center; justify-content: center; color: var(--page-fg); }
+.gcard .art svg { width: 58px; height: 58px; }
+.gcard .nm { font: 600 12.5px var(--sans); margin-top: 4px; }
+.gcard .sym { font: 400 10.5px var(--mono); color: var(--page-dim); margin-top: 4px; word-break: break-all; }
+.gcard .cmd { font: 400 10.5px var(--mono); color: #7FB4FF; margin-top: 6px; }
+
+table.spec { border-collapse: collapse; margin-top: 16px; font-size: 12.5px; width: 100%; }
+table.spec th, table.spec td { text-align: left; padding: 8px 16px 8px 0; vertical-align: top; }
+table.spec th { color: var(--page-dim); font-weight: 500; font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: 0.07em; border-bottom: 1px solid var(--page-line); }
+table.spec td { color: var(--page-mute); border-bottom: 1px solid rgba(255,255,255,0.045); }
+body.light table.spec td { border-bottom-color: rgba(0,0,0,0.06); }
+table.spec td.mono { color: var(--page-fg); font-family: var(--mono); font-size: 11.5px; }
+table.spec td.cmd { font-family: var(--mono); font-size: 11.5px; color: #7FB4FF; }
+table.spec td .gi { width: 22px; height: 22px; display: block; color: var(--page-fg); }
+
+ol.decisions { margin: 16px 0 0 20px; }
+ol.decisions li { font-size: 13px; color: var(--page-mute); margin-bottom: 14px; }
+ol.decisions li b { display: block; color: var(--page-fg); font-weight: 600; margin-bottom: 2px; font-size: 13px; }
+ol.decisions li .rec { color: #6FE08F; }
+ul.plain { margin: 12px 0 0 20px; }
+ul.plain li { font-size: 13px; color: var(--page-mute); margin: 6px 0; }
+
+</style>
+</head>
+<body>
+
+<!-- ═══════════════ glyph sprite ═══════════════ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <!-- SF Symbols: rectangle.{left,right,top,bottom}half.filled, traced from the real
+       artwork (NSImage(systemSymbolName:), 225x166 natural, ~7.6% border, r=15% of width).
+       The plate is SOLID and the OTHER half is knocked out: the solid half is the pane
+       about to be created, the hollow half is the pane you already have. -->
+  <clipPath id="hL"><rect x="0" y="0" width="12" height="24"/></clipPath>
+  <clipPath id="hR"><rect x="12" y="0" width="12" height="24"/></clipPath>
+  <clipPath id="hT"><rect x="0" y="0" width="24" height="12"/></clipPath>
+  <clipPath id="hB"><rect x="0" y="12" width="24" height="12"/></clipPath>
+  <mask id="mRight"><rect width="24" height="24" fill="#000"/>
+    <rect x="2.8" y="4.9" width="18.4" height="14.2" rx="2.8" fill="#fff"/>
+    <g clip-path="url(#hL)"><rect x="4.2" y="6.3" width="15.6" height="11.4" rx="1.4" fill="#000"/></g></mask>
+  <mask id="mLeft"><rect width="24" height="24" fill="#000"/>
+    <rect x="2.8" y="4.9" width="18.4" height="14.2" rx="2.8" fill="#fff"/>
+    <g clip-path="url(#hR)"><rect x="4.2" y="6.3" width="15.6" height="11.4" rx="1.4" fill="#000"/></g></mask>
+  <mask id="mDown"><rect width="24" height="24" fill="#000"/>
+    <rect x="2.8" y="4.9" width="18.4" height="14.2" rx="2.8" fill="#fff"/>
+    <g clip-path="url(#hT)"><rect x="4.2" y="6.3" width="15.6" height="11.4" rx="1.4" fill="#000"/></g></mask>
+  <mask id="mUp"><rect width="24" height="24" fill="#000"/>
+    <rect x="2.8" y="4.9" width="18.4" height="14.2" rx="2.8" fill="#fff"/>
+    <g clip-path="url(#hB)"><rect x="4.2" y="6.3" width="15.6" height="11.4" rx="1.4" fill="#000"/></g></mask>
+  <symbol id="g-right" viewBox="0 0 24 24"><rect width="24" height="24" fill="currentColor" mask="url(#mRight)"/></symbol>
+  <symbol id="g-left"  viewBox="0 0 24 24"><rect width="24" height="24" fill="currentColor" mask="url(#mLeft)"/></symbol>
+  <symbol id="g-down"  viewBox="0 0 24 24"><rect width="24" height="24" fill="currentColor" mask="url(#mDown)"/></symbol>
+  <symbol id="g-up"    viewBox="0 0 24 24"><rect width="24" height="24" fill="currentColor" mask="url(#mUp)"/></symbol>
+
+  <symbol id="g-pencil" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6"
+    stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l1-4L16.2 4.8a2 2 0 012.8 0l.2.2a2 2 0 010 2.8L8 19l-4 1z"/><path d="M14.8 6.2l3 3"/></g></symbol>
+  <symbol id="g-xmark" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2"
+    stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></g></symbol>
+  <symbol id="g-aleft" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7"
+    stroke-linecap="round" stroke-linejoin="round"><path d="M20 12H4M10 6l-6 6 6 6"/></g></symbol>
+  <symbol id="g-aright" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7"
+    stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h16M14 6l6 6-6 6"/></g></symbol>
+  <symbol id="g-aleftline" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7"
+    stroke-linecap="round" stroke-linejoin="round"><path d="M21 12H7M12 6l-5 6 5 6M3.5 5v14"/></g></symbol>
+  <symbol id="g-arightline" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7"
+    stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h14M12 6l5 6-5 6M20.5 5v14"/></g></symbol>
+  <symbol id="g-number" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7"
+    stroke-linecap="round"><path d="M9 4L7 20M17 4l-2 16M4 9h16M3 15h16"/></g></symbol>
+  <symbol id="g-chevR" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.4"
+    stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></g></symbol>
+  <symbol id="g-move" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7"
+    stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12h19M7 7.5L2.5 12 7 16.5M17 7.5l4.5 4.5L17 16.5"/></g></symbol>
+
+  <!-- chrome bar icons -->
+  <symbol id="c-menu" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.6"
+    stroke-linecap="round"><path d="M2 4h12M2 8h12M2 12h12"/></g></symbol>
+  <symbol id="c-plus" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.6"
+    stroke-linecap="round"><path d="M8 3v10M3 8h10"/></g></symbol>
+  <symbol id="c-search" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.6"
+    stroke-linecap="round"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2l3.3 3.3"/></g></symbol>
+  <symbol id="c-folder" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.5"
+    stroke-linejoin="round"><path d="M2 4.5c0-.8.7-1.5 1.5-1.5h2.6l1.5 1.6h4.9c.8 0 1.5.7 1.5 1.5v6c0 .8-.7 1.5-1.5 1.5h-9C2.7 13.6 2 12.9 2 12.1z"/></g></symbol>
+  <symbol id="c-home" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.6"
+    stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8L8 2.8 13.5 8M4 7v6h8V7"/></g></symbol>
+  <symbol id="c-x" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="2.2"
+    stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></g></symbol>
+</defs></svg>
+
+<h1>Window tab → pane splits</h1>
+<p class="sub">Long-pressing a tmux window tab (or right-clicking it with a trackpad) already opens a
+context menu — <b>Rename</b>, the <b>Move</b> group, <b>Close&nbsp;Window</b>. This adds the four
+pane splits to the top of that same menu, each one led by a glyph that shows <i>where the new pane
+lands</i>: the filled half of the window outline is the pane you're about to create.</p>
+<div class="chips">
+  <span class="chip"><span class="dot acc"></span>4 new actions · right / left / down / up</span>
+  <span class="chip"><span class="dot ok"></span>native <code>UIMenu</code> — <code>rectangle.*half.filled</code></span>
+  <span class="chip"><span class="dot ok"></span>targets that tab's own active pane</span>
+  <span class="chip"><span class="dot mid"></span>Close&nbsp;Window already ships — unchanged</span>
+</div>
+
+<h2 id="demo">1 · Live demo</h2>
+<p class="sub">Real: <b>long-press</b> a tab (hold ~0.45 s) or <b>right-click</b> it. Hover a split option
+and the canvas shows a ghost of the result; pick it and the pane grid actually splits — repeatedly, and
+always from the focused pane, exactly as tmux would. The wire line under the stage prints the command
+that would go out over the tmux&nbsp;-CC control channel.</p>
+
+<div class="controls">
+  <span class="seglbl">menu style</span>
+  <span class="seg" id="styleSeg">
+    <button data-style="palette" class="on">Palette + rows</button>
+    <button data-style="rows">Rows (native)</button>
+    <button data-style="lead">Rows, leading glyphs</button>
+  </span>
+  <label class="ctl"><input type="checkbox" id="subToggle"> collapse <b>Move</b> into a submenu</label>
+  <span class="seglbl">theme</span>
+  <span class="seg" id="themeSeg">
+    <button data-theme="void" class="on">Void</button>
+    <button data-theme="paper">Paper</button>
+  </span>
+  <span class="seg"><button id="resetBtn">Reset panes</button></span>
+</div>
+
+<div class="stageWrap">
+  <div class="deviceScale" id="deviceScale">
+    <div class="device" id="device">
+      <div class="canvas" id="canvas"></div>
+
+      <div class="pill">
+        <button class="cib" title="Sidebar"><span class="box"><svg><use href="#c-menu"/></svg></span></button>
+        <button class="hostpill" title="Connection status">
+          <span class="dot"></span><span class="name">dev@do-nyc</span>
+          <span class="sep">·</span><span class="tag">TMUX</span>
+        </button>
+        <div class="stripWrap"><div class="strip" id="strip"></div></div>
+        <button class="cib" id="addBtn" title="New window"><span class="box"><svg><use href="#c-plus"/></svg></span></button>
+        <button class="cib" title="Find"><span class="box"><svg><use href="#c-search"/></svg></span></button>
+        <button class="cib" title="Files"><span class="box"><svg><use href="#c-folder"/></svg></span></button>
+        <button class="cib" title="Home"><span class="box"><svg><use href="#c-home"/></svg></span></button>
+      </div>
+
+      <div class="scrim" id="scrim"></div>
+      <div class="menu" id="menu" role="menu"></div>
+    </div>
+  </div>
+</div>
+<div class="wire" id="wire"><span class="tagx">tmux -CC</span><span class="d">waiting — open a tab menu</span></div>
+<p class="hintline" id="hintline"></p>
+
+<h2 id="styles">2 · Three ways to show the glyphs <span style="font-size:12px;font-weight:500;color:var(--page-dim)">— decided: A</span></h2>
+<p class="sub">The reference (macOS <b>Move&nbsp;&amp;&nbsp;Resize</b>) puts four result-glyphs in a single
+palette row under a header. iPadOS <code>UIMenu</code> rows put the image on the <i>trailing</i> edge —
+that's the platform convention, and it's what you get for free. Leading glyphs are macOS's convention and
+would need a custom menu view. Height matters here: the Move group already costs 5 rows, so four more
+full-height rows makes a very tall menu. <b>A is the one we're building</b>; B and C stay here as the
+record of what was weighed.</p>
+
+<div class="grid3">
+  <div class="card">
+    <h4>A · Palette + rows <span style="color:#6FE08F;font-weight:600">✓ chosen</span></h4>
+    <p class="k">One palette row, glyph-only, under a “New pane” header — the reference layout.
+    <code>UIMenu.preferredElementSize = .small</code> (iOS&nbsp;16+) or
+    <code>.displayAsPalette</code> (iOS&nbsp;17+). Deployment target is 17.0, so both are unconditional.</p>
+    <div class="menuHolder" data-variant="palette"></div>
+    <span class="verdict good">● 7 elements · ≈362 pt tall · native</span>
+  </div>
+  <div class="card">
+    <h4>B · Rows, native placement</h4>
+    <p class="k">Four ordinary rows appended to the existing sections. Zero new API — just four more
+    <code>UIAction</code>s in <code>tabMenuSections</code>. Glyph sits trailing, as every other iPadOS
+    menu does, so it reads as “icon”, not “preview of the result”.</p>
+    <div class="menuHolder" data-variant="rows"></div>
+    <span class="verdict meh">● 11 elements · ≈490 pt tall · native</span>
+  </div>
+  <div class="card">
+    <h4>C · Rows, leading glyphs</h4>
+    <p class="k">The literal macOS look: glyph first, then the label. <code>UIMenu</code> cannot move the
+    image, so this needs a custom menu view — losing the system blur, the lift animation, keyboard
+    navigation and VoiceOver's menu semantics.</p>
+    <div class="menuHolder" data-variant="lead"></div>
+    <span class="verdict bad">● 11 elements · custom view · non-native</span>
+  </div>
+</div>
+<p class="note">Turn on <b>collapse Move into a submenu</b> in the demo above to see A drop to 4 elements
+(≈190&nbsp;pt) — palette, Rename, Move&nbsp;▸, Close. That is the shortest honest menu of the four.</p>
+
+<h2 id="glyphs">3 · The glyph set</h2>
+<p class="sub">All five are stock SF Symbols — no custom asset, no drawing code. The outline is the
+window; the solid half is the pane about to be created. Same metaphor Apple uses for window tiling, and
+it survives at 21&nbsp;pt in a menu row and at 25&nbsp;pt in a palette.</p>
+<div class="glyphs">
+  <div class="gcard">
+    <div class="art"><svg><use href="#g-right"/></svg></div>
+    <div class="nm">Split Right</div>
+    <div class="sym">rectangle.righthalf.filled</div>
+    <div class="cmd">split-window -h</div>
+  </div>
+  <div class="gcard">
+    <div class="art"><svg><use href="#g-left"/></svg></div>
+    <div class="nm">Split Left</div>
+    <div class="sym">rectangle.lefthalf.filled</div>
+    <div class="cmd">split-window -h -b</div>
+  </div>
+  <div class="gcard">
+    <div class="art"><svg><use href="#g-down"/></svg></div>
+    <div class="nm">Split Down</div>
+    <div class="sym">rectangle.bottomhalf.filled</div>
+    <div class="cmd">split-window -v</div>
+  </div>
+  <div class="gcard">
+    <div class="art"><svg><use href="#g-up"/></svg></div>
+    <div class="nm">Split Up</div>
+    <div class="sym">rectangle.tophalf.filled</div>
+    <div class="cmd">split-window -v -b</div>
+  </div>
+  <div class="gcard">
+    <div class="art"><svg><use href="#g-xmark"/></svg></div>
+    <div class="nm">Close Window</div>
+    <div class="sym">xmark</div>
+    <div class="cmd">kill-window</div>
+  </div>
+</div>
+<p class="note">Verified present in <code>CoreGlyphs.bundle</code> on the current toolchain
+(iPhoneOS&nbsp;26.0 SDK): <code>rectangle.lefthalf.filled</code>, <code>rectangle.righthalf.filled</code>,
+<code>rectangle.tophalf.filled</code>, <code>rectangle.bottomhalf.filled</code>. In a right-to-left
+layout, <code>rectangle.leadinghalf.filled</code> / <code>.trailinghalf.filled</code> mirror
+automatically — worth using for left/right so “Split Right” keeps meaning the trailing edge.</p>
+
+<h2 id="spec">4 · Behaviour</h2>
+<table class="spec">
+  <thead><tr><th style="width:26px"></th><th>Action</th><th>Sends on the control channel</th><th>Shortcut</th><th>Disabled when</th></tr></thead>
+  <tbody>
+    <tr><td><svg class="gi"><use href="#g-right"/></svg></td><td class="mono">Split Right</td>
+        <td class="cmd">split-window -h -t %<i>active</i></td><td class="mono">⌘D</td>
+        <td>sync offline · another device holds the grid</td></tr>
+    <tr><td><svg class="gi"><use href="#g-left"/></svg></td><td class="mono">Split Left</td>
+        <td class="cmd">split-window -h -b -t %<i>active</i></td><td class="mono">—</td>
+        <td>sync offline · another device holds the grid</td></tr>
+    <tr><td><svg class="gi"><use href="#g-down"/></svg></td><td class="mono">Split Down</td>
+        <td class="cmd">split-window -v -t %<i>active</i></td><td class="mono">⌘⇧D</td>
+        <td>sync offline · another device holds the grid</td></tr>
+    <tr><td><svg class="gi"><use href="#g-up"/></svg></td><td class="mono">Split Up</td>
+        <td class="cmd">split-window -v -b -t %<i>active</i></td><td class="mono">—</td>
+        <td>sync offline · another device holds the grid</td></tr>
+    <tr><td><svg class="gi"><use href="#g-xmark"/></svg></td><td class="mono">Close Window <span style="color:var(--page-dim)">(ships today)</span></td>
+        <td class="cmd">kill-window -t @<i>window</i></td><td class="mono">—</td>
+        <td>window list not hydrated · sync offline</td></tr>
+  </tbody>
+</table>
+<p class="note">The real call keeps the existing suffix — <code>split-window … -e COLORTERM=truecolor</code>
+(<code>TmuxController+PaneCommands.swift:52</code>). <code>-b</code> is the only new flag; everything
+else is the path <code>⌘D</code> already takes. Closing a window with 2+ panes still prompts, and still
+prompts while the <code>%window-add</code> details query is in flight.</p>
+
+<h3>Compact (iPhone): nothing to gate</h3>
+<p class="sub">Checked, and it's simpler than “hide the splits on iPhone”: <b>the tab strip does not
+exist on iPhone.</b> <code>SessionTopBar.styledBar</code> branches on idiom — iPhone renders
+<code>compactBarCore</code> (back · host switcher · <code>+</code>), and only the regular-width branch
+builds <code>tabStrip</code>. There is no tab to long-press, so this menu is structurally iPad-only and
+needs no compact branch, no size-class check and no separate decision. Panes on iPhone stay full-screen:
+<code>setTmuxGridPresentation(isPhone ? .singlePane : .paneGrid)</code>.</p>
+<p class="sub" style="margin-top:14px"><b>Where splits already exist, exactly.</b> Traced every
+<code>palette.open(…)</code> call site, because “the palette runs on iPad too” is only half true:</p>
+<table class="spec">
+  <thead><tr><th>Surface</th><th>Reachable when</th><th>Splits today</th></tr></thead>
+  <tbody>
+    <tr><td class="mono">Tab context menu</td><td>iPad, regular width — the only place the tab strip exists</td>
+        <td style="color:#FFC061">none — this change adds 4</td></tr>
+    <tr><td class="mono">Compact switcher</td>
+        <td>iPhone <b>and</b> iPad in narrow Split&nbsp;View / Slide&nbsp;Over — only by tapping the
+            <b>host name</b> in <code>compactBarCore</code> (<code>openCompactSwitcher()</code>:12023),
+            never by ⌘K</td>
+        <td>2-way — but behind a bare <code>.contextMenu</code> on the row
+            (<code>CommandPaletteView.swift:329</code>): <b>long-press only, no ⋯, no chevron, no hint</b></td></tr>
+    <tr><td class="mono">⌘K quick-switch</td>
+        <td>anywhere — but <code>ContentView.openPalette()</code> passes <code>sessions:</code> only, so
+            <code>tmuxWindows</code> stays empty</td>
+        <td style="color:var(--page-dim)">no tmux rows at all</td></tr>
+    <tr><td class="mono">⌘D / ⌘⇧D</td><td>anywhere tmux is attached</td><td>2-way, on the active pane</td></tr>
+  </tbody>
+</table>
+<p class="note"><b>Caveat that reframes decision 6:</b> the compact menu is real in code but has no
+affordance — <code>Rename</code>, the four <code>Move</code> items, <code>Tidy</code>, <code>Close</code>
+and the two splits all hang off an undiscoverable long-press on a palette row. Aligning its glyphs with the
+tab menu polishes something users are unlikely to find; giving it an affordance is the bigger question.
+Wired in code; not yet confirmed on a device.</p>
+<p class="note">The seam is not “iPad versus iPhone” — it is <b>one iPad, resized</b>. Drag the
+Split&nbsp;View divider narrow and <code>CompactLayout.isPhone</code> flips on size class, the tab strip
+disappears, and the same user's split options change from four directions with
+<code>rectangle.*half.filled</code> to two axes with <code>rectangle.split.2x1</code> / <code>1x2</code>.
+That is decision 6.</p>
+
+<h2 id="ships">5 · What already ships in this menu</h2>
+<p class="sub">Every other item in the mockup's menu is live today — nothing there is a proposal. Verified
+against the current checkout:</p>
+<table class="spec">
+  <thead><tr><th>Item</th><th>Status</th><th>Reaches tmux as</th><th>Where</th></tr></thead>
+  <tbody>
+    <tr><td class="mono">Rename</td><td style="color:#6FE08F">ships</td>
+        <td class="cmd">rename-window -t @id 'name'</td>
+        <td>alert → <code>submitWindowRename()</code> → <code>TmuxController.renameWindow</code>:2788</td></tr>
+    <tr><td class="mono">Move Left / Move Right</td><td style="color:#6FE08F">ships</td>
+        <td class="cmd">swap-window (planner)</td>
+        <td><code>TmuxController.moveWindow</code>:2459 → <code>TmuxWindowReorderPlanner</code></td></tr>
+    <tr><td class="mono">Move to Start / Move to End</td><td style="color:#6FE08F">ships</td>
+        <td class="cmd">move-window (planner)</td>
+        <td>same path, destination 0 / last</td></tr>
+    <tr><td class="mono">Tidy window numbers</td><td style="color:#6FE08F">ships</td>
+        <td class="cmd">move-window -r (per session in group)</td>
+        <td><code>renumberWindows()</code>:2545, gated by <code>canTidyWindows</code></td></tr>
+    <tr><td class="mono">Close Window</td><td style="color:#6FE08F">ships</td>
+        <td class="cmd">kill-window -t @id</td>
+        <td><code>requestWindowClose()</code>:13342 — confirms at 2+ panes</td></tr>
+    <tr><td class="mono">Split Right / Left / Down / Up</td><td style="color:#FFC061">new</td>
+        <td class="cmd">split-window -h|-v [-b]</td>
+        <td>the only work in this change</td></tr>
+  </tbody>
+</table>
+<p class="note">Long-press and right-click are both live too — <code>TmuxWindowInteractionSurface</code>
+already installs a <code>UIContextMenuInteraction</code> alongside the reorder hold, and disabled states
+(<code>canReorderWindows</code>, <code>canTidyWindows</code>, degraded sync, peer grid authority) are
+already computed. The four splits drop into the section list this menu is built from.</p>
+
+<h2 id="decisions">6 · Decisions</h2>
+<ol class="decisions">
+  <li><b>Treatment.</b> <span class="rec">Decided: A — palette + rows</span>, header “New pane”, above Rename.</li>
+  <li><b>iPhone / compact.</b> <span class="rec">Decided: not applicable</span> — no tab strip exists there,
+    so there is nothing to gate or branch.</li>
+  <li><b>Splitting a tab that isn't the focused window.</b>
+    <span class="rec">Decided: split, then select that window</span>, so the result is visible.</li>
+  <li><b>Labels and disabled states.</b> <span class="rec">Decided: “Split Right / Left / Down / Up”</span>,
+    disabled on the existing gates — degraded sync, peer grid authority — same as Move and Close.</li>
+  <li><b>The overflow window list.</b> <code>TmuxWindowListPopover</code> keeps its own parallel copy of this
+    menu (<code>menuSections</code>:14353, Move Up/Down rather than Left/Right because it is a vertical
+    list) and shares <code>TmuxWindowInteractionSurface</code>. Without the same palette there, one window
+    has two different menus depending on whether you opened it from the strip or the ▾ list.
+    <span class="rec">Default: add it there too.</span> <b>Open.</b></li>
+  <li><b>Shortcuts for left / up.</b> <span class="rec">Default: menu-only, no new
+    <code>ShortcutAction</code> cases</span> — ⌘D / ⌘⇧D unchanged. Adding two assignable actions means a new
+    case, label, availability, default chord, <code>wantsPriorityOverSystemBehavior</code> entry, terminal
+    selector and a <code>ShortcutRegistryTests</code> pin apiece, and there is no obvious free chord.
+    <b>Open.</b></li>
+  <li><b>The compact switcher's hidden menu.</b> Rename, Move ×4, Tidy, Close and two axis splits all hang
+    off an undiscoverable long-press on a palette row. <span class="rec">Default: leave it untouched
+    here</span> — giving it an affordance is its own piece of work, not part of adding splits. <b>Open.</b></li>
+</ol>
+
+<h3>What ships behind this</h3>
+<ul class="plain">
+  <li>4 <code>UIAction</code>s in <code>tabMenuSections(window:position:)</code> —
+      <code>SessionView.swift:13045</code>; a palette needs one extra <code>UIMenu</code> with
+      <code>preferredElementSize</code> set in <code>contextMenuInteraction(_:configurationForMenuAtLocation:)</code>
+      (<code>SessionView.swift:13974</code>).</li>
+  <li><code>TmuxWindowMenuAction</code> gains nothing — it already carries title, systemImage, destructive,
+      disabled and a handler.</li>
+  <li><code>TmuxController.splitPane(_:axis:)</code> gains a <code>before: Bool</code> (the <code>-b</code>
+      flag) — <code>TmuxControl/TmuxController+PaneCommands.swift:34</code> — and the wire command
+      <code>.splitTmuxPane</code> carries it across the shared-core ABI, so Android gets the same four
+      directions from one change.</li>
+  <li>The same four actions belong in the overflow window list's row menu
+      (<code>TmuxWindowListPopover</code>) — it mirrors the strip's tabs and would otherwise be the one
+      place a split is missing.</li>
+</ul>
+
+<script>
+(() => {
+'use strict';
+
+/* ───────────────────────── fake terminal content ───────────────────────── */
+const C = {
+  claude:
+`<span class="p">dev@do-nyc</span><span class="d">:</span><span class="b2">~/tessera</span><span class="d">$</span> git log --oneline -5
+<span class="y">4f6c011</span> docs: finalize tmux ordering contract and validation evidence
+<span class="y">0448172</span> fix: preserve Android reorder geometry while the keyboard hides rows
+<span class="y">c4a8e78</span> feat: reorder iOS tmux windows across tablet and compact navigation
+<span class="y">e22224e</span> feat: add assignable iOS window move shortcuts
+<span class="y">d2b4f38</span> fix: reveal reordered Android windows through pending reconciliation
+<span class="p">dev@do-nyc</span><span class="d">:</span><span class="b2">~/tessera</span><span class="d">$</span> ./scripts/integration/run-integration-tests.sh --list
+<span class="m">S1 scroll-primary      S6 scroll-vim        T3 mouse-click-mosh</span>
+<span class="m">D2 window-naming       D4 fullscreen        A1 aggregate-visual</span>
+<span class="p">dev@do-nyc</span><span class="d">:</span><span class="b2">~/tessera</span><span class="d">$</span> <span class="cur"></span>`,
+  server:
+`<span class="m">[server] listening on :8443 (tls)</span>
+<span class="p">ready</span> <span class="d">·</span> 4 workers <span class="d">·</span> pid 40182
+<span class="m">12:04:11</span> GET  /v1/sessions        <span class="p">200</span>   8ms
+<span class="m">12:04:11</span> POST /v1/sessions/attach <span class="p">201</span>  21ms
+<span class="m">12:04:13</span> GET  /v1/panes/%14       <span class="p">200</span>   3ms
+<span class="m">12:04:19</span> GET  /healthz            <span class="p">200</span>   1ms
+<span class="cur"></span>`,
+  logs:
+`<span class="m">tail -f /var/log/tessera/agent.log</span>
+<span class="d">12:03:58</span> <span class="p">info </span> control channel attached (tmux 3.5a)
+<span class="d">12:04:02</span> <span class="p">info </span> %layout-change @1 window_layout=b3f2,238x58,0,0,14
+<span class="d">12:04:07</span> <span class="y">warn </span> refresh-client -C 238,58 coalesced (2 pending)
+<span class="d">12:04:15</span> <span class="p">info </span> %window-add @5
+<span class="cur"></span>`,
+  vim:
+`<span class="b2">  1</span> import SwiftUI
+<span class="b2">  2</span>
+<span class="b2">  3</span> struct TmuxWindowMenuAction {
+<span class="b2">  4</span>     let title: String
+<span class="b2">  5</span>     let systemImage: String
+<span class="b2">  6</span>     var destructive = false
+<span class="b2">  7</span>     var disabled = false
+<span class="b2">  8</span>     let handler: () -&gt; Void
+<span class="b2">  9</span> }
+<span class="m">~</span>
+<span class="m">~</span>
+<span class="d">"SessionView.swift" 18020L, 641293B</span>`,
+  zsh:
+`<span class="p">dev@do-nyc</span><span class="d">:</span><span class="b2">~/tessera</span><span class="d">$</span> <span class="cur"></span>`,
+  htop:
+`<span class="m">  1</span>[<span class="p">||||</span>      <span class="d">18.2%</span>]  <span class="m">Tasks: 104, 312 thr</span>
+<span class="m">  2</span>[<span class="p">||</span>        <span class="d"> 7.4%</span>]  <span class="m">Load: 0.62 0.48 0.39</span>
+<span class="m">Mem</span>[<span class="y">|||||||</span>   <span class="d">2.9G</span>]  <span class="m">Uptime: 14 days</span>
+<span class="d">  PID USER      CPU% MEM%  COMMAND</span>
+<span class="b2">40182</span> dev        4.1  1.2  tessera-agent
+<span class="b2">  912</span> root       0.9  0.4  tmux -CC`,
+};
+const NEW_BODIES = ['zsh', 'htop', 'zsh', 'logs'];
+
+/* ───────────────────────── layout model ───────────────────────── */
+let uid = 11;
+const leaf = (title, body) => ({ k: 'leaf', id: '%' + (uid++), title, body });
+
+const mkWindows = () => ([
+  { id: '@1', name: 'claude', layout: leaf('claude', 'claude') },
+  { id: '@2', name: 'server', layout: leaf('server', 'server') },
+  { id: '@3', name: 'logs',   layout: leaf('logs',   'logs')   },
+  { id: '@4', name: 'vim',    layout: leaf('vim',    'vim')    },
+]);
+
+const S = {
+  windows: mkWindows(),
+  activeWin: '@1',
+  activePane: {},
+  style: 'palette',
+  submenu: false,
+  openFor: null,     // window id whose menu is open
+  newCount: 0,
+};
+S.windows.forEach(w => { S.activePane[w.id] = w.layout.id; });
+
+const win = id => S.windows.find(w => w.id === id);
+const leaves = (n, out = []) => { n.k === 'leaf' ? out.push(n) : n.kids.forEach(k => leaves(k, out)); return out; };
+const paneCount = w => leaves(w.layout).length;
+
+function replaceLeaf(node, id, make) {
+  if (node.k === 'leaf') return node.id === id ? make(node) : node;
+  node.kids = node.kids.map(k => replaceLeaf(k, id, make));
+  return node;
+}
+function dropLeaf(node, id) {
+  if (node.k === 'leaf') return node.id === id ? null : node;
+  const kids = node.kids.map(k => dropLeaf(k, id)).filter(Boolean);
+  return kids.length === 0 ? null : kids.length === 1 ? kids[0] : { ...node, kids };
+}
+
+const SIDES = {
+  right: { dir: 'h', before: false, label: 'Split Right', glyph: 'g-right', cmd: 'split-window -h' },
+  left:  { dir: 'h', before: true,  label: 'Split Left',  glyph: 'g-left',  cmd: 'split-window -h -b' },
+  down:  { dir: 'v', before: false, label: 'Split Down',  glyph: 'g-down',  cmd: 'split-window -v' },
+  up:    { dir: 'v', before: true,  label: 'Split Up',    glyph: 'g-up',    cmd: 'split-window -v -b' },
+};
+
+function doSplit(winId, side) {
+  const w = win(winId); if (!w) return;
+  const spec = SIDES[side];
+  const target = S.activePane[winId];
+  const body = NEW_BODIES[S.newCount++ % NEW_BODIES.length];
+  const fresh = leaf(body === 'htop' ? 'htop' : 'zsh', body);
+  w.layout = replaceLeaf(w.layout, target, node => ({
+    k: 'split', dir: spec.dir, kids: spec.before ? [fresh, node] : [node, fresh],
+  }));
+  S.activePane[winId] = fresh.id;          // tmux makes the new pane active
+  S.activeWin = winId;                      // decision 2: act on what you touched
+  wire(spec.cmd + ' -t ' + target + ' -e COLORTERM=truecolor', 'select-window -t ' + winId);
+  render();
+}
+
+function closePane(winId, paneId) {
+  const w = win(winId); if (!w) return;
+  const next = dropLeaf(w.layout, paneId);
+  if (!next) return closeWindow(winId);
+  w.layout = next;
+  if (S.activePane[winId] === paneId) S.activePane[winId] = leaves(next)[0].id;
+  wire('kill-pane -t ' + paneId);
+  render();
+}
+
+function closeWindow(winId) {
+  const w = win(winId); if (!w) return;
+  const many = paneCount(w) > 1;
+  const i = S.windows.indexOf(w);
+  S.windows.splice(i, 1);
+  delete S.activePane[winId];
+  if (S.activeWin === winId) S.activeWin = (S.windows[Math.min(i, S.windows.length - 1)] || {}).id;
+  wire('kill-window -t ' + winId, many ? 'confirmed — ' + paneCount(w) + ' panes' : null);
+  render();
+}
+
+function addWindow() {
+  const n = leaf('zsh', 'zsh');
+  const id = '@' + (S.windows.length + 5);
+  S.windows.push({ id, name: 'zsh', layout: n });
+  S.activePane[id] = n.id; S.activeWin = id;
+  wire('new-window');
+  render();
+}
+
+/* ───────────────────────── rendering ───────────────────────── */
+const $ = s => document.querySelector(s);
+const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls;
+  if (html != null) e.innerHTML = html; return e; };
+const svg = (id, cls) => `<svg${cls ? ' class="' + cls + '"' : ''} viewBox="0 0 24 24"><use href="#${id}"/></svg>`;
+
+function renderPanes(canvas, w, opts = {}) {
+  canvas.innerHTML = '';
+  if (!w) return;
+  const single = paneCount(w) === 1;
+  const build = node => {
+    if (node.k === 'leaf') {
+      const p = el('div', 'pane' + (single ? ' single' : '') +
+        (node.id === S.activePane[w.id] ? ' focus' : ''));
+      p.dataset.pane = node.id;
+      const h = el('div', 'phdr');
+      const x = el('button', 'x', svg('g-xmark'));
+      x.onclick = e => { e.stopPropagation(); closePane(w.id, node.id); };
+      h.append(x, el('span', 't', node.title));
+      const b = el('div', 'pbody', C[node.body] || C.zsh);
+      p.append(h, b);
+      p.onclick = () => { S.activePane[w.id] = node.id; wire('select-pane -t ' + node.id); render(); };
+      return p;
+    }
+    const s = el('div', 'split ' + node.dir);
+    node.kids.forEach((k, i) => { if (i) s.append(el('div', 'gut')); s.append(build(k)); });
+    return s;
+  };
+  canvas.append(build(w.layout));
+}
+
+function renderStrip(strip, compact) {
+  strip.innerHTML = '';
+  S.windows.forEach((w, i) => {
+    const tab = el('button', 'tab' + (w.id === S.activeWin ? ' active' : ''));
+    tab.dataset.win = w.id;
+    tab.innerHTML = `<span class="ttl">${w.name}</span><span class="hint">⌘${i + 1}</span>`;
+    const x = el('button', 'tabx', `<span class="circ">${svg('c-x')}</span>`);
+    x.onclick = e => { e.stopPropagation(); closeWindow(w.id); };
+    const wrap = el('div');
+    wrap.style.cssText = 'display:flex;align-items:center;flex:none';
+    wrap.append(tab, x);
+    attachTabGestures(tab, w.id, compact);
+    strip.append(wrap);
+  });
+}
+
+function render() {
+  renderPanes($('#canvas'), win(S.activeWin));
+  renderStrip($('#strip'), false);
+  if (S.openFor && win(S.openFor)) openMenu(S.openFor, true); else closeMenu();
+}
+
+/* ───────────────────────── the menu ───────────────────────── */
+function mrow({ label, glyph, destructive, disabled, chevron, onClick }, style) {
+  const r = el('button', 'mrow' + (style === 'lead' ? ' lead' : '') +
+    (destructive ? ' destructive' : '') + (disabled ? ' dis' : ''));
+  r.innerHTML = `<span class="lbl">${label}</span>` +
+    (chevron ? svg('g-chevR', 'chev') : '') + svg(glyph);
+  if (!disabled && onClick) r.onclick = onClick;
+  return r;
+}
+
+function buildMenu(host, { style, submenu, winId, interactive }) {
+  host.innerHTML = '';
+  const w = winId ? win(winId) : null;
+  const pos = w ? S.windows.indexOf(w) + 1 : 2;
+  const last = (w ? S.windows.length : 4);
+  const sep = () => host.append(el('div', 'msep'));
+  const order = ['right', 'left', 'down', 'up'];
+
+  if (style === 'palette') {
+    const hdr = el('div', 'mhdr', 'New pane');
+    host.append(hdr);
+    const pal = el('div', 'mpal');
+    order.forEach(side => {
+      const b = el('button', null, svg(SIDES[side].glyph));
+      b.title = SIDES[side].label;
+      if (interactive) {
+        // A palette is glyph-only on device. Naming the hovered item in the
+        // section header keeps the mockup legible without covering a row.
+        b.onmouseenter = () => { ghost(side); hdr.innerHTML =
+          'New pane <span style="opacity:.75">&middot; ' + SIDES[side].label.replace('Split ', '') + '</span>'; };
+        b.onmouseleave = () => { ghost(null); hdr.textContent = 'New pane'; };
+        b.onclick = () => { closeMenu(); doSplit(winId, side); };
+      }
+      pal.append(b);
+    });
+    host.append(pal);
+  } else {
+    order.forEach(side => {
+      const s = SIDES[side];
+      const r = mrow({ label: s.label, glyph: s.glyph,
+        onClick: interactive ? () => { closeMenu(); doSplit(winId, side); } : null }, style);
+      if (interactive) {
+        r.onmouseenter = () => ghost(side);
+        r.onmouseleave = () => ghost(null);
+      }
+      host.append(r);
+    });
+  }
+  sep();
+  host.append(mrow({ label: 'Rename', glyph: 'g-pencil',
+    onClick: interactive ? () => { closeMenu(); wire('rename-window -t ' + winId); } : null }, style));
+  sep();
+
+  if (submenu) {
+    host.append(mrow({ label: 'Move', glyph: 'g-move', chevron: true }, style));
+  } else {
+    const moves = [
+      ['Move Left',     'g-aleft',      pos <= 1,    'swap-window -t ' + (pos - 2)],
+      ['Move Right',    'g-aright',     pos >= last, 'swap-window -t ' + pos],
+      ['Move to Start', 'g-aleftline',  pos <= 1,    'move-window -t 0'],
+      ['Move to End',   'g-arightline', pos >= last, 'move-window -t ' + (last - 1)],
+      ['Tidy window numbers', 'g-number', false,     'move-window -r'],
+    ];
+    moves.forEach(([label, glyph, dis, cmd]) => host.append(mrow({ label, glyph, disabled: dis,
+      onClick: interactive ? () => { closeMenu(); wire(cmd); } : null }, style)));
+  }
+  sep();
+  host.append(mrow({ label: 'Close Window', glyph: 'g-xmark', destructive: true,
+    onClick: interactive ? () => { closeMenu(); closeWindow(winId); } : null }, style));
+}
+
+function openMenu(winId, keepOpen) {
+  const device = $('#device'), menu = $('#menu'), scrim = $('#scrim');
+  const tab = device.querySelector(`.tab[data-win="${winId}"]`);
+  if (!tab) return closeMenu();
+  S.openFor = winId;
+  buildMenu(menu, { style: S.style, submenu: S.submenu, winId, interactive: true });
+  menu.classList.add('on');
+  scrim.classList.add('on');
+  lift(device, tab);
+  const d = device.getBoundingClientRect(), t = tab.getBoundingClientRect();
+  const left = Math.min(Math.max(t.left - d.left, 10), d.width - menu.offsetWidth - 10);
+  menu.style.left = left + 'px';
+  menu.style.top = (t.bottom - d.top + 9) + 'px';
+  if (!keepOpen) hint('Hover a split option to preview it · Esc or tap outside to dismiss');
+}
+
+function closeMenu() {
+  S.openFor = null;
+  $('#menu').classList.remove('on');
+  $('#scrim').classList.remove('on');
+  ghost(null);
+  unlift($('#device'));
+}
+
+/* The context-menu "preview": UIKit lifts a snapshot of the pressed view above
+   the blurred backdrop. The top bar is its own stacking context, so a class on
+   the real tab would sit *under* the scrim — clone it into a layer instead. */
+function lift(container, tab) {
+  unlift(container);
+  const d = container.getBoundingClientRect(), t = tab.getBoundingClientRect();
+  const clone = tab.cloneNode(true);
+  clone.classList.add('lifted', 'liftclone');
+  clone.style.cssText += `position:absolute;left:${t.left - d.left}px;top:${t.top - d.top}px;` +
+    `width:${t.width}px;height:${t.height}px;z-index:58;pointer-events:none;`;
+  container.append(clone);
+  tab.style.visibility = 'hidden';
+  tab.dataset.lifted = '1';
+}
+function unlift(container) {
+  container.querySelectorAll('.liftclone').forEach(n => n.remove());
+  container.querySelectorAll('.tab[data-lifted]').forEach(t => {
+    t.style.visibility = ''; delete t.dataset.lifted;
+  });
+}
+
+/* Ghost preview of the resulting pane. Computed from the layout tree, not from
+   the DOM, so it is also correct for a tab whose window isn't on screen — every
+   sibling in a tmux split node gets an equal share, same as the flex render. */
+function paneFraction(node, id, r) {
+  if (node.k === 'leaf') return node.id === id ? r : null;
+  const n = node.kids.length;
+  for (let i = 0; i < n; i++) {
+    const sub = node.dir === 'h'
+      ? { x: r.x + r.w * i / n, y: r.y, w: r.w / n, h: r.h }
+      : { x: r.x, y: r.y + r.h * i / n, w: r.w, h: r.h / n };
+    const hit = paneFraction(node.kids[i], id, sub);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+let ghostEl = null;
+function ghost(side) {
+  if (ghostEl) { ghostEl.remove(); ghostEl = null; }
+  if (!side || !S.openFor) return;
+  const w = win(S.openFor); if (!w) return;
+  const device = $('#device'), canvas = $('#canvas');
+  const f = paneFraction(w.layout, S.activePane[w.id], { x: 0, y: 0, w: 1, h: 1 });
+  if (!f) return;
+  const d = device.getBoundingClientRect(), c = canvas.getBoundingClientRect();
+  const s = SIDES[side];
+  let x = c.left - d.left + f.x * c.width, y = c.top - d.top + f.y * c.height;
+  let wd = f.w * c.width, ht = f.h * c.height;
+  if (s.dir === 'h') { wd /= 2; if (!s.before) x += wd; }
+  else               { ht /= 2; if (!s.before) y += ht; }
+  const elsewhere = w.id !== S.activeWin;
+  const g = el('div', 'ghost',
+    `<span class="lbl">new pane${elsewhere ? ' &middot; in ' + w.name : ''}</span>`);
+  g.style.cssText += `position:absolute;z-index:55;left:${x + 2}px;top:${y + 2}px;` +
+    `width:${Math.max(0, wd - 4)}px;height:${Math.max(0, ht - 4)}px;`;
+  device.append(g);
+  ghostEl = g;
+}
+
+/* ───────────────────────── gestures ───────────────────────── */
+function attachTabGestures(tab, winId, compact) {
+  if (compact) return;
+  let timer = null, origin = null, fired = false;
+  const cancel = () => { clearTimeout(timer); timer = null; };
+  tab.addEventListener('pointerdown', e => {
+    if (e.button === 2) return;
+    origin = { x: e.clientX, y: e.clientY }; fired = false;
+    timer = setTimeout(() => { fired = true; openMenu(winId); }, 450);
+  });
+  tab.addEventListener('pointermove', e => {
+    if (!timer || !origin) return;
+    if (Math.hypot(e.clientX - origin.x, e.clientY - origin.y) > 8) cancel();  // 8pt drag threshold
+  });
+  tab.addEventListener('pointerup', () => {
+    if (timer) { cancel(); if (!fired) { S.activeWin = winId; wire('select-window -t ' + winId); render(); } }
+  });
+  tab.addEventListener('pointerleave', cancel);
+  tab.addEventListener('contextmenu', e => { e.preventDefault(); cancel(); openMenu(winId); });
+}
+
+/* ───────────────────────── chrome ───────────────────────── */
+function wire(cmd, extra) {
+  const w = $('#wire');
+  w.innerHTML = `<span class="tagx">tmux -CC</span><span class="snd">&rarr; ${cmd}</span>` +
+    (extra ? `<span class="d">· ${extra}</span>` : '');
+}
+function hint(text) { $('#hintline').textContent = text; }
+
+
+/* ───────────────────────── boot ───────────────────────── */
+$('#styleSeg').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  S.style = b.dataset.style;
+  [...e.currentTarget.children].forEach(c => c.classList.toggle('on', c === b));
+  renderStatics(); render();
+});
+$('#themeSeg').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  document.body.classList.toggle('light', b.dataset.theme === 'paper');
+  [...e.currentTarget.children].forEach(c => c.classList.toggle('on', c === b));
+});
+$('#subToggle').addEventListener('change', e => { S.submenu = e.target.checked; renderStatics(); render(); });
+$('#resetBtn').addEventListener('click', () => {
+  S.windows = mkWindows(); S.activePane = {}; S.newCount = 0;
+  S.windows.forEach(w => { S.activePane[w.id] = w.layout.id; });
+  S.activeWin = '@1'; closeMenu(); wire('kill-pane · reset'); render();
+});
+$('#addBtn').addEventListener('click', addWindow);
+$('#scrim').addEventListener('click', closeMenu);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
+
+function renderStatics() {
+  document.querySelectorAll('.menuHolder').forEach(h => {
+    let m = h.querySelector('.menu');
+    if (!m) { m = el('div', 'menu on'); h.append(m); }
+    buildMenu(m, { style: h.dataset.variant, submenu: S.submenu, winId: null, interactive: false });
+  });
+}
+
+function fit() {
+  const avail = document.body.clientWidth - 56;
+  const k = Math.min(1, avail / 1194);
+  const s = $('#deviceScale');
+  s.style.transform = `scale(${k})`;
+  s.parentElement.style.height = (740 * k) + 'px';
+}
+window.addEventListener('resize', fit);
+
+renderStatics();
+render();
+fit();
+hint('Long-press a tab (~0.45 s) or right-click it. Key equivalents are omitted on purpose — iPadOS context menus do not display them.');
+})();
+</script>
+</body>
+</html>

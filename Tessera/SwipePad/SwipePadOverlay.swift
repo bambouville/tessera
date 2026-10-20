@@ -3,6 +3,24 @@
 import SwiftUI
 import TmuxControl
 
+enum SwipePadFloatingLayout {
+    /// Fit the surface before clamping its centre, including on split views
+    /// narrower than the preferred surface. The puck's position is untouched.
+    static func frame(center: CGPoint, size: CGSize, bounds: CGRect, margin: CGFloat = 12) -> CGRect {
+        let insetX = min(max(0, margin), max(0, bounds.width) / 2)
+        let insetY = min(max(0, margin), max(0, bounds.height) / 2)
+        let available = bounds.insetBy(dx: insetX, dy: insetY)
+        let width = min(max(0, size.width), available.width)
+        let height = min(max(0, size.height), available.height)
+        return CGRect(
+            x: min(max(center.x - width / 2, available.minX), available.maxX - width),
+            y: min(max(center.y - height / 2, available.minY), available.maxY - height),
+            width: width,
+            height: height
+        )
+    }
+}
+
 struct SwipePadOverlay: View {
     let onSend: ([UInt8]) -> Void
     let tmux: TmuxController
@@ -109,6 +127,7 @@ struct SwipePadOverlay: View {
                                 diameter: diameter,
                                 position: puckPosition,
                                 canvasSize: canvasSize,
+                                safeAreaInsets: proxy.safeAreaInsets,
                                 resolver: resolver,
                                 tmux: tmux,
                                 processNameProvider: processNameProvider,

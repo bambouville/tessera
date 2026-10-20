@@ -42,8 +42,18 @@ final class ModifierNotationTests: XCTestCase {
     func testControlShortcutChipsFollowTheNotation() {
         XCTAssertEqual(AccessoryChip.ctrlC.displayLabel(.glyph), "⌃C")
         XCTAssertEqual(AccessoryChip.ctrlJ.displayLabel(.glyph), "⌃J")
+        XCTAssertEqual(AccessoryChip.ctrlL.displayLabel(.glyph), "⌃L")
         XCTAssertEqual(AccessoryChip.ctrlC.displayLabel(.words), "ctrl-c")
         XCTAssertEqual(AccessoryChip.ctrlJ.displayLabel(.words), "ctrl-j")
+        XCTAssertEqual(AccessoryChip.ctrlL.displayLabel(.words), "ctrl-l")
+    }
+
+    /// ↩ is a named key with no modifier, so it is spelled by the notation
+    /// rather than being a fixed glyph — the same rule that makes ⇥ read `tab`
+    /// in words mode.
+    func testReturnChipFollowsTheNotation() {
+        XCTAssertEqual(AccessoryChip.enter.displayLabel(.glyph), "↩")
+        XCTAssertEqual(AccessoryChip.enter.displayLabel(.words), "ret")
     }
 
     /// No chip may render a bare caret once control unified on ⌃ — that was
@@ -166,14 +176,17 @@ final class ModifierNotationTests: XCTestCase {
         }
     }
 
-    /// Only keys that *are* modifier notation may move — the four bare
-    /// modifiers, ⌘, and the two control shortcuts. A future chip that quietly
-    /// starts varying its label would be a spelling change the user never
-    /// asked for.
-    func testExactlySevenChipsVaryWithNotation() {
+    /// Only keys the notation actually spells may move — the four bare
+    /// modifiers, ⌘, the three control shortcuts, and ↩ / ret. A future chip
+    /// that quietly starts varying its label would be a spelling change the
+    /// user never asked for.
+    func testExactlyTheSpelledChipsVaryWithNotation() {
         let varying = AccessoryChip.allCases.filter {
             $0.displayLabel(.glyph) != $0.displayLabel(.words)
         }
-        XCTAssertEqual(Set(varying), Set([.ctrl, .alt, .shift, .cmd, .tab, .ctrlC, .ctrlJ]))
+        XCTAssertEqual(
+            Set(varying),
+            Set([.ctrl, .alt, .shift, .cmd, .tab, .ctrlC, .ctrlJ, .ctrlL, .enter])
+        )
     }
 }

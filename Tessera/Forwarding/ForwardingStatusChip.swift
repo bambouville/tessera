@@ -6,22 +6,32 @@ import PortForwarding
 /// the active session's `PortForwarderManager` and:
 ///   - hides itself when the manager has zero rules (no chrome wasted
 ///     when forwarding isn't in use for this host)
-///   - shows `⇄ N` accent-soft when listening (no in-flight conns)
-///   - shows `⇄ N` accent-fill when at least one connection is in flight
+///   - shows `⇄ N` with N listeners; the glyph is green while something
+///     answers behind at least one of them, muted while nothing does
+///   - fills accent-soft when at least one connection is in flight
 ///   - flips to amber `⇄ !` when any rule is in `.error`
 ///
-/// Tap → bottom sheet popover with per-rule controls (open in safari,
-/// pause). Sheet is non-modal — the user can dismiss and keep typing.
+/// Tap → bottom sheet popover with per-rule controls (open the tunnel in the
+/// in-app browser, or hand it to Safari). Sheet is non-modal — the user can
+/// dismiss and keep typing.
 struct ForwardingStatusChip: View {
     let manager: PortForwarderManager
     let scale: CGFloat
     let T: DesignTokens
+    /// Whether this chip looks at what answers behind its tunnels: only while
+    /// its session is the one on screen and the app is in front, since each
+    /// look is a real connection to the target.
+    var monitorsServices = true
 
     @State private var sheetVisible = false
 
     var body: some View {
         if !manager.forwarders.isEmpty {
             chipButton
+                .task(id: monitorsServices) {
+                    guard monitorsServices else { return }
+                    await manager.monitorServices()
+                }
                 .sheet(isPresented: $sheetVisible) {
                     ForwardingStatusSheet(manager: manager)
                         .presentationDetents([.medium, .large])
@@ -35,12 +45,13 @@ struct ForwardingStatusChip: View {
         let isError = manager.hasError
         let count = manager.runningCount
         let active = manager.activeConnectionCount > 0
+        let serving = manager.servingCount > 0
 
         Button { sheetVisible = true } label: {
             HStack(spacing: 5 * scale) {
                 Text(verbatim: "\u{21C4}")
                     .font(.system(size: 12 * scale, weight: .semibold))
-                    .foregroundStyle(isError ? T.amber : T.accent)
+                    .foregroundStyle(isError ? T.amber : (serving ? T.green : T.fgMuted))
                 Text(isError ? "!" : String(count))
                     .font(Typography.tesseraMono(size: 11 * scale, weight: .medium))
                     .foregroundStyle(T.fg)
@@ -68,16 +79,30 @@ struct ForwardingStatusChip: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityValue(forwardingServiceSummary(manager))
     }
+}
+
+/// The glyph's colour as words, for VoiceOver and for the UI tests that
+/// cannot read a colour.
+@MainActor
+private func forwardingServiceSummary(_ manager: PortForwarderManager) -> String {
+    if manager.hasError { return String(localized: "error") }
+    return manager.servingCount > 0
+        ? String(localized: "serving")
+        : String(localized: "nothing serving")
 }
 
 /// Phone toolbar action for sessions that actually have forwarding entries.
 /// Like the iPad count chip, it stays out of the compact top bar when the
-/// manager is empty. The sheet is intentionally read-only: tunnel creation
-/// and editing stay on iPad.
+/// manager is empty. The sheet is read-only for *editing*: tunnel creation and
+/// editing stay on iPad, while opening a tunnel in the in-app browser is full
+/// parity — a phone is where a terminal has the least room to render a page.
 struct CompactForwardingStatusButton: View {
     let manager: PortForwarderManager?
     let T: DesignTokens
+    /// See `ForwardingStatusChip.monitorsServices`.
+    var monitorsServices = true
 
     @State private var sheetVisible = false
 
@@ -97,6 +122,11 @@ struct CompactForwardingStatusButton: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Active tunnels")
+            .accessibilityValue(forwardingServiceSummary(manager))
+            .task(id: monitorsServices) {
+                guard monitorsServices else { return }
+                await manager.monitorServices()
+            }
             .sheet(isPresented: $sheetVisible) {
                 ForwardingStatusSheet(manager: manager, readOnly: true)
                     .presentationDetents([.medium, .large])
@@ -108,24 +138,34 @@ struct CompactForwardingStatusButton: View {
     private var buttonTint: Color {
         guard let manager else { return T.fgMuted }
         if manager.hasError { return T.amber }
-        return manager.runningCount > 0 ? T.accent : T.fgMuted
+        return manager.servingCount > 0 ? T.green : T.fgMuted
     }
 }
 
-/// Bottom sheet shown when the user taps the chip. Lists every rule
-/// in the manager with its bytes / active-connection count and a
-/// `pause` toggle. HTTP-ish ports also get an `↗ open in safari`
-/// button that opens `http://localhost:<localPort>/`.
+/// Bottom sheet shown when the user taps the chip. Lists every rule in the
+/// manager with its bytes / active-connection count. A live tunnel the shared
+/// policy calls browsable also gets `↗ open in browser`, which presents the
+/// page inside Tessera, and a `safari` escape hatch for anything the in-app
+/// browser cannot do (a downloaded file, a password autofill).
 private struct ForwardingStatusSheet: View {
     let manager: PortForwarderManager?
+    /// Whether rules can be created or edited from here. Opening a tunnel is
+    /// not editing, so the browse actions stay available either way — the
+    /// phone's sheet is where a tunnel is most useful to open, since the
+    /// terminal beside it has the least room to show a page.
     var readOnly = false
     @Environment(\.designTokens) private var T
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    // Optional: the tunnel-browser harness presents this sheet without one.
+    @Environment(ProgramStatusCenter.self) private var programStatusCenter: ProgramStatusCenter?
+
+    @State private var browsing: BrowsingTunnel?
+    @State private var programStatusCoverSource = UUID()
 
     private var sortedForwarders: [PortForwarder] {
         (manager?.forwarders.values.map { $0 } ?? [])
-            .sorted { $0.rule.localPort < $1.rule.localPort }
+            .sorted { $0.rule.bind.port < $1.rule.bind.port }
     }
 
     var body: some View {
@@ -148,7 +188,11 @@ private struct ForwardingStatusSheet: View {
                     Text("no active tunnels")
                         .font(Typography.tesseraMono(size: 13, weight: .medium))
                         .foregroundStyle(T.fg)
-                    Text("create and edit forwarding rules from iPad.")
+                    Text(
+                        readOnly
+                            ? "create and edit forwarding rules from iPad."
+                            : "create and edit forwarding rules on the host's tunnels page."
+                    )
                         .font(Typography.tesseraMono(size: 11))
                         .foregroundStyle(T.fgMuted)
                 }
@@ -168,6 +212,16 @@ private struct ForwardingStatusSheet: View {
             }
         }
         .background(T.presentationBg)
+        // The rows below say per tunnel what the glyph summarised; bring
+        // them up to date rather than showing the last cadence's answer.
+        .onAppear { manager?.probeServicesNow() }
+        // The sheet and its browser cover the session's terminal, so its
+        // finished and failed results stay unread until the sheet closes.
+        .onAppear { programStatusCenter?.setApplicationCovered(true, source: programStatusCoverSource) }
+        .onDisappear { programStatusCenter?.setApplicationCovered(false, source: programStatusCoverSource) }
+        .fullScreenCover(item: $browsing) { tunnel in
+            TunnelWebBrowserView(target: tunnel.target, ruleLabel: tunnel.label)
+        }
     }
 
     @ViewBuilder
@@ -177,13 +231,13 @@ private struct ForwardingStatusSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 statusDot(for: forwarder)
-                Text(String(rule.localPort))
+                Text(String(rule.bind.port))
                     .font(Typography.tesseraMono(size: 13, weight: .semibold))
                     .foregroundStyle(T.accent)
                 Text(verbatim: " → ")
                     .font(Typography.tesseraMono(size: 13))
                     .foregroundStyle(T.fgDim)
-                Text(verbatim: "\(rule.remoteHost):\(rule.remotePort)")
+                Text(verbatim: rule.targetDisplayText)
                     .font(Typography.tesseraMono(size: 13))
                     .foregroundStyle(T.fg)
                 if !rule.label.isEmpty {
@@ -199,11 +253,19 @@ private struct ForwardingStatusSheet: View {
                 .foregroundStyle(statusColor(for: forwarder))
 
             HStack(spacing: 6) {
-                if !readOnly, isHTTPPort(rule.localPort) {
-                    Btn("\u{2197} open in safari", style: .primary, compact: true) {
-                        if let url = URL(string: "http://localhost:\(rule.localPort)/") {
-                            openURL(url)
-                        }
+                // A tunnel is only browsable while something is listening on
+                // it; the shared policy answers the address, this answers the
+                // liveness it deliberately does not hold.
+                if isLive(forwarder), let target = ForwardedWebPolicy.webTarget(for: rule) {
+                    Btn("\u{2197} open in browser", style: .primary, compact: true) {
+                        browsing = BrowsingTunnel(
+                            id: rule.id,
+                            target: target,
+                            label: rule.label
+                        )
+                    }
+                    Btn("safari", compact: true) {
+                        if let url = URL(string: target.url) { openURL(url) }
                     }
                 }
                 Spacer()
@@ -219,8 +281,13 @@ private struct ForwardingStatusSheet: View {
     private func statusDot(for forwarder: PortForwarder) -> some View {
         let color: Color = {
             switch forwarder.state {
-            case .active: return T.accent
-            case .listening: return T.accent.opacity(0.7)
+            case .active: return T.green
+            case .listening:
+                switch forwarder.service {
+                case .serving: return T.green
+                case .notServing: return T.fgFaint
+                case .unknown: return T.accent.opacity(0.7)
+                }
             case .idle: return T.fgFaint
             case .error: return T.amber
             }
@@ -231,7 +298,7 @@ private struct ForwardingStatusSheet: View {
     private func statusText(for forwarder: PortForwarder) -> String {
         switch forwarder.state {
         case .idle: return String(localized: "idle")
-        case .listening: return String(localized: "listening · 0 active")
+        case .listening: return forwarder.listeningStatusText
         case .active(let n): return "\u{2191} \(byteString(forwarder.bytesUp))   \u{2193} \(byteString(forwarder.bytesDown))   ·   \(n) active"
         case .error(let reason): return reason
         }
@@ -255,10 +322,19 @@ private struct ForwardingStatusSheet: View {
         return "\(n) B"
     }
 
-    private func isHTTPPort(_ p: UInt16) -> Bool {
-        // Skip well-known non-HTTP ports — postgres, mysql, redis, mongo,
-        // memcached, ssh — where http://localhost:<port>/ would just 404.
-        let nonHTTP: Set<UInt16> = [22, 5432, 3306, 6379, 27017, 11211, 25, 110, 143]
-        return !nonHTTP.contains(p)
+    private func isLive(_ forwarder: PortForwarder) -> Bool {
+        switch forwarder.state {
+        case .listening, .active: return true
+        case .idle, .error: return false
+        }
     }
+}
+
+/// The tunnel the in-app browser is currently showing. Identified by its rule
+/// so `fullScreenCover(item:)` rebuilds the browser when the user closes one
+/// tunnel's page and opens another's.
+private struct BrowsingTunnel: Identifiable {
+    let id: UUID
+    let target: ForwardedWebTarget
+    let label: String
 }

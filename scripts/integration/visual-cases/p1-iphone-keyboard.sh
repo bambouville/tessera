@@ -15,7 +15,9 @@ CASE_DIR="$VISUAL_ROOT/cases/P1-iphone-keyboard"
 RUNTIME="$VISUAL_ROOT/runtime.json"
 APP_PATH="$(jq -r .app_path "$RUNTIME")"
 IPAD_UDID="$(jq -r .udid "$RUNTIME")"
+DERIVED_DATA="$(jq -r .derived_data "$RUNTIME")"
 BUNDLE_ID=com.bambouville.TesseraApp
+PROJECT="$HERE/../../Tessera.xcodeproj"
 PASSWORD="$(fixture_password)"
 SESSION="tessera-phone-viewport-$(basename "$RUN_DIR" | tr -cd 'A-Za-z0-9' | tail -c 17)"
 rm -rf "$CASE_DIR"
@@ -29,11 +31,15 @@ clear_app_environment() {
     >/dev/null 2>&1 || true
   xcrun simctl spawn "$udid" launchctl unsetenv TESSERA_LIVE_SCROLL_CONFIG_B64 \
     >/dev/null 2>&1 || true
+  xcrun simctl spawn "$udid" launchctl unsetenv TESSERA_LIVE_SCROLL_SHOW_EDGES \
+    >/dev/null 2>&1 || true
 }
 
 cleanup() {
   if [[ -n "$phone_udid" ]]; then
     xcrun simctl terminate "$phone_udid" "$BUNDLE_ID" >/dev/null 2>&1 || true
+    xcrun simctl spawn "$phone_udid" launchctl unsetenv TESSERA_VISUAL_CAPTURE \
+      >/dev/null 2>&1 || true
     clear_app_environment "$phone_udid"
   fi
   xcrun simctl terminate "$IPAD_UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
@@ -42,7 +48,7 @@ cleanup() {
     >/dev/null 2>&1 || true
   delete_owned_test_simulator "$SIMULATOR_STATE/iphone_keyboard_simulator_udid" || true
 }
-trap cleanup EXIT
+trap 'fail_closed_trap cleanup' EXIT
 
 phone_udid="$(
   TESSERA_INTEGRATION_SIMULATOR_NAME="Tessera Integration iPhone Keyboard" \
@@ -119,6 +125,95 @@ wait_for_ipad_geometry() {
   return 1
 }
 
+wait_for_phone_clients_to_detach() {
+  local snapshot=''
+  local query_failed=0
+  for _ in {1..100}; do
+    if ! snapshot="$(
+        fixture_ssh "$TESSERA_FIXTURE_STABLE_HOST" \
+          "tmux list-clients -t '$SESSION' -F '#{client_name}'" \
+          2>/dev/null
+      )"; then
+      query_failed=1
+      sleep 0.1
+      continue
+    fi
+    query_failed=0
+    if [[ -z "$snapshot" ]]; then
+      return 0
+    fi
+
+    # This tmux session is uniquely run-owned. A terminated simulator can
+    # leave its SSH/control client visible for a short interval, so drain the
+    # remaining clients one at a time instead of racing the iPad attach against
+    # the production authority check (which must stay fail-closed).
+    fixture_ssh "$TESSERA_FIXTURE_STABLE_HOST" \
+      "tmux detach-client -s '$SESSION'" >/dev/null 2>&1 || true
+    sleep 0.1
+  done
+
+  if ((query_failed)); then
+    printf 'failed to verify phone tmux clients detached before iPad handoff\n' >&2
+  else
+    printf 'phone tmux clients did not detach before iPad handoff; clients=%s\n' \
+      "$snapshot" >&2
+  fi
+  return 1
+}
+
+wait_for_terminal_presentation() {
+  local udid="$1"
+  local label="$2"
+  local test_name="testWaitForLiveScrollTerminalPresentation"
+  local xcresult="$VISUAL_ROOT/p1-iphone-keyboard-${label}-ready.xcresult"
+  local log="$CASE_DIR/${label}-ready.log"
+  local summary="$CASE_DIR/${label}-ready-summary.json"
+
+  if [[ "$label" == phone ]]; then
+    test_name="testWaitForLiveScrollPhoneKeyboardPresentation"
+  fi
+
+  # SpringBoard can refuse the runner ("Busy", "Application failed preflight
+  # checks") while it is still launching the app just started above; the
+  # refused attempt runs no test, so retry it after a pause.
+  local attempt passed=0
+  for attempt in 1 2 3; do
+    rm -rf "$xcresult"
+    if TESSERA_VISUAL_CAPTURE=1 xcodebuild test-without-building \
+        -project "$PROJECT" \
+        -scheme Tessera \
+        -configuration Debug \
+        -destination "platform=iOS Simulator,id=$udid" \
+        -derivedDataPath "$DERIVED_DATA" \
+        -resultBundlePath "$xcresult" \
+        -only-testing:"TesseraUITests/VisualCaptureProbe/$test_name" \
+        >"$log" 2>&1; then
+      passed=1
+      break
+    fi
+    grep -q "Application failed preflight checks" "$log" || break
+    cp "$log" "$CASE_DIR/${label}-ready-refused-$attempt.log"
+    sleep 5
+  done
+  if ((passed == 0)); then
+    local data_container
+    data_container="$(xcrun simctl get_app_container "$udid" "$BUNDLE_ID" data 2>/dev/null || true)"
+    if [[ -n "$data_container" ]]; then
+      cp "$data_container/Library/Application Support/Diagnostics/tessera-diagnostics.log" \
+        "$CASE_DIR/${label}-failure-diagnostics.log" 2>/dev/null || true
+    fi
+    fixture_ssh "$TESSERA_FIXTURE_STABLE_HOST" \
+      "tmux show-options -qv -t '$SESSION' @tessera_authority; \
+tmux list-clients -t '$SESSION' -F '#{client_name}|#{client_pid}|#{client_created}|#{client_flags}'" \
+      >"$CASE_DIR/${label}-failure-tmux-state.log" 2>&1 || true
+    return 1
+  fi
+  xcrun xcresulttool get test-results summary --path "$xcresult" >"$summary"
+  jq -e \
+    '.totalTestCount == 1 and .passedTests == 1 and .skippedTests == 0 and .failedTests == 0' \
+    "$summary" >/dev/null
+}
+
 fixture_ssh "$TESSERA_FIXTURE_STABLE_HOST" \
   "tmux kill-session -t '$SESSION' >/dev/null 2>&1 || true; \
 tmux new-session -d -x 160 -y 50 -s '$SESSION' htop; \
@@ -141,45 +236,52 @@ config_b64="$(printf '%s' "$config_json" | base64 | tr -d '\n')"
 
 xcrun simctl install "$phone_udid" "$APP_PATH"
 clear_app_environment "$phone_udid"
+xcrun simctl spawn "$phone_udid" launchctl setenv TESSERA_VISUAL_CAPTURE 1
 xcrun simctl spawn "$phone_udid" launchctl setenv TESSERA_LIVE_SCROLL_HARNESS 1
+# Shown as ContentView shows a selected session: a hidden session sizes
+# nothing (aa619a2dd), so without show edges neither device claims the grid.
+xcrun simctl spawn "$phone_udid" launchctl setenv TESSERA_LIVE_SCROLL_SHOW_EDGES 1
 xcrun simctl spawn "$phone_udid" launchctl setenv \
   TESSERA_LIVE_SCROLL_CONFIG_B64 "$config_b64"
 xcrun simctl launch --terminate-running-process \
   "$phone_udid" "$BUNDLE_ID" >"$CASE_DIR/phone-launch.txt"
 
+# The remote resize arrives as soon as tmux attaches, which precedes local
+# pane hydration. Wait for the production harness to prove its launch shield
+# has dropped and the focused TerminalView is hittable at viewport size.
+wait_for_terminal_presentation "$phone_udid" phone
 phone_geometry="$(wait_for_phone_geometry)"
 [[ "$phone_geometry" =~ ^([0-9]+)x([0-9]+)[[:space:]]([0-9]+)x([0-9]+)[[:space:]]2$ ]]
 phone_pane_cols="${BASH_REMATCH[3]}"
 phone_pane_rows="${BASH_REMATCH[4]}"
-sleep 1
 xcrun simctl io "$phone_udid" screenshot \
   "$CASE_DIR/phone-tmux-keyboard.png" >/dev/null
+
+# P1 validates the same session sequentially on compact and regular width.
+# End the phone transport after preserving its evidence so the production
+# authority handoff can release that visible client before the iPad attaches.
+# Leaving both apps live makes the iPad correctly show the peer-control veil,
+# which is not the viewport-resize state this case is meant to grade.
+xcrun simctl terminate "$phone_udid" "$BUNDLE_ID"
+fixture_ssh "$TESSERA_FIXTURE_STABLE_HOST" \
+  "tmux detach-client -s '$SESSION' >/dev/null 2>&1 || true"
+wait_for_phone_clients_to_detach
 
 xcrun simctl install "$IPAD_UDID" "$APP_PATH"
 clear_app_environment "$IPAD_UDID"
 xcrun simctl spawn "$IPAD_UDID" launchctl setenv TESSERA_LIVE_SCROLL_HARNESS 1
+xcrun simctl spawn "$IPAD_UDID" launchctl setenv TESSERA_LIVE_SCROLL_SHOW_EDGES 1
 xcrun simctl spawn "$IPAD_UDID" launchctl setenv \
   TESSERA_LIVE_SCROLL_CONFIG_B64 "$config_b64"
 xcrun simctl launch --terminate-running-process \
   "$IPAD_UDID" "$BUNDLE_ID" >"$CASE_DIR/ipad-launch.txt"
 
+wait_for_terminal_presentation "$IPAD_UDID" ipad
 ipad_geometry="$(wait_for_ipad_geometry "$phone_pane_cols" "$phone_pane_rows")"
-sleep 1
 xcrun simctl io "$IPAD_UDID" screenshot \
   "$CASE_DIR/ipad-tmux-resized.raw.png" >/dev/null
-# simctl can return the landscape CAMetalLayer in a portrait-oriented pixel
-# buffer on this runtime. Normalize the evidence without changing its pixels.
-read -r ipad_pixel_width ipad_pixel_height < <(
-  sips -g pixelWidth -g pixelHeight "$CASE_DIR/ipad-tmux-resized.raw.png" \
-    | awk '/pixelWidth/{width=$2} /pixelHeight/{height=$2} END{print width, height}'
-)
-if ((ipad_pixel_height > ipad_pixel_width)); then
-  sips -r 270 "$CASE_DIR/ipad-tmux-resized.raw.png" \
-    --out "$CASE_DIR/ipad-tmux-resized.png" >/dev/null
-else
-  mv "$CASE_DIR/ipad-tmux-resized.raw.png" \
-    "$CASE_DIR/ipad-tmux-resized.png"
-fi
+"$HERE/normalize-landscape-screenshot.sh" "$CASE_DIR/ipad-tmux-resized.raw.png" \
+  "$CASE_DIR/ipad-tmux-resized.png" >/dev/null
 rm -f "$CASE_DIR/ipad-tmux-resized.raw.png"
 
 jq -n \
@@ -196,12 +298,17 @@ jq -n \
       "A later iPad attachment expands the same two-pane layout beyond the phone dimensions instead of inheriting a flattened or phone-width split.",
       "Every accessory chip and the keyboard-toggle button is fully visible and entirely above the top edge of the software keyboard; no part of the 52 pt bar is covered. The visible terminal region and keyboard have no unintended clipping, stale pixels, or black rendering artifacts."
     ],
-    capture_notes: "Production SSH+tmux session views connected programmatically to a disposable fixture. The same pre-existing 160x50 side-by-side htop/Vim window is captured first on a dedicated portrait iPhone with its real software keyboard, then on the integration iPad after that client expands the shared layout. simctl screenshots preserve CAMetalLayer pixels; the iPad PNG is losslessly orientation-normalized when this simulator runtime returns its landscape surface in a portrait pixel buffer. No user host or UI-driven connection is involved.",
+    capture_notes: "Production SSH+tmux session views connected programmatically to a disposable fixture. The same pre-existing 160x50 side-by-side htop/Vim window is captured first on a dedicated portrait iPhone with its real software keyboard. The run-owned phone app and tmux client are then ended without killing the session, and the integration iPad attaches and expands that shared layout. simctl screenshots preserve CAMetalLayer pixels; the iPad PNG is normalized to upright landscape whichever shape simctl returns. No user host or UI-driven connection is involved.",
     deterministic_precheck: {
       verdict: "pass",
       detail: ("Remote tmux window, focused-pane, and pane-count geometry changed " + $initial + " -> " + $phone + " -> " + $ipad + ".")
+    },
+    presentation_precheck: {
+      verdict: "pass",
+      detail: "Before each screenshot, XCUITest observed the production harness render-ready state and a hittable, viewport-sized live-scroll terminal surface; the phone probe also dismissed the one-time QuickPath tutorial if present and required the real software keyboard. This excludes the attaching-pane launch shield and keyboard onboarding sheet."
     }
   }' >"$CASE_DIR/case.json"
 
 cleanup
 trap - EXIT
+script_completed=1

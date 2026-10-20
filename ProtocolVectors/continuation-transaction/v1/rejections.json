@@ -1,0 +1,8 @@
+{
+  "validAbortCode": "user_cancelled",
+  "invalidAbortCodes": ["", "bad\ncode"],
+  "expectedErrors": {
+    "invalidAbortCode": "invalidAbort",
+    "terminalMutation": "invalidTransition"
+  }
+}

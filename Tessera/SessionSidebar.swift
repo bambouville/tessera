@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+import TesseraCore
+import TmuxControlCore
 
 /// Sidebar root for the NavigationSplitView. Hosts and active sessions
 /// share one custom M2 sidebar surface. Fixed 240pt wide; `ContentView`
@@ -15,7 +17,7 @@ struct SessionSidebar: View {
     @Environment(AppearancePreferences.self) private var appearance
     @Environment(HostTerminalBackgroundStore.self) private var hostBackgrounds
     @Environment(ConnectionActivityStore.self) private var connectionActivity
-    @Environment(AgentCenter.self) private var agentCenter
+    @Environment(AgentCenterV2Coordinator.self) private var agentCenterV2
 
     @Binding var activeSessions: [LiveSession]
     @Binding var selectedItem: SidebarItem?
@@ -185,9 +187,9 @@ struct SessionSidebar: View {
                         systemName: "sparkles",
                         label: "agents",
                         badges: AgentSidebarBadgeFactory.make(
-                            waitingCount: agentCenter.waitingCount,
-                            justFinishedCount: agentCenter.unreadJustFinishedCount,
-                            totalCount: agentCenter.agents.count
+                            waitingCount: agentCenterV2.attentionBadgeCounts.waiting,
+                            justFinishedCount: agentCenterV2.attentionBadgeCounts.finished,
+                            totalCount: agentCenterV2.attentionBadgeCounts.total
                         ),
                         isSelected: selectedItem == .agents
                     ) {
@@ -308,10 +310,12 @@ private struct ActiveSessionRowBody<S: ObservableObject & TerminalSession>: View
     var onDisconnect: () -> Void = {}
 
     @State private var confirmingDisconnect = false
+    @State private var sharedState: SharedSessionState = .idle
     @Environment(\.designTokens) private var T
     @Environment(AppearancePreferences.self) private var appearance
     @Environment(SessionRegistry.self) private var registry
-    @Environment(AgentCenter.self) private var agentCenter
+    @Environment(AgentCenterV2Coordinator.self) private var agentCenterV2
+    @Environment(ProgramStatusCenter.self) private var programStatusCenter
 
     // Dot color mirrors `SessionTopBar.dotColor(for:)` so the sidebar
     // and the top-bar chrome agree on what each state looks like.
@@ -344,9 +348,8 @@ private struct ActiveSessionRowBody<S: ObservableObject & TerminalSession>: View
     }
 
     var body: some View {
-        // Read once inside the @MainActor body; the helpers take the
-        // (Sendable) SessionState rather than touching the isolated
-        // `session.state` from non-isolated computed properties.
+        // Read once from the retained shared coordinator projection; helpers
+        // take the Sendable presentation mapping rather than transport state.
         //
         // A tmux session reports `.connected` the moment the SSH/mosh
         // handshake lands, but the user is still watching the "attaching
@@ -354,16 +357,19 @@ private struct ActiveSessionRowBody<S: ObservableObject & TerminalSession>: View
         // its connecting appearance (amber dot, pulsing, "connecting…")
         // until `SessionView` marks the launch complete in the registry —
         // otherwise the sidebar reads "connected" over the loading screen.
-        let rawState = session.state
+        let rawState = legacySessionState(from: sharedState)
         let state: SessionState = (rawState == .connected && !registry.isRenderReady(live.id))
             ? .connecting
             : rawState
-        let sessionNeedsInput = agentCenter.agents.contains {
-            $0.id.sessionID == live.id && $0.status == .waitingForInput
-        }
-        let sessionHasUnreadFinished = agentCenter.hasUnreadJustFinished(
-            sessionID: live.id
-        )
+        let agentAttention = agentCenterV2.sessionAttention(sessionID: live.id)
+        // Agents' own reports merge into their glyph; every reporting
+        // program counts in the state line.
+        let terminals = programStatusCenter.mergedTerminals(sessionID: live.id, agentCenter: agentCenterV2)
+        let agentTone = terminals.filter(\.hasAgent).compactMap { $0.attention?.tone }.min()
+        let sessionNeedsInput = agentTone == .needsInput
+        let sessionHasUnreadFinished = agentTone == .finished || agentTone == .failed
+        let resultTint = agentTone == .failed ? T.red : T.green
+        let attentionCounts = programStatusCenter.sessionCounts(sessionID: live.id, agentCenter: agentCenterV2)
         let authorityPeerName = registry.gridAuthorityPeerName(for: live.id)
 
         // spacing 0: the disconnect button's 44 pt hit frame supplies the gap.
@@ -388,20 +394,23 @@ private struct ActiveSessionRowBody<S: ObservableObject & TerminalSession>: View
                             }
                         }
 
-                        Text(label(for: state))
+                        // "connected · 1 needs approval · 1 finished"
+                        (Text(label(for: state)).foregroundColor(T.fgMuted)
+                            + (attentionCounts.total > 0
+                                ? Text(verbatim: " · ").foregroundColor(T.fgDim)
+                                    + ProgramStatusWords.countText(attentionCounts, specificKinds: true, T: T)
+                                : Text(verbatim: "")))
                             .font(Typography.tesseraMono(size: 11))
-                            .foregroundStyle(T.fgMuted)
                             .lineLimit(1)
                     }
 
-                    if appearance.agentCenterEnabled,
-                       agentCenter.sessionIDsWithAgents.contains(live.id) {
+                    if appearance.agentCenterEnabled, agentAttention.hasAgent {
                         Image(systemName: "sparkles")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(
                                 sessionNeedsInput
                                     ? T.amber
-                                    : (sessionHasUnreadFinished ? T.green : T.fgMuted)
+                                    : (sessionHasUnreadFinished ? resultTint : T.fgMuted)
                             )
                             .shadow(
                                 color: sessionNeedsInput ? T.amber.opacity(0.55) : .clear,
@@ -411,14 +420,14 @@ private struct ActiveSessionRowBody<S: ObservableObject & TerminalSession>: View
                                 sessionNeedsInput
                                     ? "agent needs input"
                                     : (sessionHasUnreadFinished
-                                        ? "agent just finished"
+                                        ? (agentTone == .failed ? "agent failed" : "agent just finished")
                                         : "agent active")
                             )
                     }
 
                     if let authorityPeerName {
-                        let sameDeviceClass = authorityPeerName
-                            == GridAuthorityDeviceIdentity.selfDisplayName
+                        let peerKind = GridAuthorityDeviceIdentity
+                            .peerKind(authorityPeerName)
                         Image(systemName: authorityPeerName == "iPhone"
                             ? "iphone"
                             : (authorityPeerName == "iPad"
@@ -428,9 +437,16 @@ private struct ActiveSessionRowBody<S: ObservableObject & TerminalSession>: View
                             .foregroundStyle(T.fgMuted)
                             // One whole sentence per case: "another iPad"
                             // does not survive as a separable fragment.
-                            .accessibilityLabel(sameDeviceClass
-                                ? String(localized: "continued on another \(authorityPeerName)")
-                                : String(localized: "continued on \(authorityPeerName)"))
+                            .accessibilityLabel({
+                                switch peerKind {
+                                case .anotherOfOwnClass(let name):
+                                    String(localized: "continued on another \(name)")
+                                case .named(let name):
+                                    String(localized: "continued on \(name)")
+                                case .unknownDevice:
+                                    String(localized: "continued elsewhere")
+                                }
+                            }())
                     }
 
                     Spacer(minLength: 0)
@@ -457,6 +473,7 @@ private struct ActiveSessionRowBody<S: ObservableObject & TerminalSession>: View
                 confirmingDisconnect = true
             }
         }
+        .onReceive(session.sessionCommands.statePublisher) { sharedState = $0 }
         .padding(.leading, 12)
         // trailing 3: 12 minus the 9 pt the hit frame adds around the glyph.
         .padding(.trailing, 3)
@@ -690,6 +707,11 @@ struct BottomNavigationRow: View {
     private func updateAttentionPulse() {
         attentionPulse = false
         guard badges.contains(where: { $0.tone == .needsInput }) else { return }
+        // Automation holds the attention frame rather than pulsing forever.
+        guard !ContinuousMotion.isSuppressed else {
+            attentionPulse = true
+            return
+        }
         withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
             attentionPulse = true
         }

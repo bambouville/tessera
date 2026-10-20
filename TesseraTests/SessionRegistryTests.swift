@@ -170,15 +170,13 @@ final class SessionRegistryTests: XCTestCase {
             paneID: PaneId(11)
         )
 
-        XCTAssertEqual(
-            registry.tmuxFocusRequest,
-            SessionRegistry.TmuxFocusRequest(
-                token: 1,
-                sessionID: session.id,
-                windowID: WindowId(7),
-                paneID: PaneId(11)
-            )
-        )
+        let request = registry.tmuxFocusRequest
+        XCTAssertEqual(request?.token, 1)
+        XCTAssertEqual(request?.sessionID, session.id)
+        XCTAssertEqual(request?.windowID, WindowId(7))
+        XCTAssertEqual(request?.paneID, PaneId(11))
+        XCTAssertEqual(request?.carrierID, ObjectIdentifier(session.session.terminalSession))
+        XCTAssertGreaterThan(request?.expiresAt ?? .now, .now)
     }
 
     func test_requestTmuxFocusIgnoresStaleSession() {

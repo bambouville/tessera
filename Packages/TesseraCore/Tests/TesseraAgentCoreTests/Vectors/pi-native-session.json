@@ -1,0 +1,19 @@
+{
+  "version": 3,
+  "entries": [
+    {"type":"message","id":"root","parentId":null,"message":{"role":"user","content":"synthetic request"}},
+    {"type":"message","id":"abandoned","parentId":"root","message":{"role":"assistant","content":[{"type":"text","text":"abandoned answer"}]}},
+    {"type":"model_change","id":"model","parentId":"root","provider":"synthetic","modelId":"synthetic-model"},
+    {"type":"message","id":"call","parentId":"model","message":{"role":"assistant","content":[{"type":"toolCall","id":"call-1","name":"read","arguments":{"path":"synthetic.txt"}}]}},
+    {"type":"message","id":"result","parentId":"call","message":{"role":"toolResult","toolCallId":"call-1","toolName":"read","content":[{"type":"text","text":"synthetic output"}],"isError":false}},
+    {"type":"custom_message","id":"hidden","parentId":"result","customType":"context","content":"hidden extension context","display":false},
+    {"type":"custom_message","id":"notice","parentId":"hidden","customType":"notice","content":"visible extension notice","display":true},
+    {"type":"compaction","id":"compact","parentId":"notice","summary":"synthetic summary","firstKeptEntryId":"root","tokensBefore":42},
+    {"type":"message","id":"answer","parentId":"compact","message":{"role":"assistant","content":[{"type":"text","text":"synthetic answer"}],"stopReason":"stop"}}
+  ],
+  "expectedRecordIDs": ["synthetic-session","root","model","call","result","hidden","notice","compact","answer"],
+  "visibleSystemRecord": {
+    "type":"message","role":"system","providerSystemMessage":true,
+    "blocks":[{"type":"text","text":"visible extension notice"}]
+  }
+}

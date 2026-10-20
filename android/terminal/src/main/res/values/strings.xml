@@ -1,0 +1,7 @@
+<resources>
+  <string name="paste_text">Paste</string>
+  <string name="copy_text">Copy</string>
+  <string name="text_selection_more">More…</string>
+  <string name="quick_open_selected_path">Quick open</string>
+  <string name="reveal_selected_path">Reveal in Files</string>
+</resources>

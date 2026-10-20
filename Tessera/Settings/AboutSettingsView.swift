@@ -9,6 +9,7 @@ private enum BundledDocument: String, Identifiable, CaseIterable {
     case gpl
     case appStoreException
     case thirdPartyNotices
+    case agentHostNotices
 
     var id: String { rawValue }
 
@@ -26,19 +27,25 @@ private enum BundledDocument: String, Identifiable, CaseIterable {
                 localized: "third-party licenses & notices",
                 comment: "Bundled document row in About"
             )
+        case .agentHostNotices:
+            return String(
+                localized: "Agent Host licenses & notices",
+                comment: "Bundled helper document title in About. Agent Host is a proper name."
+            )
         }
     }
 
-    private var resource: (name: String, ext: String?) {
+    private var resource: (name: String, ext: String?, subdirectory: String?) {
         switch self {
-        case .gpl: return ("LICENSE", nil)
-        case .appStoreException: return ("COPYING", "iOS")
-        case .thirdPartyNotices: return ("ThirdPartyNotices", "txt")
+        case .gpl: return ("LICENSE", nil, nil)
+        case .appStoreException: return ("COPYING", "iOS", nil)
+        case .thirdPartyNotices: return ("ThirdPartyNotices", "txt", nil)
+        case .agentHostNotices: return ("THIRD-PARTY-NOTICES", "txt", "agent-host")
         }
     }
 
     func loadText() -> String {
-        guard let url = Bundle.main.url(forResource: resource.name, withExtension: resource.ext),
+        guard let url = Bundle.main.url(forResource: resource.name, withExtension: resource.ext, subdirectory: resource.subdirectory),
               let text = try? String(contentsOf: url, encoding: .utf8) else {
             return String(localized: "this document failed to load from the app bundle — please report this build issue at https://github.com/bambouville/tessera/issues")
         }
@@ -55,6 +62,7 @@ struct AboutSettingsView: View {
 
     private let sourceURL = URL(string: "https://github.com/bambouville/tessera")!
     private let licenseURL = URL(string: "https://www.gnu.org/licenses/gpl-3.0.html")!
+    private let privacyPolicyURL = URL(string: "https://bambouville.github.io/tessera/privacy-policy")!
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -116,6 +124,7 @@ struct AboutSettingsView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 linkRow("view source code", systemImage: "chevron.left.forwardslash.chevron.right", url: sourceURL)
+                linkRow("privacy policy", systemImage: "hand.raised", url: privacyPolicyURL)
                 documentRow("view license (GPL-3.0)", systemImage: "doc.text", document: .gpl)
                 documentRow("app store exception & trademark notice", systemImage: "doc.text", document: .appStoreException)
                 linkRow("gpl-3.0 at gnu.org", systemImage: "safari", url: licenseURL)
@@ -166,9 +175,18 @@ struct AboutSettingsView: View {
             VStack(alignment: .leading, spacing: 12) {
                 creditLine("SwiftTerm", "MIT License")
                 creditLine("Citadel", "MIT License")
-                creditLine("BigInt", "MIT License")
                 creditLine("SwiftNIO SSH", "Apache License 2.0")
                 creditLine("SwiftNIO, Swift Crypto & other Swift server libraries", "Apache License 2.0")
+                creditLine("swift-markdown", "Apache License 2.0")
+                creditLine("swift-cmark", "BSD 2-Clause License, MIT License")
+                creditLine("shlex", "MIT License")
+                creditLine("SQLite", String(localized: "public domain", comment: "SQLite copyright status in About acknowledgments"))
+                creditLine("simdjson", "MIT License")
+                creditLine("musl libc", "MIT License")
+                creditLine("LLVM libc++", "Apache License 2.0 with LLVM Exceptions")
+                creditLine("LLVM libc++abi", "Apache License 2.0 with LLVM Exceptions")
+                creditLine("LLVM libunwind", "Apache License 2.0 with LLVM Exceptions")
+                creditLine("Zig", "MIT License")
                 creditLine("Mosh (mobile shell)", "GNU GPL v3")
                 creditLine("Protocol Buffers", "BSD 3-Clause License")
                 creditLine("JetBrains Mono (bundled terminal font)", "SIL Open Font License 1.1")
@@ -178,12 +196,13 @@ struct AboutSettingsView: View {
 
             documentRow("view third-party licenses & notices", systemImage: "doc.on.doc", document: .thirdPartyNotices)
                 .padding(.top, 6)
+            documentRow("view Agent Host licenses & notices", systemImage: "doc.on.doc", document: .agentHostNotices)
         }
         .padding(.horizontal, 4)
     }
 
-    /// Library and licence names are proper nouns — the same text in every
-    /// language, so both halves render verbatim.
+    /// Library and licence names render verbatim; descriptive copyright
+    /// statuses such as public domain are localized by the caller.
     private func creditLine(_ what: String, _ source: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(verbatim: what)

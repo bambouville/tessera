@@ -235,53 +235,87 @@ final class CommandPaletteTests: XCTestCase {
         XCTAssertEqual(palette.sessions.count, 0)
     }
 
-    func test_sessionsPrecedeAgentsRankedByUrgency() {
-        let palette = CommandPalette()
-        let session = makeLive(name: "session")
-        let idle = makeAgent(name: "idle", status: .idle)
-        let waiting = makeAgent(name: "waiting", status: .waitingForInput)
-        let working = makeAgent(name: "working", status: .working)
+    func test_sharedTmuxBuilderPreservesOrderNamesAndPaneTitlePrecedence() {
+        let windows = CommandPaletteTmuxSnapshot.buildWindows([
+            TmuxController.WindowInfo(
+                id: WindowId(7), index: 4, windowName: "agent work", activePaneId: PaneId(11),
+                activePaneTitle: "host", activePaneTitleIsDefault: true,
+                panes: [
+                    .init(id: PaneId(11), title: "host", titleIsDefault: true, currentCommand: "sh"),
+                    .init(id: PaneId(12), title: " README ", currentCommand: "sh"),
+                    .init(id: PaneId(13), currentCommand: "htop"),
+                    .init(id: PaneId(14)),
+                ]
+            ),
+            TmuxController.WindowInfo(id: WindowId(2), index: 9, windowName: "logs"),
+        ]) { paneID in
+            [PaneId(11): "claude", PaneId(12): "codex"][paneID]
+        }
 
-        palette.open(sessions: [session], agents: [idle, working, waiting])
-
-        XCTAssertEqual(palette.entries.map(\.id), [
-            .session(session.id),
-            .agent(waiting.id),
-            .agent(working.id),
-            .agent(idle.id),
-        ])
+        XCTAssertEqual(windows.map(\.id), [WindowId(7), WindowId(2)])
+        XCTAssertEqual(windows.map(\.position), [0, 1])
+        XCTAssertEqual(windows.map(\.tmuxIndex), [4, 9])
+        XCTAssertEqual(windows[0].title, "claude")
+        XCTAssertEqual(windows[0].renameSeed, "agent work")
+        XCTAssertEqual(windows[0].panes.map(\.title), ["claude", "README", "htop", "agent work"])
+        XCTAssertEqual(windows[0].panes[0].command, "sh")
     }
 
-    func test_atPrefixScopesResultsToAgents() {
-        let palette = CommandPalette()
-        let session = makeLive(name: "prod-session")
-        let agent = makeAgent(name: "Codex", status: .working, hostName: "prod-agent")
-        palette.open(sessions: [session], agents: [agent])
+    func test_sharedTmuxBuilderKeepsExplicitTitlesAndDropsAbsentAgentFallback() {
+        let window = TmuxController.WindowInfo(
+            id: WindowId(7), windowName: "sh", activePaneId: PaneId(11),
+            activePaneTitle: "Release checklist",
+            panes: [.init(id: PaneId(11), title: "Release checklist", currentCommand: "sh")]
+        )
+        let titled = CommandPaletteTmuxSnapshot.buildWindows([window]) { _ in "codex" }
+        XCTAssertEqual(titled[0].title, "Release checklist")
+        XCTAssertEqual(titled[0].panes[0].title, "Release checklist")
 
-        palette.query = "@ prod"
-
-        XCTAssertEqual(palette.agentResults.map(\.id), [agent.id])
-        XCTAssertTrue(palette.results.isEmpty)
-        XCTAssertEqual(palette.entries.map(\.id), [.agent(agent.id)])
+        var untitled = window
+        untitled.activePaneTitle = nil
+        untitled.panes[0].title = nil
+        let bound = CommandPaletteTmuxSnapshot.buildWindows([untitled]) { _ in "codex" }
+        XCTAssertEqual(bound[0].title, "codex")
+        XCTAssertEqual(bound[0].panes[0].title, "codex")
+        let unbound = CommandPaletteTmuxSnapshot.buildWindows([untitled]) { _ in nil }
+        XCTAssertEqual(unbound[0].title, "sh")
+        XCTAssertEqual(unbound[0].panes[0].title, "sh")
     }
 
-    func test_agentQueryMatchesFullLocation() {
+    func test_sharedTmuxBuilderSupportsWindowNameSearchAndStableFocusCommit() {
+        let session = makeLive(name: "host")
+        let windows = CommandPaletteTmuxSnapshot.buildWindows([
+            TmuxController.WindowInfo(
+                id: WindowId(7), windowName: "release work", activePaneId: PaneId(11),
+                panes: [.init(id: PaneId(11), currentCommand: "sh")]
+            ),
+        ]) { _ in "claude" }
         let palette = CommandPalette()
-        let agent = makeAgent(name: "Claude Code", status: .idle, hostName: "buildbox")
-        palette.open(sessions: [], agents: [agent])
+        palette.open(sessions: [session], tmuxWindows: windows, currentSessionID: session.id)
+        palette.query = "release"
+        XCTAssertEqual(palette.tmuxResults.map(\.id), [.window(WindowId(7))])
+        XCTAssertEqual(palette.commitResult(), .window(sessionID: session.id, windowID: WindowId(7)))
 
-        palette.query = "window 4"
-
-        XCTAssertEqual(palette.agentResults.map(\.id), [agent.id])
+        palette.refreshSnapshot(sessions: [session], paneTitles: [:], lastTouched: [:], tmuxWindows: [])
+        XCTAssertNil(palette.currentSessionID)
+        XCTAssertTrue(palette.tmuxResults.isEmpty)
     }
 
-    func test_commitResultReturnsAgentTarget() {
+    func test_selectedSessionAcceptsFirstHydratedWindowSnapshotWhileOpen() {
+        let session = makeLive(name: "host")
         let palette = CommandPalette()
-        let agent = makeAgent(name: "Codex", status: .waitingForInput)
-        palette.open(sessions: [], agents: [agent])
+        palette.open(sessions: [session], currentSessionID: session.id, allowsTmuxMutation: false)
+        XCTAssertTrue(palette.tmuxResults.isEmpty)
 
-        XCTAssertEqual(palette.commitResult(), .agent(agent.id))
-        XCTAssertNil(palette.commit())
+        let windows = CommandPaletteTmuxSnapshot.buildWindows([
+            TmuxController.WindowInfo(id: WindowId(8), windowName: "deploy"),
+        ]) { _ in nil }
+        palette.refreshSnapshot(
+            sessions: [session], paneTitles: [:], lastTouched: [:],
+            tmuxWindows: windows, currentSessionID: session.id
+        )
+        palette.query = "deploy"
+        XCTAssertEqual(palette.commitResult(), .window(sessionID: session.id, windowID: WindowId(8)))
     }
 
     func test_compactSwitcherOrdersHomeThenWindowsAndPaneTargets() {
@@ -360,6 +394,81 @@ final class CommandPaletteTests: XCTestCase {
         XCTAssertEqual(palette.commitResult(), .home)
     }
 
+    func test_authoritativeRefreshReplacesDragPreviewAndMutationState() {
+        let palette = CommandPalette()
+        let session = makeLive(name: "phone")
+        let windows = [1, 2, 3].map { id in
+            CommandPaletteTmuxWindow(
+                id: WindowId(id),
+                title: "w\(id)",
+                position: id - 1,
+                tmuxIndex: id,
+                panes: []
+            )
+        }
+        palette.open(
+            sessions: [session],
+            tmuxWindows: windows,
+            currentSessionID: session.id,
+            canReorderTmuxWindows: true,
+            canTidyTmuxWindows: true
+        )
+        palette.previewMoveWindow(WindowId(1), to: 2)
+
+        XCTAssertEqual(palette.tmuxWindows.map(\.id), [WindowId(2), WindowId(3), WindowId(1)])
+        XCTAssertFalse(palette.isTmuxWindowMutationPending, "only an admitted controller operation may mark the palette pending")
+
+        let externalOrder = [windows[2], windows[0], windows[1]]
+        palette.refreshSnapshot(
+            sessions: [session],
+            paneTitles: [:],
+            lastTouched: [:],
+            tmuxWindows: externalOrder,
+            currentSessionID: session.id,
+            canReorderTmuxWindows: true,
+            canTidyTmuxWindows: true,
+            isTmuxWindowMutationPending: false,
+            tmuxWindowOrderError: "remote order won"
+        )
+
+        XCTAssertEqual(palette.tmuxWindows.map(\.id), [WindowId(3), WindowId(1), WindowId(2)])
+        XCTAssertFalse(palette.isTmuxWindowMutationPending)
+        XCTAssertTrue(palette.canReorderTmuxWindows)
+        XCTAssertTrue(palette.canTidyTmuxWindows)
+        XCTAssertEqual(palette.tmuxWindowOrderError, "remote order won")
+    }
+
+    func test_refreshRepeatingTheSameTmuxStateKeepsADragPreview() {
+        let palette = CommandPalette()
+        let session = makeLive(name: "host")
+        let windows = [1, 2, 3].map { id in
+            CommandPaletteTmuxWindow(id: WindowId(id), title: "w\(id)", position: id - 1, tmuxIndex: id, panes: [])
+        }
+        func refresh(_ windows: [CommandPaletteTmuxWindow]) {
+            palette.refreshSnapshot(
+                sessions: [session], paneTitles: [:], lastTouched: [:],
+                tmuxWindows: windows, currentSessionID: session.id,
+                allowsTmuxMutation: true, canReorderTmuxWindows: true, canTidyTmuxWindows: true,
+                isTmuxWindowMutationPending: false, tmuxWindowOrderError: nil
+            )
+        }
+        palette.open(sessions: [session], tmuxWindows: windows, currentSessionID: session.id,
+                     canReorderTmuxWindows: true, canTidyTmuxWindows: true)
+        palette.previewMoveWindow(WindowId(1), to: 2)
+        let generation = palette.tmuxSnapshotGeneration
+
+        // An agent row changing refreshes the palette with the same windows.
+        refresh(windows)
+        XCTAssertEqual(palette.tmuxWindows.map(\.id), [WindowId(2), WindowId(3), WindowId(1)])
+        XCTAssertEqual(palette.tmuxSnapshotGeneration, generation)
+
+        var renamed = windows
+        renamed[1] = CommandPaletteTmuxWindow(id: WindowId(2), title: "build", position: 1, tmuxIndex: 2, panes: [])
+        refresh(renamed)
+        XCTAssertEqual(palette.tmuxWindows.map(\.id), [WindowId(1), WindowId(2), WindowId(3)])
+        XCTAssertEqual(palette.tmuxSnapshotGeneration, generation &+ 1)
+    }
+
     // MARK: helpers
 
     private func makeLive(name: String, hostKeyOverride: String? = nil) -> LiveSession {
@@ -373,43 +482,6 @@ final class CommandPaletteTests: XCTestCase {
         )
     }
 
-    private func makeAgent(
-        name: String,
-        status: AgentStatus,
-        hostName: String = "host"
-    ) -> AgentInstance {
-        let sessionID = UUID()
-        let now = Date(timeIntervalSinceReferenceDate: 100)
-        return AgentInstance(
-            id: AgentInstanceID(sessionID: sessionID, paneID: 8),
-            profileID: UUID(),
-            name: name,
-            providerSessionID: nil,
-            location: AgentLocation(
-                sessionID: sessionID,
-                hostName: hostName,
-                transportLabel: "ssh+tmux",
-                tmuxSessionName: "work",
-                windowID: 4,
-                windowName: "editor",
-                paneID: 8
-            ),
-            status: status,
-            taskSummary: nil,
-            outputTail: nil,
-            prompt: nil,
-            detectedAt: now,
-            statusChangedAt: now,
-            finishedAt: status == .justFinished ? now : nil,
-            lastLifecycleEventAt: now,
-            lastOutputAt: now,
-            outputSequence: 0,
-            bracketedPasteEnabled: false,
-            sendInFlight: false,
-            actionMessage: nil,
-            actionIsError: false
-        )
-    }
 }
 
 @MainActor

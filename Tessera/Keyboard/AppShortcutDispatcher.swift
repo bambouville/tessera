@@ -126,6 +126,7 @@ extension BindingKey {
         switch chip {
         case .esc:   return .escape
         case .tab:   return .tab
+        case .enter: return .return
         case .left:  return .left
         case .down:  return .down
         case .up:    return .up
@@ -157,7 +158,7 @@ extension BindingKey {
         case .rbracket:  return .character("]")
         case .lt:        return .character("<")
         case .gt:        return .character(">")
-        case .ctrl, .alt, .shift, .cmd, .ctrlC, .ctrlJ:
+        case .ctrl, .alt, .shift, .cmd, .ctrlC, .ctrlJ, .ctrlL:
             return nil
         }
     }

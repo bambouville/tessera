@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!--
+          Visual harness for connection-only surfaces. Exported so `adb shell am start`
+          can select a scene during a verification pass; this manifest is merged into
+          debug builds only, so the activity never exists in a release APK.
+        -->
+        <activity
+            android:name=".TesseraHarnessActivity"
+            android:exported="true"
+            android:label="Tessera harness"
+            android:windowSoftInputMode="adjustNothing" />
+    </application>
+</manifest>

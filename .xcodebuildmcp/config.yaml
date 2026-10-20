@@ -1,0 +1,16 @@
+schemaVersion: 1
+enabledWorkflows:
+  - simulator
+  - debugging
+  - device
+  - ui-automation
+  - utilities
+  - xcode-ide
+debug: true
+sentryDisabled: true
+setupPreferences:
+  platforms:
+    - iOS
+sessionDefaults:
+  projectPath: Tessera.xcodeproj
+  scheme: Tessera

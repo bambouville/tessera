@@ -1,0 +1,28 @@
+scenario d1-owner-stamp-session-scope
+# New mosh clients observe the owner's session option through a filtered
+# session loop; the compatibility mirror serves old view-attached clients.
+session O 80x24 w0
+group O-tessera-view O
+control ssh O
+control mosh O-tessera-view no-output
+send ssh refresh-client -B 'tessera-authority:%*:#{@tessera_authority}'
+send mosh refresh-client -B 'tessera-authority:%*:#{S:#{?#{==:#{session_id},$0},#{@tessera_authority},}}'
+# Keep the nominal 0.3 s command reads before either subscription timer.
+advance 1.7
+send ssh set-option @tessera_authority 'v1 A 4097 iPad'
+advance 1
+expect ssh %subscription-changed tessera-authority {O} {w0} 0 * : v1 A 4097 iPad
+expect mosh %subscription-changed tessera-authority {O-tessera-view} {w0} 0 * : v1 A 4097 iPad
+send mosh show-options -qv -t '$0' @tessera_authority
+expect mosh v1 A 4097 iPad
+send mosh set-option -t '$0' @tessera_authority 'v1 B 8193 iPhone'
+advance 1
+expect ssh %subscription-changed tessera-authority {O} {w0} 0 * : v1 B 8193 iPhone
+expect mosh %subscription-changed tessera-authority {O-tessera-view} {w0} 0 * : v1 B 8193 iPhone
+send mosh set-option @tessera_authority 'v1 B 8193 iPhone'
+send ssh set-option -u @tessera_authority
+advance 1
+expect ssh %subscription-changed tessera-authority {O} {w0} 0 * : *
+expect mosh %subscription-changed tessera-authority {O-tessera-view} {w0} 0 * : *
+expect-not ssh %subscription-changed tessera-authority * : v1*
+expect-not mosh %subscription-changed tessera-authority * : v1*

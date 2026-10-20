@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "version": "0.1.0",
+  "protocol": 3,
+  "simdjson": "4.6.4",
+  "sqlite": "3.53.4",
+  "sourceSHA256": "41665a520740272537ce0c30023728e781cd90207ddfb938897f5dd0ab2e094a",
+  "artifacts": [
+    {
+      "target": "darwin-arm64",
+      "file": "tessera-agent-host-darwin-arm64",
+      "bytes": 2478000,
+      "sha256": "0c554366ebbd31844fc107be94829e70b38f80e765befe0aa32eb4e0206eea3f",
+      "minimumOS": "macOS 12",
+      "libc": "system",
+      "cpu": "arm64"
+    },
+    {
+      "target": "darwin-x86_64",
+      "file": "tessera-agent-host-darwin-x86_64",
+      "bytes": 2798496,
+      "sha256": "42c3fb52fea8079ca2437c89e014cb551a8279ea733532ef733d7d6f37e78e0e",
+      "minimumOS": "macOS 12",
+      "libc": "system",
+      "cpu": "x86_64"
+    },
+    {
+      "target": "linux-aarch64",
+      "file": "tessera-agent-host-linux-aarch64",
+      "bytes": 3035632,
+      "sha256": "750bd3cde1a00cfe465f7cb5c2517cb0f02af3dec7a2d057bf408ea36195122e",
+      "minimumOS": "Linux 4.19",
+      "libc": "static musl (glibc and musl hosts)",
+      "cpu": "aarch64 baseline"
+    },
+    {
+      "target": "linux-x86_64",
+      "file": "tessera-agent-host-linux-x86_64",
+      "bytes": 3341688,
+      "sha256": "01b96f9b6f2b433b85b07eae2470aa734af8422409e47842c9be7bd5f5c71753",
+      "minimumOS": "Linux 4.19",
+      "libc": "static musl (glibc and musl hosts)",
+      "cpu": "x86_64 baseline"
+    }
+  ]
+}

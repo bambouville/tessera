@@ -23,6 +23,22 @@ final class OnboardingController {
         self.appearance = appearance
     }
 
+    enum BootstrapPresentationAction: Equatable {
+        case none, hideOnboarding, completeWelcome, resumeOnboarding
+    }
+
+    /// Shared decision for the bootstrap sheet's presentation-change handler.
+    /// Cancel resumes the ordinary welcome flow without marking it complete.
+    static func bootstrapPresentationAction(
+        wasPresented: Bool,
+        isPresented: Bool,
+        hasCompletedFirstOpen: Bool
+    ) -> BootstrapPresentationAction {
+        if isPresented { return .hideOnboarding }
+        guard wasPresented else { return .none }
+        return hasCompletedFirstOpen ? .completeWelcome : .resumeOnboarding
+    }
+
     /// Auto-runs the welcome card exactly once, and only on a genuine first
     /// launch: the user hasn't seen it (`hasSeen == false`) and there are no
     /// hosts yet (`hasHosts == false`). Idempotent — guarded on `.inactive`, so

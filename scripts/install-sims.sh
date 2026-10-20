@@ -101,7 +101,18 @@ xcrun simctl boot "$iphone_udid" >/dev/null 2>&1 || true
 xcrun simctl bootstatus "$iphone_udid" -b
 
 build_root="$(mktemp -d "${TMPDIR:-/tmp}/tessera-install-sims.XXXXXX")"
-trap 'rm -rf "$build_root"' EXIT
+cleanup() {
+  local status=$?
+  # bash 3.2 enters this trap with $? = 0 after a `set -u` abort under
+  # `set -e`; only a run that reached script_completed=1 may exit 0.
+  if [[ "$status" -eq 0 && "${script_completed:-0}" != 1 ]]; then
+    echo "${0##*/}: aborted before completion (bash set -u abort?)" >&2
+    status=1
+  fi
+  rm -rf "$build_root"
+  exit "$status"
+}
+trap cleanup EXIT
 
 echo "==> building $SCHEME ($CONFIG) for iPhone and iPad simulators..."
 xcodebuild \
@@ -139,3 +150,4 @@ if [[ -z "${NO_OPEN_SIMULATOR:-}" ]]; then
 fi
 
 echo "==> done."
+script_completed=1

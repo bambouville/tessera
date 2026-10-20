@@ -1,33 +1,37 @@
 import Foundation
+import Observation
+import TesseraAppleContinuity
 
-/// Owns the one `NSUserActivity` representing the focused connected session.
-/// The broadcaster has no session authority of its own: callers replace or
-/// clear the descriptor as focus/lifecycle changes, and lock always forces an
-/// invalidation before another activity can become current.
+/// Apple-app adapter for the shared Handoff publisher. Session focus and
+/// lifecycle remain app-owned; exact activity bytes, replacement, identity,
+/// and invalidation semantics live in `TesseraAppleContinuity` so the macOS
+/// bridge can use the same implementation.
 @MainActor
 @Observable
-final class ActivityBroadcaster: NSObject, NSUserActivityDelegate {
-    static let activityType = "com.bambouville.tessera.session"
-    static let descriptorKey = "descriptor"
+final class ActivityBroadcaster {
+    static let activityType = AppleContinuationActivityContract.activityType
+    static let descriptorKey = AppleContinuationActivityContract.descriptorKey
 
-    typealias ContinuationStreamHandler = @MainActor (
-        _ input: InputStream,
-        _ output: OutputStream
-    ) -> Void
+    typealias ContinuationStreamHandler = AppleContinuationStreamHandler
 
     private(set) var isBroadcasting = false
     private(set) var lastFailure: String?
     private(set) var publicationGeneration = 0
 
-    var onContinuationStreams: ContinuationStreamHandler?
+    var onContinuationStreams: ContinuationStreamHandler? {
+        didSet { reconcile() }
+    }
 
-    private var activity: NSUserActivity?
+    private let publisher = AppleContinuationActivityPublisher()
     private var descriptor: SessionActivityDescriptor?
-    private var publishedDescriptorData: Data?
-    private var publishedSupportsStreams = false
     private var enabled = true
     private var applicationActive = true
     private var locked = false
+
+    /// The already validated focused-session descriptor. Pairing-v1 reads this
+    /// only after the user explicitly chooses to continue that focused session
+    /// on another device; it is never a credential or a connection trigger.
+    var currentDescriptor: SessionActivityDescriptor? { descriptor }
 
     func setEnabled(_ enabled: Bool) {
         self.enabled = enabled
@@ -49,12 +53,12 @@ final class ActivityBroadcaster: NSObject, NSUserActivityDelegate {
         reconcile()
     }
 
+    /// Matches the released app behavior: invalidate only the current
+    /// `NSUserActivity`, retaining the focused descriptor for a later
+    /// lifecycle reconciliation.
     func invalidate() {
-        activity?.invalidate()
-        activity = nil
-        publishedDescriptorData = nil
-        publishedSupportsStreams = false
-        isBroadcasting = false
+        publisher.invalidateCurrentActivity()
+        synchronizePublishedState()
     }
 
     func clearLastFailure() {
@@ -63,55 +67,64 @@ final class ActivityBroadcaster: NSObject, NSUserActivityDelegate {
 
     func reportFailure(_ message: String) {
         descriptor = nil
-        invalidate()
+        publisher.clearPublication()
+        synchronizePublishedState()
         lastFailure = message
     }
 
     private func reconcile() {
-        guard enabled, applicationActive, !locked, let descriptor else {
-            invalidate()
+        // Clear the retained request before touching any publisher property
+        // whose setter reconciles. Otherwise publish(nil) after an explicit
+        // invalidation could briefly resurrect the old activity.
+        guard let descriptor else {
+            publisher.clearPublication()
+            publisher.configure(
+                enabled: enabled,
+                applicationActive: applicationActive,
+                locked: locked,
+                onContinuationStreams: onContinuationStreams
+            )
+            synchronizePublishedState()
             return
         }
 
+        publisher.configure(
+            enabled: enabled,
+            applicationActive: applicationActive,
+            locked: locked,
+            onContinuationStreams: onContinuationStreams
+        )
+
         do {
             let data = try descriptor.handoffData()
-            let supportsStreams = onContinuationStreams != nil
-            if activity != nil,
-               isBroadcasting,
-               publishedDescriptorData == data,
-               publishedSupportsStreams == supportsStreams {
-                lastFailure = nil
-                return
-            }
-            let replacement = NSUserActivity(activityType: Self.activityType)
-            replacement.title = Self.title(for: descriptor)
-            replacement.userInfo = [Self.descriptorKey: data]
-            replacement.requiredUserInfoKeys = [Self.descriptorKey]
-            replacement.targetContentIdentifier = descriptor.hostID.uuidString
-            replacement.isEligibleForHandoff = true
-            replacement.isEligibleForSearch = false
-            replacement.isEligibleForPublicIndexing = false
-            replacement.supportsContinuationStreams = supportsStreams
-            replacement.delegate = self
-
-            activity?.invalidate()
-            activity = replacement
-            publishedDescriptorData = data
-            publishedSupportsStreams = supportsStreams
-            publicationGeneration += 1
-            lastFailure = nil
-            replacement.becomeCurrent()
-            isBroadcasting = true
-            DiagnosticLogStore.appendApp(
-                "continuity broadcast result=current action=\(descriptor.continuationAction.rawValue) bytes=\(data.count)"
+            let previousGeneration = publisher.publicationGeneration
+            try publisher.publish(
+                AppleContinuationPublication(
+                    descriptorData: data,
+                    title: Self.title(for: descriptor),
+                    targetContentIdentifier: descriptor.hostID.uuidString
+                )
             )
+            synchronizePublishedState()
+            lastFailure = nil
+            if publisher.publicationGeneration != previousGeneration {
+                DiagnosticLogStore.appendApp(
+                    "continuity broadcast result=current action=\(descriptor.continuationAction.rawValue) bytes=\(data.count)"
+                )
+            }
         } catch {
-            invalidate()
+            publisher.clearPublication()
+            synchronizePublishedState()
             lastFailure = error.localizedDescription
             DiagnosticLogStore.appendApp(
                 "continuity broadcast result=rejected error='\(error.localizedDescription)'"
             )
         }
+    }
+
+    private func synchronizePublishedState() {
+        isBroadcasting = publisher.isPublishing
+        publicationGeneration = publisher.publicationGeneration
     }
 
     static func title(for descriptor: SessionActivityDescriptor) -> String {
@@ -120,33 +133,6 @@ final class ActivityBroadcaster: NSObject, NSUserActivityDelegate {
         return switch descriptor.continuationAction {
         case .continueSession: String(localized: "\(descriptor.name) — continue session")
         case .reconnect: String(localized: "\(descriptor.name) — reconnect")
-        }
-    }
-
-    nonisolated func userActivity(
-        _ userActivity: NSUserActivity,
-        didReceive inputStream: InputStream,
-        outputStream: OutputStream
-    ) {
-        Task { @MainActor [weak self] in
-            guard let self,
-                  self.enabled,
-                  self.applicationActive,
-                  !self.locked,
-                  self.isBroadcasting,
-                  self.activity === userActivity,
-                  let handler = self.onContinuationStreams
-            else {
-                inputStream.close()
-                outputStream.close()
-                return
-            }
-            // Foundation delivers unopened streams and requires the app to
-            // open them immediately. The enrollment transport takes ownership
-            // from this point and closes both on every terminal state.
-            inputStream.open()
-            outputStream.open()
-            handler(inputStream, outputStream)
         }
     }
 }

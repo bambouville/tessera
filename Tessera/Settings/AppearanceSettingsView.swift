@@ -63,6 +63,19 @@ struct AppearanceSettingsView: View {
                 }
             }
 
+            Field(
+                label: "terminal font",
+                sub: "applies to the terminal grid only — app chrome keeps its own face"
+            ) {
+                VStack(spacing: 6) {
+                    ForEach(TerminalFontCatalog.all) { option in
+                        fontRow(option, selected: appearance.terminalFontID == option.id) {
+                            appearance.terminalFontID = option.id
+                        }
+                    }
+                }
+            }
+
             Field(label: "terminal font size · \(Int(appearance.fontSize)) pt") {
                 VStack(alignment: .leading, spacing: 12) {
                     fontSizePreview
@@ -129,6 +142,58 @@ struct AppearanceSettingsView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// One selectable typeface. Both lines render in the face they name — a
+    /// terminal font is chosen on how `0O1lI` and bracket pairs separate, so
+    /// the sample carries more than the family name does.
+    private func fontRow(
+        _ option: TerminalFontOption,
+        selected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            // Name and note share the first line and the sample gets the whole
+            // second one, so the row reads the same on a phone as on an iPad
+            // without a width branch — the sample is the part that has to stay
+            // uncropped, and it is the widest thing here.
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(verbatim: option.name)
+                        .font(TerminalFontResolver.font(id: option.id, size: 13))
+                        .foregroundStyle(selected ? T.accent : T.fg)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+
+                    Spacer(minLength: 0)
+
+                    Text(option.note)
+                        .font(Typography.tesseraMono(size: 10))
+                        .foregroundStyle(T.fgDim)
+                        .multilineTextAlignment(.trailing)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.8)
+                }
+
+                Text(verbatim: "0O1lI  {}[]()  ->  ~$#")
+                    .font(TerminalFontResolver.font(id: option.id, size: 11))
+                    .foregroundStyle(T.fgMuted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(minHeight: 44)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(T.inputBg)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(selected ? T.accent : T.border, lineWidth: selected ? 1.5 : 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private func materialCard(
@@ -215,13 +280,16 @@ struct AppearanceSettingsView: View {
     }
 
     /// Live mockup of the terminal font at the user's chosen size. Updates
-    /// continuously as the slider moves. Sized to match the current
-    /// `appearance.fontSize` — same JetBrainsMono used in the live terminal,
-    /// so the preview is faithful.
+    /// continuously as the slider moves, and resolves through the same
+    /// `TerminalFontResolver` the live grid uses, so family and size are both
+    /// faithful rather than the preview quietly staying on the default face.
     private var fontSizePreview: some View {
         let preview = previewColors(for: appearance.mode)
         return Text(verbatim: "$ ls projects/\ntessera/  notes.md")
-            .font(Typography.tesseraMono(size: appearance.fontSize))
+            .font(TerminalFontResolver.font(
+                id: appearance.terminalFontID,
+                size: appearance.fontSize
+            ))
             .foregroundStyle(preview.fg)
             .lineSpacing(2)
             .frame(maxWidth: .infinity, alignment: .leading)

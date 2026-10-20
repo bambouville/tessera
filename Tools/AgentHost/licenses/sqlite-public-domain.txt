@@ -1,0 +1,16 @@
+SQLite 3.53.4
+https://sqlite.org/copyright.html
+
+SQLite is in the public domain. The amalgamation source carries this notice:
+
+The author disclaims copyright to this source code. In place of
+a legal notice, here is a blessing:
+
+    May you do good and not evil.
+    May you find forgiveness for yourself and forgive others.
+    May you share freely, never taking more than you give.
+
+Build input: https://sqlite.org/2026/sqlite-amalgamation-3530400.zip
+Archive SHA3-256: 628a44cfe82c66aed1ccbbe85a562d2e33ebe64b3288981ed76285612227934e
+sqlite3.c SHA-256: b1dd5d74ec7f29055a6684fa06fb3c2f6821c87dd38f9a458dfd2e8a1db28189
+sqlite3.h SHA-256: 919e7f2e8ed1d8f56ac17b412b8971c76aa5d1a879752cc6058f75e7d5910e1d

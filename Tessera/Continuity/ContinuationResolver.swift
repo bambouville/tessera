@@ -1,4 +1,7 @@
 import Foundation
+import TesseraContinuityCore
+import TesseraDomainCore
+import TesseraProtocolCore
 
 /// A local saved-host candidate, its persisted connection key, and its typed
 /// route identity. The string key is retained as persistence metadata; route
@@ -37,6 +40,22 @@ struct ContinuationHostCandidate: Equatable, Sendable {
             resolverRoute = nil
         }
     }
+
+    var sharedCandidate: TesseraContinuityCore.ContinuationHostCandidate? {
+        guard let profile = try? host.sharedProfile() else { return nil }
+        return TesseraContinuityCore.ContinuationHostCandidate(
+            profile: profile,
+            connectionKey: connectionKey,
+            resolverRoute: resolverRoute?.map {
+                ContinuationRouteCoordinate(
+                    user: $0.user,
+                    address: $0.address,
+                    port: $0.port,
+                    transport: ContinuationWireTransport($0.transport)
+                )
+            }
+        )
+    }
 }
 
 enum ContinuationResolution: Equatable, Sendable {
@@ -71,16 +90,26 @@ enum ContinuationResolver {
         _ descriptor: SessionActivityDescriptor,
         among candidates: [ContinuationHostCandidate]
     ) -> ContinuationResolution {
-        if let match = candidates.first(where: { $0.host.id == descriptor.hostID }) {
-            return .fastPath(match.host)
+        let mapped = candidates.compactMap { candidate in
+            candidate.sharedCandidate.map { (app: candidate, core: $0) }
         }
-        if let match = candidates.first(where: {
-            guard let candidateRoute = $0.resolverRoute else { return false }
-            return candidateRoute == descriptor.resolverRoute
-        }) {
-            return .endpointMatch(match.host)
+        switch TesseraContinuityCore.ContinuationResolver.resolve(
+            descriptor.core,
+            among: mapped.map(\.core)
+        ) {
+        case .fastPath(let profile):
+            guard let host = mapped.first(where: { $0.app.host.id == profile.id })?.app.host else {
+                return .prefill(descriptor)
+            }
+            return .fastPath(host)
+        case .endpointMatch(let profile):
+            guard let host = mapped.first(where: { $0.app.host.id == profile.id })?.app.host else {
+                return .prefill(descriptor)
+            }
+            return .endpointMatch(host)
+        case .prefill:
+            return .prefill(descriptor)
         }
-        return .prefill(descriptor)
     }
 
     static func resolve(
@@ -110,22 +139,18 @@ enum ContinuationTrustHintMapper {
         from descriptor: SessionActivityDescriptor,
         for localHost: Host
     ) -> [UUID: String] {
-        let advertisedRoute = descriptor.via + [descriptor.endpoint]
-        let localRoute = localHost.jumpChain + [localHost]
-        guard advertisedRoute.count == localRoute.count else { return [:] }
-
-        var result: [UUID: String] = [:]
-        for (advertised, local) in zip(advertisedRoute, localRoute) {
-            guard advertised.user == local.user,
-                  advertised.address == local.address,
-                  advertised.port == local.port,
-                  advertised.transport == local.transport
-            else { return [:] }
-            if let fingerprint = advertised.hostKeyFingerprint {
-                result[local.id] = fingerprint
+        TesseraContinuityCore.ContinuationTrustHintPolicy.hints(
+            from: descriptor.core,
+            for: (localHost.jumpChain + [localHost]).map { host in
+                ContinuationLocalRouteEndpoint(
+                    hostID: host.id,
+                    user: host.user,
+                    address: host.address,
+                    port: host.port,
+                    transport: ContinuationWireTransport(host.transport)
+                )
             }
-        }
-        return result
+        )
     }
 }
 
@@ -137,12 +162,10 @@ enum ContinuationTmuxReusePolicy {
         requestedSessionName: String?,
         activeSessionName: String?
     ) -> Bool {
-        let requested = requestedSessionName?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !requested.isEmpty else { return true }
-        let active = activeSessionName?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return active == requested
+        TesseraContinuityCore.ContinuationTmuxReusePolicy.mayReuseAutoTmuxSession(
+            requestedSessionName: requestedSessionName,
+            activeSessionName: activeSessionName
+        )
     }
 }
 
@@ -167,26 +190,22 @@ enum ContinuationRouteReusePolicy {
         destinationIdentifierExists: Bool,
         savedVia: [UUID: ContinuationSavedRouteEndpoint]
     ) -> ContinuationRouteReuseConflict? {
-        if destinationIdentifierExists {
-            return .destinationIdentifierAlreadyExists
+        let sharedSaved = savedVia.mapValues {
+            TesseraContinuityCore.ContinuationSavedRouteEndpoint(
+                endpoint: $0.endpoint.core,
+                jumpHostID: $0.jumpHostID
+            )
         }
-
-        for (index, advertised) in descriptor.via.enumerated() {
-            guard let saved = savedVia[advertised.hostID] else { continue }
-            guard saved.endpoint.user == advertised.user,
-                  saved.endpoint.address == advertised.address,
-                  saved.endpoint.port == advertised.port,
-                  saved.endpoint.transport == advertised.transport
-            else { return .endpointDiffers(advertised.hostID) }
-
-            let expectedJumpID: UUID? = index == 0
-                ? nil
-                : descriptor.via[index - 1].hostID
-            if saved.jumpHostID != expectedJumpID {
-                return .routeDiffers(advertised.hostID)
-            }
+        switch TesseraContinuityCore.ContinuationRouteReusePolicy.conflict(
+            for: descriptor.core,
+            destinationIdentifierExists: destinationIdentifierExists,
+            savedVia: sharedSaved
+        ) {
+        case .destinationIdentifierAlreadyExists?: return .destinationIdentifierAlreadyExists
+        case .endpointDiffers(let id)?: return .endpointDiffers(id)
+        case .routeDiffers(let id)?: return .routeDiffers(id)
+        case nil: return nil
         }
-        return nil
     }
 }
 
@@ -199,8 +218,9 @@ enum ContinuationInsertionPlanner {
         for descriptor: SessionActivityDescriptor,
         hasSavedHost: (UUID) -> Bool
     ) -> Set<UUID> {
-        Set([descriptor.hostID] + descriptor.via.compactMap {
-            hasSavedHost($0.hostID) ? nil : $0.hostID
-        })
+        TesseraContinuityCore.ContinuationInsertionPlanner.plannedInsertedHostIDs(
+            for: descriptor.core,
+            hasSavedHost: hasSavedHost
+        )
     }
 }

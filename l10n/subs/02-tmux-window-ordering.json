@@ -1,0 +1,140 @@
+{
+  "tmux window %lld of %lld, %@, %lld panes%@": {
+    "en": {
+      "value": "tmux window %1$lld of %2$lld, %3$@, %#@panes@%5$@",
+      "subs": {
+        "panes": {
+          "argNum": 4,
+          "one": "%lld pane",
+          "other": "%lld panes"
+        }
+      }
+    },
+    "de": {
+      "value": "tmux-Fenster %1$lld von %2$lld, %3$@, %#@panes@%5$@",
+      "subs": {
+        "panes": {
+          "argNum": 4,
+          "one": "%lld Bereich",
+          "other": "%lld Bereiche"
+        }
+      }
+    },
+    "es": {
+      "value": "ventana de tmux %1$lld de %2$lld, %3$@, %#@panes@%5$@",
+      "subs": {
+        "panes": {
+          "argNum": 4,
+          "one": "%lld panel",
+          "other": "%lld paneles"
+        }
+      }
+    },
+    "fr": {
+      "value": "fenêtre tmux %1$lld sur %2$lld, %3$@, %#@panes@%5$@",
+      "subs": {
+        "panes": {
+          "argNum": 4,
+          "one": "%lld volet",
+          "other": "%lld volets"
+        }
+      }
+    },
+    "ja": {
+      "value": "tmux ウインドウ %2$lld 個中 %1$lld 番目、%3$@、%#@panes@%5$@",
+      "subs": {
+        "panes": {
+          "argNum": 4,
+          "other": "%lld 個のペイン"
+        }
+      }
+    },
+    "zh-Hans": {
+      "value": "tmux 窗口，第 %1$lld 个，共 %2$lld 个，%3$@，%#@panes@%5$@",
+      "subs": {
+        "panes": {
+          "argNum": 4,
+          "other": "%lld 个窗格"
+        }
+      }
+    },
+    "zh-Hant": {
+      "value": "tmux 視窗，第 %1$lld 個，共 %2$lld 個，%3$@，%#@panes@%5$@",
+      "subs": {
+        "panes": {
+          "argNum": 4,
+          "other": "%lld 個窗格"
+        }
+      }
+    }
+  },
+  "tmux window %lld of %lld, %@, %lld panes%@, current": {
+    "en": {
+      "value": "tmux window %1$lld of %2$lld, %3$@, %#@panes@%5$@, current",
+      "subs": {
+        "panes": {
+          "argNum": 4,
+          "one": "%lld pane",
+          "other": "%lld panes"
+        }
+      }
+    },
+    "de": {
+      "value": "tmux-Fenster %1$lld von %2$lld, %3$@, %#@panes@%5$@, aktuell",
+      "subs": {
+        "panes": {
+          "argNum": 4,
+          "one": "%lld Bereich",
+          "other": "%lld Bereiche"
+        }
+      }
+    },
+    "es": {
+      "value": "ventana de tmux %1$lld de %2$lld, %3$@, %#@panes@%5$@, actual",
+      "subs": {
+        "panes": {
+          "argNum": 4,
+          "one": "%lld panel",
+          "other": "%lld paneles"
+        }
+      }
+    },
+    "fr": {
+      "value": "fenêtre tmux %1$lld sur %2$lld, %3$@, %#@panes@%5$@, actuelle",
+      "subs": {
+        "panes": {
+          "argNum": 4,
+          "one": "%lld volet",
+          "other": "%lld volets"
+        }
+      }
+    },
+    "ja": {
+      "value": "tmux ウインドウ %2$lld 個中 %1$lld 番目、%3$@、%#@panes@%5$@、現在",
+      "subs": {
+        "panes": {
+          "argNum": 4,
+          "other": "%lld 個のペイン"
+        }
+      }
+    },
+    "zh-Hans": {
+      "value": "tmux 窗口，第 %1$lld 个，共 %2$lld 个，%3$@，%#@panes@%5$@，当前",
+      "subs": {
+        "panes": {
+          "argNum": 4,
+          "other": "%lld 个窗格"
+        }
+      }
+    },
+    "zh-Hant": {
+      "value": "tmux 視窗，第 %1$lld 個，共 %2$lld 個，%3$@，%#@panes@%5$@，目前",
+      "subs": {
+        "panes": {
+          "argNum": 4,
+          "other": "%lld 個窗格"
+        }
+      }
+    }
+  }
+}

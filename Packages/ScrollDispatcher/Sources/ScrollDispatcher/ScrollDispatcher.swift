@@ -1,11 +1,14 @@
 import Foundation
+import TesseraInputCore
 
 // MARK: - Public surface
 
 /// Pure-Swift state machine that decides what a trackpad scroll event should
 /// do, given the terminal's current state.
 ///
-/// Three behaviors per pillar §3.1:
+/// Three behaviors per pillar §3.1 — the rule itself is
+/// `TerminalScrollRouting` in the shared core, so Android's Termux view
+/// answers the same question the same way:
 ///
 ///   1. Primary screen               → scroll the local scrollback buffer.
 ///   2. Alt-screen + mouse reporting → forward as mouse wheel events.
@@ -26,7 +29,7 @@ public struct ScrollDispatcher: Sendable {
     /// Residual scroll delta not yet converted into discrete output
     /// (arrow keys in arrow-translation mode, mouse wheel ticks in
     /// mouse-forwarding mode). Cleared on `.cancelled` (true abort)
-    /// and on mode transitions, but preserved across `.ended` —
+    /// and on mode transitions. Fractional ticks survive `.ended` —
     /// discrete mouse-wheel ticks on iPadOS arrive as `.began`→`.ended`
     /// pairs with no intermediate `.changed` events, so state must
     /// survive gesture boundaries or a 3pt-per-click wheel can never
@@ -75,6 +78,19 @@ public struct ScrollDispatcher: Sendable {
         }
         lastPhase = currentPhase
 
+        // A capped fling can leave whole ticks queued. They belong to the
+        // old motion, not the next gesture or its reversed direction. Keep
+        // only a sub-tick fraction, so small discrete wheel clicks still
+        // accumulate across began/ended pairs without replaying stale motion.
+        let threshold: Double = switch currentPhase {
+        case .primary: 0
+        case .altScreenMouseForward: config.mouseWheelThresholdPoints
+        case .altScreenArrowKeyTranslate: config.pointsPerArrowKey
+        }
+        if threshold > 0 && (event.phase == .ended || event.deltaY * scrollAccumulator < 0) {
+            scrollAccumulator.formTruncatingRemainder(dividingBy: threshold)
+        }
+
         switch currentPhase {
         case .primary:
             // Primary screen: bypass the accumulator. The scrollback view
@@ -118,11 +134,15 @@ public struct ScrollDispatcher: Sendable {
         for event: ScrollEvent,
         in terminal: TerminalState
     ) -> Phase {
-        guard terminal.isAltScreen else { return .primary }
-        if terminal.mouseReporting.forwardsWheelEvents {
-            return .altScreenMouseForward
+        switch TerminalScrollRouting.route(
+            bufferIsAlternate: terminal.isAltScreen,
+            mouseReporting: terminal.mouseReporting.forwardsWheelEvents,
+            mouseReportingImpliesAltScreen: terminal.mouseReportingImpliesAltScreen
+        ) {
+        case .localScrollback: return .primary
+        case .mouseWheel: return .altScreenMouseForward
+        case .arrowKeys: return .altScreenArrowKeyTranslate
         }
-        return .altScreenArrowKeyTranslate
     }
 
     // MARK: - Encoders
@@ -228,13 +248,19 @@ extension ScrollDispatcher {
     public struct TerminalState: Sendable, Equatable {
         public var isAltScreen: Bool
         public var mouseReporting: MouseReporting
+        /// Session-supplied: mouse reporting stands in for the alternate
+        /// screen only while there is no local scrollback to offer (plain
+        /// mosh, mosh+tmux before its pane grid). See `TerminalScrollRouting`.
+        public var mouseReportingImpliesAltScreen: Bool
 
         public init(
             isAltScreen: Bool = false,
-            mouseReporting: MouseReporting = .off
+            mouseReporting: MouseReporting = .off,
+            mouseReportingImpliesAltScreen: Bool = false
         ) {
             self.isAltScreen = isAltScreen
             self.mouseReporting = mouseReporting
+            self.mouseReportingImpliesAltScreen = mouseReportingImpliesAltScreen
         }
     }
 

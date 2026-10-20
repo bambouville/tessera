@@ -1,0 +1,584 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 7,
+    "identityHash": "8c4b7f0bef393ea7ffed598fd7ecad72",
+    "entities": [
+      {
+        "tableName": "hosts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `displayName` TEXT NOT NULL, `hostname` TEXT NOT NULL, `port` INTEGER NOT NULL, `username` TEXT NOT NULL, `jumpHostId` TEXT, `identityId` TEXT, `transportKind` TEXT NOT NULL, `tmuxMode` TEXT NOT NULL, `tmuxTarget` TEXT, `createdAtEpochMilliseconds` INTEGER NOT NULL, `updatedAtEpochMilliseconds` INTEGER NOT NULL, `launchCommand` TEXT, `notes` TEXT, `envVars` TEXT, `startupSnippet` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`jumpHostId`) REFERENCES `hosts`(`id`) ON UPDATE CASCADE ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "displayName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hostname",
+            "columnName": "hostname",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "port",
+            "columnName": "port",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "username",
+            "columnName": "username",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "jumpHostId",
+            "columnName": "jumpHostId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "identityId",
+            "columnName": "identityId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "transportKind",
+            "columnName": "transportKind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tmuxMode",
+            "columnName": "tmuxMode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tmuxTarget",
+            "columnName": "tmuxTarget",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAtEpochMilliseconds",
+            "columnName": "createdAtEpochMilliseconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMilliseconds",
+            "columnName": "updatedAtEpochMilliseconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "launchCommand",
+            "columnName": "launchCommand",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "envVars",
+            "columnName": "envVars",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "startupSnippet",
+            "columnName": "startupSnippet",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_hosts_jumpHostId",
+            "unique": false,
+            "columnNames": [
+              "jumpHostId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_hosts_jumpHostId` ON `${TABLE_NAME}` (`jumpHostId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "hosts",
+            "onDelete": "RESTRICT",
+            "onUpdate": "CASCADE",
+            "columns": [
+              "jumpHostId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "identities",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `displayName` TEXT NOT NULL, `credentialKind` TEXT NOT NULL, `credentialReference` TEXT NOT NULL, `createdAtEpochMilliseconds` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "displayName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "credentialKind",
+            "columnName": "credentialKind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "credentialReference",
+            "columnName": "credentialReference",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMilliseconds",
+            "columnName": "createdAtEpochMilliseconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "known_hosts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`normalizedEndpoint` TEXT NOT NULL, `algorithm` TEXT NOT NULL, `canonicalKeyBlob` BLOB NOT NULL, `previousAlgorithm` TEXT, `previousCanonicalKeyBlob` BLOB, `firstSeenAtEpochMilliseconds` INTEGER NOT NULL, `lastVerifiedAtEpochMilliseconds` INTEGER NOT NULL, PRIMARY KEY(`normalizedEndpoint`))",
+        "fields": [
+          {
+            "fieldPath": "normalizedEndpoint",
+            "columnName": "normalizedEndpoint",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "algorithm",
+            "columnName": "algorithm",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "canonicalKeyBlob",
+            "columnName": "canonicalKeyBlob",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "previousAlgorithm",
+            "columnName": "previousAlgorithm",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "previousCanonicalKeyBlob",
+            "columnName": "previousCanonicalKeyBlob",
+            "affinity": "BLOB"
+          },
+          {
+            "fieldPath": "firstSeenAtEpochMilliseconds",
+            "columnName": "firstSeenAtEpochMilliseconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastVerifiedAtEpochMilliseconds",
+            "columnName": "lastVerifiedAtEpochMilliseconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "normalizedEndpoint"
+          ]
+        }
+      },
+      {
+        "tableName": "session_restore",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`sessionId` TEXT NOT NULL, `hostId` TEXT NOT NULL, `transportKind` TEXT NOT NULL, `tmuxTarget` TEXT, `lastSelection` TEXT, `reconnectRequired` INTEGER NOT NULL, `updatedAtEpochMilliseconds` INTEGER NOT NULL, PRIMARY KEY(`sessionId`))",
+        "fields": [
+          {
+            "fieldPath": "sessionId",
+            "columnName": "sessionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hostId",
+            "columnName": "hostId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "transportKind",
+            "columnName": "transportKind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tmuxTarget",
+            "columnName": "tmuxTarget",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastSelection",
+            "columnName": "lastSelection",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "reconnectRequired",
+            "columnName": "reconnectRequired",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMilliseconds",
+            "columnName": "updatedAtEpochMilliseconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "sessionId"
+          ]
+        }
+      },
+      {
+        "tableName": "cross_device_receipts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`receiptId` TEXT NOT NULL, `attemptId` TEXT NOT NULL, `kind` TEXT NOT NULL, `hostIds` TEXT NOT NULL, `recordedAtEpochMilliseconds` INTEGER NOT NULL, PRIMARY KEY(`receiptId`))",
+        "fields": [
+          {
+            "fieldPath": "receiptId",
+            "columnName": "receiptId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attemptId",
+            "columnName": "attemptId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hostIds",
+            "columnName": "hostIds",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recordedAtEpochMilliseconds",
+            "columnName": "recordedAtEpochMilliseconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "receiptId"
+          ]
+        }
+      },
+      {
+        "tableName": "pending_cross_device_access",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`pendingId` TEXT NOT NULL, `attemptId` TEXT NOT NULL, `hostId` TEXT NOT NULL, `identityId` TEXT NOT NULL, `createdAtEpochMilliseconds` INTEGER NOT NULL, PRIMARY KEY(`pendingId`))",
+        "fields": [
+          {
+            "fieldPath": "pendingId",
+            "columnName": "pendingId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attemptId",
+            "columnName": "attemptId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hostId",
+            "columnName": "hostId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "identityId",
+            "columnName": "identityId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMilliseconds",
+            "columnName": "createdAtEpochMilliseconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "pendingId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_pending_cross_device_access_attemptId",
+            "unique": false,
+            "columnNames": [
+              "attemptId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_pending_cross_device_access_attemptId` ON `${TABLE_NAME}` (`attemptId`)"
+          },
+          {
+            "name": "index_pending_cross_device_access_hostId",
+            "unique": false,
+            "columnNames": [
+              "hostId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_pending_cross_device_access_hostId` ON `${TABLE_NAME}` (`hostId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "agent_thread_metadata",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`threadKey` TEXT NOT NULL, `lastReadRecordID` TEXT, `unread` INTEGER NOT NULL, `updatedAtEpochMilliseconds` INTEGER NOT NULL, PRIMARY KEY(`threadKey`))",
+        "fields": [
+          {
+            "fieldPath": "threadKey",
+            "columnName": "threadKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastReadRecordID",
+            "columnName": "lastReadRecordID",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "unread",
+            "columnName": "unread",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMilliseconds",
+            "columnName": "updatedAtEpochMilliseconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "threadKey"
+          ]
+        }
+      },
+      {
+        "tableName": "agent_route_tokens",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`routeToken` TEXT NOT NULL, `threadKey` TEXT NOT NULL, `carrierGeneration` INTEGER NOT NULL, `expiresAtEpochMilliseconds` INTEGER NOT NULL, PRIMARY KEY(`routeToken`))",
+        "fields": [
+          {
+            "fieldPath": "routeToken",
+            "columnName": "routeToken",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "threadKey",
+            "columnName": "threadKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "carrierGeneration",
+            "columnName": "carrierGeneration",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "expiresAtEpochMilliseconds",
+            "columnName": "expiresAtEpochMilliseconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "routeToken"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_agent_route_tokens_threadKey",
+            "unique": false,
+            "columnNames": [
+              "threadKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_agent_route_tokens_threadKey` ON `${TABLE_NAME}` (`threadKey`)"
+          }
+        ]
+      },
+      {
+        "tableName": "agent_thread_lineage",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`threadKey` TEXT NOT NULL, `parentThreadKey` TEXT, `parentRecordID` TEXT, `updatedAtEpochMilliseconds` INTEGER NOT NULL, PRIMARY KEY(`threadKey`))",
+        "fields": [
+          {
+            "fieldPath": "threadKey",
+            "columnName": "threadKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "parentThreadKey",
+            "columnName": "parentThreadKey",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "parentRecordID",
+            "columnName": "parentRecordID",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "updatedAtEpochMilliseconds",
+            "columnName": "updatedAtEpochMilliseconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "threadKey"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_agent_thread_lineage_parentThreadKey",
+            "unique": false,
+            "columnNames": [
+              "parentThreadKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_agent_thread_lineage_parentThreadKey` ON `${TABLE_NAME}` (`parentThreadKey`)"
+          }
+        ]
+      },
+      {
+        "tableName": "agent_launch_receipts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`threadKey` TEXT NOT NULL, `requestID` TEXT NOT NULL, `parentThreadKey` TEXT, `parentRecordID` TEXT, `windowID` TEXT NOT NULL, `paneID` TEXT NOT NULL, `worktreeCreated` INTEGER NOT NULL, `recordedAtEpochMilliseconds` INTEGER NOT NULL, PRIMARY KEY(`threadKey`))",
+        "fields": [
+          {
+            "fieldPath": "threadKey",
+            "columnName": "threadKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "requestID",
+            "columnName": "requestID",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "parentThreadKey",
+            "columnName": "parentThreadKey",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "parentRecordID",
+            "columnName": "parentRecordID",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "windowID",
+            "columnName": "windowID",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paneID",
+            "columnName": "paneID",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "worktreeCreated",
+            "columnName": "worktreeCreated",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recordedAtEpochMilliseconds",
+            "columnName": "recordedAtEpochMilliseconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "threadKey"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_agent_launch_receipts_parentThreadKey",
+            "unique": false,
+            "columnNames": [
+              "parentThreadKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_agent_launch_receipts_parentThreadKey` ON `${TABLE_NAME}` (`parentThreadKey`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '8c4b7f0bef393ea7ffed598fd7ecad72')"
+    ]
+  }
+}

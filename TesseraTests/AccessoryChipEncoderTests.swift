@@ -1,5 +1,6 @@
 import XCTest
 import UIKit
+import TesseraInputCore
 @testable import Tessera
 
 final class AccessoryChipEncoderTests: XCTestCase {
@@ -55,7 +56,8 @@ final class AccessoryChipEncoderTests: XCTestCase {
     func testDefaultBarOrderUsesCompactPhoneLayout() {
         XCTAssertEqual(
             AccessoryChip.defaultBarOrder(for: .phone),
-            [.esc, .ctrl, .tab, .left, .right, .down, .up, .alt, .ctrlC, .ctrlJ]
+            [.esc, .enter, .ctrl, .tab, .left, .right, .down, .up, .alt,
+             .ctrlC, .ctrlJ, .ctrlL]
         )
     }
 
@@ -66,11 +68,11 @@ final class AccessoryChipEncoderTests: XCTestCase {
         )
     }
 
-    /// Both default bars must fit their idiom's chip budget. The phone bar is
-    /// the tight one — chips are 44pt minimum with no horizontal padding, and
-    /// the bar scrolls, but the *default* set should not arrive pre-overflowed.
+    /// Both default bars must fit their idiom's chip budget. Phone chips are
+    /// 44pt wide with 6pt gaps and no horizontal padding, so twelve is ~594pt:
+    /// a whole row in landscape, which is the width the default is sized to.
     func testDefaultBarsStayWithinTheirChipBudget() {
-        XCTAssertLessThanOrEqual(AccessoryChip.defaultBarOrder(for: .phone).count, 11)
+        XCTAssertLessThanOrEqual(AccessoryChip.defaultBarOrder(for: .phone).count, 12)
         XCTAssertLessThanOrEqual(AccessoryChip.defaultBarOrder(for: .pad).count, 12)
     }
 
@@ -96,6 +98,38 @@ final class AccessoryChipEncoderTests: XCTestCase {
         XCTAssertEqual(
             AccessoryChipEncoder.encode(.ctrlC, armed: .none, applicationCursor: false),
             [0x03]
+        )
+    }
+
+    func test_ctrlLEncodesFormFeed() {
+        XCTAssertEqual(
+            AccessoryChipEncoder.encode(.ctrlL, armed: .none, applicationCursor: false),
+            [0x0C]
+        )
+    }
+
+    /// Return is a carriage return, not the line feed ⌃J sends — the two chips
+    /// sit next to each other on the bar and must not become the same key.
+    func test_enterEncodesCarriageReturnAndTakesOnlyAlt() {
+        XCTAssertEqual(
+            AccessoryChipEncoder.encode(.enter, armed: .none, applicationCursor: true),
+            [0x0D]
+        )
+        XCTAssertEqual(
+            AccessoryChipEncoder.encode(
+                .enter,
+                armed: ArmedModifiers(ctrl: true, shift: true),
+                applicationCursor: false
+            ),
+            [0x0D]
+        )
+        XCTAssertEqual(
+            AccessoryChipEncoder.encode(
+                .enter,
+                armed: ArmedModifiers(alt: true),
+                applicationCursor: false
+            ),
+            [0x1B, 0x0D]
         )
     }
 
@@ -682,6 +716,95 @@ final class TerminalInputNormalizerTests: XCTestCase {
         XCTAssertEqual(
             normalize(bytes),
             bytes
+        )
+    }
+}
+
+/// `AccessoryChip` keeps its own enum — it carries the localized VoiceOver
+/// names, the notation-aware labels, and the idiom-aware defaults, none of
+/// which belong in a portable catalog. What it may not do is disagree with
+/// `AccessoryKeyCatalog` about which keys exist, what they are called in
+/// storage, or what they send.
+final class AccessoryKeyCatalogParityTests: XCTestCase {
+    func testChipRawValuesAreTheCanonicalCatalogIDs() {
+        XCTAssertEqual(AccessoryChip.allCases.map(\.rawValue), AccessoryKeyCatalog.allIDs)
+        for chip in AccessoryChip.allCases {
+            XCTAssertEqual(
+                chip.catalogKey?.rawValue,
+                chip.rawValue,
+                "\(chip.rawValue) has no catalog entry"
+            )
+        }
+    }
+
+    func testChipModifierClassificationMatchesTheCatalog() {
+        for chip in AccessoryChip.allCases {
+            XCTAssertEqual(
+                chip.isModifier,
+                chip.catalogKey?.isModifier,
+                chip.rawValue
+            )
+        }
+        XCTAssertEqual(AccessoryChip.ctrl.armedModifier, .control)
+        XCTAssertEqual(AccessoryChip.alt.armedModifier, .alternate)
+        XCTAssertEqual(AccessoryChip.shift.armedModifier, .shift)
+        XCTAssertEqual(AccessoryChip.cmd.armedModifier, .command)
+        XCTAssertNil(AccessoryChip.esc.armedModifier)
+    }
+
+    func testDefaultBarOrdersMatchTheCatalog() {
+        XCTAssertEqual(
+            AccessoryChip.defaultBarOrder(for: .phone).map(\.rawValue),
+            AccessoryKeyCatalog.persistedIDs(for: AccessoryKeyCatalog.defaultPhoneBarOrder)
+        )
+        XCTAssertEqual(
+            AccessoryChip.defaultBarOrder(for: .pad).map(\.rawValue),
+            AccessoryKeyCatalog.persistedIDs(for: AccessoryKeyCatalog.defaultTabletBarOrder)
+        )
+    }
+
+    /// Every chip's bytes come out of the catalog, under every modifier
+    /// combination and both cursor modes.
+    func testChipEncodingMatchesTheCatalogForEveryModifierCombination() {
+        for chip in AccessoryChip.allCases where !chip.isModifier {
+            for bits in 0..<8 {
+                let armed = ArmedModifiers(
+                    ctrl: bits & 4 != 0,
+                    alt: bits & 2 != 0,
+                    shift: bits & 1 != 0
+                )
+                for applicationCursor in [false, true] {
+                    XCTAssertEqual(
+                        AccessoryChipEncoder.encode(
+                            chip,
+                            armed: armed,
+                            applicationCursor: applicationCursor
+                        ),
+                        AccessoryKeyCatalog.encode(
+                            id: chip.rawValue,
+                            modifiers: armed,
+                            applicationCursorMode: applicationCursor
+                        ),
+                        "\(chip.rawValue) \(bits) \(applicationCursor)"
+                    )
+                }
+            }
+        }
+    }
+
+    /// The bar decodes stored raw IDs through `compactMap`, which is what lets
+    /// a `custom:<uuid>` slot and an unknown chip coexist with built-ins.
+    func testStoredOrderDecodingMatchesTheCatalogCodec() {
+        let stored = ["esc", "custom:1D6A8A1C-0000-4000-8000-000000000000", "nonsense", "tab"]
+        XCTAssertEqual(
+            AccessoryChip.from(rawIDs: stored).map(\.rawValue),
+            AccessoryKeyCatalog.builtInKeys(in: stored).map(\.rawValue)
+        )
+        XCTAssertEqual(
+            CustomShortcut(name: "deploy", tokens: [.text("x")]).chipRawID.prefix(
+                AccessoryKeyCatalog.customIDPrefix.count
+            ),
+            AccessoryKeyCatalog.customIDPrefix[...]
         )
     }
 }

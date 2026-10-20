@@ -85,7 +85,20 @@ struct TerminalSettingsView: View {
                 .padding(.bottom, 24)
             }
 
-            // §agent scroll lock — opt out of the working-agent scroll freeze
+            // §program status — OSC 7501 reports from the programs
+            // themselves. Deterministic, so on by default, and independent
+            // of Agent Center's experimental fallback parsing.
+            SettingsH("program status")
+                .padding(.top, 6)
+
+            ToggleRow(
+                title: "program status",
+                subtitle: "show needs input, finished and failed on tabs and session lists when programs report it (OSC 7501) · works without agent center",
+                isOn: $appearance.programStatusEnabled
+            )
+            .padding(.bottom, 24)
+
+            // §agent scroll lock — opt into the working-agent scroll freeze
             // per provider. Detection, cards, and attention notifications are
             // untouched; only the frozen viewport goes away.
             SettingsH("agent scroll lock")

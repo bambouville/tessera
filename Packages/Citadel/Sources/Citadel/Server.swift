@@ -26,12 +26,14 @@ final class SubsystemHandler: ChannelDuplexHandler {
     let shell: ShellDelegate?
     let sftp: SFTPDelegate?
     let eventLoop: EventLoop
+    let username: String?
     var configured: EventLoopPromise<Void>
 
-    init(sftp: SFTPDelegate?, shell: ShellDelegate?, eventLoop: EventLoop) {
+    init(sftp: SFTPDelegate?, shell: ShellDelegate?, eventLoop: EventLoop, username: String?) {
         self.sftp = sftp
         self.shell = shell
         self.eventLoop = eventLoop
+        self.username = username
         self.configured = eventLoop.makePromise()
     }
 
@@ -54,7 +56,7 @@ final class SubsystemHandler: ChannelDuplexHandler {
         case let event as SSHChannelRequestEvent.ExecRequest:
             context.fireUserInboundEventTriggered(event)
         case is SSHChannelRequestEvent.ShellRequest:
-            guard let shell = shell, let parent = context.channel.parent else {
+            guard let shell = shell else {
                 _ = context.channel.triggerUserOutboundEvent(ChannelFailureEvent()).flatMap {
                     self.configured.succeed(())
                     return context.channel.close()
@@ -62,14 +64,13 @@ final class SubsystemHandler: ChannelDuplexHandler {
                 return
             }
 
-            parent.pipeline.handler(type: NIOSSHHandler.self).flatMap { handler in
-                ShellServerSubsystem.setupChannelHanders(
+            ShellServerSubsystem.setupChannelHanders(
                     channel: context.channel,
                     shell: shell,
                     logger: .init(label: "nl.orlandos.citadel.sftp-server"),
-                    username: handler.username
+                    username: username
                 )
-            }.flatMap { () -> EventLoopFuture<Void> in
+            .flatMap { () -> EventLoopFuture<Void> in
                 let promise = context.eventLoop.makePromise(of: Void.self)
                 context.channel.triggerUserOutboundEvent(ChannelSuccessEvent(), promise: promise)
                 self.configured.succeed(())
@@ -80,20 +81,19 @@ final class SubsystemHandler: ChannelDuplexHandler {
         case let event as SSHChannelRequestEvent.SubsystemRequest:
             switch event.subsystem {
             case "sftp":
-                guard let sftp = sftp, let parent = context.channel.parent else {
+                guard let sftp = sftp else {
                     context.channel.close(promise: nil)
                     self.configured.succeed(())
                     return
                 }
 
-                parent.pipeline.handler(type: NIOSSHHandler.self).flatMap { handler in
-                    SFTPServerSubsystem.setupChannelHanders(
+                SFTPServerSubsystem.setupChannelHanders(
                         channel: context.channel,
                         sftp: sftp,
                         logger: .init(label: "nl.orlandos.citadel.sftp-server"),
-                        username: handler.username
+                        username: username
                     )
-                }.flatMap { () -> EventLoopFuture<Void> in
+                .flatMap { () -> EventLoopFuture<Void> in
                     let promise = context.eventLoop.makePromise(of: Void.self)
                     context.channel.triggerUserOutboundEvent(ChannelSuccessEvent(), promise: promise)
                     self.configured.succeed(())
@@ -124,7 +124,7 @@ final class SubsystemHandler: ChannelDuplexHandler {
     }
 }
 
-final class CitadelServerDelegate: Sendable, GlobalRequestDelegate {
+final class CitadelServerDelegate: Sendable {
     let _sftp = NIOLockedValueBox<SFTPDelegate?>(nil)
     let _exec = NIOLockedValueBox<ExecDelegate?>(nil)
     let _shell = NIOLockedValueBox<ShellDelegate?>(nil)
@@ -160,7 +160,8 @@ final class CitadelServerDelegate: Sendable, GlobalRequestDelegate {
             handlers.append(SubsystemHandler(
                 sftp: self.sftp,
                 shell: self.shell,
-                eventLoop: channel.eventLoop
+                eventLoop: channel.eventLoop,
+                username: username
             ))
 
             handlers.append(ExecHandler(delegate: exec, username: username))
@@ -186,6 +187,7 @@ final class CitadelServerDelegate: Sendable, GlobalRequestDelegate {
     func tcpForwardingRequest(
         _ request: GlobalRequest.TCPForwardingRequest,
         handler: NIOSSHHandler,
+        username: String?,
         promise: EventLoopPromise<GlobalRequest.TCPForwardingResponse>
     ) {
         guard let delegate = remotePortForward else {
@@ -193,7 +195,7 @@ final class CitadelServerDelegate: Sendable, GlobalRequestDelegate {
             return
         }
 
-        let context = SSHContext(username: handler.username)
+        let context = SSHContext(username: username)
 
         switch request {
         case .listen(let host, let port):
@@ -231,6 +233,59 @@ final class CitadelServerDelegate: Sendable, GlobalRequestDelegate {
                 }
             }
         }
+    }
+}
+
+/// Latches the first successful delegate decision before NIOSSH receives it.
+/// A separate instance is created for each accepted parent connection.
+final class ServerConnectionAuthentication: NIOSSHServerUserAuthenticationDelegate {
+    private let delegate: NIOSSHServerUserAuthenticationDelegate
+    private let acceptedUsername = NIOLockedValueBox<String?>(nil)
+
+    init(delegate: NIOSSHServerUserAuthenticationDelegate) {
+        self.delegate = delegate
+    }
+
+    var username: String? { acceptedUsername.withLockedValue { $0 } }
+    var supportedAuthenticationMethods: NIOSSHAvailableUserAuthenticationMethods {
+        delegate.supportedAuthenticationMethods
+    }
+
+    func requestReceived(
+        request: NIOSSHUserAuthenticationRequest,
+        responsePromise: EventLoopPromise<NIOSSHUserAuthenticationOutcome>
+    ) {
+        let decision = responsePromise.futureResult.eventLoop.makePromise(of: NIOSSHUserAuthenticationOutcome.self)
+        let acceptedUsername = self.acceptedUsername
+        let username = request.username
+        decision.futureResult.map { outcome in
+            acceptedUsername.withLockedValue { stored in
+                // NIOSSH can have multiple auth requests in flight. Once one
+                // succeeds, the connection's authenticated identity is fixed:
+                // a late success/failure must never replace or clear it.
+                if stored == nil, case .success = outcome { stored = username }
+            }
+            return outcome
+        }.cascade(to: responsePromise)
+        delegate.requestReceived(request: request, responsePromise: decision)
+    }
+}
+
+private final class ServerConnectionRequests: GlobalRequestDelegate {
+    let delegate: CitadelServerDelegate
+    let authentication: ServerConnectionAuthentication
+
+    init(delegate: CitadelServerDelegate, authentication: ServerConnectionAuthentication) {
+        self.delegate = delegate
+        self.authentication = authentication
+    }
+
+    func tcpForwardingRequest(
+        _ request: GlobalRequest.TCPForwardingRequest,
+        handler: NIOSSHHandler,
+        promise: EventLoopPromise<GlobalRequest.TCPForwardingResponse>
+    ) {
+        delegate.tcpForwardingRequest(request, handler: handler, username: authentication.username, promise: promise)
     }
 }
 
@@ -306,10 +361,15 @@ public final class SSHServer {
             .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
             .childChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
             .childChannelInitializer { channel in
+                // Upstream deliberately does not expose NIOSSHHandler.username.
+                // Identity belongs to this authenticated connection, not the
+                // server-wide delegate shared by concurrent clients.
+                let authentication = ServerConnectionAuthentication(delegate: authenticationDelegate)
+                let requests = ServerConnectionRequests(delegate: delegate, authentication: authentication)
                 var server = SSHServerConfiguration(
                     hostKeys: hostKeys,
-                    userAuthDelegate: authenticationDelegate,
-                    globalRequestDelegate: delegate
+                    userAuthDelegate: authentication,
+                    globalRequestDelegate: requests
                 )
 
                 algorithms.apply(to: &server)
@@ -325,9 +385,7 @@ public final class SSHServer {
                         role: .server(server),
                         allocator: channel.allocator,
                         inboundChildChannelInitializer: { childChannel, channelType in
-                            channel.pipeline.handler(type: NIOSSHHandler.self).flatMap { handler in
-                                delegate.initializeSshChildChannel(childChannel, channelType, username: handler.username)
-                            }
+                            delegate.initializeSshChildChannel(childChannel, channelType, username: authentication.username)
                         }
                     ),
                     CloseErrorHandler(logger: logger)

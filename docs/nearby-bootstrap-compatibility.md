@@ -32,6 +32,11 @@ and hellos must fit the 4096-byte receive cap shipped builds enforce before
 the version probe can run
 (`NearbyBootstrapProtocol.maximumHandshakeMessageSize`).
 
+Optional manifest extensions use authenticated receiver declarations in the
+already-lenient recipient-key payload, before manifest export. See
+[v2 extensions](schemas/nearby-bootstrap/v2-extensions.md). This is separate
+from cleartext protocol-version negotiation and leaves the frozen schemas intact.
+
 ## Artifacts
 
 - Contract + invariants (canonical): `Tessera/Bootstrap/NearbyBootstrapCompatibility.swift`

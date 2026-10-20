@@ -1,4 +1,5 @@
 import XCTest
+import TesseraContinuityCore
 @testable import Tessera
 
 @MainActor
@@ -56,17 +57,21 @@ final class ContinuityLifecycleTests: XCTestCase {
 
         XCTAssertTrue(coordinator.receive(data: data, isLocked: false))
         XCTAssertNotNil(coordinator.ready)
+        let readyID = try XCTUnwrap(coordinator.ready?.id)
         coordinator.cancel()
         XCTAssertNil(coordinator.ready)
         XCTAssertNil(coordinator.stashedWhileLocked)
         XCTAssertNil(coordinator.active)
+        XCTAssertEqual(coordinator.sharedState, .cancelled(readyID))
 
         XCTAssertTrue(coordinator.receive(data: data, isLocked: true))
         XCTAssertNotNil(coordinator.stashedWhileLocked)
+        let stashedID = try XCTUnwrap(coordinator.stashedWhileLocked?.id)
         coordinator.cancel()
         XCTAssertNil(coordinator.ready)
         XCTAssertNil(coordinator.stashedWhileLocked)
         XCTAssertNil(coordinator.active)
+        XCTAssertEqual(coordinator.sharedState, .cancelled(stashedID))
     }
 
     func test_applicationLockRestashesOnlyUnhandledActivity() throws {
@@ -79,14 +84,129 @@ final class ContinuityLifecycleTests: XCTestCase {
 
         XCTAssertNil(coordinator.ready)
         XCTAssertEqual(coordinator.stashedWhileLocked?.id, pending.id)
+        guard case .stashedBehindLock(let sharedStash) = coordinator.sharedState else {
+            return XCTFail("shared ready activity was not restashed")
+        }
+        XCTAssertEqual(sharedStash.id, pending.id)
 
         coordinator.replayAfterUnlock()
         coordinator.consume(pending.id)
         XCTAssertEqual(coordinator.active?.id, pending.id)
+        guard case .resolving(let activeBeforeLock) = coordinator.sharedState else {
+            return XCTFail("shared continuation was not active before lock")
+        }
         coordinator.applicationDidLock()
 
         XCTAssertEqual(coordinator.active?.id, pending.id)
         XCTAssertNil(coordinator.stashedWhileLocked)
+        XCTAssertEqual(coordinator.sharedState, .resolving(activeBeforeLock))
+    }
+
+    func test_appleCoordinatorAdaptsWholeSharedContinuationLifecycle() throws {
+        let coordinator = ContinuationCoordinator()
+        let descriptor = makeDescriptor()
+        XCTAssertTrue(coordinator.receive(
+            data: try descriptor.handoffData(),
+            isLocked: false
+        ))
+        let pending = try XCTUnwrap(coordinator.ready)
+        guard case .ready = coordinator.sharedState else {
+            return XCTFail("shared receive state was \(coordinator.sharedState)")
+        }
+
+        coordinator.consume(pending.id)
+        let resolution = coordinator.resolve(
+            pending.id,
+            among: [],
+            hasSavedHost: { _ in false }
+        )
+        XCTAssertEqual(resolution, .prefill(descriptor))
+        guard case .needsHostAdmission(_, let insertionPlan) = coordinator.sharedState else {
+            return XCTFail("shared resolution state was \(coordinator.sharedState)")
+        }
+
+        XCTAssertTrue(coordinator.hostAdmissionCompleted(
+            continuationID: pending.id,
+            admittedHostID: descriptor.hostID,
+            insertedHostIDs: insertionPlan.insertedHostIDs
+        ))
+        guard case .needsCredential = coordinator.sharedState else {
+            return XCTFail("shared admission state was \(coordinator.sharedState)")
+        }
+        XCTAssertTrue(coordinator.credentialEnrollmentCompleted(
+            continuationID: pending.id,
+            hostID: descriptor.hostID
+        ))
+        guard case .connecting = coordinator.sharedState else {
+            return XCTFail("shared credential state was \(coordinator.sharedState)")
+        }
+        XCTAssertTrue(coordinator.connectionCompleted(
+            continuationID: pending.id,
+            hostID: descriptor.hostID
+        ))
+        guard case .completed(let receipt) = coordinator.sharedState else {
+            return XCTFail("shared completion state was \(coordinator.sharedState)")
+        }
+        XCTAssertEqual(receipt.continuationID, pending.id)
+        XCTAssertEqual(receipt.hostID, descriptor.hostID)
+        XCTAssertEqual(coordinator.active?.id, pending.id)
+    }
+
+    func test_appleCoordinatorLocalizesStructuredDescriptorFailure() throws {
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: makeDescriptor().handoffData())
+                as? [String: Any]
+        )
+        object["port"] = 0
+        let invalid = try JSONSerialization.data(withJSONObject: object)
+
+        let coordinator = ContinuationCoordinator()
+        XCTAssertFalse(coordinator.receive(data: invalid, isLocked: false))
+        XCTAssertEqual(
+            coordinator.lastFailure,
+            "Continuation endpoint has invalid port 0."
+        )
+        XCTAssertEqual(
+            coordinator.sharedLastFailure,
+            .invalidDescriptor(.invalidPort(0))
+        )
+        XCTAssertEqual(coordinator.sharedState, .failed(nil, .invalidDescriptor))
+
+        // The malformed receipt remains terminal until its UI consumes the
+        // error, then releases because it never acquired stream authority.
+        XCTAssertFalse(coordinator.receive(
+            data: try makeDescriptor().handoffData(),
+            isLocked: false
+        ))
+        coordinator.clearLastFailure()
+        XCTAssertEqual(coordinator.sharedState, .idle)
+        XCTAssertTrue(coordinator.receive(
+            data: try makeDescriptor().handoffData(),
+            isLocked: false
+        ))
+    }
+
+    func test_securityPolicyChangePreservesSharedTerminalAuthority() throws {
+        let coordinator = ContinuationCoordinator()
+        XCTAssertTrue(coordinator.receive(
+            data: try makeDescriptor().handoffData(),
+            isLocked: false
+        ))
+        let pending = try XCTUnwrap(coordinator.ready)
+
+        coordinator.securityPolicyChanged()
+
+        XCTAssertNil(coordinator.ready)
+        XCTAssertNil(coordinator.active)
+        XCTAssertEqual(
+            coordinator.sharedState,
+            .failed(pending.id, .policyInvalidated)
+        )
+        XCTAssertEqual(coordinator.sharedLastFailure, .stalePolicy)
+        XCTAssertEqual(
+            coordinator.lastFailure,
+            "The continuation is no longer current."
+        )
     }
 
     func test_continuationDraftRecoveryMarkerTracksOnlyRowsCreatedByDraft() throws {
@@ -136,6 +256,91 @@ final class ContinuityLifecycleTests: XCTestCase {
         )
         coordinator.clearLastFailure()
         XCTAssertNil(coordinator.lastFailure)
+    }
+
+    func test_busyCoordinatorRetainsOriginalEnrollmentStreamAuthority() throws {
+        let coordinator = ContinuationCoordinator()
+        let descriptorData = try makeDescriptor().handoffData()
+        let originalActivity = NSUserActivity(
+            activityType: ActivityBroadcaster.activityType
+        )
+        originalActivity.userInfo = [
+            ActivityBroadcaster.descriptorKey: descriptorData
+        ]
+        XCTAssertTrue(coordinator.receive(originalActivity, isLocked: false))
+        XCTAssertTrue(coordinator.enrollmentActivity === originalActivity)
+
+        let missingDescriptorActivity = NSUserActivity(
+            activityType: ActivityBroadcaster.activityType
+        )
+        XCTAssertFalse(coordinator.receive(missingDescriptorActivity, isLocked: false))
+        XCTAssertTrue(coordinator.enrollmentActivity === originalActivity)
+
+        let duplicateActivity = NSUserActivity(
+            activityType: ActivityBroadcaster.activityType
+        )
+        duplicateActivity.userInfo = [
+            ActivityBroadcaster.descriptorKey: descriptorData
+        ]
+        XCTAssertFalse(coordinator.receive(duplicateActivity, isLocked: false))
+        XCTAssertTrue(coordinator.enrollmentActivity === originalActivity)
+    }
+
+    func test_terminalAcceptedActivityRetainsStreamAuthorityUntilFinishActive() throws {
+        let coordinator = ContinuationCoordinator()
+        let descriptor = makeDescriptor()
+        let originalActivity = NSUserActivity(
+            activityType: ActivityBroadcaster.activityType
+        )
+        originalActivity.userInfo = [
+            ActivityBroadcaster.descriptorKey: try descriptor.handoffData()
+        ]
+        XCTAssertTrue(coordinator.receive(originalActivity, isLocked: false))
+        let pending = try XCTUnwrap(coordinator.ready)
+        coordinator.consume(pending.id)
+        XCTAssertEqual(
+            coordinator.resolve(
+                pending.id,
+                among: [],
+                hasSavedHost: { _ in false }
+            ),
+            .prefill(descriptor)
+        )
+        guard case .needsHostAdmission(_, let plan) = coordinator.sharedState else {
+            return XCTFail("expected host admission")
+        }
+        XCTAssertTrue(coordinator.hostAdmissionCompleted(
+            continuationID: pending.id,
+            admittedHostID: descriptor.hostID,
+            insertedHostIDs: plan.insertedHostIDs
+        ))
+        coordinator.credentialEnrollmentFailed()
+        XCTAssertEqual(
+            coordinator.sharedState,
+            .failed(pending.id, .credentialEnrollmentFailed)
+        )
+
+        let malformedSecondActivity = NSUserActivity(
+            activityType: ActivityBroadcaster.activityType
+        )
+        XCTAssertFalse(
+            coordinator.receive(malformedSecondActivity, isLocked: false)
+        )
+        XCTAssertTrue(coordinator.enrollmentActivity === originalActivity)
+        XCTAssertEqual(
+            coordinator.sharedState,
+            .failed(pending.id, .credentialEnrollmentFailed)
+        )
+
+        coordinator.finishActive()
+        let nextActivity = NSUserActivity(
+            activityType: ActivityBroadcaster.activityType
+        )
+        nextActivity.userInfo = [
+            ActivityBroadcaster.descriptorKey: try descriptor.handoffData()
+        ]
+        XCTAssertTrue(coordinator.receive(nextActivity, isLocked: false))
+        XCTAssertTrue(coordinator.enrollmentActivity === nextActivity)
     }
 
     func test_broadcastInvalidatesAndReconcilesAcrossEveryLifecycleGate() throws {
@@ -210,6 +415,59 @@ final class ContinuityLifecycleTests: XCTestCase {
 
         broadcaster.reportFailure("Route is unavailable.")
         XCTAssertEqual(broadcaster.lastFailure, "Route is unavailable.")
+    }
+
+    func test_broadcastClearAfterExplicitInvalidationNeverRepublishesRetainedRequest() {
+        let broadcaster = ActivityBroadcaster()
+        broadcaster.publish(makeDescriptor())
+        let publishedGeneration = broadcaster.publicationGeneration
+
+        broadcaster.invalidate()
+        XCTAssertFalse(broadcaster.isBroadcasting)
+        XCTAssertEqual(broadcaster.publicationGeneration, publishedGeneration)
+
+        broadcaster.publish(nil)
+        XCTAssertFalse(broadcaster.isBroadcasting)
+        XCTAssertEqual(
+            broadcaster.publicationGeneration,
+            publishedGeneration,
+            "clearing an invalidated activity must not momentarily republish it"
+        )
+
+        broadcaster.setApplicationActive(false)
+        broadcaster.setApplicationActive(true)
+        XCTAssertFalse(broadcaster.isBroadcasting)
+        XCTAssertEqual(broadcaster.publicationGeneration, publishedGeneration)
+    }
+
+    func test_broadcastAtomicGateConfigurationDoesNotRepublishInvalidatedDescriptor() {
+        let broadcaster = ActivityBroadcaster()
+        broadcaster.publish(makeDescriptor())
+        let publishedGeneration = broadcaster.publicationGeneration
+
+        broadcaster.invalidate()
+        broadcaster.onContinuationStreams = { input, output in
+            input.close()
+            output.close()
+        }
+        broadcaster.setLocked(true)
+
+        XCTAssertFalse(broadcaster.isBroadcasting)
+        XCTAssertEqual(
+            broadcaster.publicationGeneration,
+            publishedGeneration + 1,
+            "changing streams while still enabled legitimately republishes before lock"
+        )
+
+        let lockedGeneration = broadcaster.publicationGeneration
+        broadcaster.invalidate()
+        broadcaster.onContinuationStreams = nil
+        XCTAssertFalse(broadcaster.isBroadcasting)
+        XCTAssertEqual(
+            broadcaster.publicationGeneration,
+            lockedGeneration,
+            "the publisher must apply the retained locked gate before stream changes"
+        )
     }
 
     private func makeDescriptor() -> SessionActivityDescriptor {

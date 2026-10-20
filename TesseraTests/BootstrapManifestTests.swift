@@ -66,6 +66,47 @@ final class BootstrapManifestTests: XCTestCase {
         }
     }
 
+    func test_agentCenterSyncPolicyKeepsRestoreAndWelcomeLocal() {
+        XCTAssertEqual(BootstrapSyncClassification.appearancePreferences["agentCenterEnabled"], .syncable)
+        for field in ["agentCenterNotificationsEnabled", "hasSeenWelcome", "sessionRestorePolicy"] {
+            XCTAssertEqual(BootstrapSyncClassification.appearancePreferences[field], .neverSyncs)
+        }
+    }
+
+    func test_decoderRejectsInheritedRestoreStateAndAutomaticConnectionFlags() throws {
+        let encoded = try Self.makeManifestForCrossTest().encoded()
+        let original = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        for field in ["sessionRestore", "selectedSessionID"] {
+            var root = original
+            root[field] = "inherited-state"
+            XCTAssertThrowsError(try BootstrapManifest.decode(
+                JSONSerialization.data(withJSONObject: root)
+            )) { error in
+                XCTAssertEqual(error as? BootstrapManifestError, .unknownField(path: "manifest", field: field))
+            }
+        }
+        var root = original
+        var settings = try XCTUnwrap(root["settings"] as? [String: Any])
+        settings["sessionRestorePolicy"] = "always"
+        root["settings"] = settings
+        XCTAssertThrowsError(try BootstrapManifest.decode(
+            JSONSerialization.data(withJSONObject: root)
+        )) { error in
+            XCTAssertEqual(error as? BootstrapManifestError,
+                           .unknownField(path: "manifest.settings", field: "sessionRestorePolicy"))
+        }
+        root = original
+        var hosts = try XCTUnwrap(root["hosts"] as? [[String: Any]])
+        hosts[0]["connectOnLaunch"] = true
+        root["hosts"] = hosts
+        XCTAssertThrowsError(try BootstrapManifest.decode(
+            JSONSerialization.data(withJSONObject: root)
+        )) { error in
+            XCTAssertEqual(error as? BootstrapManifestError,
+                           .unknownField(path: "manifest.hosts[0]", field: "connectOnLaunch"))
+        }
+    }
+
     func test_futureManifestVersionReportsVersionBeforeUnknownFieldLeak() throws {
         let encoded = try Self.makeManifestForCrossTest().encoded()
         var root = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])

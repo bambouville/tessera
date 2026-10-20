@@ -1,0 +1,13 @@
+{
+  "changedRouteAddress": "replacement.example",
+  "replacementHostID": "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC",
+  "deviceLocalPolicyGenerationCollision": 7,
+  "validAbortCode": "user_cancelled",
+  "invalidAbortCode": "",
+  "expectedErrors": {
+    "changedRoute": "authorizationScopeMismatch",
+    "changedHostSet": "manifestMismatch",
+    "incompleteGrantReceipt": "invalidGrantReceipt",
+    "terminalMutation": "invalidTransition"
+  }
+}

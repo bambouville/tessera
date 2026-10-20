@@ -1,0 +1,7 @@
+{
+  "maximumEncodedByteCount": 1048576,
+  "maximumHostCount": 1000,
+  "maximumIdentityCount": 1000,
+  "maximumJumpChainCount": 1000,
+  "maximumKnownHostCount": 1000
+}

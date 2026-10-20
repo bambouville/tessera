@@ -28,13 +28,15 @@ final class SpeechDictationController {
 
     private let appearance: AppearancePreferences
     @ObservationIgnored private var recognizer: SFSpeechRecognizer?
-    @ObservationIgnored private var audioEngine: AVAudioEngine?
+    @ObservationIgnored private var audioCapture: DictationAudioCapture?
     @ObservationIgnored private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     @ObservationIgnored private var recognitionTask: SFSpeechRecognitionTask?
     @ObservationIgnored private var silenceTimer: Timer?
     @ObservationIgnored private var lastChangeAt: Date?
     @ObservationIgnored private var willResignActiveObserver: NSObjectProtocol?
-    @ObservationIgnored private var tapInstalled = false
+    @ObservationIgnored private var listeningID: UUID?
+    @ObservationIgnored private var cancelSetup: (() -> Void)?
+    @ObservationIgnored private var requestingPermissions = false
     @ObservationIgnored private var isStopping = false
 
     static var isOnDeviceAvailable: Bool {
@@ -61,12 +63,8 @@ final class SpeechDictationController {
         }
         silenceTimer?.invalidate()
         recognitionTask?.cancel()
-        audioEngine?.stop()
-        if tapInstalled {
-            audioEngine?.inputNode.removeTap(onBus: 0)
-        }
-        recognitionRequest?.endAudio()
-        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+        cancelSetup?()
+        audioCapture?.cancel()
     }
 
     func requestPermissions() async -> DictationPermissionState {
@@ -87,78 +85,83 @@ final class SpeechDictationController {
     }
 
     func start() async {
-        guard activeState == .idle else { return }
-
+        guard activeState == .idle, !requestingPermissions else { return }
+        requestingPermissions = true
         let permissions = await requestPermissions()
-        guard permissions == .granted else { return }
+        requestingPermissions = false
+        guard permissions == .granted, !Task.isCancelled else { return }
 
         guard let recognizer = Self.onDeviceRecognizer(logFallback: true) else {
             DiagnosticLogStore.appendSpeech("start refused reason=on-device-recognizer-unavailable")
             return
         }
 
-        activeState = .listening
-        startedAt = .now
-        transcript = ""
-        amplitude = 0
-        lastChangeAt = .now
-        self.recognizer = recognizer
-
-        do {
-            try configureAudioSession()
-        } catch {
-            DiagnosticLogStore.appendSpeech("start failed step=audio-session error='\(error)'")
-            stop(commit: false)
-            return
-        }
-
-        let engine = AVAudioEngine()
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.requiresOnDeviceRecognition = true
         request.shouldReportPartialResults = true
+        let capture = DictationAudioCapture(request: request)
+        await beginListening(cancel: { capture.cancel() }) { id in
+            self.recognizer = recognizer
+            self.recognitionRequest = request
+            self.audioCapture = capture
+            self.recognitionTask = recognizer.recognitionTask(with: request) { result, error in
+                let text = result?.bestTranscription.formattedString
+                let errorDescription = error.map { "\($0)" }
+                Task { @MainActor [weak self] in
+                    guard self?.listeningID == id else { return }
+                    self?.handleRecognitionUpdate(text: text, errorDescription: errorDescription)
+                }
+            }
+            return try await capture.start { [weak self] rms in
+                Task { @MainActor [weak self] in
+                    guard self?.listeningID == id else { return }
+                    self?.publishAmplitude(rms)
+                }
+            }
+        }
+    }
 
-        audioEngine = engine
-        recognitionRequest = request
-
-        let inputNode = engine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
-        guard format.channelCount > 0 else {
-            DiagnosticLogStore.appendSpeech("start refused reason=no-input-channels")
-            stop(commit: false)
+    /// Shared with microphone-free ordering tests. A cancelled setup may
+    /// finish later, but can never publish a start time or revive listening.
+    func beginListening(
+        cancel: @escaping () -> Void,
+        setup: (UUID) async throws -> Date
+    ) async {
+        guard activeState == .idle else { return }
+        let id = UUID()
+        listeningID = id
+        cancelSetup = cancel
+        activeState = .listening
+        startedAt = nil
+        transcript = ""
+        amplitude = 0
+        lastChangeAt = nil
+        await Task.yield()
+        guard listeningID == id, !Task.isCancelled else {
+            if listeningID == id { stop(commit: false) }
             return
         }
-
-        recognitionTask = recognizer.recognitionTask(with: request) { result, error in
-            let text = result?.bestTranscription.formattedString
-            let errorDescription = error.map { "\($0)" }
-            Task { @MainActor [weak self] in
-                self?.handleRecognitionUpdate(text: text, errorDescription: errorDescription)
-            }
-        }
-
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak request] buffer, _ in
-            request?.append(buffer)
-            let rms = Self.normalizedRMS(from: buffer)
-            Task { @MainActor [weak self] in
-                self?.publishAmplitude(rms)
-            }
-        }
-        tapInstalled = true
-
-        engine.prepare()
         do {
-            try engine.start()
+            let start = try await setup(id)
+            guard listeningID == id else { return }
+            guard !Task.isCancelled else {
+                stop(commit: false)
+                return
+            }
+            startedAt = start
+            lastChangeAt = start
+            startSilenceTimerIfNeeded()
         } catch {
-            DiagnosticLogStore.appendSpeech("start failed step=audio-engine error='\(error)'")
+            guard listeningID == id else { return }
+            if !(error is CancellationError) {
+                DiagnosticLogStore.appendSpeech("start failed error='\(error)'")
+            }
             stop(commit: false)
-            return
         }
-
-        startSilenceTimerIfNeeded()
     }
 
     func stop(commit: Bool) {
-        guard activeState != .idle || audioEngine != nil || recognitionTask != nil || recognitionRequest != nil else {
+        guard activeState != .idle || audioCapture != nil || recognitionTask != nil || recognitionRequest != nil else {
             if !commit {
                 transcript = ""
             }
@@ -170,6 +173,9 @@ final class SpeechDictationController {
 
         isStopping = true
         activeState = .finishing
+        listeningID = nil
+        cancelSetup?()
+        cancelSetup = nil
         silenceTimer?.invalidate()
         silenceTimer = nil
 
@@ -178,25 +184,10 @@ final class SpeechDictationController {
         recognitionTask?.cancel()
         recognitionTask = nil
 
-        if let audioEngine {
-            audioEngine.stop()
-            if tapInstalled {
-                audioEngine.inputNode.removeTap(onBus: 0)
-                tapInstalled = false
-            }
-        }
-
-        recognitionRequest?.endAudio()
         recognitionRequest = nil
         recognizer = nil
-        audioEngine = nil
+        audioCapture = nil
         lastChangeAt = nil
-
-        do {
-            try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
-        } catch {
-            DiagnosticLogStore.appendSpeech("stop teardown failed error='\(error)'")
-        }
 
         activeState = .idle
         startedAt = nil
@@ -207,12 +198,6 @@ final class SpeechDictationController {
             onCommit?(committedText)
         }
         transcript = ""
-    }
-
-    private func configureAudioSession() throws {
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.record, mode: .measurement, options: [.duckOthers])
-        try session.setActive(true)
     }
 
     private func startSilenceTimerIfNeeded() {
@@ -342,7 +327,7 @@ final class SpeechDictationController {
         return fallback
     }
 
-    nonisolated private static func normalizedRMS(from buffer: AVAudioPCMBuffer) -> Double {
+    nonisolated fileprivate static func normalizedRMS(from buffer: AVAudioPCMBuffer) -> Double {
         guard let channelData = buffer.floatChannelData, buffer.frameLength > 0 else {
             return 0
         }
@@ -357,5 +342,103 @@ final class SpeechDictationController {
 
         let rms = sqrt(Double(sumSquares) / Double(frameCount))
         return min(1, max(0, 1 - exp(-rms * 18)))
+    }
+}
+
+/// All app-wide AVAudioSession/engine mutations share this queue, including
+/// the bell's launch-time ambient setup, cancelled dictation teardown, and
+/// subsequent starts. No audio work blocks UI.
+enum AudioSessionQueue {
+    static let shared = DispatchQueue(label: "com.bambouville.Tessera.audio-session")
+}
+
+private final class DictationAudioCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    private let request: SFSpeechAudioBufferRecognitionRequest
+    private var engine: AVAudioEngine?
+    private var tapInstalled = false
+    private var sessionActive = false
+
+    init(request: SFSpeechAudioBufferRecognitionRequest) {
+        self.request = request
+    }
+
+    private var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    func cancel() {
+        lock.lock()
+        let wasCancelled = cancelled
+        cancelled = true
+        lock.unlock()
+        if !wasCancelled { AudioSessionQueue.shared.async { self.tearDown() } }
+    }
+
+    func start(amplitude: @escaping @Sendable (Double) -> Void) async throws -> Date {
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                AudioSessionQueue.shared.async {
+                    var step = "audio-session"
+                    do {
+                        guard !self.isCancelled else { throw CancellationError() }
+                        let session = AVAudioSession.sharedInstance()
+                        try session.setCategory(.record, mode: .measurement, options: [.duckOthers])
+                        self.sessionActive = true
+                        try session.setActive(true)
+                        guard !self.isCancelled else { throw CancellationError() }
+                        step = "audio-engine"
+                        let engine = AVAudioEngine()
+                        self.engine = engine
+                        let input = engine.inputNode
+                        let format = input.outputFormat(forBus: 0)
+                        guard format.channelCount > 0 else {
+                            throw NSError(domain: "SpeechDictation", code: 1,
+                                          userInfo: [NSLocalizedDescriptionKey: "No input channels"])
+                        }
+                        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak request = self.request] buffer, _ in
+                            request?.append(buffer)
+                            amplitude(SpeechDictationController.normalizedRMS(from: buffer))
+                        }
+                        self.tapInstalled = true
+                        guard !self.isCancelled else { throw CancellationError() }
+                        engine.prepare()
+                        try engine.start()
+                        let startedAt = Date.now
+                        guard !self.isCancelled else { throw CancellationError() }
+                        continuation.resume(returning: startedAt)
+                    } catch {
+                        self.tearDown()
+                        if !(error is CancellationError) {
+                            DiagnosticLogStore.appendSpeech("start failed step=\(step) error='\(error)'")
+                        }
+                        continuation.resume(throwing: error)
+                    }
+                }
+            }
+        } onCancel: {
+            self.cancel()
+        }
+    }
+
+    private func tearDown() {
+        engine?.stop()
+        if tapInstalled {
+            engine?.inputNode.removeTap(onBus: 0)
+            tapInstalled = false
+        }
+        engine = nil
+        request.endAudio()
+        if sessionActive {
+            sessionActive = false
+            do {
+                try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+            } catch {
+                DiagnosticLogStore.appendSpeech("stop teardown failed error='\(error)'")
+            }
+        }
     }
 }

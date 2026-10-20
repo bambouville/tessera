@@ -1,0 +1,137 @@
+{
+  "$schema": "schema.json",
+  "protocolVersion": 2,
+  "releasedAppVersion": "0.3.6",
+  "origin": {
+    "privateKeySeedHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "publicKeyHex": "8f40c5adb68f25624ae5b214ea767a6ec94d829d3d7b5e1ad1ba6f3e2138285f",
+    "canonicalHelloJSON": "{\"appVersion\":\"0.3.6\",\"ephemeralPublicKey\":\"j0DFrbaPJWJK5bIU6nZ6bslNgp09e14a0bpvPiE4KF8=\",\"role\":\"origin\",\"supportedVersions\":[2],\"version\":2}"
+  },
+  "recipient": {
+    "privateKeySeedHex": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+    "publicKeyHex": "358072d6365880d1aeea329adf9121383851ed21a28e3b75e965d0d2cd166254",
+    "canonicalHelloJSON": "{\"appVersion\":\"0.3.6\",\"ephemeralPublicKey\":\"NYBy1jZYgNGu6jKa35EhODhR7SGijjt16WXQ0s0WYlQ=\",\"role\":\"recipient\",\"supportedVersions\":[2],\"version\":2}"
+  },
+  "commitment": {
+    "canonicalProjectionJSON": "{\"ephemeralPublicKey\":\"NYBy1jZYgNGu6jKa35EhODhR7SGijjt16WXQ0s0WYlQ=\",\"role\":\"recipient\",\"version\":2}",
+    "helloDigestHex": "f88dc1093b87c5d709997a5bc4ce3efa19bd58fce8ca5fb5d87a769e742c04a2",
+    "canonicalJSON": "{\"appVersion\":\"0.3.6\",\"helloDigest\":\"+I3BCTuHxdcJmXpbxM4++hm9WPzoyl+12Hp2nnQsBKI=\",\"role\":\"recipient\",\"supportedVersions\":[2],\"version\":2}"
+  },
+  "transcriptHex": "0026746573736572612f6e65617262792d626f6f7473747261702f7472616e7363726970742f76320002000b726f6c653a6f726967696e00208f40c5adb68f25624ae5b214ea767a6ec94d829d3d7b5e1ad1ba6f3e2138285f000e726f6c653a726563697069656e740020358072d6365880d1aeea329adf9121383851ed21a28e3b75e965d0d2cd166254",
+  "transcriptHashHex": "7e3631b4e7284359ef2dce76be1e393c8cb867cc6c619f432432b9b004818087",
+  "sasBytesHex": "c1b8f6cbe80105e4",
+  "sasDigits": "027492",
+  "directionalMaterial": {
+    "originToRecipientKeyHex": "4f84e4ce11a964d0466f6f4a8cd1a0e90236c0527aab7a45ce8846d3bb65a0a7",
+    "recipientToOriginKeyHex": "3aec62eef1b1d4b300362f34a3e8418f540c96c5f226a76acbb0b35002ba56ea",
+    "originToRecipientNonceHex": "1c1a555c8dcde6f3963c422c",
+    "recipientToOriginNonceHex": "c7cc335db51aa0ee95fd8478"
+  },
+  "fullTransfer": {
+    "recipientPublicKeyCanonicalJSON": "{\"algorithm\":\"ssh-ed25519\",\"blob\":\"AAAAC3NzaC1lZDI1NTE5AAAAIAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4f\",\"displayName\":\"Recipient key\",\"fingerprint\":\"SHA256:ZkAslGjFiUHdGf/WUL8rQvkib4PTvQatUV0OUQSncCA\",\"id\":\"AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA\",\"protection\":\"software\"}",
+    "manifestCanonicalJSON": "{\"appearance\":{\"accent\":\"blue\",\"chromeMaterial\":\"system\",\"colorScheme\":\"system\",\"cursorBlink\":true,\"cursorStyle\":\"block\",\"customAccentRGB\":31487,\"monospacedFontName\":\"SFMono-Regular\",\"terminalFontSize\":14,\"terminalThemeID\":\"default\"},\"hosts\":[{\"address\":\"server.example\",\"authenticationHint\":\"publicKey\",\"id\":\"BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB\",\"launchMode\":\"autoTmux\",\"name\":\"vector-host\",\"osHint\":\"linux\",\"port\":22,\"portForwards\":[],\"sortOrder\":0,\"tags\":[],\"transport\":\"ssh\",\"user\":\"alice\"}],\"identities\":[],\"jumpChains\":[],\"knownHosts\":[],\"settings\":{\"accessoryBarKeys\":[],\"bellNotificationEnabled\":false,\"bellSoundEnabled\":false,\"bellVisualEnabled\":true,\"filesDefaultDestination\":\"cwd\",\"filesReaperDays\":30,\"modifierBehavior\":\"oneShot\",\"scrollbackLines\":10000},\"version\":2}",
+    "importAcceptanceCanonicalJSON": "{\"acceptedHostIDs\":[\"BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB\"],\"manifestHash\":\"3k6vWac8kayU1wjFoJfXrfJmczzOwEDOjm7e7EcO3Z0=\"}",
+    "grantReceiptCanonicalJSON": "{\"publicKeyFingerprint\":\"SHA256:ZkAslGjFiUHdGf/WUL8rQvkib4PTvQatUV0OUQSncCA\",\"publicKeyID\":\"AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA\",\"results\":[{\"hostID\":\"BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB\",\"hostName\":\"vector-host\",\"status\":\"installed\"}]}",
+    "completionAcknowledgementCanonicalJSON": "{\"grantReceiptHash\":\"xv1yxZfr6ae4HuVBQS6sDrCCp7ZNhk3L9AQ5CXWZZ1c=\",\"publicKeyID\":\"AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA\"}",
+    "frames": [
+      {
+        "name": "recipient-public-key",
+        "kind": "recipientPublicKey",
+        "direction": "recipientToOrigin",
+        "directionByte": 2,
+        "sequence": 1,
+        "frameVersion": 1,
+        "frameHex": "5442434801020000000000000001c7cc335db51aa0ee95fd8479a438717b0265141a551676cfe2b8a130fce687cbec5417154deb078057c4ed942ab1bfc7a7cf5313c4784ef31f7b2536e6ea03d6cbc5a87b5de809de70aa6cc5b2edd4c97875e2f33a457e03856a6b0c62c0d90133dcb0af54d379ac57dddf122b232c9827c3de30bd97ec65451e5e93f71ed75f77354466adf81b9094e32cb18d6723a05e0630d2be52e928221da308ce9d821d71192aa0e69467d2debc632f0b55b905bb445d349b6ac7782f7a0106004ab64ee19eb893e5fb0fd2780cf90b92b56c77b8ea0c4755504248bacda0deaa253b5e98f4f1b7fffcfc15bd5644919d718d66b8527d8794e7e2bc5b9471b8746984b0090d6cfbcef0edaa45389d80d3b5fd0e4f964893365aed1ec45f033750c3c905247bdbc7b2400770e010ac5a18335e9dcfa33c1a618c405288b1b81ef2ff6e202aa7c13251dc60f1f6dfd5344a3939a9f39ea7d645e072ccecff5ae99c95490bcc641e6a36ecbb8f2d7d37a9650024dc5c6367798d74552c4099d0aae21d81fa2cbb500da721783b4e6cc6d3a4bda8a4be0e167cd11d6d99ec5c3366d3e834071a172ac6c5390a776ba721d977f7",
+        "alternateFrameHex": "5442434801020000000000000001c7cc335db51aa0ee95fd8479a4386a73156d59411346298eeeb1823df0d5b3c8ed55124667c94ecb348fd78f30efb7d299ba3848ef5551e3326f0833ccea2595c8b0d17b5de809e642cd4df3b9c0cbff534cf1cf38414f119e424a07549ec22e32e0bcaf54d379a457f2d71e1f190e9238c1ec03b887ef5940257899e878f52e720b5042b3eb1b9590df24aa8d5923a45f6302a2b534ed2c12668951c9b0994364362595fa9259f7efe46b0a043d8f7eb8221c10b348e67b29511e5c3b7bbd4df2a4dfd3cf8f39cd4407dc37828f076b93ed07426353565bbac2d79eb91861078483ed99d7c5e054bb576e93ae44a779890e4fb994e681c548bb7abc6d6888a4102351b0d4c4c7aa75379ac3d4c1df7b7b9758ea3a49d004dc5f313351b594162013c4dc9f540430ef15b75e040f5eefc8a0232f64e8504291d6cb36f29a6e3d37b1cd005acc1885eee1d534573939a9f39ea7d658e072ccecff59df9c93463ad4596d51058aafa1381b239b566756f7425f6b41be13495e75f8dfa0f12089ba6ca4200a977c4e69167c80df88bd92b7b952381cc04d4789d5441c26d3e8382ce56193fae72b101a00fd8bec0f09"
+      },
+      {
+        "name": "origin-authorization-proof",
+        "kind": "originAuthorization",
+        "direction": "originToRecipient",
+        "directionByte": 1,
+        "sequence": 1,
+        "frameVersion": 1,
+        "frameHex": "54424348010100000000000000011c1a555c8dcde6f3963c422d2b84b6fb8d7228871d40682e49b3c5484d1c123b4eef871d1f00a1be27f345c2d49f7a2e7155353760386153b9dc704febb89d7772e3641d236de4",
+        "alternateFrameHex": "54424348010100000000000000011c1a555c8dcde6f3963c422d2b84adf39a7a65dc5b0d20650cf6896251061e7606a4920e020ea7be44aa13dada947f3b71457e622c38612b62110785d9b734631d101edbff7eaf"
+      },
+      {
+        "name": "origin-manifest",
+        "kind": "manifest",
+        "direction": "originToRecipient",
+        "directionByte": 1,
+        "sequence": 2,
+        "frameVersion": 1,
+        "frameHex": "54424348010100000000000000021c1a555c8dcde6f3963c422ea58ce39595393be5802d06ab3b3dcf8ab1003d6b85746ca83173eaa881db87ce42ff4967f41147d0b21264fd7a640e3b73190c08e1decb74b10f1ec4321cb80e893e6f79962c44912cc942e1310bce3eb6a45d7bce2e4fe8ea417cc409cf3e427c72255f26645b8ce307cc58cabdbbdf9b9ca77fbe908f23f1ae89021208e96afd9e9c71ce6777b89ff815df5ff91fffe8625682ede00dbbe8ef4f997647848b9d9609e475da2ba1c9defe403b99ed7ca59a7983f4695a726ff487b0fae2bc3396e95934fb97018da13b55e8a7446db09ce3430f2c7b2ad5f3f6834e4c841c82189a8198749595dabc3c869bbea478123fe78b2a51fd25b149b75f189299fb76667c52abe3038335956b29656a56a250dd74d2c1200d019c2b4401ab2273a991b757aeba945e03a4af6695b22bf6048d0e0e0f134ed6715d5606f959555aa71fd326da2c1b4593d0170fc4c5a81af42a07c9fc1be74a263c742bd44809cb95b7ff77341b91d5c97a6cc40816c0924223e752410798556650fbc7fc8fdfa4aa49a9ad20ee35c2c561eeb1e6460ab87b5eab3d544b2f361d2fc085269eb2069af7492ef8c38571091a5c3c928a8dfab967bab407f4e2c753ece93305a6dd546c9599eb50f6b3f5529352a6a35586a34cb7a2e96530738e39c7c424234227f8dc0fb1ba2c581ab6ba7c49d8ff64c2e646a238971a733f6014d6529818b14748a2795958a352ec60ede45a71da690f3c88fb343638106783a425f544e212b77b4fa221d201a4c4471ad2b9e91103f8c3d0b179326b78d47b0626c9a28a8cedd04990cb3fd41ebfd4dccdb0819ec45b7c5a07579d7132209b12115ea1061c03966b79390f2da0ed9628d107dcad48f13439be3190e7634869bfbeb620b300948754764f606f5f33bbd5513686c7523c012b5b31a4be31ce857ee60c0cf35b6bbf75919366071c770d7849c2aba658501c1611b61b7da1707cbb4e9424819b4702bbaa189b9244e927841f18eee52c29ea54f91e90f2c59c91e035b3758822ef88c877274db79fb1c3261078102e5798440b1c5a276bf96bba03875464c875ead4f624b379101c5363c7ef7f742aa6b555a58f3910b83e3f289ae8bdd84a6ff6c12cdd92fed17f6751c7a2e3c3fa63cbb9db0d1c3b05b84fcc3542b4058456f034d0752300fce812a420ccedd4c7e5f7f0459ff35f1b62bb23d8b77e6124c7c1520822ce642e1dc58b811ac96f3b91cec4cf86432c29012e72ab2c33ebd21e2f707365e864166acd2a5a645d44e94d6223584da09db09f11d3fcfecf2cbe7b47f4d8199c4a2a5c54fc045e9c15089ddc7d5e9151f3b2b872bfe5c4e55a58674c8d288b29fecc00f4fd88689551aca76634f8184ac6a84454a41bc32a12db50a9e45bfe44b6aae0b9e59aebe2b7110d6c55b9bb0c774f0ec33ccddb805907af43381fe0570fe40f357f09a6607ebab7d7aaf22a695ec482065de84d6093110df83f4ec391b00a5bc0193efea497d38bede753a14ed0e14c4f46dcf61473f6de6708dbbd",
+        "alternateFrameHex": "54424348010100000000000000021c1a555c8dcde6f3963c422ea58cf89d823176bec6625de73722e091a66a5325ac4d5fac3c7fc0e6f293928041fa6c45ef4f48fd9c394fa67d650d226779100cebf7d82c863230f1197da72d9a155942a02864ba04e06a9f3213e25c83d9564ffe1165f6cf4450f122be4e55677508032e5f08b3e31eea5ce7f8b5e2c6a2a439b996a21d99f196111e53b320c0898046fa7e4db8a7ff1e956dd729be987649def6fe21a0f8ea4ec7416998b0818f2fe0628630b9de9aee4539eac241b9ae7ed9f932325d4eb090eeebe5a2238eb37405facd2ec7de3d6be9a56b45aaac822449062127d7e7bc9b6179da69b436abd6c223b4a380b13d95fdbaa41b0964ffd71b31f8118878896819bba4e06e1e6462aab81ae728a1680b414053f84cf041d5df170c3798555e26f62843b1ccd47a8088bb7953a1984988b7349179a2176b04224bcb5a613939c17763628578ab24b90a0341b4cf3e57cce8bb18e01f1a80ff1d8d7e3d284605f90112dbb3b4ec27071bbfd0c54472d0047ad7bf3a3eea7c775c826f4855c9e6e28dd3c7c62ef98d0cc104ece554c6b2ea6e3ab97060d1647f6b0509331bcda40ab9802e93f05404fdda9545247b5f24b99e92dda97c80b601f4e4e243ecf16e05b9c67c77bd82c130dea8dd548554b0b87d9ebc579fb9c17e1a13a622efdf0e266424d6f50c9fae485931b0da6159dcfb64c4fc45a724a72c525c4d44a206ad0b855b4cd87871679263f17ff1913117f11a247c88e26019633d56a9a23ff61b813faa0c41e40ce529d5b45006e192f40e5a88d0f49f76003642f90e067dfcb8a191f28a428fdf38e51ee49ef2bda0ef99c571765a5f42da222f3bb23e5477fc0d142a905a6c135033a790a616d62ded8848c01d13e534cdb4794831a084981ee23db1ae0e76621571584aa6d24505bcd77640151e665285931bc8da7de02031fe72789f76c69d4f2a2d5f33654ceaad966f5831202e9f5b6cc45024ea6a8f2593c4772a9da915b0b74dc27f9e4767f1d82515987cd33eb9aab1b88aea2d9d2f9534d286f456356ca29bebc2124b74212111900d0f1f652b40c345842edf580ce248e492e622af7d190b7338c88d526739c8ac1ef7cf3a48a33f1b16b19589de7b66e59a1786fbd5ca624f0f90a3f9e1de39fb8ed70b393b2c8d44eb2f0adb109152ef30e441172dfbf4069e4cf0c7f9a8ded9f4649eff6f3012af38fa93283823e3bd571b23d44f0c09ede59546d64b20e5f9dac0826b071d2d1f4fba441eb4dd251b755b65cf5a0c41f87141627719cc125607464bb0a89ff808e8aaa6f907886063acf36787623e37408f2c7ae01036aad24c6a824da8adbd5fcbe9fefe6e573f758403fa32fed81eebf8da59996f928d4156cd18529db3514c8f08de7957c87e8ae070df70a2add98ecdfa83f1ae0457460eb8ab24335510cc05eaf6d85936b6563c2aa8501ce945004811bc6b5cebf4e6b4ca2b5c4ac3980b1791606e8e167cea6025c6a2b20d17b44b31adfe97fa84d4aa53a1ac4cc639ce19e5b9edfbc64aeeb95ae1"
+      },
+      {
+        "name": "recipient-import-acceptance",
+        "kind": "importAcceptance",
+        "direction": "recipientToOrigin",
+        "directionByte": 2,
+        "sequence": 2,
+        "frameVersion": 1,
+        "frameHex": "5442434801020000000000000002c7cc335db51aa0ee95fd847a5323f3bed0e373ef1651e81d31bf734a593047fa93ff81eae7b4f6bea2205703d5f6fdd04ecca6d9bf88050af13ba3c59886a4504601881826fbab690d755634252b5851c34d71426dfc27bb44ac990befa3cc3013f0f698d57b549f3c10ec62de61b3a9dedf6991426439ce5d9ba2a7a2741c717a734b40ea9e6f7e9cd54bc4bdd5039886563340dc2df1e32e1e5c821decec42af2ba9617a4864ea57aaa8f2cbbd35bdebfa31048edab287699c7858fe3a1d3876859ba38feb43f9cd56a76ff44d7271b78412968e767973351b213d2cf8e7b67b3c1ca22364ba1d",
+        "alternateFrameHex": "5442434801020000000000000002c7cc335db51aa0ee95fd847a5323e8b6c7eb3eb4501abf4f3bb44d6363616ce684d6bde5d8d3b2eab1727c25e8dfd49b3b82b0c9a48b167bee3c8ace9b81b7617f1ca16825d8c8621177531b1a174379d865695d76d43c935cb38223f48bd71a73d8edb0d65428b93f3e8c61f5788eafcec476ca5b602edf769bbafaa15d1b6f046e587582a14027918a57a9a5b116eca1470875c676e2d0030148a725e3fb238774f1606e2860ee70f4f9aacb9f0296e8936a1383fb91e96ec42d0ee5256d064dbb9eec85fa70c0d97f8c2b8d54467e86c93a96dd2e7973aaaf5967fbfb5331e72fd5a4edad7e2d"
+      },
+      {
+        "name": "origin-grant-receipt",
+        "kind": "grantReceipt",
+        "direction": "originToRecipient",
+        "directionByte": 1,
+        "sequence": 3,
+        "frameVersion": 1,
+        "frameHex": "54424348010100000000000000031c1a555c8dcde6f3963c422fcd71d40da74c87d6b33327466dfb75b279cb2bfd049ac34e7d7249fcb50f593727a665ef2ba78e4ab9f5c9131556fad149b2a87700c6f0c41eb1c76cc7322d064846cdf38ea59fa82a9ca23da2c6ed43d239ddaad6f55f196b75ee5f82b4c2a8fed671089e77c28788c30ee180ac3f38bb83752a95f992f6c01342a6a07878570153a16a26f9139351ec0f0c993207e3ab40390f3491139b4c55b9477a273f92809989b4a997a5d7b7c308abba6a03af9d7a9ac25e516780bcb93b45a598f4b8ac1aa4c37be4afbc3fcf2da452ac5956fc4f2409fe00761bd0fde985459f9534cb327074b2a5e83c571989ff7edb376458ddb6c4de0dbca011ca47bd8a4b29776a216e7f275afca0e014e1f1924ccb4777827b048b7d80c0e8356cc5c1a9260a37733315cc7d3ced3a9d064e1965ca7b990383a1825608bfec4704d287e7b1d2eb4c484fe54b2f0789bb922a4c6f107d451b324f97cb2f4f139ede0487db6bf8fccc06e8f6ff87fef5c7f4ace20c63045340c8a8",
+        "alternateFrameHex": "54424348010100000000000000031c1a555c8dcde6f3963c422fcd71cf05b044ca8df5766f0566f66da07ef908fe11efa120574b5cd7bb39087b47dc4ae102bd866897c5e1721276eec074a180117bc2dafd35f6e27bc9022d34531de8c993ab9cb439c4d50f84f2fb47f72ff9ddd3b6611d4965ff4db490dea9a3c8710aa40698bd9ba721a6b5f53f3cb0bf662fb0d9a0d9f4036389ca1c7b341c73a93327d210b877d02a069e0e23e696795b7f33f1068c5169b06c61302bb3978e9ea3be86c5c6d7d41fbcad7d09b88a6d8dd54a7073bcb6b8206fce82ebdc8810a7ec74cc8e8b1cf4369e75f65b25e5632f38ff585e10d3eceaac6496ba0ed0342304adfef12a4a258cd565f32f7b43f5adecc527dc8a71e25c9591632f61710975573f45e4a2e614faf7c13cd41c69ac6c1b9b6d989deb1867c2d1f3383f1e756049e07e26b035802b743360d17da7278ce8994a04bfbc7f539bad90bec8fe627d17fe4d7a2bb990e67d012a5341190f322aeb9a2a7a249be338d3dc68c0b18506e889e1f027f8eed2925b4997910a1a1895"
+      },
+      {
+        "name": "recipient-completion-acknowledgement",
+        "kind": "completionAcknowledgement",
+        "direction": "recipientToOrigin",
+        "directionByte": 2,
+        "sequence": 3,
+        "frameVersion": 1,
+        "frameHex": "5442434801020000000000000003c7cc335db51aa0ee95fd847bc54d60487b588758a1ab31af592db9338538a65e9b27a8a82f8e2f8d7bdf4cf9c1c151724bea17cca56fed340cbca24b04725c552761094103b225341669d39190207874a700cd9de1f8a8431c5891a98547a2919074eea47927aac556af06e05c5b7f7be49477d420d890bfbd4a97bfc3669c89767b4baf721df65a26fb64ad8b5a9fb211c9114eed09c4e55d9476bfd56c9df11f8a0f9f304072b763be1ddcb1f3e943771505bee82c0ef13b7701655fa7ec278debec544de5d2f03ddb47d3195dd6d0f6be33b3dd8405d030e2ff95837b3021f03ee1e9351cce0cb3125e1504",
+        "alternateFrameHex": "5442434801020000000000000003c7cc335db51aa0ee95fd847bc54d7b406c50ca03e7ea64e04c3896298f3a8e6a9c0a8cab01d01c997ff273d5f6ed3d3120f019dcac48d5284bdee84f27567b041370291516b01f3a7553e5a6961c7f689c25ec90e8d3a547006c81be901fb4feaf6b99cc7f43f2ce49953ec969671b5cc69978c02fc19eaf9879b8a7f456828e144f37c86d33814946c67ab8b660a1a927ac3e40ff16f6f55b8b439cd371e0e916b3038f3f5c02bc59ad19cfb5e0ed50730601b0ec3906994c1e575f638fca54e4f8cd6a75d3fcd91cf46aec0d78ffefcc8f1d87eca522ec06c6b29583db2862f6ace68b969967f3de5c2d38e4"
+      }
+    ]
+  },
+  "frames": [
+    {
+      "name": "origin-sas-match",
+      "direction": "originToRecipient",
+      "directionByte": 1,
+      "sequence": 0,
+      "frameVersion": 1,
+      "frameHex": "54424348010100000000000000001c1a555c8dcde6f3963c422ce7b9e6b5876448b51c9654580fe61a2370f0b89983cfcb55c187ed829acd3501791217f34a283421a2527a1023a9dd439f22a44a335230",
+      "alternateFrameHex": "54424348010100000000000000001c1a555c8dcde6f3963c422ce7b9fdbd906c05ee5ac70f090ad2447721b5f59cc88d8d079adcf28c88ed725832202fa1192834e2758b5d8e34f7eb15b1e3e9e6dc8fd1"
+    },
+    {
+      "name": "recipient-sas-match",
+      "direction": "recipientToOrigin",
+      "directionByte": 2,
+      "sequence": 0,
+      "frameVersion": 1,
+      "frameHex": "5442434801020000000000000000c7cc335db51aa0ee95fd8478ab462e9e361f3add577a01a1189d6d68a57441b296cbe9cdfc19968968b03ac0d32d8cc41200c80da9cb3670cf853aa9901637f52c1c22",
+      "alternateFrameHex": "5442434801020000000000000000c7cc335db51aa0ee95fd8478ab46359621177786112b5af01da9333cf4310cb7dd89af9fa74289877a907d99981fb4964100c84300ad369f6abda84e41942a8bf32c6a"
+    },
+    {
+      "name": "origin-debug-test",
+      "direction": "originToRecipient",
+      "directionByte": 1,
+      "sequence": 1,
+      "frameVersion": 1,
+      "frameHex": "54424348010100000000000000011c1a555c8dcde6f3963c422d2b84adf39a7a65dc5b0d20654ce9e179625a162170dea710325a9ca666b85a8f97ca342a795f732f78386854e7412f044089a69ac6466d952b333ff7502806ee",
+      "alternateFrameHex": "54424348010100000000000000011c1a555c8dcde6f3963c422d2b84b6fb8d7228871d5b7f345af8872b4809033853e7995e514bace34faf3d80d9935a194a5d4e3e106c7f56a9082f04ae1913511922de63118399a7902b4253"
+    },
+    {
+      "name": "recipient-debug-test",
+      "direction": "recipientToOrigin",
+      "directionByte": 2,
+      "sequence": 1,
+      "frameVersion": 1,
+      "frameHex": "5442434801020000000000000001c7cc335db51aa0ee95fd8479a4386a73156d59411346298ee8a59e3ff3ca95ced46f4b464ad624ce22d5cf8330baed9be1c14b5ac86f60b9471e3525f6f34d9bc011017e450d5d1f2a252bdb2edfa778",
+      "alternateFrameHex": "5442434801020000000000000001c7cc335db51aa0ee95fd8479a438717b0265141a551076dfffeae477e2f3aed2e1591a543cac1dcf2d8cfcad11ad8af1f6dd2569fb6d5da82f4a2227b8ba4d9bb7af1a69f859b2fcc55d4a80c8728ac7"
+    }
+  ]
+}

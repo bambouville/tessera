@@ -1,9 +1,8 @@
 import Foundation
 import Observation
-
-public enum TmuxDiagnostics {
-    public static var sink: ((String) -> Void)?
-}
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Runtime state machine for a `tmux -CC` session.
 ///
@@ -49,21 +48,13 @@ public final class TmuxController {
     /// command batch as the size force, so peers observe an explicit authority
     /// transfer instead of inferring one from geometry. Value grammar:
     /// `v1 <deviceID> <generation> <displayName>`.
-    public static let gridAuthorityOption = "@tessera_authority"
-    static let gridAuthoritySubscriptionName = "tessera-authority"
+    public static let gridAuthorityOption = TmuxGridAuthority.option
+    static let gridAuthoritySubscriptionName = TmuxGridAuthority.subscriptionName
 
     /// Identity this client stamps into `gridAuthorityOption` when it takes
     /// the grid. `id` must be stable per app install; `displayName` is shown
     /// on the peer's takeover overlay ("continued on iPhone").
-    public struct GridAuthorityIdentity: Equatable, Sendable {
-        public let id: String
-        public let displayName: String
-
-        public init(id: String, displayName: String) {
-            self.id = TmuxController.sanitizedAuthorityToken(id)
-            self.displayName = TmuxController.sanitizedAuthorityToken(displayName)
-        }
-    }
+    public typealias GridAuthorityIdentity = TmuxGridAuthorityIdentity
 
     /// Who currently owns the shared tmux grid, as observed through the
     /// authority stamp. `.unknown` until the first stamp observation of a
@@ -81,17 +72,68 @@ public final class TmuxController {
         public var isPeer: Bool { peerDisplayName != nil }
     }
 
-    /// How this control client participates in tmux window sizing.
-    ///
-    /// App clients use `resizeTmux`: each visible terminal pushes its physical
-    /// viewport with `refresh-client -C`, allowing tmux to choose the current
-    /// grid from all attached device sizes. `preserveServerGeometry` remains
-    /// available for non-rendering observer clients that attach with tmux's
-    /// `ignore-size` flag.
-    public enum ClientSizePolicy: Sendable {
-        case resizeTmux
-        case preserveServerGeometry
+    /// The one value the terminal surface renders for grid authority. It is
+    /// derived from the lifecycle reducer's state, never from `gridAuthority`
+    /// alone: while a show intent is pending, buffered stamp lines can
+    /// project a peer that the fresh read is about to displace, and showing
+    /// the veil for that interval would flash it over a session the user is
+    /// resuming. Equatable without a generation, so an unchanged value never
+    /// invalidates a SwiftUI body.
+    public enum GridAuthorityPresentation: Equatable, Sendable {
+        /// Nothing to show; terminal input flows.
+        case none
+        /// A show (or explicit open) is resolving: the last frame stays on
+        /// screen with a small indicator, and input waits for the result.
+        /// `awaitingConnection` is true while no control channel can carry
+        /// the read, i.e. the session "takes control when reconnected".
+        case resuming(awaitingConnection: Bool)
+        /// Another device holds the grid and no gesture is pending.
+        case veiled(peerName: String)
+        /// The user tapped the veil (or a contested claim's own write won):
+        /// the veil stays up with its progress state.
+        case reclaiming(peerName: String, awaitingConnection: Bool)
+
+        // The input gate is `TmuxController.gridAuthorityAllowsInput`: it
+        // also needs the reducer's last-known holder while a show waits for
+        // a connection, which this value deliberately does not carry.
+
+        /// True for the states that draw the continued-elsewhere veil.
+        public var showsVeil: Bool {
+            switch self {
+            case .veiled, .reclaiming: return true
+            case .none, .resuming: return false
+            }
+        }
+
+        public var peerName: String? {
+            switch self {
+            case .veiled(let name), .reclaiming(let name, _): return name
+            case .none, .resuming: return nil
+            }
+        }
+
+        public var isReclaiming: Bool {
+            if case .reclaiming = self { return true }
+            return false
+        }
+
+        public var isResuming: Bool {
+            if case .resuming = self { return true }
+            return false
+        }
+
+        /// A pending gesture is waiting for a control channel.
+        public var isAwaitingConnection: Bool {
+            switch self {
+            case .resuming(let awaiting), .reclaiming(_, let awaiting): return awaiting
+            case .none, .veiled: return false
+            }
+        }
     }
+
+    /// Portable policy shared with non-Observation clients such as the Mac
+    /// Bridge. Kept as a source-compatible nested alias for existing callers.
+    public typealias ClientSizePolicy = TmuxClientSizePolicy
 
 
     public enum Mode: Equatable, Sendable {
@@ -126,6 +168,7 @@ public final class TmuxController {
         case viewportRefresh = "tmux-repaint-viewport-only"
         case deepRepaint = "tmux-repaint-deep"
         case repaintScrub = "tmux-repaint-scrub"
+        case moshHistory = "mosh-history"
     }
 
     /// Metadata describing one shared-terminal feed without retaining its
@@ -135,6 +178,10 @@ public final class TmuxController {
         public let source: TerminalFeedSource
         public let paneId: PaneId?
         public let windowId: WindowId?
+        /// Surface-ownership epoch. Unlike `generation`, this advances only
+        /// when the terminal must be rebound and its scrollback cleared; an
+        /// in-place foreground viewport repair intentionally retains it.
+        public let renderOwnerEpoch: UInt64?
         public let generation: Int?
         public let captureRows: Int?
         public let reason: String?
@@ -146,6 +193,7 @@ public final class TmuxController {
             source: TerminalFeedSource,
             paneId: PaneId? = nil,
             windowId: WindowId? = nil,
+            renderOwnerEpoch: UInt64? = nil,
             generation: Int? = nil,
             captureRows: Int? = nil,
             reason: String? = nil,
@@ -154,29 +202,12 @@ public final class TmuxController {
             self.source = source
             self.paneId = paneId
             self.windowId = windowId
+            self.renderOwnerEpoch = renderOwnerEpoch
             self.generation = generation
             self.captureRows = captureRows
             self.reason = reason
             self.originalByteCount = originalByteCount
         }
-    }
-
-    enum RenderStage: Equatable, Sendable {
-        case viewport
-        /// Refresh the already-rendered window/pane in place. Unlike a real
-        /// window swap, this must not clear and rebuild local scrollback.
-        case viewportOnly
-        case deep
-    }
-
-    private enum CaptureBodyPolicy {
-        /// A visible or full-grid `capture-pane -p` must describe at least one
-        /// terminal row. tmux represents a blank grid as empty row strings.
-        case requiredGrid
-        /// Supplemental alternate-screen captures are optional: history can
-        /// disappear between metadata and capture, and `capture-pane -a -q`
-        /// succeeds with no body when there is no saved primary grid.
-        case optionalSupplement
     }
 
     /// Failure modes for the command-response API (§3.2 commit C).
@@ -192,6 +223,14 @@ public final class TmuxController {
         /// `reset()`) before tmux replied. The completion fires to
         /// release captured state; no response bytes are available.
         case cancelled
+        /// The command's response never arrived within the bounded
+        /// response interval and the queue entered recovery. The remote
+        /// server MAY still have executed the command — treat delivery
+        /// as ambiguous and never retry non-idempotent input for it.
+        case timedOut
+        /// A background write refused, unsent, while another device holds
+        /// the grid or a take-back is running (S5′).
+        case refusedByAuthority
     }
 
     /// Lightweight view model for one tmux window, kept in step with
@@ -279,10 +318,16 @@ public final class TmuxController {
         public var visibleLayout: WindowLayout?
         public var isZoomed: Bool
 
+        /// Delegates to the portable owner of the label policy so the tab
+        /// strip, the Android tab strip, and anything reading the snapshot
+        /// wire all render the identical string.
         public var displayName: String {
-            (activePaneTitleIsDefault ? nil : Self.nonEmpty(activePaneTitle))
-                ?? Self.nonEmpty(windowName)
-                ?? id.description
+            TmuxWindowSnapshot.displayName(
+                windowID: id,
+                name: windowName,
+                activePaneTitle: activePaneTitle,
+                activePaneTitleIsDefault: activePaneTitleIsDefault
+            )
         }
 
         /// Compatibility for existing UI call sites; prefer
@@ -294,10 +339,13 @@ public final class TmuxController {
         public var paneCount: Int { layout?.paneCount ?? max(1, panes.count) }
 
         /// True when this window must mount the pane grid rather than render
-        /// through the shared single-pane terminal. Uses the FULL layout (not
-        /// `visibleLayout`) so a zoomed multi-pane window stays in grid mode.
+        /// through the shared single-pane terminal. A zoomed multi-pane window
+        /// is intentionally one surface; its full layout remains available for
+        /// unzoom and pane navigation while `visibleLayout` names the leaf.
         /// Fail-open: a `nil` layout (pre-hydration) renders single-pane.
-        public var rendersAsPaneGrid: Bool { (layout?.paneCount ?? 1) > 1 }
+        public var rendersAsPaneGrid: Bool {
+            !isZoomed && (layout?.paneCount ?? 1) > 1
+        }
 
         public init(
             id: WindowId,
@@ -333,42 +381,6 @@ public final class TmuxController {
             else { return nil }
             return value
         }
-    }
-
-    public struct ScrollbackCapture: Equatable, Sendable {
-        public let paneId: PaneId
-        public let requestedDepth: Int
-        public let historySize: Int?
-        public let capturedLineCount: Int
-        public let repaintBytes: [UInt8]
-
-        public init(
-            paneId: PaneId,
-            requestedDepth: Int,
-            historySize: Int?,
-            capturedLineCount: Int,
-            repaintBytes: [UInt8]
-        ) {
-            self.paneId = paneId
-            self.requestedDepth = requestedDepth
-            self.historySize = historySize
-            self.capturedLineCount = capturedLineCount
-            self.repaintBytes = repaintBytes
-        }
-    }
-
-    public enum ScrollbackCaptureSkipReason: Equatable, Sendable {
-        case notInTmux
-        case noActivePane
-        case stale
-        case metadataUnavailable
-        case alternateScreen
-        case captureFailed
-    }
-
-    public enum ScrollbackCaptureResult: Equatable, Sendable {
-        case captured(ScrollbackCapture)
-        case skipped(ScrollbackCaptureSkipReason)
     }
 
     public struct PaneInteractionState: Equatable, Sendable {
@@ -410,10 +422,47 @@ public final class TmuxController {
     /// arrive as normal notifications.
     public private(set) var windows: [WindowInfo] = []
 
+    /// Immutable production state. The portable runtime remains independent of
+    /// Apple Observation, while this revision projection lets Apple adapters
+    /// subscribe to every core-owned snapshot change without duplicating its
+    /// fields or policy.
+    public var snapshot: TmuxSnapshot {
+        _ = snapshotObservationRevision
+        return runtimeEngine.snapshot
+    }
+
     /// True only after this control connection has completed an authoritative
     /// `list-windows` response. Side-channel reconnects keep stale tabs visible,
     /// but targeted commands must remain blocked until this flips back to true.
     public private(set) var isWindowListHydrated = false
+
+    /// User-facing failure from the most recent reorder or tidy operation.
+    /// The session UI observes this and presents it through its existing
+    /// transient-error surface.
+    public private(set) var windowOrderError: String?
+
+    /// Ordering controls are valid only against live, authoritative topology.
+    /// A yielded side-channel client must not mutate the peer-owned session,
+    /// and the core admits only one optimistic order at a time.
+    public var canTidyWindows: Bool {
+        mode == .tmuxControl
+            && isWindowListHydrated
+            && snapshot.isWindowListHydrated
+            && ownSessionId != nil
+            && !gridAuthority.isPeer
+            && !isWindowReorderPending
+            && !windows.isEmpty
+    }
+
+    /// Moving needs a distinct source and destination. Tidy remains available
+    /// for one surviving window because its tmux index may still have a gap.
+    public var canReorderWindows: Bool {
+        canTidyWindows && windows.count > 1
+    }
+
+    public var isWindowReorderPending: Bool {
+        snapshot.isReorderPending || windowOrderOperationPending
+    }
 
     /// Outstanding `%window-add` details queries (`queryWindowDetails`)
     /// per window, counted so a close + re-add of the same id — two
@@ -456,8 +505,46 @@ public final class TmuxController {
     public private(set) var renderedPaneId: PaneId?
 
     // Non-observed internals (SwiftUI doesn't need to re-render on these).
-    @ObservationIgnored private var parser = TmuxControlParser()
-    @ObservationIgnored private var dcsBuffer: [UInt8] = []
+    @ObservationIgnored private var runtimeEngine = TmuxRuntimeEngine()
+    /// A legacy platform hydration reply can arrive before later topology in
+    /// one already-parsed socket read. Stage its session-scoped correction so
+    /// ordered snapshots can use it, then commit only if nothing later in the
+    /// read supersedes it.
+    @ObservationIgnored private var activeWindowQueryRebase: (
+        windowID: WindowId,
+        sessionID: SessionId?,
+        connectionGeneration: UInt64
+    )?
+    @ObservationIgnored private var pendingHydratedActiveWindow: (
+        windowID: WindowId,
+        generation: Int,
+        reason: String
+    )?
+    /// Generation of a socket read whose legacy list callback mutated the
+    /// runtime after that read had already been parsed. Its later topology
+    /// notifications must be replayed in wire order.
+    @ObservationIgnored private var legacyTopologyReplayConnectionGeneration: UInt64?
+    /// Synchronous callbacks (including sendBytes in tests/adapters) may
+    /// re-enter ingest while an outer socket read is still being processed.
+    /// Only the outermost invocation owns batch-final query commit and replay
+    /// cleanup; nested invocations participate in the same ordered turn.
+    @ObservationIgnored private var controlProcessingDepth = 0
+    /// The single portable owner for render staging and tmux command-response
+    /// correlation. Platform code below is deliberately limited to executing
+    /// its ordered effects against SwiftTerm and the transport.
+    @ObservationIgnored private var renderLedger = TmuxRenderLedger()
+    @ObservationIgnored private var renderTimerTasks: [UInt64: Task<Void, Never>] = [:]
+    @ObservationIgnored private var executingRenderReplyRows: Int?
+    @ObservationIgnored private var executingRenderReplyReason: String?
+    /// The ordered topology at the command reply currently being delivered.
+    /// RuntimeEngine has already parsed the rest of the socket read, so legacy
+    /// completion handlers must use this snapshot instead of its batch-final
+    /// mutable state.
+    @ObservationIgnored private var executingCommandReplySnapshot: TmuxSnapshot?
+    private var snapshotObservationRevision: UInt64 = 0
+    /// The portable core owns all incremental DCS/prologue state. The Apple
+    /// adapter only projects the detector's passthrough/control partitions.
+    @ObservationIgnored private var controlModeDetector = TmuxControlModeDetector()
     @ObservationIgnored private var outputTitleScanners: [PaneId: TerminalOutputScanner] = [:]
     @ObservationIgnored private var preloadedTerminalDefaultColorPanes: Set<PaneId> = []
 
@@ -469,20 +556,78 @@ public final class TmuxController {
     /// with the responses on the wire.
     @ObservationIgnored private var pendingCommands: [PendingCommand] = []
     @ObservationIgnored private var nextCommandSequence = 0
+    @ObservationIgnored private var pendingWindowReorderToken: UInt64?
+    @ObservationIgnored private var windowOrderDeadlineTask: Task<Void, Never>?
+    @ObservationIgnored var windowOrderDeadlineInterval: TimeInterval = 5
+    @ObservationIgnored private var windowOrderOperationPending = false
 
-    /// Lines accumulated between the most recent `%begin` and the next
-    /// `%end` / `%error`. Drained and handed to the head completion
-    /// when the terminator arrives.
-    @ObservationIgnored private var inflightLines: [String] = []
-    /// Guard tuple from the `%begin` that opened `inflightLines`. tmux emits
-    /// the same tuple on the closing `%end`/`%error`; retaining it lets us
-    /// diagnose corruption and classify the frame without trusting one
-    /// potentially malformed closing flags field.
-    @ObservationIgnored private var inflightFrameGuard: (
-        time: Int,
-        commandNumber: Int,
-        flags: Int
-    )?
+    /// Response-liveness watchdog over `pendingCommands`. The FIFO's
+    /// correctness depends on tmux answering every client command; a lost,
+    /// misclassified, or never-emitted reply otherwise poisons the queue
+    /// forever while `%output` keeps flowing (observed on tmux 3.4 — see
+    /// docs/refactor/input-stall-after-shared-refactor-findings.md).
+    @ObservationIgnored private var commandResponseWatchdogTask: Task<Void, Never>?
+    /// Ages are measured from the later of a command's transmit instant and
+    /// this baseline. Foregrounding sets it so time spent app-suspended
+    /// (during which ContinuousClock keeps advancing) never counts toward
+    /// response-poisoning thresholds.
+    @ObservationIgnored private var commandResponseWatchdogBaseline: ContinuousClock.Instant?
+    /// Most recent instant ANY control-mode wire event was processed
+    /// (notifications, `%output`, frames). Once pane output is quiet, this
+    /// distinguishes "the server produced later traffic but our client
+    /// response is missing" from a fully stalled transport.
+    @ObservationIgnored private var lastControlActivityAt: ContinuousClock.Instant?
+    /// Most recent pane-output event. A client response is ordered behind all
+    /// earlier `%output` on the same control stream, so live pane output is
+    /// congestion evidence, not proof that an unanswered command is poisoned.
+    @ObservationIgnored private var lastPaneOutputAt: ContinuousClock.Instant?
+    /// Cooperative renderer delivery intentionally yields while draining a
+    /// large pane-output batch. The watchdog may run during those yields, but
+    /// must not recover a command whose response is simply later in that same
+    /// ordered batch.
+    @ObservationIgnored private var cooperativeOutputIngestDepth = 0
+    /// While non-nil, response correlation is unsynchronized: every frame is
+    /// discarded until a success frame carrying `nonce` in its body proves the
+    /// wire has drained past all pre-recovery commands. Frames after the nonce
+    /// map 1:1 onto commands transmitted after the fence, because tmux answers
+    /// client commands serially.
+    private struct CommandQueueFence {
+        let nonce: String
+        let armedAt: ContinuousClock.Instant
+    }
+    @ObservationIgnored private var pendingCommandFence: CommandQueueFence?
+    /// Count of poisoned-queue recoveries on this controller, for
+    /// diagnostics and tests.
+    @ObservationIgnored public private(set) var commandQueueRecoveries = 0
+    /// Owner-supplied transport recovery for a poisoned command channel.
+    /// Inline SSH reopens its interactive PTY; the mosh path disconnects its
+    /// independently reconnecting tmux side channel. When unset (package
+    /// tests and compatibility clients), the nonce-fence fallback remains.
+    @ObservationIgnored public var onCommandQueueTransportRecoveryRequired: ((Int) -> Void)?
+    /// Once transport recovery has been requested, no more commands may enter
+    /// the old channel. Their delivery would be ambiguous and, for input,
+    /// could replay into the replacement attachment after its fresh hydrate.
+    @ObservationIgnored private var commandQueueAwaitingTransportRecovery = false
+    /// An actively waiting keystroke or window selection gets a tighter
+    /// liveness bound than background metadata after ordered pane output has
+    /// drained. It must never outrun renderer/control-stream backpressure.
+    @ObservationIgnored public var commandResponseInteractivePoisonThreshold: TimeInterval = 2
+    /// Server-active recovery is allowed only after pane output has drained
+    /// and stayed quiet for this interval. This keeps a large Codex/compiler
+    /// dump from turning renderer backpressure into a destructive reconnect.
+    @ObservationIgnored public var commandResponseOutputQuietPeriod: TimeInterval = 1
+    /// Oldest-pending-command age that triggers recovery after later server
+    /// activity has been observed and ordered pane output is quiet.
+    @ObservationIgnored public var commandResponsePoisonThreshold: TimeInterval = 10
+    /// Bound after output becomes quiet: recover even without observed server
+    /// activity, so a hung tmux server fails pending completions instead of
+    /// leaking them forever. Live ordered output defers this bound because the
+    /// response may still be behind that output on the same stream.
+    @ObservationIgnored public var commandResponseHardTimeout: TimeInterval = 30
+
+    /// Portable frame assembler/classifier; completion closures remain in the
+    /// Apple Observation wrapper and are dequeued only after this seam has
+    /// classified a response as client-originated.
 
     /// Last-known client size (cols × rows). Refreshed by
     /// `updateClientSize(cols:rows:)` from the outer view whenever
@@ -493,6 +638,11 @@ public final class TmuxController {
     /// in `-CC`, so without this the pane stays at whatever size the
     /// PTY happened to be at the moment `tmux -CC` was launched.
     @ObservationIgnored private var lastKnownSize: (cols: Int, rows: Int)?
+
+    /// Geometry whose refresh-client bytes entered the ordered transport queue.
+    /// Requested geometry stays in lastKnownSize while authority or app
+    /// visibility withholds it; compact reprojection must judge publications.
+    public private(set) var lastPublishedClientSize: TmuxClientGeometry?
 
     /// The physical viewport reported by the local terminal view. This stays
     /// separate from `lastKnownSize`: an `ignore-size` phone deliberately
@@ -531,6 +681,11 @@ public final class TmuxController {
     /// without matching local/session state.
     @ObservationIgnored private var reverseAttachCedeMutationInFlight = false
     @ObservationIgnored private var pendingReverseAttachCedeSize: (cols: Int, rows: Int)?
+    /// Monotonic user-selection intent for the side-channel's visible-client
+    /// mirror. Window and pane selections share the fence because either can
+    /// supersede the other while identity queries are in flight; only the
+    /// newest is allowed to move the painter client.
+    @ObservationIgnored private var visibleClientSelectionGeneration: UInt64 = 0
 
     private enum CompactClientSizeRole {
         case unresolved
@@ -563,124 +718,341 @@ public final class TmuxController {
     /// observers, while grid authority is the reversible, stamp-based
     /// ownership contract between `resizeTmux` devices.
     public private(set) var gridAuthority: GridAuthority = .unknown
-    /// True from a reclaim request until geometry is confirmed and any
-    /// required authoritative repaint has been issued/completed (or the
-    /// claim timeout folds the spinner back). Drives the overlay's
-    /// "taking back control…" phase.
-    public private(set) var gridAuthorityReclaimInFlight = false
+    /// Cross-platform authority policy. The surrounding controller is only
+    /// the tmux-command and renderer adapter; claim admission, reconnect,
+    /// contest, timeout and settlement decisions live here and in the
+    /// identical reducer Android reaches through TesseraCoreABI. Control
+    /// moves only on a show edge or a veil gesture (the show rule, review
+    /// §6.9); attach, reconnect, foreground and a peer's departure only read.
+    @ObservationIgnored private var gridAuthoritySession = TmuxGridAuthoritySession(initialGeneration: TmuxGridAuthorityStamp.generationBase(
+        unixMillis: Int64(Date().timeIntervalSince1970 * 1_000)
+    ))
+    private var gridAuthorityLifecycle: TmuxGridAuthorityLifecycleReducer { gridAuthoritySession.reducer }
+    /// Milliseconds from one sleep-inclusive origin. Tests inject the same clock
+    /// used for events and deadlines; the wake task never supplies its own time.
+    private static let gridAuthorityClockOrigin = ContinuousClock.now
+    private static func continuousAuthorityMillis() -> Int64 {
+        let elapsed = gridAuthorityClockOrigin.duration(to: ContinuousClock.now).components
+        return elapsed.seconds * 1_000 + Int64(elapsed.attoseconds / 1_000_000_000_000_000)
+    }
+    @ObservationIgnored private var gridAuthorityNow: () -> Int64 = TmuxController.continuousAuthorityMillis
+    @ObservationIgnored private var gridAuthorityWakeTask: Task<Void, Never>?
+    @ObservationIgnored private var gridAuthorityWakeDeadline: Int64?
+    @ObservationIgnored private var gridAuthorityReductionRevision: UInt64 = 0
+    #if canImport(UIKit)
+    @ObservationIgnored private var gridAuthorityBackgroundObserver: NSObjectProtocol?
+    @ObservationIgnored private var gridAuthorityForegroundObserver: NSObjectProtocol?
+    @ObservationIgnored private var gridAuthorityActiveObserver: NSObjectProtocol?
+    #endif
+    /// The single observed value the terminal surface renders. Recomputed
+    /// after every reduction and written only when it changes.
+    public private(set) var gridAuthorityPresentation: GridAuthorityPresentation = .none
+    /// One synchronous O(1) read for every input path (keys, paste, path
+    /// injection). False while veiled or reclaiming, and while resuming over
+    /// a live channel (the fresh read is moments away). While a show waits
+    /// for a channel that is down (`awaitingConnection`, e.g. a mosh+tmux
+    /// side channel reconnecting), typing still reaches the shell through
+    /// the transport, so it flows unless the last-known holder is a peer.
+    public private(set) var gridAuthorityAllowsInput = true
+    /// Agent Center launches (D7): refused while veiled or reclaiming, and
+    /// while resuming only when a peer holds the grid.
+    public var gridAuthorityRefusesAgentSend: Bool {
+        participatesInGridAuthority && gridAuthorityMutationRefusal != nil
+    }
+    /// Whether the control channel could carry a read right now; the
+    /// show coordinator pauses only connecting sessions for connect prompts.
+    public var gridAuthorityChannelIsLive: Bool {
+        gridAuthoritySession.channelIsLive
+    }
+    /// True while a claim's progress presentation is visible (from the
+    /// gesture until settlement, contest, or the 3 s presentation timeout).
+    /// Derived from the reducer; observe `gridAuthorityPresentation` instead.
+    public var gridAuthorityReclaimInFlight: Bool {
+        gridAuthorityLifecycle.claim?.presentationVisible == true
+    }
+    /// A show, explicit open or tap is waiting for its fresh authority read.
+    public var gridAuthorityHasPendingIntent: Bool {
+        gridAuthorityLifecycle.pendingIntent != nil
+    }
+    public var gridAuthorityPendingIntentSource: TmuxGridAuthorityLifecycleReducer.IntentSource? {
+        gridAuthorityLifecycle.pendingIntent?.source
+            ?? gridAuthoritySession.carriedShow(now: gridAuthorityNow()).map { $0.source == .show ? .show : .explicitOpen }
+    }
+    public private(set) var gridAuthorityMutationRefusal: TmuxGridAuthorityPresentation.MutationRefusal?
+    public private(set) var gridAuthorityGeometryHold: TmuxGridAuthoritySession.GeometryHold = .withheld
+    public private(set) var gridAuthorityNextDeadline: Int64?
+    public var gridAuthorityIntentTimeout: TimeInterval {
+        Double(gridAuthoritySession.configuration.intentWindowMillis) / 1_000
+    }
+    public var gridAuthorityGeometryEvidenceTimeout: TimeInterval {
+        Double(gridAuthoritySession.configuration.replyHoldMillis) / 1_000
+    }
     /// Set by the owner after construction (like `feedTerminal`). Nil means
     /// this client does not participate in grid-authority stamping — e.g.
     /// harness observers.
-    @ObservationIgnored public var gridAuthorityIdentity: GridAuthorityIdentity?
+    @ObservationIgnored public var gridAuthorityIdentity: GridAuthorityIdentity? {
+        didSet {
+            gridAuthoritySession.localDeviceID = gridAuthorityIdentity?.id
+            if let old = oldValue?.id, old != gridAuthorityIdentity?.id {
+                applyGridAuthorityLifecycleEffects(reduceGridAuthority(.identityChanged))
+            } else {
+                // Participation can change without a reducer transition (nil
+                // identity). Re-project it through the same ledger path.
+                applyGridAuthorityLifecycleEffects([])
+            }
+            if let local = lastKnownSize {
+                applyGridAuthorityLifecycleEffects(reduceGridAuthority(.localSize(TmuxGridSize(columns: local.cols, rows: local.rows))))
+            }
+            noteGridAuthorityWindowFacts()
+            noteGridAuthorityPaintable()
+            updateGridAuthorityPresentation()
+        }
+    }
     /// Compact grid presentation mounts only the active pane. Keep authority
     /// repaint completion aligned with the surfaces that actually exist;
     /// regular-width and unzoomed grids repaint every rendered pane.
     @ObservationIgnored public private(set) var gridAuthorityUsesCompactSinglePaneGrid = false
-    /// Fired only after a peer-departure auto-reclaim has actually settled,
-    /// so the app cannot announce control while the old grid is still live.
-    /// The argument is the departed peer label captured before `.mine`
-    /// replaces the peer state.
-    @ObservationIgnored public var onGridAuthorityAutoReclaimed: ((String?) -> Void)?
     /// Mosh owns visible repainting outside the control channel. Called after
     /// side-channel geometry settles but before the veil lifts. The Bool says
     /// whether the claim changed geometry (and therefore whether the normal
     /// layout observer should suppress its duplicate repaint). The UInt64 is
     /// the claim generation that must be acknowledged after the exact forced
     /// framebuffer has been consumed by the terminal surface.
-    @ObservationIgnored public var onGridAuthoritySideChannelRepaintRequired: ((Bool, UInt64) -> Void)?
-    @ObservationIgnored private var gridAuthorityGeneration = 0
-    @ObservationIgnored private var lastSeenAuthorityRawValue: String?
-    @ObservationIgnored private var gridAuthorityPeerCheckInFlight = false
-    @ObservationIgnored private var gridAuthorityReclaimTimeoutTask: Task<Void, Never>?
-    /// True once this controller has completed a claiming attach. Every later
-    /// attach (auto-reconnect, session change) re-derives authority from the
-    /// stamp instead of stealing the grid — a takeover can happen during ANY
-    /// drop, not just one that began while yielded (T6). Never reset: only a
-    /// fresh controller (a user-initiated connect) claims blindly.
-    @ObservationIgnored private var gridAuthorityHasAttachedOnce = false
-    /// A claim's server-side effects (stamp + size + fence) cannot be
-    /// recalled, so this stays armed after the 3s UI timeout folds the
-    /// spinner back: a late-settling claim still completes when geometry
-    /// finally matches, instead of stranding both devices veiled. Cleared on
-    /// completion, contest, or reset.
-    @ObservationIgnored private var gridAuthorityClaimPending = false
-    /// True only after the server has processed the size replay and the
-    /// inline latest-client transfer (when applicable). Geometry can arrive
-    /// from an older notification while those commands are still queued, so
-    /// it must never settle a claim before this fence lands.
-    @ObservationIgnored private var gridAuthorityClaimFenceAcknowledged = false
-    /// Diagnostic count of current-window moves observed during this claim.
-    /// Every move starts a new fence generation; stale callbacks reject
-    /// themselves, while the final settled window always gets a completion
-    /// path instead of being stranded behind an arbitrary retry limit.
-    @ObservationIgnored private var gridAuthorityRefenceCount = 0
-    /// Invalidates an older policy/fence chain when the current tmux window
-    /// moves during a claim. Claim generation alone is not enough: every
-    /// re-fence belongs to the same claim.
-    @ObservationIgnored private var gridAuthorityFenceGeneration: UInt64 = 0
-    /// Monotonic identity for the active claim. A timed-out claim's command
-    /// replies can arrive after the user retries; those old fences must not
-    /// acknowledge the replacement claim.
-    @ObservationIgnored private var gridAuthorityClaimGeneration: UInt64 = 0
-    /// The effective current-window `window-size` policy must be known before
-    /// a fence can settle the claim. It is re-probed for every claim and every
-    /// current-window move, rather than cached from attach time.
-    @ObservationIgnored private var gridAuthorityClaimPolicyResolved = false
-    @ObservationIgnored private var gridAuthorityFenceTarget: WindowId?
+    @ObservationIgnored public var onGridAuthoritySideChannelRepaintRequired: ((Bool, UInt64) -> Void)? {
+        didSet { noteGridAuthorityPaintable() }
+    }
+    /// Retire a held history view before reserving a non-preserving claim's
+    /// live frame. Foreground repairs can keep that reservation held until tail.
+    @ObservationIgnored public var onGridAuthoritySideChannelRepaintPreparing: (() -> Void)?
+    /// A same-owner foreground repair keeps a revealed history page in place.
+    /// Geometry changes still invalidate it through the render ledger.
+    public var gridAuthorityRepaintPreservesHistory: Bool {
+        gridClaimIsForegroundRecovery
+            && !gridAuthorityClaimChangedGeometry
+            && gridAuthorityForegroundRecoveryOwner != nil
+            && gridAuthorityForegroundRecoveryOwner == renderLedger.owner(for: .live)
+    }
+    public var gridAuthorityRepaintRequiresFreshRemoteState: Bool {
+        gridAuthorityClaimChangedGeometry || gridClaimIsForegroundRecovery
+    }
+    private var gridClaimIsForegroundRecovery: Bool {
+        gridAuthorityForegroundRecoveryGeneration.map { $0 == liveGridClaimGeneration } ?? false
+    }
+    @ObservationIgnored private var gridAuthorityForegroundRecoveryGeneration: UInt64?
+    @ObservationIgnored private var gridAuthorityForegroundRecoveryOwner: RenderOwner?
+    private var gridAuthorityGeometryHeld: Bool { gridAuthoritySession.geometryHold == .withheld }
+    private var gridAuthorityGeometryWithheld: Bool { gridAuthorityGeometryHeld }
+    private var gridAuthorityOrdinaryGeometryIsUnstamped: Bool {
+        participatesInGridAuthority && gridAuthoritySession.geometryHold == .advertiseOnly
+    }
+    @ObservationIgnored private var gridAuthorityDeliveryRetryTask: Task<Void, Never>?
+    @ObservationIgnored private var gridAuthorityDeliveryRetryAttempts = 0
+    @ObservationIgnored private var gridAuthorityDeliveryRetryWindow: WindowId?
+    @ObservationIgnored private var gridAuthorityDeliveryRetryPanes: Set<PaneId> = []
+    /// The live claim's generation; nil outside a claim. The session's claim
+    /// is the only one: its fence (`claimFence`) says what the wire proved.
+    private var liveGridClaimGeneration: UInt64? { gridAuthorityLifecycle.claim?.generation }
+    /// The live claim's geometry phase is open on the wire: it advertised
+    /// its target and has not confirmed, or a loss, a stall or a re-target
+    /// sent it back. It stays open after the presentation deadline: a
+    /// claim's server-side effects cannot be recalled, so a late claim
+    /// still confirms when its geometry lands (§6.10 rule 1). A claim that
+    /// never advertised (no measured viewport yet) has sent nothing.
+    private var gridClaimAwaitsFence: Bool {
+        guard let claim = gridAuthorityLifecycle.claim else { return false }
+        return claim.phase == .awaitingFence && claim.targetGrid != nil
+    }
     /// Whether this claim began with a different/unknown server grid. Latched
     /// before the size replay so a matching `%layout-change` cannot erase the
     /// fact that the visible terminal needs one resynchronizing repaint.
     @ObservationIgnored private var gridAuthorityClaimChangedGeometry = false
-    /// Manual Refresh is a repaint request even when geometry already matches.
-    @ObservationIgnored private var gridAuthorityClaimForcesRepaint = false
     /// Inline repaint completion targets. The authority remains `.peer` while
     /// these are armed, keeping the veil above the terminal until captured tmux
     /// truth has actually been fed into every visible surface.
     @ObservationIgnored private var gridAuthorityRepaintWindow: WindowId?
     @ObservationIgnored private var gridAuthorityRepaintPanes: Set<PaneId> = []
+    /// P8: the claim's visible repaint, sent in the fence's own burst when
+    /// the claim cannot change geometry. tmux runs it after the fence, so
+    /// its capture is the frame the confirmation would otherwise have asked
+    /// for one round trip later. `relied` marks that confirmation adopted
+    /// it instead of requesting its own; a failure then falls back.
+    private struct GridAuthorityClaimRepaintInFlight {
+        let claimGeneration: UInt64
+        let fenceID: UInt64
+        let window: WindowId?
+        let panes: Set<PaneId>
+        var relied = false
+    }
+    @ObservationIgnored private var gridAuthorityClaimRepaintInFlight: GridAuthorityClaimRepaintInFlight?
     #if DEBUG
     var gridAuthorityRepaintPaneTargetsForTesting: Set<PaneId> {
         gridAuthorityRepaintPanes
     }
 
+    var gridAuthorityRepaintWindowTargetForTesting: WindowId? {
+        gridAuthorityRepaintWindow
+    }
+
+    var gridAuthorityDeliveryRetryAttemptsForTesting: Int {
+        gridAuthorityDeliveryRetryAttempts
+    }
+
+    var gridAuthorityClaimFenceAcknowledgedForTesting: Bool {
+        gridAuthoritySession.claimFence?.acknowledged ?? false
+    }
+
+    var stamplessPeerRejudgePendingForTesting: Bool {
+        gridAuthoritySession.stamplessJudge.deferred != nil
+    }
+
+    /// Advances the session's injected clock without a tick. Its recorded
+    /// advertisement stays unchanged; the next event sees the elapsed time.
+    func backdateLastClientSizeReplayForTesting(by seconds: TimeInterval) {
+        advanceGridAuthorityClockForTesting(by: Int64(seconds * 1_000), tick: false)
+    }
+
+    func advanceGridAuthorityClockForTesting(by milliseconds: Int64, tick: Bool = true) {
+        let clock = gridAuthorityNow
+        gridAuthorityNow = { clock() + milliseconds }
+        if tick { applyGridAuthorityLifecycleEffects(reduceGridAuthority(.tick)) }
+    }
+
+    var gridAuthoritySessionForTesting: TmuxGridAuthoritySession { gridAuthoritySession }
+
+    /// Advances to the shared judge's deadline and ticks the same session.
+    func finishStamplessPeerEchoForTesting() {
+        guard let deadline = gridAuthoritySession.stamplessJudge.nextDeadline else { return }
+        advanceGridAuthorityClockForTesting(by: max(0, deadline - gridAuthorityNow()))
+    }
+
+    /// Models a real connection boundary, including the shared reset.
+    func advanceControlConnectionGenerationForTesting() {
+        controlConnectionGeneration &+= 1
+        resetGridAuthorityState(preserveYieldedPresentation: true)
+    }
+
+    /// Isolates a stale projection from the reset/claim effects around it.
+    func deferGridAuthorityWireTargetForTesting() {
+        activeWindowId = nil
+        renderedWindowId = nil
+    }
+
+    /// A foreground read without the app's independent repaint, so a test
+    /// can see exactly what the authority verdict releases.
+    func rereadGridAuthorityForTesting() {
+        applyGridAuthorityLifecycleEffects(
+            reduceGridAuthority(.foregrounded)
+        )
+    }
+
+    var gridAuthorityDeliveryRetryPaneTargetsForTesting: Set<PaneId> {
+        gridAuthorityDeliveryRetryPanes
+    }
+
+    func armGridAuthorityDeliveryRetryForTesting(panes: Set<PaneId>) {
+        gridAuthorityRepaintPanes = panes
+    }
+
+    func scheduleGridAuthorityDeliveryRetryForTesting(panes: Set<PaneId>) {
+        scheduleGridAuthorityDeliveryRetry(
+            rejectedWindows: [],
+            rejectedPanes: panes
+        )
+    }
+
     func setGridAuthorityGeometryPolicyForTesting(latest: Bool) {
-        gridAuthorityGeometryPolicyKnown = true
-        gridAuthorityGeometryPolicyIsLatest = latest
+        guard let window = activeWindowId else { return }
+        applyGridAuthorityLifecycleEffects(reduceGridAuthority(.windowSizePolicyReplied(
+            windowID: window.rawValue, raw: latest ? "latest" : "smallest"
+        )))
     }
 
     func expireGridAuthorityReclaimPresentationForTesting() {
-        gridAuthorityReclaimInFlight = false
+        guard gridAuthorityLifecycle.claim?.presentationVisible == true else { return }
+        advanceGridAuthorityClockForTesting(by: gridAuthoritySession.configuration.claimPresentationMillis)
+    }
+
+    var gridAuthorityLifecycleForTesting: TmuxGridAuthorityLifecycleReducer {
+        gridAuthorityLifecycle
+    }
+
+    var gridAuthorityGeometryHeldForTesting: Bool { gridAuthorityGeometryHeld }
+
+    var gridAuthorityQueriesInFlightForTesting: Int { gridAuthoritySession.query.current == nil ? 0 : 1 }
+
+    var gridAuthorityHasHeldReplyForTesting: Bool { gridAuthoritySession.query.held != nil }
+
+    func expireGridAuthorityIntentForTesting() {
+        guard let deadline = gridAuthoritySession.intentClock.deadline else { return }
+        advanceGridAuthorityClockForTesting(by: max(0, deadline - gridAuthorityNow()))
     }
     #endif
     /// Side-channel repaint acknowledgement. Mosh rendering is asynchronous
     /// to `-CC`; the app clears this only after the forced framebuffer output
     /// has actually been consumed by the terminal surface.
     @ObservationIgnored private var gridAuthoritySideChannelRepaintPending = false
+    /// Per-*issue* token handed to the platform and echoed back on its ack.
+    /// The ledger owns the reservation; this only answers "which issue of it
+    /// is this ack for", so a frame forced before a re-issue cannot discharge
+    /// the one forced after it.
     @ObservationIgnored private var gridAuthoritySideChannelRepaintGeneration: UInt64 = 0
-    /// Peer label retained across the auto-reclaim because settling changes
-    /// `gridAuthority` to `.mine` before the UI toast is delivered.
-    @ObservationIgnored private var gridAuthorityAutoReclaimPeerName: String?
-    /// Exact stamp written by a reconnect that first re-derived a non-foreign
-    /// owner. The subscription registration is already queued by then, so an
-    /// intervening foreign value can arrive before this write's echo. Matching
-    /// the exact echo lets that rare ordering re-enter the normal fenced claim
-    /// path instead of leaving the client veiled after its own later write won.
-    @ObservationIgnored private var gridAuthorityReconnectClaimExpectedStamp: String?
-    /// Reconnects query the session stamp before replaying any local size.
-    /// Ignore geometry-only fallback during that FIFO gap: a stale layout
-    /// notification can precede the query response and must not manufacture a
-    /// generic peer that then blocks an otherwise valid self re-claim.
-    @ObservationIgnored private var gridAuthorityRederiveInFlight = false
-    /// False when the current window's effective `window-size` option is not
-    /// `latest` —
-    /// smallest/largest computes the grid across ALL clients, so our size
-    /// can never win: the layout fallback would false-veil and the equality
-    /// confirm could never pass.
-    @ObservationIgnored private var gridAuthorityGeometryPolicyIsLatest = true
-    @ObservationIgnored private var gridAuthorityGeometryPolicyKnown = false
-    /// Wall-clock of the last self-initiated size replay; the layout-mismatch
-    /// fallback (stamp-less attachers) suppresses itself near our own resizes.
-    @ObservationIgnored private var lastClientSizeReplayAt: Date?
+    @ObservationIgnored private var gridAuthorityTransportFrameCorrelation: UInt64?
+    @ObservationIgnored private var gridAuthorityTransportFrameOwner: RenderOwner?
+    /// Set when a geometry settle is observed mid-step, drained at the end
+    /// of that step, once the ledger has reduced it
+    /// (`finishDeferredGridClaimConfirmation`). See `handleLayoutChange`.
+    /// `depth` is the `controlProcessingDepth` of the step that left it: a
+    /// nested step (a synchronous reply ingested from inside the outer
+    /// step) ends before the outer ledger reduce and must not drain it.
+    @ObservationIgnored private var deferredGridClaimConfirmation: (context: String, depth: Int)?
+    /// Bumped whenever the claim's geometry changes (an advertisement, a
+    /// re-fence): a settle probe written for older geometry, or a fence
+    /// acknowledged after newer geometry went out, proves nothing about the
+    /// geometry now in flight (§6.10 rule 5).
+    @ObservationIgnored private var gridClaimGeometryEpoch: UInt64 = 0
+    /// The claim's own commands still awaiting their replies (policy probe,
+    /// fence, re-fence, settle probe, side-channel window force), counted
+    /// for `gridClaimCommandsGeneration` only. A late claim with none left
+    /// and no repaint in flight cannot progress (§6.10 rule 6).
+    @ObservationIgnored private var gridClaimCommandsInFlight = 0
+    @ObservationIgnored private var gridClaimCommandsGeneration: UInt64 = 0
+    /// Set when the side-channel confirmation asked the ledger for the
+    /// claim's transport frame; the frame may be requested a turn later.
+    @ObservationIgnored private var gridClaimSideChannelRepaintRequested = false
+    private var gridAuthorityRederiveInFlight: Bool {
+        let query = gridAuthoritySession.query
+        return query.current != nil || query.held != nil || query.retryAt != nil || query.wanted
+    }
+    /// Wire confirmation uses only the policy probed for its current window.
+    private var gridAuthorityGeometryPolicyKnown: Bool { currentGridAuthorityPolicy != nil }
+    private var gridAuthorityGeometryPolicyIsLatest: Bool { currentGridAuthorityPolicy?.isLatest ?? true }
+    private var currentGridAuthorityPolicy: TmuxAuthorityGeometryEvidence.WindowSizePolicy? {
+        (activeWindowId ?? renderedWindowId).flatMap { gridAuthoritySession.evidence.policy(for: $0.rawValue) }
+    }
+    private struct WindowSizeReplayAttempt: Equatable {
+        let token: UInt64
+        let connectionGeneration: UInt64
+        let requested: TmuxClientGeometry
+    }
+    @ObservationIgnored private var windowSizeReplayAttempts: [WindowId: WindowSizeReplayAttempt] = [:]
+    @ObservationIgnored private var nextWindowSizeReplayToken: UInt64 = 0
+    @ObservationIgnored private var reconcilingPresentedWindowSize = false
+    @ObservationIgnored private var presentedWindowRecoveryReserved = false
+    private struct PassiveWindowSizeProbe: Equatable {
+        let token: UInt64
+        let connectionGeneration: UInt64
+        let windowID: WindowId
+        let requested: TmuxClientGeometry
+        let observed: TmuxClientGeometry?
+        let authorityGeneration: UInt64
+    }
+    @ObservationIgnored private var passiveWindowSizeProbe: PassiveWindowSizeProbe? {
+        didSet {
+            guard oldValue != nil, oldValue != passiveWindowSizeProbe,
+                  gridAuthoritySession.ordinaryRecoveryActive, !presentedWindowRecoveryReserved else { return }
+            applyGridAuthorityLifecycleEffects(reduceGridAuthority(.ordinaryRecovery(active: false, proven: false)))
+        }
+    }
     /// Called after tmux acknowledges the authoritative grid cache and before
     /// the visible owner is excluded from sizing. App/session owners persist
     /// this grid beyond the lifetime of the current control connection.
@@ -692,12 +1064,19 @@ public final class TmuxController {
     /// tmux-focus transition advances it before queueing new queries.
     @ObservationIgnored private var stateGeneration: Int = 0
 
+    /// Identity of the terminal surface's currently authoritative tmux
+    /// rendering continuity. This deliberately does not track
+    /// `stateGeneration`: foreground viewport repairs advance the latter to
+    /// invalidate asynchronous callbacks, while retaining the already-bound
+    /// SwiftTerm buffer and therefore this owner epoch.
+    @ObservationIgnored private var renderOwnerEpoch: UInt64 = 0
+
     /// The tmux session id (`$N`) this controller is attached to.
     ///
     /// tmux runs ONE server per user; multiple sessions live inside it.
     /// A `-CC` control client receives some notifications scoped to its
     /// own session (tmux filters those server-side) but a few — notably
-    /// `%session-window-changed` and the `%*` pane-metadata subscription
+    /// `%session-window-changed` and the per-pane metadata subscriptions
     /// — are BROADCAST to every control client in the server, each
     /// tagged with the session id they refer to. It is the client's job
     /// to ignore the ones for other sessions. Without this, two Tessera
@@ -711,40 +1090,16 @@ public final class TmuxController {
     /// the cross-session filters FAIL OPEN while it is `nil` so the
     /// single-client path can never regress.
     @ObservationIgnored private(set) var ownSessionId: SessionId?
+    @ObservationIgnored private var ownSessionName: String?
 
-    /// Inline render refresh currently waiting on tmux responses.
-    /// All stages block direct `%output` presentation until their capture
-    /// repaint lands. Foreground repairs retain same-pane output separately and
-    /// flush it as one atomic batch immediately before the authoritative
-    /// viewport repaint, preserving local scrollback without presenting every
-    /// queued redraw frame on the way to the current screen.
-    @ObservationIgnored private var pendingRenderRefresh: (
-        windowId: WindowId,
-        generation: Int,
-        stage: RenderStage
-    )?
-
-    /// App-background and foreground-capture output barrier. iPadOS can resume
-    /// the SSH read path while the app is still inactive, before the foreground
-    /// capture is issued. Buffering from the inactive edge closes that gap.
-    /// Bytes remain partitioned by pane so a grid can flush each surface into
-    /// its own terminal model. Below the safety cap, buffered bytes are fed
-    /// synchronously and then the captured viewport is painted in the same
-    /// main-actor turn, so SwiftTerm keeps the output in scrollback but Core
-    /// Animation can only present the final frame. If the cap is exceeded, the
-    /// whole retained stream for that pane is discarded (never a partial escape
-    /// sequence) and the authoritative viewport capture supplies visible truth.
-    @ObservationIgnored private var isForegroundOutputCoalescing = false
+    /// Lifecycle is a platform fact; foreground byte retention and release are
+    /// owned entirely by `renderLedger`.
     @ObservationIgnored private var appIsInactive = false
-    @ObservationIgnored private var awaitingAppForegroundRefresh = false
-    @ObservationIgnored private var foregroundOutputRefreshGeneration: Int?
-    @ObservationIgnored private var coalescedForegroundOutput: [PaneId: [UInt8]] = [:]
-    @ObservationIgnored private var coalescedForegroundOutputByteCount = 0
-    @ObservationIgnored private var foregroundOutputOverflowedPanes: Set<PaneId> = []
-    @ObservationIgnored private var foregroundPaneRefreshTargets: [PaneId: Int] = [:]
-    @ObservationIgnored private var foregroundPaneRetryTasks: [PaneId: Task<Void, Never>] = [:]
-    @ObservationIgnored private var foregroundPaneRetryAttempts: [PaneId: Int] = [:]
-    @ObservationIgnored private var pausedPanes: Set<PaneId> = []
+    /// An owner replay the session released while the app was still
+    /// inactive (a foreground read answered before activation). The session
+    /// already counted that edge as replayed and will not release it again,
+    /// so activation sends it.
+    @ObservationIgnored private var gridAuthorityOwnerReplayDeferred = false
     @ObservationIgnored private var windowBellFlags: [WindowId: Bool] = [:]
 
     /// Maps every known pane to its owning window, rebuilt from window
@@ -760,17 +1115,17 @@ public final class TmuxController {
     /// surface instead of the shared single-pane terminal. Empty = no grid =
     /// today's single-pane fast path (byte-identical, golden-pinned).
     @ObservationIgnored private var paneSinks: [PaneId: (ArraySlice<UInt8>) -> Void] = [:]
-
-    /// Panes whose capture-repaint is in flight. Live `%output` for the pane is
-    /// dropped until the repaint lands (per-pane analog of `pendingRenderRefresh`
-    /// for the shared swap), so stale bytes can't bleed in ahead of the capture.
-    @ObservationIgnored private var pendingPaneRefreshes: [PaneId: Int] = [:]
-    @ObservationIgnored private var paneRefreshSequence = 0
-
-    /// Panes that have already had a full deep capture since becoming visible.
-    /// Drives deep-on-first-focus: siblings render shallow on swap-in and
-    /// upgrade to a deep capture the first time they are focused.
-    @ObservationIgnored private var deepRefreshedPanes: Set<PaneId> = []
+    private struct PaneRenderSurfaceAdapter {
+        let bind: (TmuxControlCore.RenderOwner, Int) -> Void
+        let feed: (TmuxControlCore.RenderOwner, ArraySlice<UInt8>) -> Void
+        let state: () -> (
+            altScreen: Bool,
+            mouseMode: RenderMouseMode,
+            columns: Int,
+            rows: Int
+        )?
+    }
+    @ObservationIgnored private var paneRenderSurfaces: [PaneId: PaneRenderSurfaceAdapter] = [:]
 
     /// Pending pane-focus latch (iTerm2's `_paneToActivateWhenCreated`).
     /// `%window-pane-changed @w %p` is BROADCAST to every control client with NO
@@ -803,47 +1158,11 @@ public final class TmuxController {
     static let moshPaneBorderFormat =
         " #[align=left]#{?#{||:#{==:#{pane_title},#{host}},#{==:#{pane_title},#{host_short}}},#{pane_current_command},#{pane_title}} "
 
-    static let paneMetadataSubscriptionName = "tessera-pane-meta"
-    private static let bellSubscriptionName = "tessera-bell"
-    static let paneMetadataSubscriptionFormat = [
-        "#{window_id}",
-        "#{pane_id}",
-        "#{pane_active}",
-        "#{pane_left}",
-        "#{pane_top}",
-        "#{pane_width}",
-        "#{pane_height}",
-        "#{pane_current_command}",
-        "#{pane_title}",
-        "#{window_name}",
-        "#{host}",
-        "#{pane_current_path}",
-        "#{@tessera_agent_state}",
-    ].joined(separator: "\t")
-    static let renderedPaneMetadataFormat = [
-        "#{pane_id}",
-        "#{cursor_x}",
-        "#{cursor_y}",
-        "#{pane_title}",
-        "#{window_name}",
-        "#{host}",
-        "#{alternate_on}",
-        "#{history_size}",
-        "#{scroll_region_upper}",
-        "#{scroll_region_lower}",
-        "#{cursor_flag}",
-        "#{insert_flag}",
-        "#{keypad_cursor_flag}",
-        "#{keypad_flag}",
-        "#{wrap_flag}",
-        "#{mouse_standard_flag}",
-        "#{mouse_button_flag}",
-        "#{mouse_all_flag}",
-        "#{mouse_sgr_flag}",
-        "#{origin_flag}",
-        "#{alternate_saved_x}",
-        "#{alternate_saved_y}",
-    ].joined(separator: "\t")
+    /// Owned by `TmuxPaneMetadataSubscription` so the subscribed field order
+    /// and the parser can never drift, on this platform or any other.
+    static let paneMetadataSubscriptionName = TmuxPaneMetadataSubscription.name
+    static let paneMetadataSubscriptionFormat = TmuxPaneMetadataSubscription.format
+    static let renderedPaneMetadataFormat = RenderCommands.renderedPaneMetadataFormat
 
     /// False immediately after DCS entry; the first server-originated
     /// `%end` frame (flags bit0 clear) completes the control-mode
@@ -857,41 +1176,18 @@ public final class TmuxController {
     /// keep the golden frame count.
     @ObservationIgnored private let separatorProbeEnabled: Bool
     @ObservationIgnored private var sentSeparatorProbe = false
-    /// Latched when a command reply proves this host's tmux sanitizes reply
-    /// bodies (our tab separators arrive as another character). On such a
-    /// host capture-pane output is equally sanitized — its escape sequences
-    /// arrive as literal garbage — so capture-repaints must not be painted.
-    @ObservationIgnored private var commandRepliesSanitized = false
-    @ObservationIgnored private var allowUngatedLatchFallback = false
-    /// A post-attach window swap whose authoritative capture has not landed.
-    /// While true, incremental `%output` must not latch a pane over the stale
-    /// full-screen image; only a successful capture-repaint clears the gate.
-    @ObservationIgnored private var establishedRenderIsFailClosed = false
-    @ObservationIgnored private var initialRenderWatchdogTask: Task<Void, Never>?
-    @ObservationIgnored private var renderRetryTask: Task<Void, Never>?
-    @ObservationIgnored private var renderCommandQueueWaitTask: Task<Void, Never>?
-    @ObservationIgnored private var renderRetryAttemptsByGeneration: [Int: Int] = [:]
-
-    /// Bumped every time a `refresh-client -C` is actually sent. Repaint
-    /// flows latch the epoch when their metadata query is sent and compare
-    /// at apply time: commands are FIFO-serialized on the control channel,
-    /// so a size replay sent mid-refresh resizes and reflows the pane
-    /// between the cursor snapshot and the capture reply — the two then
-    /// describe different grids and painting the pair misplaces rows and
-    /// the restored cursor. Continuity resume hits this every time: the
-    /// connect outraces the settling view layout (keyboard, safe area),
-    /// so attach-init interleaves with 2–3 size events.
-    @ObservationIgnored private var clientSizeEpoch = 0
-    /// Consecutive repaints discarded for epoch mismatch. Bounded so a
-    /// pathological size churn still paints SOMETHING — a misplaced
-    /// cursor beats a terminal that stays empty.
-    @ObservationIgnored private var renderSizeResyncAttempts = 0
-    @ObservationIgnored private var paneSizeResyncAttempts: [PaneId: Int] = [:]
-    private static let maxClientSizeResyncAttempts = 3
-
     private struct PendingCommand {
+        /// Tag allocated by the shared command FIFO. Sequence remains a
+        /// human-friendly monotonic diagnostic counter only.
+        let tag: UInt64
         let sequence: Int
         let command: String
+        /// Transmit instant, for oldest-pending-age poisoning detection.
+        let transmittedAt: ContinuousClock.Instant
+        /// Caller-supplied correlation tag (e.g. the shared session
+        /// adapter's input receipt) carried into transmit/response logs so
+        /// one device log can follow a keystroke across layers.
+        let correlation: String?
         let completion: (Result<[String], CommandError>) -> Void
     }
 
@@ -901,15 +1197,28 @@ public final class TmuxController {
 
     /// Called with bytes destined for the terminal renderer.
     /// Set by the owner after construction; nil by default.
-    @ObservationIgnored public var feedTerminal: ((ArraySlice<UInt8>) -> Void)?
+    @ObservationIgnored public var feedTerminal: ((ArraySlice<UInt8>) -> Void)? {
+        didSet { noteGridAuthorityPaintable() }
+    }
 
     /// Source-aware variant of `feedTerminal`. When set, it takes precedence
     /// over the legacy closure so existing package clients remain compatible.
-    @ObservationIgnored public var feedTerminalWithContext: ((ArraySlice<UInt8>, TerminalFeedContext) -> Void)?
+    @ObservationIgnored public var feedTerminalWithContext: ((ArraySlice<UInt8>, TerminalFeedContext) -> Void)? {
+        didSet { noteGridAuthorityPaintable() }
+    }
 
     /// Called with bytes destined for the SSH channel upstream.
     /// Set by the owner after construction; nil by default.
     @ObservationIgnored public var sendBytes: (([UInt8]) -> Void)?
+    /// Synchronous admission into the ordered writer for the current PTY or
+    /// control channel. When set, takes precedence over sendBytes for control
+    /// commands; false means the transport withheld or dropped the bytes.
+    /// Record sizing before any reply can be ingested, rather than waiting
+    /// for a write-completion callback that can arrive after tmux's layout.
+    @ObservationIgnored public var sendBytesAdmitting: (([UInt8]) -> Bool)?
+    /// Metadata-only bridge for correlating an input receipt with the actual
+    /// transport write. Called synchronously immediately before admission.
+    @ObservationIgnored public var commandWriteDiagnostic: ((Int, String?) -> Void)?
 
     /// Called with decoded `%output` bytes before renderer routing so the
     /// owner can synthesize terminal replies without waiting on the
@@ -921,10 +1230,25 @@ public final class TmuxController {
     /// the first swap after attach), the window about to be rendered, and
     /// whether tmux reports the incoming pane is in the alternate screen.
     @ObservationIgnored public var displayWillSwap: ((_ from: WindowId?, _ to: WindowId, _ paneInAltScreen: Bool) -> Void)?
+    /// Owner-aware form of `displayWillSwap`. The platform adapter uses the
+    /// context to bind its render surface immediately before the authoritative
+    /// repaint feed. Keeping the context-free hook preserves source
+    /// compatibility for package clients that do not expose a render surface.
+    @ObservationIgnored public var displayWillSwapWithContext: ((
+        _ from: WindowId?,
+        _ context: TerminalFeedContext,
+        _ paneInAltScreen: Bool
+    ) -> Void)?
     /// Fired after the repaint bytes for `windowId` have been fed and the
     /// rendered ids committed. App layer uses it to re-run find and restore
     /// per-window client-side modes.
     @ObservationIgnored public var displayDidSwap: ((_ windowId: WindowId) -> Void)?
+    /// App-layer diagnostics hook. The controller fires this immediately
+    /// before lifecycle boundaries can replace render owners or dismantle
+    /// surfaces, allowing the platform seam to publish one aggregate
+    /// `dropped_foreign` count without moving diagnostics policy into the
+    /// portable reducer.
+    @ObservationIgnored public var renderDropSummaryBoundary: ((_ boundary: String) -> Void)?
     /// Fired after an already-rendered pane is repaired in place. Unlike
     /// `displayDidSwap`, this must not restore per-window modes; the app uses it
     /// only to refresh derived viewport state such as Find matches.
@@ -932,7 +1256,89 @@ public final class TmuxController {
     /// App-layer answer to "is the shared SwiftTerm terminal currently on
     /// the alternate-screen buffer". Consulted when assembling repaints.
     @ObservationIgnored public var terminalIsInAltScreen: (() -> Bool)?
-    /// History depth (lines) for the deep repaint stage (wired next).
+
+    // MARK: Shared render-ledger platform seam
+
+    /// Platform surface hooks used by the portable ledger. Apps with only one
+    /// shared surface may leave these nil; the controller bridges `.live`
+    /// through the context-aware compatibility callbacks above.
+    @ObservationIgnored public var renderBindSurface: ((SurfaceId, TmuxControlCore.RenderOwner) -> Void)?
+    /// Returns true only when the exact owner-qualified bytes were accepted by
+    /// a mounted surface. Authority stays fail-closed if the surface vanished
+    /// or rejected a stale owner between capture and delivery.
+    @ObservationIgnored public var renderFeedSurface: ((SurfaceId, TmuxControlCore.RenderOwner, ArraySlice<UInt8>, RenderFeedSource) -> Bool)? {
+        didSet { noteGridAuthorityPaintable() }
+    }
+
+    struct AuthorityDeliveryTally {
+        private(set) var acceptedWindows: Set<WindowId> = []
+        private(set) var rejectedWindows: Set<WindowId> = []
+        private(set) var acceptedPanes: Set<PaneId> = []
+        private(set) var rejectedPanes: Set<PaneId> = []
+
+        mutating func record(
+            accepted: Bool,
+            surfaceID: SurfaceId,
+            owner: TmuxControlCore.RenderOwner,
+            source: RenderFeedSource
+        ) {
+            switch source {
+            case .viewportRepaint, .viewportRefresh, .deepRepaint, .repaintScrub:
+                if surfaceID == .live, let windowID = owner.windowID {
+                    if accepted {
+                        acceptedWindows.insert(windowID)
+                    } else {
+                        rejectedWindows.insert(windowID)
+                    }
+                } else if let paneID = owner.paneID {
+                    if accepted {
+                        acceptedPanes.insert(paneID)
+                    } else {
+                        rejectedPanes.insert(paneID)
+                    }
+                }
+            case .paneOutput, .foregroundReplay, .moshHistory:
+                break
+            }
+        }
+
+        var completedWindows: Set<WindowId> {
+            acceptedWindows.subtracting(rejectedWindows)
+        }
+
+        var completedPanes: Set<PaneId> {
+            acceptedPanes.subtracting(rejectedPanes)
+        }
+    }
+
+    @ObservationIgnored public var renderSurfaceState: ((SurfaceId) -> (
+        altScreen: Bool,
+        mouseMode: RenderMouseMode,
+        columns: Int,
+        rows: Int
+    )?)?
+    @ObservationIgnored public var renderSaveWindowModes: ((SurfaceId, WindowId) -> Void)?
+    @ObservationIgnored public var renderRestoreWindowModes: ((SurfaceId, WindowId, Bool) -> Void)?
+    @ObservationIgnored public var renderHistoryReady: ((
+        SurfaceId,
+        TmuxControlCore.RenderOwner,
+        Int,
+        Int,
+        RenderHistoryPlacement
+    ) -> Void)?
+    /// Inline (SSH+tmux) history settle hook: surface, owner, credited
+    /// depth, tmux `history_size`, and whether a later `scrollbackRequested`
+    /// can still deepen. Follows the `.deep` feed it describes.
+    @ObservationIgnored public var renderInlineHistorySettled: ((
+        SurfaceId,
+        TmuxControlCore.RenderOwner,
+        Int,
+        Int,
+        Bool
+    ) -> Void)?
+    @ObservationIgnored public var requestTransportFullFrame: (() -> Void)?
+    /// History depth (lines) for the first inline deep repaint stage. The
+    /// ledger deepens to the scrollback limit on demand.
     public var deepRepaintHistoryDepth: Int = 2000
 
     public var initialRenderWatchdogInterval: TimeInterval = 4.0
@@ -944,11 +1350,13 @@ public final class TmuxController {
     var renderCommandQueueMaxWait: TimeInterval = 0.25
 
     /// Hard cap for output retained across inactive→foreground recovery.
-    /// Normal Codex redraw bursts stay well below this (the live regression is
-    /// ~288 KiB). On overflow we discard that pane's whole retained stream —
-    /// never a truncated escape sequence — and trust the viewport capture for
-    /// visible truth, avoiding unbounded memory and multi-second parser stalls.
-    public var maxForegroundOutputBytes = 512 * 1024
+    /// Ordinary textual output stays below this. Full-screen redraw storms can
+    /// exceed it quickly (the live regression is ~460 KiB split across two
+    /// retained phases); replaying those batches blocked SwiftTerm on the old
+    /// frame for several seconds. On overflow we discard that pane's whole
+    /// retained stream — never a truncated escape sequence — and trust the
+    /// viewport capture for visible truth.
+    public var maxForegroundOutputBytes = 64 * 1024
 
     /// Max capture-repaint attempts per generation before we stop re-trying and
     /// rely on the live-output fallback alone. Must be > 1: tmux returns empty
@@ -962,7 +1370,24 @@ public final class TmuxController {
 
     private static let defaultColorProbeQueryBytes = Array("\u{1B}]10;?\u{1B}\\\u{1B}]11;?\u{1B}\\".utf8)
 
+    /// tmux server version learned from the attach-time separator probe
+    /// (`#{version}`, e.g. "3.4" or "3.6a"). Nil until that reply lands.
+    @ObservationIgnored private(set) var serverVersion: String?
+
+    /// `refresh-client -r` (a control client's colour report for a pane)
+    /// exists from tmux 3.5. Nil while the version is unknown; the report
+    /// path then assumes support, which is also the pre-existing behavior.
+    var serverSupportsClientReports: Bool? {
+        serverVersion.map(Self.versionSupportsClientReports)
+    }
+
     @ObservationIgnored public var onBell: ((_ windowID: Int, _ isActiveWindow: Bool, _ windowName: String?) -> Void)?
+
+    /// A tmux paste buffer changed and its text was fetched. This is how
+    /// `/copy` in Codex (and any `tmux load-buffer -w` / copy-mode yank)
+    /// reaches the device clipboard: tmux forwards OSC 52 only to real
+    /// ttys, so a control-mode client must mirror the buffer itself.
+    @ObservationIgnored public var onPasteBufferChanged: ((_ name: String, _ text: String) -> Void)?
 
     /// Called when a tmux control command issued by a pane operation
     /// (split / kill / zoom / select) fails with `%error`. The payload is the
@@ -1001,6 +1426,71 @@ public final class TmuxController {
     /// work is expected to coalesce off this pulse.
     @ObservationIgnored public var paneOutputObserver: ((_ paneId: PaneId, _ data: ArraySlice<UInt8>) -> Void)?
 
+    // MARK: Program status (OSC 7501)
+
+    /// Status records that programs report about themselves, per pane and for
+    /// the raw terminal. Published only when a record changes.
+    public private(set) var programStatus: ProgramStatusSnapshot = .empty
+    /// Off for package clients; the app sets it from its preference. Turning
+    /// it off discards every record and stops the raw-SSH query reply.
+    public var programStatusEnabled = false {
+        didSet {
+            guard programStatusEnabled != oldValue else { return }
+            programStatusMonitor.isEnabled = programStatusEnabled
+            executeRenderEffects(renderLedger.reduce(
+                .programStatusPaneOutput(enabled: programStatusEnabled),
+                snapshot: runtimeEngine.snapshot
+            ))
+            Self.logDiagnostic("program-status enabled=\(programStatusEnabled)")
+            publishProgramStatus()
+        }
+    }
+    @ObservationIgnored private var programStatusMonitor: ProgramStatusMonitor = {
+        var monitor = ProgramStatusMonitor(answersQueries: true)
+        monitor.isEnabled = false
+        return monitor
+    }()
+    @ObservationIgnored private var programStatusAttentionCount = 0
+
+    /// Marks one terminal's results up to `token` checked: the user has been
+    /// shown that pane. Blocked records are never acknowledged.
+    public func acknowledgeProgramStatus(terminal: ProgramStatusTerminalKey, through token: UInt64) {
+        guard programStatusMonitor.acknowledge(terminal: terminal, through: token) else { return }
+        publishProgramStatus()
+    }
+
+    private func observeProgramStatus(_ batch: TmuxRuntimeBatch) {
+        guard programStatusEnabled else { return }
+        programStatusMonitor.observe(batch: batch)
+        publishProgramStatus()
+    }
+
+    /// Raw-terminal output. Tessera is the terminal here, so a detection
+    /// query is answered before the bytes reach the emulator: the reply
+    /// precedes its DA1 answer to a `CSI c` that follows the query. Only the
+    /// inline path's passthrough is the user's terminal; a side channel's is
+    /// an SSH exec stream.
+    private func observeRawProgramStatus(_ bytes: ArraySlice<UInt8>) {
+        guard programStatusEnabled, controlPath == .inline else { return }
+        let reply = programStatusMonitor.feed(bytes, terminal: .raw)
+        if !reply.isEmpty {
+            Self.logDiagnostic("program-status query-reply bytes=\(reply.count)")
+            sendBytes?(reply)
+        }
+        publishProgramStatus()
+    }
+
+    private func publishProgramStatus() {
+        guard programStatusMonitor.revision != programStatus.revision else { return }
+        let snapshot = programStatusMonitor.snapshot()
+        programStatus = snapshot
+        let attention = snapshot.terminals.count { $0.attention != nil }
+        if attention != programStatusAttentionCount {
+            programStatusAttentionCount = attention
+            Self.logDiagnostic("program-status terminals=\(snapshot.terminals.count) attention=\(attention)")
+        }
+    }
+
     /// Retained semantic Agent Center state published by a remote hook as a
     /// pane user option. Format subscriptions replay this value to a fresh
     /// control client after app/session restoration.
@@ -1012,16 +1502,599 @@ public final class TmuxController {
     @ObservationIgnored public var inputObserver: ((_ paneId: PaneId?, _ bytes: [UInt8]) -> Void)?
 
     public init(
+        authorityInitialGeneration: UInt64? = nil,
         controlPath: ControlPath = .inline,
         clientSizePolicy: ClientSizePolicy = .resizeTmux,
-        separatorProbeEnabled: Bool = false
+        separatorProbeEnabled: Bool = false,
+        authorityConfiguration: TmuxGridAuthoritySession.Configuration = .init(),
+        authorityNow: (() -> Int64)? = nil
     ) {
         self.controlPath = controlPath
         self.clientSizePolicy = clientSizePolicy
         self.separatorProbeEnabled = separatorProbeEnabled
+        gridAuthoritySession = TmuxGridAuthoritySession(configuration: authorityConfiguration, initialGeneration: authorityInitialGeneration ?? TmuxGridAuthorityStamp.generationBase(
+            unixMillis: Int64(Date().timeIntervalSince1970 * 1_000)
+        ))
+        if let authorityNow { gridAuthorityNow = authorityNow }
+        #if canImport(UIKit)
+        if UIApplication.shared.applicationState == .background {
+            _ = gridAuthoritySession.reduce(.backgrounded, now: gridAuthorityNow())
+        }
+        gridAuthorityBackgroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.gridAuthorityBackgrounded() }
+        }
+        gridAuthorityForegroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            // Let the slot coordinator deliver any hide owed during sleep first.
+            Task { @MainActor [weak self] in self?.gridAuthorityForegrounded() }
+        }
+        // A restored session builds its controller while a cold launch still
+        // reads `applicationState` as background, and that launch posts no
+        // willEnterForeground: becoming active ends the background, or its
+        // show would wait for a foreground read that never comes. Resigning
+        // proves nothing (inactive is transparent), so it is not observed.
+        gridAuthorityActiveObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.gridAuthoritySession.inBackground else { return }
+                Self.logDiagnostic("grid-authority foregrounded reason=became-active")
+                self.gridAuthorityForegrounded()
+            }
+        }
+        #endif
+        // Policy is fixed at construction. This also projects the initial
+        // background reduction before any transport or identity is supplied.
+        runtimeEngine.projectAuthority(
+            participatesInGridAuthority ? gridAuthorityLifecycle.authority : .unknown
+        )
+    }
+
+    deinit {
+        gridAuthorityWakeTask?.cancel()
+        #if canImport(UIKit)
+        if let gridAuthorityBackgroundObserver { NotificationCenter.default.removeObserver(gridAuthorityBackgroundObserver) }
+        if let gridAuthorityForegroundObserver { NotificationCenter.default.removeObserver(gridAuthorityForegroundObserver) }
+        if let gridAuthorityActiveObserver { NotificationCenter.default.removeObserver(gridAuthorityActiveObserver) }
+        #endif
+    }
+
+    /// Convert the Apple rendering projection into the typed metadata shape
+    /// accepted by the portable owner. Callers use this only at validated
+    /// fixed-query/subscription boundaries, never to replace a whole runtime
+    /// snapshot.
+    private func coreWindowMetadata(_ window: WindowInfo) -> TmuxWindowSnapshot {
+        TmuxWindowSnapshot(
+            id: window.id,
+            index: window.index,
+            name: window.windowName,
+            activePaneID: window.activePaneId,
+            activePaneTitle: window.activePaneTitle,
+            activePaneTitleIsDefault: window.activePaneTitleIsDefault,
+            panes: window.panes.map { pane in
+                TmuxPaneSnapshot(
+                    id: pane.id,
+                    title: pane.title,
+                    titleIsDefault: pane.titleIsDefault,
+                    currentCommand: pane.currentCommand,
+                    isActive: pane.isActive,
+                    isAlternateScreen: pane.isAlternateScreen,
+                    isMouseReporting: pane.isMouseReporting,
+                    isSgrMouse: pane.isSgrMouse,
+                    contentRect: pane.contentRect
+                )
+            },
+            layout: window.layout,
+            visibleLayout: window.visibleLayout,
+            isZoomed: window.isZoomed
+        )
+    }
+
+    private func publishWindowMetadataToCore(_ windowID: WindowId) {
+        guard let window = window(windowID),
+              runtimeEngine.ingestWindowPresentation(coreWindowMetadata(window))
+        else { return }
+    }
+
+    private func publishWindowListQueryToCore() {
+        let query = windows.map(coreWindowMetadata)
+        _ = runtimeEngine.ingestWindowListQuery(query)
+    }
+
+    /// Refresh the Apple Observation projection from the portable owner. The
+    /// projection deliberately carries no independent policy state.
+    private func projectCoreSnapshot(_ supplied: TmuxSnapshot? = nil) {
+        let core = supplied ?? runtimeEngine.snapshot
+        let projectedWindows = core.windows.map { window in
+            let panes = window.panes.map { pane in
+                PaneInfo(
+                    id: pane.id,
+                    title: pane.title,
+                    titleIsDefault: pane.titleIsDefault,
+                    isActive: pane.isActive,
+                    currentCommand: pane.currentCommand,
+                    isAlternateScreen: pane.isAlternateScreen,
+                    isMouseReporting: pane.isMouseReporting,
+                    isSgrMouse: pane.isSgrMouse,
+                    contentRect: pane.contentRect
+                )
+            }
+            return WindowInfo(
+                id: window.id,
+                index: window.index,
+                windowName: window.name,
+                activePaneId: window.activePaneID,
+                activePaneTitle: window.activePaneTitle,
+                activePaneTitleIsDefault: window.activePaneTitleIsDefault,
+                panes: panes,
+                layout: window.layout,
+                visibleLayout: window.visibleLayout,
+                isZoomed: window.isZoomed
+            )
+        }
+        if windows != projectedWindows { windows = projectedWindows }
+        ownSessionId = core.sessionID
+        ownSessionName = core.sessionName
+        activeWindowId = core.activeWindowID
+        let projectedActiveWindow = core.activeWindowID.flatMap { activeID in
+            projectedWindows.first { $0.id == activeID }
+        }
+        activePaneId = projectedActiveWindow?.activePaneId
+            ?? runtimeEngine.activeRoutingPaneID
+        rebuildPaneWindowTable()
+        // `gridAuthority` has exactly one source: the lifecycle reducer. The
+        // runtime's own classification (subscription stamps, the stamp-less
+        // fallback) reaches it only through `observedAuthority`, so a stale
+        // runtime value can never re-project over a fresher reducer verdict.
+        projectGridAuthority(gridAuthorityLifecycle.authority)
+        snapshotObservationRevision = core.revision
+        noteGridAuthorityWindowFacts(core)
+        noteGridAuthorityPaintable()
+    }
+
+    private func projectGridAuthority(_ authority: TmuxGridAuthoritySnapshot) {
+        switch authority {
+        case .unknown:
+            gridAuthority = .unknown
+        case .mine:
+            gridAuthority = .mine
+        case .peer(_, let displayName, _):
+            gridAuthority = .peer(displayName: displayName)
+        }
     }
 
     // MARK: - Public API
+
+    /// Declare the emulator surfaces currently mounted by the app. Inline
+    /// single-pane mode normally declares `.live`; pane grids and mosh history
+    /// overlays use stable pane-specific ids. The reducer immediately
+    /// reconciles the declarations against the latest authoritative snapshot.
+    public func declareRenderSurfaces(_ declarations: [SurfaceDeclaration]) {
+        declareRenderSurfaces(declarations, snapshot: runtimeEngine.snapshot)
+    }
+
+    private func declareRenderSurfaces(
+        _ declarations: [SurfaceDeclaration],
+        snapshot: TmuxSnapshot
+    ) {
+        currentRenderDeclarations = declarations
+        submitRenderFact(.surfacesDeclared(declarations), snapshot: snapshot)
+        noteGridAuthorityPaintable()
+    }
+
+    /// Includes both the capture and its still-unacknowledged presentation.
+    public func isHistoryPresentationPending(for surfaceID: SurfaceId) -> Bool {
+        renderLedger.isHistoryPresentationPending(for: surfaceID)
+    }
+
+    /// Submit a platform observation to the portable render ledger and execute
+    /// its effects synchronously, in order, on the main actor.
+    public func submitRenderFact(_ fact: RenderFact) {
+        submitRenderFact(fact, snapshot: runtimeEngine.snapshot)
+    }
+
+    private func submitRenderFact(_ fact: RenderFact, snapshot: TmuxSnapshot) {
+        if case .scrollbackLimit(let lines) = fact {
+            renderScrollbackLimit = max(0, lines)
+        }
+        updateRenderLedgerConfiguration()
+        executeRenderEffects(
+            renderLedger.reduce(fact, snapshot: snapshot),
+            snapshot: snapshot
+        )
+    }
+
+    private var defaultRenderSurfaceDeclaration: SurfaceDeclaration {
+        SurfaceDeclaration(surfaceID: .live, presentation: .single)
+    }
+
+    @ObservationIgnored private var renderScrollbackLimit = 10_000
+    @ObservationIgnored private var currentRenderDeclarations: [SurfaceDeclaration] = []
+
+    private func updateRenderLedgerConfiguration(advertiseOnly: Bool = false) {
+        renderLedger.updateConfiguration(.init(
+            deepHistoryDepth: deepRepaintHistoryDepth,
+            // A normal iPad flick plus release travels beyond 240 rows.
+            // Keep enough initial history to avoid a second capture mid-glide.
+            moshPageDepth: 512,
+            scrollbackLimit: renderScrollbackLimit,
+            commandQueueWaitMilliseconds: Int(max(0, renderCommandQueueMaxWait) * 1_000),
+            renderRetryMilliseconds: Int(max(0, renderRefreshRetryDelay) * 1_000),
+            initialRenderWatchdogMilliseconds: Int(max(0, initialRenderWatchdogInterval) * 1_000),
+            maximumViewportRetryAttempts: maxRenderRefreshAttempts,
+            maximumForegroundOutputBytes: maxForegroundOutputBytes,
+            // An unstamped session's ordinary replay is a bare
+            // `refresh-client -C`: no `select-window` latest fence (M3).
+            inlineClientSizeReplayBelongsToClaim: advertiseOnly || gridClaimAwaitsFence
+                || gridAuthorityOrdinaryGeometryIsUnstamped,
+            // P6: every `-C` this controller sends goes through the ledger's
+            // `.clientSize` replay, except the reverse-attach cede, which
+            // reports its acknowledged size through `noteAppliedClientSize`;
+            // that one is not trusted as advertised, so the next claim
+            // re-sends its `-C`.
+            suppressesUnchangedClientSizeReplay: true,
+            // P8: visible captures ride with their metadata query, and the
+            // claim's correlated repaint queues behind its own fence.
+            pipelinesVisibleCapture: true
+        ))
+    }
+
+    private func executeRenderEffects(
+        _ effects: [RenderEffect],
+        snapshot suppliedSnapshot: TmuxSnapshot? = nil
+    ) {
+        let effectSnapshot = suppliedSnapshot ?? runtimeEngine.snapshot
+        var authorityDelivery = AuthorityDeliveryTally()
+        var effectIndex = effects.startIndex
+        while effectIndex < effects.endIndex {
+            if case .sendCommand = effects[effectIndex] {
+                var commandIndex = effectIndex
+                var wireBytes: [UInt8] = []
+                var publishedSize: TmuxClientGeometry?
+                while commandIndex < effects.endIndex,
+                      case .sendCommand(let command) = effects[commandIndex] {
+                    let line = command.hasSuffix("\n") ? command : command + "\n"
+                    Self.logDiagnostic(
+                        "render-command-transmit controller=\(diagnosticID) pending=\(renderLedger.pendingCommandCount) commandCategory=\(Self.commandCategory(command))"
+                    )
+                    wireBytes.append(contentsOf: line.utf8)
+                    publishedSize = Self.publishedClientSize(in: command) ?? publishedSize
+                    commandIndex += 1
+                }
+                // Every purpose in this run was already appended to the core
+                // FIFO by the reducer.  One transport call prevents a
+                // synchronous write callback from inserting a platform query
+                // between an authoritative metadata/capture pair.
+                transmitControlBytes(wireBytes, publishedSize: publishedSize)
+                effectIndex = commandIndex
+                continue
+            }
+
+            let effect = effects[effectIndex]
+            defer { effectIndex += 1 }
+            switch effect {
+            case .sendCommand:
+                preconditionFailure("contiguous render commands are handled above")
+
+            case .commandReply(let tag, let success, let lines, _):
+                completePlatformCommand(tag: tag, success: success, lines: lines)
+
+            case .bindSurface(let surfaceID, let owner):
+                let previous = ledgerRenderedOwners[surfaceID]
+                ledgerRenderedOwners[surfaceID] = owner
+                if surfaceID == .live {
+                    renderOwnerEpoch = owner.epoch
+                }
+                renderBindSurface?(surfaceID, owner)
+                if renderBindSurface == nil,
+                   surfaceID != .live,
+                   let paneID = owner.paneID {
+                    paneRenderSurfaces[paneID]?.bind(owner, renderScrollbackLimit)
+                }
+                if renderBindSurface == nil, surfaceID == .live,
+                   let windowID = owner.windowID {
+                    let feedSource = effects[effects.index(after: effectIndex)...]
+                        .lazy
+                        .compactMap { candidate -> RenderFeedSource? in
+                            guard case .feed(
+                                let candidateSurface,
+                                let candidateOwner,
+                                _,
+                                let source
+                            ) = candidate,
+                                  candidateSurface == surfaceID,
+                                  candidateOwner == owner,
+                                  source != .foregroundReplay
+                            else { return nil }
+                            return source
+                        }
+                        .first
+                    let context = terminalFeedContext(
+                        owner: owner,
+                        source: feedSource.map(terminalFeedSource) ?? .viewportRepaint,
+                        originalByteCount: nil
+                    )
+                    let incomingAlt = owner.paneID.flatMap { paneID in
+                        effectSnapshot.windows
+                            .flatMap(\.panes)
+                            .first(where: { $0.id == paneID })?
+                            .isAlternateScreen
+                    } ?? false
+                    if let displayWillSwapWithContext {
+                        displayWillSwapWithContext(previous?.windowID, context, incomingAlt)
+                    } else {
+                        displayWillSwap?(previous?.windowID, windowID, incomingAlt)
+                    }
+                }
+
+            case .feed(let surfaceID, let owner, let reference, let source):
+                guard let bytes = renderLedger.takeRenderBytes(reference) else {
+                    Self.logDiagnostic(
+                        "render-ledger missing-bytes-ref controller=\(diagnosticID) id=\(reference.rawValue)"
+                    )
+                    continue
+                }
+                let feedAccepted: Bool
+                if let renderFeedSurface {
+                    feedAccepted = renderFeedSurface(
+                        surfaceID,
+                        owner,
+                        bytes[...],
+                        source
+                    )
+                } else if surfaceID == .live {
+                    feedAccepted = feedTerminalWithContext != nil || feedTerminal != nil
+                    deliverToSharedTerminal(
+                        bytes[...],
+                        context: terminalFeedContext(
+                            owner: owner,
+                            source: terminalFeedSource(source),
+                            originalByteCount: bytes.count
+                        )
+                    )
+                } else if let paneID = owner.paneID,
+                          let surface = paneRenderSurfaces[paneID] {
+                    surface.feed(owner, bytes[...])
+                    feedAccepted = true
+                } else if let paneID = owner.paneID,
+                          let legacySink = paneSinks[paneID] {
+                    legacySink(bytes[...])
+                    feedAccepted = true
+                } else {
+                    feedAccepted = false
+                }
+                // The shared render ledger replaced the legacy refresh
+                // executors, so authority repaint completion belongs at this
+                // common delivery boundary. Retained live output and mosh
+                // history are not authoritative captures; only a completed
+                // inline repaint can commit the pending lifecycle stamp and
+                // lift the takeover veil.
+                authorityDelivery.record(
+                    accepted: feedAccepted,
+                    surfaceID: surfaceID,
+                    owner: owner,
+                    source: source
+                )
+                if surfaceID == .live, source == .paneOutput {
+                    if owner.windowID == nil, let paneID = owner.paneID {
+                        runtimeEngine.ingestProvisionalActivePane(paneID)
+                    }
+                    renderedWindowId = owner.windowID
+                    renderedPaneId = owner.paneID
+                    activePaneId = owner.paneID
+                    markInitialRenderReady()
+                }
+
+            case .saveWindowModes(let surfaceID, let windowID):
+                renderSaveWindowModes?(surfaceID, windowID)
+
+            case .restoreWindowModes(let surfaceID, let windowID, let paneInAltScreen):
+                renderRestoreWindowModes?(surfaceID, windowID, paneInAltScreen)
+                guard let owner = ledgerRenderedOwners[surfaceID] else { continue }
+                if surfaceID == .live {
+                    let changed = renderedWindowId != owner.windowID || renderedPaneId != owner.paneID
+                    renderedWindowId = owner.windowID
+                    renderedPaneId = owner.paneID
+                    activePaneId = owner.paneID
+                    if changed {
+                        displayDidSwap?(windowID)
+                    } else {
+                        displayDidRefresh?(windowID)
+                    }
+                } else if let paneID = owner.paneID {
+                    paneDidRefresh?(paneID)
+                }
+
+            case .resolveSurfaceState(let surfaceID, let request):
+                let supplied = renderSurfaceState?(surfaceID)
+                let paneID = ledgerRenderedOwners[surfaceID]?.paneID
+                    ?? Self.paneIDEncoded(in: surfaceID)
+                let paneSupplied = paneID.flatMap { paneRenderSurfaces[$0]?.state() }
+                let altScreen = supplied?.altScreen
+                    ?? paneSupplied?.altScreen
+                    ?? (surfaceID == .live
+                        ? terminalIsInAltScreen?() == true
+                        : paneID.flatMap { paneLocalAltScreenProbe?($0) } == true)
+                let columns = supplied?.columns ?? paneSupplied?.columns ?? lastKnownSize?.cols ?? 0
+                let rows = supplied?.rows ?? paneSupplied?.rows ?? lastKnownSize?.rows ?? 0
+                submitRenderFact(
+                    .surfaceState(
+                        surfaceID,
+                        request: request,
+                        altScreen: altScreen,
+                        mouseMode: supplied?.mouseMode ?? paneSupplied?.mouseMode ?? .off,
+                        columns: columns,
+                        rows: rows
+                    ),
+                    snapshot: effectSnapshot
+                )
+
+            case .armTimer(let token, let milliseconds):
+                renderTimerTasks.removeValue(forKey: token)?.cancel()
+                renderTimerTasks[token] = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .milliseconds(max(0, milliseconds)))
+                    guard !Task.isCancelled, let self else { return }
+                    self.renderTimerTasks.removeValue(forKey: token)
+                    self.submitRenderFact(.timerFired(token: token))
+                }
+
+            case .cancelTimer(let token):
+                renderTimerTasks.removeValue(forKey: token)?.cancel()
+
+            case .initialRenderReady:
+                markInitialRenderReady()
+
+            case .requestTransportFullFrame:
+                requestTransportFullFrame?()
+
+            case .historyReady(let surfaceID, let owner, let depth, let historySize, let placement):
+                renderHistoryReady?(surfaceID, owner, depth, historySize, placement)
+
+            case .inlineHistorySettled(let surfaceID, let owner, let depth, let historySize, let canDeepen):
+                renderInlineHistorySettled?(surfaceID, owner, depth, historySize, canDeepen)
+
+            case .refreshCompleted:
+                // Completion is proven by the feed tally below, which also
+                // covers uncorrelated repaints.
+                break
+
+            case .refreshFailed(_, let correlation, let reason):
+                // Only the claim repaint sent behind its fence is correlated
+                // on Apple; a failure must not strand the veil it would lift.
+                gridClaimRepaintBehindFenceFailed(correlation: correlation, reason: reason)
+
+            case .requestCorrelatedTransportFullFrame(_, let owner, let correlation, let reason):
+                // The ledger owns the reservation and re-issues it across its
+                // own rebinds, so this arm fires once per (re-)issue and the
+                // platform simply forces a frame for the owner it names.
+                requestCorrelatedTransportFullFrame(
+                    owner: owner,
+                    correlation: correlation,
+                    reason: reason
+                )
+
+            case .transportFullFrameCompleted(_, _, let correlation):
+                guard gridAuthorityLifecycle.claim?.generation == correlation,
+                      gridAuthorityLifecycle.claim?.phase == .awaitingRepaint
+                else { break }
+                finishGridAuthorityClaimPresentation(
+                    context: "side-channel-repaint-delivered"
+                )
+
+            case .transportFullFrameFailed(_, let correlation, let reason):
+                Self.logDiagnostic(
+                    "grid-authority transport frame failed correlation=\(correlation) reason=\(reason)"
+                )
+                // `owner-changed` means the surface moved to another window or
+                // pane. That kills the *frame*, not the claim: the veil must
+                // stay closed while the claim re-enters its geometry/fence
+                // phase for the window now on screen (D38 -- never complete,
+                // never abort). `refenceGridClaimIfCurrentWindowMoved` owns
+                // that transition and has already run for this move.
+                //
+                // `superseded` is the same shape: the reservation was replaced
+                // under this very correlation and its replacement request is
+                // already in this batch.
+                guard reason != "owner-changed", reason != "superseded" else { break }
+                guard gridAuthorityLifecycle.claim?.generation == correlation,
+                      gridAuthorityLifecycle.claim?.phase == .awaitingRepaint
+                else { break }
+                applyGridAuthorityLifecycleEffects(
+                    reduceGridAuthority(.abortClaim(
+                        generation: correlation, reason: .adapterFailure))
+                )
+
+            case .diagnostic(let message):
+                Self.logDiagnostic(message)
+            }
+        }
+        // A repaint sent behind a claim's fence that lands before the claim
+        // confirmed (the window was still resizing) cannot be counted; the
+        // confirmation then asks for its own.
+        if gridAuthorityClaimRepaintInFlight?.relied == false,
+           !authorityDelivery.completedWindows.isEmpty || !authorityDelivery.completedPanes.isEmpty {
+            gridAuthorityClaimRepaintInFlight = nil
+        }
+        // Multiple feeds (deep repaint + viewport scrub) form one effect
+        // transaction. Acknowledge only after the whole transaction has been
+        // delivered so the veil cannot lift between its constituent frames.
+        for windowID in authorityDelivery.completedWindows {
+            if gridAuthorityDeliveryRetryWindow == windowID {
+                gridAuthorityDeliveryRetryWindow = nil
+            }
+            completeGridAuthoritySharedRepaintIfNeeded(windowId: windowID)
+        }
+        for paneID in authorityDelivery.completedPanes {
+            gridAuthorityDeliveryRetryPanes.remove(paneID)
+            completeGridAuthorityPaneRepaintIfNeeded(paneId: paneID)
+        }
+        scheduleGridAuthorityDeliveryRetry(
+            rejectedWindows: authorityDelivery.rejectedWindows,
+            rejectedPanes: authorityDelivery.rejectedPanes
+        )
+        // Ordinary foreground/first-fill and delivery-retry captures can
+        // consume claim targets too. Their terminal failures are uncorrelated:
+        // inspect the ledger after the whole delivery transaction, including
+        // any replacement a correlated failure just started.
+        let targetCaptureFailed = (gridAuthorityRepaintWindow != nil && renderLedger.hasFailedRefresh(for: .live))
+            || gridAuthorityRepaintPanes.contains {
+                renderLedger.hasFailedRefresh(for: Self.inlinePaneSurfaceID($0))
+            }
+        if controlPath == .inline, !appIsInactive,
+           targetCaptureFailed, gridAuthorityDeliveryRetryTask == nil {
+            stallGridClaim(context: "repaint-exhausted", canProgress: true, fenceAgain: false)
+        }
+    }
+
+    @ObservationIgnored private var ledgerRenderedOwners: [SurfaceId: TmuxControlCore.RenderOwner] = [:]
+
+    private func completePlatformCommand(tag: UInt64, success: Bool, lines: [String]) {
+        guard let index = pendingCommands.firstIndex(where: { $0.tag == tag }) else {
+            Self.logDiagnostic(
+                "command-response missing-platform-tag controller=\(diagnosticID) tag=\(tag)"
+            )
+            return
+        }
+        let entry = pendingCommands.remove(at: index)
+        if success {
+            entry.completion(.success(lines))
+        } else {
+            entry.completion(.failure(.tmuxError(lines: lines)))
+        }
+    }
+
+    private func terminalFeedSource(_ source: RenderFeedSource) -> TerminalFeedSource {
+        switch source {
+        case .paneOutput: return .paneOutput
+        case .viewportRepaint: return .viewportRepaint
+        case .viewportRefresh: return .viewportRefresh
+        case .deepRepaint: return .deepRepaint
+        case .repaintScrub: return .repaintScrub
+        case .foregroundReplay: return .foregroundReplay
+        case .moshHistory: return .moshHistory
+        }
+    }
+
+    private func terminalFeedContext(
+        owner: TmuxControlCore.RenderOwner,
+        source: TerminalFeedSource,
+        originalByteCount: Int?
+    ) -> TerminalFeedContext {
+        let isCapture = source != .paneOutput && source != .foregroundReplay
+        return TerminalFeedContext(
+            source: source,
+            paneId: owner.paneID,
+            windowId: owner.windowID,
+            renderOwnerEpoch: owner.epoch,
+            generation: stateGeneration,
+            captureRows: isCapture ? executingRenderReplyRows : nil,
+            reason: isCapture ? executingRenderReplyReason : nil,
+            originalByteCount: originalByteCount
+        )
+    }
 
     /// Feed a chunk of bytes received from the SSH output stream.
     /// Routes them to the terminal (passthrough) or into the tmux
@@ -1031,28 +2104,55 @@ public final class TmuxController {
         case .passthrough:
             handlePassthrough(chunk)
         case .tmuxControl:
-            let messages = parser.feed(chunk)
-            process(messages: messages)
+            let batch = runtimeEngine.feed(chunk)
+            process(steps: batch.orderedSteps)
+            deliverAgentStates(batch.agentStates)
+            observeProgramStatus(batch)
         }
     }
+
+    /// Publish the lifecycle payloads the shared runtime read off this batch's
+    /// pane-metadata events.
+    ///
+    /// Delivered per batch rather than per message because a pane option is a
+    /// state, not an event: the value that matters is the one that survives
+    /// the read. It arrives for every pane of the session, including panes
+    /// this client never paints, which is the point — an agent working in an
+    /// unwatched window has no other way to reach Agent Center.
+    private func deliverAgentStates(_ states: [TmuxPaneAgentState]) {
+        guard let observer = paneAgentStateObserver, !states.isEmpty else { return }
+        for state in states { observer(state.paneID, state.json) }
+    }
+
+    @ObservationIgnored private var cooperativeYieldGeneration: UInt64 = 0
 
     /// Main-actor-friendly ingestion for an interactive renderer. Control
     /// messages retain their strict synchronous ordering, while live pane
     /// payloads are delivered in bounded slices with cooperative yields. The
     /// legacy synchronous API remains available for package clients and tests
     /// that do not own a UI run loop.
-    public func ingestCooperatively(_ chunk: [UInt8]) async {
+    /// Returns whether rendering yielded, so a surrounding stream consumer
+    /// can reset its fairness budget without counting our scheduling wait.
+    @discardableResult
+    public func ingestCooperatively(_ chunk: [UInt8]) async -> Bool {
+        let previousYield = cooperativeYieldGeneration
         switch mode {
         case .passthrough:
             await handlePassthroughCooperatively(chunk)
         case .tmuxControl:
             let parseStart = IngestStageStats.now()
-            let messages = parser.feed(chunk)
+            let batch = runtimeEngine.feed(chunk)
+            let steps = batch.orderedSteps
             ingestStages.parseMs += IngestStageStats.elapsedMs(since: parseStart)
-            await processCooperatively(messages: messages)
+            cooperativeOutputIngestDepth += 1
+            defer { cooperativeOutputIngestDepth -= 1 }
+            await processCooperatively(steps: steps)
+            deliverAgentStates(batch.agentStates)
+            observeProgramStatus(batch)
         }
         ingestStages.noteCall()
-        ingestStages.flushIfDue(log: { Self.logDiagnostic($0) })
+        ingestStages.flushIfDue(log: { Self.logDiagnostic("controller=\(diagnosticID) " + $0) })
+        return cooperativeYieldGeneration != previousYield
     }
 
     // MARK: - Pane grid rendering (multi-pane windows)
@@ -1065,494 +2165,206 @@ public final class TmuxController {
     /// app calls this when mounting/dismantling a pane surface in the grid.
     /// Registering does NOT auto-repaint — the app follows with `refreshPane`.
     public func setPaneSink(_ paneId: PaneId, _ sink: ((ArraySlice<UInt8>) -> Void)?) {
+        let wasRenderingGrid = !paneSinks.isEmpty
         if let sink {
             paneSinks[paneId] = sink
         } else {
             paneSinks.removeValue(forKey: paneId)
-            pendingPaneRefreshes.removeValue(forKey: paneId)
-            paneSizeResyncAttempts.removeValue(forKey: paneId)
-            deepRefreshedPanes.remove(paneId)
-            discardCoalescedForegroundOutput(for: paneId)
-            foregroundPaneRefreshTargets.removeValue(forKey: paneId)
-            foregroundPaneRetryTasks.removeValue(forKey: paneId)?.cancel()
-            foregroundPaneRetryAttempts.removeValue(forKey: paneId)
-            if isForegroundOutputCoalescing,
-               !awaitingAppForegroundRefresh,
-               foregroundOutputRefreshGeneration == nil,
-               foregroundPaneRefreshTargets.isEmpty {
-                endForegroundOutputCoalescing()
-            }
+            paneRenderSurfaces.removeValue(forKey: paneId)
         }
+        redeclareInlineRenderSurfaces()
+        if wasRenderingGrid,
+           paneSinks.isEmpty,
+           mode == .tmuxControl,
+           controlPath == .inline {
+            submitRenderFact(.refreshRequested(
+                .live,
+                stage: .viewport,
+                reason: "grid-collapse-resync"
+            ))
+        }
+    }
+
+    /// Register the owner-aware seam for a mounted grid terminal. The legacy
+    /// sink remains present only for source-compatible tests and dead repaint
+    /// helpers while the ledger executor always chooses this adapter first.
+    public func setPaneRenderSurface(
+        _ paneId: PaneId,
+        legacyFeed: @escaping (ArraySlice<UInt8>) -> Void,
+        bind: @escaping (TmuxControlCore.RenderOwner, Int) -> Void,
+        feed: @escaping (TmuxControlCore.RenderOwner, ArraySlice<UInt8>) -> Void,
+        state: @escaping () -> (
+            altScreen: Bool,
+            mouseMode: RenderMouseMode,
+            columns: Int,
+            rows: Int
+        )?
+    ) {
+        paneRenderSurfaces[paneId] = .init(bind: bind, feed: feed, state: state)
+        noteGridAuthorityPaintable()
+        setPaneSink(paneId, legacyFeed)
     }
 
     /// Drop every pane sink — used when the grid unmounts (window collapses to
     /// a single pane, or the session resets) so output falls back to the
     /// shared single-pane path.
     public func clearAllPaneSinks() {
-        let removedPaneIds = Set(paneSinks.keys)
+        let wasRenderingGrid = !paneSinks.isEmpty
         paneSinks.removeAll()
-        pendingPaneRefreshes.removeAll()
-        paneSizeResyncAttempts.removeAll()
-        deepRefreshedPanes.removeAll()
-        for paneId in removedPaneIds {
-            discardCoalescedForegroundOutput(for: paneId)
-            foregroundPaneRefreshTargets.removeValue(forKey: paneId)
-            foregroundPaneRetryTasks.removeValue(forKey: paneId)?.cancel()
-            foregroundPaneRetryAttempts.removeValue(forKey: paneId)
-        }
-        // A grid can collapse while the app is inactive. Keep the lifecycle
-        // barrier armed in that case; the foreground shared-surface refresh
-        // will take ownership and release it. Once foreground recovery is
-        // already running, unmounting the target grid invalidates its buffers.
-        if isForegroundOutputCoalescing,
-           !awaitingAppForegroundRefresh,
-           foregroundOutputRefreshGeneration == nil {
-            endForegroundOutputCoalescing()
+        paneRenderSurfaces.removeAll()
+        redeclareInlineRenderSurfaces()
+        if wasRenderingGrid,
+           mode == .tmuxControl,
+           controlPath == .inline {
+            submitRenderFact(.refreshRequested(
+                .live,
+                stage: .viewport,
+                reason: "grid-collapse-resync"
+            ))
         }
     }
 
-    /// Capture pane `%P`'s current screen (and scrollback) from tmux and
-    /// repaint it into its registered sink. The per-pane analog of
-    /// `refreshRenderedWindow`, sharing `RepaintAssembly` for byte-identical
-    /// output. `deep` requests the full scrollback capture; a shallow refresh
-    /// (viewport only) is used for swap-in siblings and upgraded to deep on
-    /// first focus. No-op if the pane has no sink or we're not inline.
-    ///
-    /// Deep runs AT MOST ONCE per pane mount (`deepRefreshedPanes`): the
-    /// repaint stream's `ESC[2J` clears only the visible screen, so a deep
-    /// repaint's history lines APPEND to the client's local scrollback.
-    /// That's correct exactly once, into a freshly mounted (near-empty)
-    /// buffer; after that the sink's live `%output` keeps history current
-    /// and every further repaint must be viewport-only or each focus
-    /// switch/foreground restore would stack another full copy of history
-    /// into local scrollback.
+    /// The render-surface id of one grid pane, `pane:<pane number>`. Shared
+    /// with the app so the platform ladders and the ledger agree on the
+    /// spelling of a surface.
+    nonisolated public static func inlinePaneSurfaceID(_ paneID: PaneId) -> SurfaceId {
+        SurfaceId("pane:\(paneID.rawValue)")
+    }
+
+    /// Inverse of `inlinePaneSurfaceID`; nil for `.live` and anything else.
+    nonisolated public static func paneIDEncoded(in surfaceID: SurfaceId) -> PaneId? {
+        let prefix = "pane:"
+        guard surfaceID.rawValue.hasPrefix(prefix),
+              let value = Int(surfaceID.rawValue.dropFirst(prefix.count))
+        else { return nil }
+        return PaneId(value)
+    }
+
+    /// PaneGridView remains responsible for mounting SwiftTerm views; this is
+    /// the only place their topology becomes reducer input. Active-first order
+    /// keeps launch readiness tied to the pane a user can actually interact
+    /// with while sibling surfaces hydrate behind it.
+    private func redeclareInlineRenderSurfaces(
+        snapshot suppliedSnapshot: TmuxSnapshot? = nil
+    ) {
+        guard controlPath == .inline else { return }
+        let snapshot = suppliedSnapshot ?? runtimeEngine.snapshot
+        guard !paneSinks.isEmpty else {
+            guard snapshot.activeWindowID != nil else {
+                if !currentRenderDeclarations.isEmpty {
+                    declareRenderSurfaces([], snapshot: snapshot)
+                }
+                return
+            }
+            let activeWindowUsesGrid = snapshot.activeWindowID
+                .flatMap { activeID in
+                    snapshot.windows.first { $0.id == activeID }
+                }
+                .map { window in
+                    !window.isZoomed && (window.layout?.paneCount ?? 1) > 1
+                }
+                ?? false
+            // Between the topology notification and SwiftUI mounting its
+            // per-pane emulators there is intentionally no render surface.
+            // Keeping `.live` declared during that turn would let the ledger
+            // enqueue a shared-window repaint that can never paint this grid
+            // and would occupy the command FIFO ahead of the pane captures.
+            let declarations = activeWindowUsesGrid
+                ? []
+                : [defaultRenderSurfaceDeclaration]
+            if declarations != currentRenderDeclarations {
+                declareRenderSurfaces(declarations, snapshot: snapshot)
+            }
+            return
+        }
+        let orderedPaneIDs = paneSinks.keys.sorted { lhs, rhs in
+            if lhs == activePaneId { return true }
+            if rhs == activePaneId { return false }
+            return lhs.rawValue < rhs.rawValue
+        }
+        let declarations = orderedPaneIDs.map { paneID in
+            SurfaceDeclaration(
+                surfaceID: Self.inlinePaneSurfaceID(paneID),
+                presentation: .grid,
+                windowID: paneWindowTable[paneID] ?? activeWindowId,
+                paneID: paneID
+            )
+        }
+        if declarations != currentRenderDeclarations {
+            declareRenderSurfaces(declarations, snapshot: snapshot)
+        }
+    }
+
+    /// The compact pane's geometry changed (a `%layout-change` resized the
+    /// focused pane): rebuild it deep once the new bounds reach its
+    /// terminal. P7: not while a peer holds the grid. The ledger already
+    /// owes that relayout, and the claim's repaint (or the peer's departure)
+    /// pays it. Capturing here would cost a 2,000-row capture on every
+    /// keyboard toggle of the peer's, and during a take-back would supersede
+    /// the claim's own repaint.
+    public func refreshPaneAfterCompactGeometryChange(paneId: PaneId) {
+        guard !participatesInGridAuthority || !gridAuthorityLifecycle.authority.isPeer else {
+            Self.logDiagnostic("compact-pane refresh owed while yielded pane=\(paneId)")
+            return
+        }
+        refreshPane(paneId: paneId, deep: true)
+    }
+
+    /// Ask the shared ledger to rebuild one mounted pane surface. The ledger
+    /// owns the capture stages, epochs, retries, and clear-before-feed rule.
     public func refreshPane(paneId: PaneId, deep: Bool = true) {
-        let inheritsForegroundRecovery = isForegroundOutputCoalescing
-            && !awaitingAppForegroundRefresh
-            && paneWindowTable[paneId] == activeWindowId
-            && activeWindowId.flatMap { window($0)?.rendersAsPaneGrid } == true
-        refreshPane(
-            paneId: paneId,
-            deep: deep,
-            foregroundRecovery: inheritsForegroundRecovery
-        )
-    }
-
-    private func refreshPane(
-        paneId: PaneId,
-        deep: Bool,
-        foregroundRecovery: Bool,
-        queueWaitStartedAt: TimeInterval? = nil
-    ) {
         guard controlPath == .inline, paneSinks[paneId] != nil else { return }
-        if awaitingAppForegroundRefresh, !foregroundRecovery { return }
-        let wantsDeep = deep && !deepRefreshedPanes.contains(paneId)
-        paneRefreshSequence &+= 1
-        let requestID = paneRefreshSequence
-        pendingPaneRefreshes[paneId] = requestID
-        if foregroundRecovery {
-            foregroundPaneRetryTasks.removeValue(forKey: paneId)?.cancel()
-            foregroundPaneRefreshTargets[paneId] = requestID
-            if !pendingCommands.isEmpty {
-                let now = ProcessInfo.processInfo.systemUptime
-                let startedAt = queueWaitStartedAt ?? now
-                let elapsed = now - startedAt
-                if elapsed < max(0, renderCommandQueueMaxWait) {
-                    if queueWaitStartedAt == nil {
-                        Self.logDiagnostic(
-                            "foreground-pane wait-command-queue controller=\(diagnosticID) pane=\(paneId) request=\(requestID) pending=\(pendingCommands.count) maxWaitMs=\(Int(renderCommandQueueMaxWait * 1_000))"
-                        )
-                    }
-                    waitForCommandQueueBeforeForegroundPaneRender(
-                        paneId: paneId,
-                        requestID: requestID,
-                        deep: deep,
-                        startedAt: startedAt
-                    )
-                    return
-                }
-                Self.logDiagnostic(
-                    "foreground-pane command-queue-wait-expired controller=\(diagnosticID) pane=\(paneId) request=\(requestID) pending=\(pendingCommands.count) waitedMs=\(Int(elapsed * 1_000))"
-                )
-            }
-        }
-        let target = paneId.description
-        let sizeEpoch = clientSizeEpoch
-        sendControlCommand(
-            "display-message -p -t \(target) '\(Self.renderedPaneMetadataFormat)'"
-        ) { [weak self] result in
-            guard let self else { return }
-            if self.awaitingAppForegroundRefresh {
-                if self.pendingPaneRefreshes[paneId] == requestID {
-                    self.pendingPaneRefreshes.removeValue(forKey: paneId)
-                }
-                return
-            }
-            guard self.paneSinks[paneId] != nil,
-                  self.pendingPaneRefreshes[paneId] == requestID,
-                  case .success(let lines) = result,
-                  let head = lines.first(where: { !$0.isEmpty }),
-                  let state = Self.parseRenderedPaneState(head)
-            else {
-                self.failPaneRefresh(paneId: paneId, requestID: requestID)
-                return
-            }
-            self.capturePane(paneId: paneId, state: state, requestID: requestID, deep: wantsDeep, sizeEpoch: sizeEpoch)
-        }
+        submitRenderFact(.refreshRequested(
+            Self.inlinePaneSurfaceID(paneId),
+            stage: deep ? .deep : .viewport,
+            reason: deep ? "pane-focus" : "pane-mount"
+        ))
     }
 
-    private func capturePane(
-        paneId: PaneId,
-        state: RenderedPaneState,
-        requestID: Int,
-        deep: Bool,
-        sizeEpoch: Int
-    ) {
-        let target = paneId.description
-        let depth = deep ? max(0, deepRepaintHistoryDepth) : 0
-
-        if state.paneInAltScreen {
-            // history → saved primary → alt-screen viewport (mirrors the shared
-            // captureDeepAltScreen chain, pane-targeted).
-            let captureAlt: ([String], [String]) -> Void = { [weak self] history, savedPrimary in
-                guard let self else { return }
-                self.sendPaneSettledCapture(
-                    paneId: paneId,
-                    requestID: requestID,
-                    expectedAltScreen: true,
-                    deep: deep
-                ) { settledState, altLines in
-                    self.finishPaneRefresh(
-                        paneId: paneId, state: settledState, requestID: requestID,
-                        captureLines: altLines, historyLines: history,
-                        savedPrimaryLines: savedPrimary, altScreenLines: altLines, deep: deep,
-                        sizeEpoch: sizeEpoch
-                    )
-                }
-            }
-            let captureSavedPrimary: ([String]) -> Void = { [weak self] history in
-                guard let self else { return }
-                self.sendPaneCapture(
-                    "capture-pane -p -e -N -a -q -t \(target)",
-                    paneId: paneId,
-                    requestID: requestID,
-                    bodyPolicy: .optionalSupplement
-                ) { savedPrimary in
-                    captureAlt(history, savedPrimary)
-                }
-            }
-            if deep, (state.historySize ?? 0) > 0 {
-                sendPaneCapture(
-                    "capture-pane -p -e -N -S -\(depth) -E -1 -t \(target)",
-                    paneId: paneId,
-                    requestID: requestID,
-                    bodyPolicy: .optionalSupplement
-                ) { history in
-                    captureSavedPrimary(history)
-                }
-            } else {
-                captureSavedPrimary([])
-            }
-            return
-        }
-
-        let command = deep
-            ? "capture-pane -p -e -N -S -\(depth) -t \(target)"
-            : "capture-pane -p -e -N -t \(target)"
-        sendPaneCapture(command, paneId: paneId, requestID: requestID) { [weak self] lines in
-            guard let self else { return }
-            guard deep else {
-                self.finishPaneRefresh(
-                    paneId: paneId, state: state, requestID: requestID,
-                    captureLines: lines, historyLines: [], savedPrimaryLines: [],
-                    altScreenLines: nil, deep: false,
-                    sizeEpoch: sizeEpoch
-                )
-                return
-            }
-            self.sendPaneSettledCapture(
-                paneId: paneId,
-                requestID: requestID,
-                expectedAltScreen: false,
-                deep: true
-            ) { settledState, scrubLines in
-                self.finishPaneRefresh(
-                    paneId: paneId, state: settledState, requestID: requestID,
-                    captureLines: lines, historyLines: [], savedPrimaryLines: [],
-                    altScreenLines: nil, scrubLines: scrubLines, deep: true,
-                    sizeEpoch: sizeEpoch
-                )
-            }
-        }
-    }
-
-    private func sendPaneSettledCapture(
-        paneId: PaneId,
-        requestID: Int,
-        expectedAltScreen: Bool,
-        deep: Bool,
-        onSuccess: @escaping (RenderedPaneState, [String]) -> Void
-    ) {
-        let target = paneId.description
-        enqueueControlCommandPair(
-            "display-message -p -t \(target) '\(Self.renderedPaneMetadataFormat)'",
-            "capture-pane -p -e -N -t \(target)"
-        ) { [weak self] metadataResult, captureResult in
-            guard let self else { return }
-            guard self.paneSinks[paneId] != nil,
-                  self.pendingPaneRefreshes[paneId] == requestID
-            else {
-                self.failPaneRefresh(paneId: paneId, requestID: requestID)
-                return
-            }
-            guard case .success(let metadataLines) = metadataResult,
-                  let head = metadataLines.first(where: { !$0.isEmpty }),
-                  let settledState = Self.parseRenderedPaneState(head),
-                  case .success(let captureLines) = captureResult,
-                  !captureLines.isEmpty
-            else {
-                self.failPaneRefresh(paneId: paneId, requestID: requestID)
-                return
-            }
-            guard settledState.paneId == paneId,
-                  settledState.paneInAltScreen == expectedAltScreen
-            else {
-                let inheritsForegroundRecovery = self.foregroundPaneRefreshTargets[paneId] == requestID
-                self.pendingPaneRefreshes.removeValue(forKey: paneId)
-                Self.logDiagnostic(
-                    "pane-refresh settled-state changed pane=\(paneId) request=\(requestID) newPane=\(settledState.paneId) expectedAlt=\(expectedAltScreen) actualAlt=\(settledState.paneInAltScreen)"
-                )
-                self.refreshPane(
-                    paneId: paneId,
-                    deep: deep,
-                    foregroundRecovery: inheritsForegroundRecovery
-                )
-                return
-            }
-            onSuccess(settledState, captureLines)
-        }
-    }
-
-    private func sendPaneCapture(
-        _ command: String,
-        paneId: PaneId,
-        requestID: Int,
-        bodyPolicy: CaptureBodyPolicy = .requiredGrid,
-        onSuccess: @escaping ([String]) -> Void
-    ) {
-        sendControlCommand(command) { [weak self] result in
-            guard let self else { return }
-            guard self.paneSinks[paneId] != nil,
-                  self.pendingPaneRefreshes[paneId] == requestID,
-                  case .success(let lines) = result
-            else {
-                self.failPaneRefresh(paneId: paneId, requestID: requestID)
-                return
-            }
-            if case .requiredGrid = bodyPolicy, lines.isEmpty {
-                Self.logDiagnostic(
-                    "pane-refresh capture rejected-empty pane=\(paneId) request=\(requestID) commandCategory=\(Self.commandCategory(command)) clientRows=\(self.lastKnownSize?.rows ?? -1)"
-                )
-                self.failPaneRefresh(paneId: paneId, requestID: requestID)
-                return
-            }
-            onSuccess(lines)
-        }
-    }
-
-    private func finishPaneRefresh(
-        paneId: PaneId,
-        state: RenderedPaneState,
-        requestID: Int,
-        captureLines: [String],
-        historyLines: [String],
-        savedPrimaryLines: [String],
-        altScreenLines: [String]?,
-        scrubLines: [String]? = nil,
-        deep: Bool,
-        sizeEpoch: Int
-    ) {
-        guard let sink = paneSinks[paneId],
-              pendingPaneRefreshes[paneId] == requestID
-        else {
-            failPaneRefresh(paneId: paneId, requestID: requestID)
-            return
-        }
-        if awaitingAppForegroundRefresh {
-            pendingPaneRefreshes.removeValue(forKey: paneId)
-            return
-        }
-        // Same size-epoch atomicity as finishRenderedWindowRefresh: a client
-        // resize processed between this pane's metadata query and its capture
-        // reply means cursor and grid describe different geometries — discard
-        // and re-run instead of painting a shifted frame.
-        if sizeEpoch != clientSizeEpoch,
-           paneSizeResyncAttempts[paneId, default: 0] < Self.maxClientSizeResyncAttempts {
-            paneSizeResyncAttempts[paneId, default: 0] += 1
-            let inheritsForegroundRecovery = foregroundPaneRefreshTargets[paneId] == requestID
-            pendingPaneRefreshes.removeValue(forKey: paneId)
-            Self.logDiagnostic(
-                "pane-refresh size-resync pane=\(paneId) request=\(requestID) attempt=\(paneSizeResyncAttempts[paneId] ?? 0) deep=\(deep)"
-            )
-            refreshPane(
-                paneId: paneId,
-                deep: deep,
-                foregroundRecovery: inheritsForegroundRecovery
-            )
-            return
-        }
-        let completesForegroundRecovery = foregroundPaneRefreshTargets[paneId] == requestID
-        if completesForegroundRecovery {
-            let retainedOutput = takeCoalescedForegroundOutput(for: paneId)
-            if !retainedOutput.bytes.isEmpty {
-                sink(ArraySlice(retainedOutput.bytes))
-            }
-        }
-        // A pane surface starts on the normal buffer at mount, but live
-        // %output (a TUI's 1049h) moves it — ask the app for the CURRENT
-        // local buffer so the assembler emits ?1049l first when needed
-        // (see paneLocalAltScreenProbe). The scroll region is pane-relative,
-        // so don't suppress it (clientRows=nil).
-        let bytes = RepaintAssembly.assemble(
-            state: state,
-            captureLines: captureLines,
-            historyLines: historyLines,
-            savedPrimaryLines: savedPrimaryLines,
-            altScreenLines: altScreenLines,
-            terminalIsInAltScreen: paneLocalAltScreenProbe?(paneId) ?? false,
-            clientRows: nil
-        )
-        let tailContentLines = state.paneInAltScreen ? (altScreenLines ?? captureLines) : captureLines
-        if RepaintAssembly.backgroundLeftOpen(in: tailContentLines) {
-            Self.logDiagnostic(
-                "repaint-bg-open pane=\(paneId) stage=\(deep ? "deep" : "viewport") paneAlt=\(state.paneInAltScreen) lines=\(tailContentLines.count)"
-            )
-        }
-        let paneCaptureMaxCols = tailContentLines.reduce(0) { max($0, RepaintAssembly.visibleColumns(in: $1)) }
-        Self.logDiagnostic(
-            "repaint-width pane=\(paneId) clientCols=\(lastKnownSize?.cols ?? -1) clientRows=\(lastKnownSize?.rows ?? -1) captureMaxCols=\(paneCaptureMaxCols) captureRows=\(tailContentLines.count) cursorX=\(state.cursorX) cursorY=\(state.cursorY) stage=\(deep ? "deep" : "viewport")"
-        )
-        sink(ArraySlice(bytes))
-        if deep,
-           !state.paneInAltScreen,
-           let scrubLines {
-            let scrubBytes = RepaintAssembly.assemble(
-                state: state,
-                captureLines: scrubLines,
-                historyLines: [],
-                savedPrimaryLines: [],
-                altScreenLines: nil,
-                terminalIsInAltScreen: false,
-                clientRows: nil
-            )
-            sink(ArraySlice(scrubBytes))
-            Self.logDiagnostic(
-                "repaint-scrub pane=\(paneId) deepRows=\(captureLines.count) scrubRows=\(scrubLines.count) source=fresh-viewport"
-            )
-        }
-        pendingPaneRefreshes.removeValue(forKey: paneId)
-        paneSizeResyncAttempts.removeValue(forKey: paneId)
-        if deep { deepRefreshedPanes.insert(paneId) }
-        if pausedPanes.contains(paneId) {
-            resumePausedPane(paneId)
-        }
-        if paneWindowTable[paneId] == activeWindowId {
-            markInitialRenderReady()
-        }
-        paneDidRefresh?(paneId)
-        foregroundPaneRetryTasks.removeValue(forKey: paneId)?.cancel()
-        foregroundPaneRetryAttempts.removeValue(forKey: paneId)
-        finishForegroundPaneRefresh(paneId, requestID: requestID)
-        completeGridAuthorityPaneRepaintIfNeeded(paneId: paneId)
-    }
-
-    private func failPaneRefresh(paneId: PaneId, requestID: Int) {
-        if pendingPaneRefreshes[paneId] == requestID {
-            pendingPaneRefreshes.removeValue(forKey: paneId)
-        }
-        if foregroundPaneRefreshTargets[paneId] == requestID {
-            // Keep the pane fail-closed and retain its output until an
-            // authoritative capture succeeds. Reopening live output here
-            // recreates the stale-grid/sliver failure seen on shared surfaces.
-            scheduleForegroundPaneRefreshRetry(paneId: paneId, requestID: requestID)
-            return
-        }
-        finishForegroundPaneRefresh(paneId, requestID: requestID)
-    }
-
-    private func scheduleForegroundPaneRefreshRetry(paneId: PaneId, requestID: Int) {
-        let attempt = (foregroundPaneRetryAttempts[paneId] ?? 0) + 1
-        foregroundPaneRetryAttempts[paneId] = attempt
-        foregroundPaneRetryTasks.removeValue(forKey: paneId)?.cancel()
-        let delay = renderRefreshRetryDelay * Double(min(attempt, 6))
-        Self.logDiagnostic(
-            "foreground-pane retry scheduled pane=\(paneId) request=\(requestID) attempt=\(attempt) delay=\(delay)"
-        )
-        foregroundPaneRetryTasks[paneId] = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: Self.nanoseconds(for: delay))
-            guard !Task.isCancelled else { return }
-            await MainActor.run { [weak self] in
-                guard let self,
-                      self.isForegroundOutputCoalescing,
-                      !self.awaitingAppForegroundRefresh,
-                      self.foregroundPaneRefreshTargets[paneId] == requestID,
-                      self.paneSinks[paneId] != nil
-                else { return }
-                self.foregroundPaneRetryTasks.removeValue(forKey: paneId)
-                self.refreshPane(
-                    paneId: paneId,
-                    deep: paneId == self.activePaneId,
-                    foregroundRecovery: true
-                )
-            }
-        }
-    }
-
-    private func waitForCommandQueueBeforeForegroundPaneRender(
-        paneId: PaneId,
-        requestID: Int,
-        deep: Bool,
-        startedAt: TimeInterval
-    ) {
-        foregroundPaneRetryTasks.removeValue(forKey: paneId)?.cancel()
-        foregroundPaneRetryTasks[paneId] = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 20_000_000)
-            guard !Task.isCancelled else { return }
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                self.foregroundPaneRetryTasks.removeValue(forKey: paneId)
-                guard self.isForegroundOutputCoalescing,
-                      !self.awaitingAppForegroundRefresh,
-                      self.foregroundPaneRefreshTargets[paneId] == requestID,
-                      self.paneSinks[paneId] != nil
-                else { return }
-                self.refreshPane(
-                    paneId: paneId,
-                    deep: deep,
-                    foregroundRecovery: true,
-                    queueWaitStartedAt: startedAt
-                )
-            }
-        }
-    }
-
-    /// Send typed bytes upstream. In passthrough mode, bytes flow
-    /// straight to the SSH channel. In tmux mode, they become a
-    /// `send-keys -t %<pane> -H <hex>` command targeting the active
-    /// pane — hex encoding guarantees safe UTF-8 / control-char transit
     /// through the tmux command parser.
     public func sendInput(_ bytes: [UInt8]) {
+        sendInput(bytes, correlation: nil)
+    }
+
+    /// `sendInput` variant carrying an opaque correlation tag into the
+    /// command-transmit/response diagnostics, so a caller-side admission log
+    /// line (e.g. the shared session adapter's) can be tied to the exact
+    /// tmux command and its acknowledgement in one device log.
+    public func sendInput(_ bytes: [UInt8], correlation: String?) {
+        sendInput(bytes, correlation: correlation) { _ in }
+    }
+
+    /// `sendInput` that reports what tmux made of it: true once tmux ran the
+    /// `send-keys` (or passthrough handed the bytes to the transport), false
+    /// when nothing was sent or tmux failed it. The command is queued before
+    /// this returns, in order with other input; the report follows tmux's
+    /// reply.
+    public func sendInput(
+        _ bytes: [UInt8],
+        correlation: String?,
+        completion: @escaping @MainActor (Bool) -> Void
+    ) {
         switch mode {
         case .passthrough:
             if !bytes.isEmpty { inputObserver?(nil, bytes) }
             sendBytes?(bytes)
+            completion(!bytes.isEmpty && sendBytes != nil)
         case .tmuxControl:
-            guard !userMutationsSuppressedWhileYielded else { return }
-            guard let pane = activePaneId else { return }
-            guard !bytes.isEmpty else { return }
+            guard !userMutationsSuppressedWhileYielded,
+                  let pane = activePaneId,
+                  !bytes.isEmpty
+            else {
+                completion(false)
+                return
+            }
             inputObserver?(pane, bytes)
             let hex = bytes.map { String(format: "%02x", $0) }.joined(separator: " ")
-            sendControlCommand("send-keys -t \(pane.description) -H \(hex)")
+            enqueueControlCommand(
+                "send-keys -t \(pane.description) -H \(hex)",
+                correlation: correlation
+            ) { result in
+                if case .success = result { completion(true) } else { completion(false) }
+            }
         }
     }
 
@@ -1621,17 +2433,26 @@ public final class TmuxController {
             completion(.failure(.cancelled))
             return
         }
+        // S5′ (D13): a launch write here (Agent Center's launch buffer,
+        // `new-window -d`, `split-window -d`) would change the grid another
+        // device is using. Decided in the same turn as the enqueue.
+        guard !gridAuthorityRefusesAgentSend || TmuxAgentCommandAccess.isAuthorityNeutral(command) else {
+            Self.logDiagnostic(
+                "background-query refused controller=\(diagnosticID) reason=controlled-elsewhere commandCategory=\(Self.commandCategory(command))"
+            )
+            completion(.failure(.refusedByAuthority))
+            return
+        }
         sendControlCommand(command, completion: completion)
     }
 
     public var isAuthoritativeRenderRefreshPending: Bool {
-        pendingRenderRefresh != nil
-            || isForegroundOutputCoalescing
-            || establishedRenderIsFailClosed
+        renderLedger.hasPendingRender
     }
 
     private func enqueueControlCommand(
         _ command: String,
+        correlation: String? = nil,
         completion: @escaping (Result<[String], CommandError>) -> Void
     ) {
         let category = Self.commandCategory(command)
@@ -1643,11 +2464,22 @@ public final class TmuxController {
             completion(.failure(.notInTmuxMode))
             return
         }
+        guard !commandQueueAwaitingTransportRecovery else {
+            Self.logDiagnostic(
+                "sendControlCommand rejected controller=\(diagnosticID) reason=transport-recovery-pending commandCategory=\(category)"
+            )
+            completion(.failure(.timedOut))
+            return
+        }
 
+        let submission = renderLedger.enqueuePlatformCommand(command)
         nextCommandSequence &+= 1
         let entry = PendingCommand(
+            tag: submission.tag,
             sequence: nextCommandSequence,
             command: command,
+            transmittedAt: ContinuousClock.now,
+            correlation: correlation,
             completion: completion
         )
         transmitControlCommand(entry)
@@ -1673,23 +2505,111 @@ public final class TmuxController {
             completion(failure, failure)
             return
         }
+        guard !commandQueueAwaitingTransportRecovery else {
+            Self.logDiagnostic(
+                "sendControlCommand pair rejected controller=\(diagnosticID) reason=transport-recovery-pending firstCategory=\(Self.commandCategory(firstCommand)) secondCategory=\(Self.commandCategory(secondCommand))"
+            )
+            let failure: Result<[String], CommandError> = .failure(.timedOut)
+            completion(failure, failure)
+            return
+        }
 
+        let submissions = renderLedger.enqueuePlatformCommands([firstCommand, secondCommand])
+        guard submissions.count == 2 else {
+            let failure: Result<[String], CommandError> = .failure(.cancelled)
+            completion(failure, failure)
+            return
+        }
         var firstResult: Result<[String], CommandError>?
         nextCommandSequence &+= 1
         let first = PendingCommand(
+            tag: submissions[0].tag,
             sequence: nextCommandSequence,
             command: firstCommand,
+            transmittedAt: ContinuousClock.now,
+            correlation: nil,
             completion: { result in firstResult = result }
         )
         nextCommandSequence &+= 1
         let second = PendingCommand(
+            tag: submissions[1].tag,
             sequence: nextCommandSequence,
             command: secondCommand,
+            transmittedAt: ContinuousClock.now,
+            correlation: nil,
             completion: { result in
                 completion(firstResult ?? .failure(.cancelled), result)
             }
         )
         transmitControlCommandPair(first, second)
+    }
+
+    /// Queue one logical mutation as an uninterrupted command batch. Reorder
+    /// plans can contain several swaps and selection restores (including active-window
+    /// restoration); tidy can contain one renumber per session-group member.
+    /// Every response is still correlated independently, and the aggregate
+    /// completion runs only after the final response so partial failures can
+    /// be reported without abandoning later correlation slots.
+    private func enqueueControlCommands(
+        _ commands: [String],
+        completion: @escaping ([Result<[String], CommandError>]) -> Void
+    ) {
+        guard !commands.isEmpty else {
+            completion([])
+            return
+        }
+        guard mode == .tmuxControl else {
+            completion(Array(repeating: .failure(.notInTmuxMode), count: commands.count))
+            return
+        }
+        guard !commandQueueAwaitingTransportRecovery else {
+            completion(Array(repeating: .failure(.timedOut), count: commands.count))
+            return
+        }
+
+        let submissions = renderLedger.enqueuePlatformCommands(commands)
+        guard submissions.count == commands.count else {
+            completion(Array(repeating: .failure(.cancelled), count: commands.count))
+            return
+        }
+
+        var results = Array<Result<[String], CommandError>?>(
+            repeating: nil,
+            count: commands.count
+        )
+        var entries: [PendingCommand] = []
+        entries.reserveCapacity(commands.count)
+        for (index, command) in commands.enumerated() {
+            nextCommandSequence &+= 1
+            entries.append(PendingCommand(
+                tag: submissions[index].tag,
+                sequence: nextCommandSequence,
+                command: command,
+                transmittedAt: ContinuousClock.now,
+                correlation: nil,
+                completion: { result in
+                    results[index] = result
+                    guard results.allSatisfy({ $0 != nil }) else { return }
+                    completion(results.compactMap { $0 })
+                }
+            ))
+        }
+
+        // Establish the complete FIFO before invoking the transport callback;
+        // test transports and app adapters may synchronously re-enter ingest.
+        pendingCommands.append(contentsOf: entries)
+        for entry in entries {
+            Self.logDiagnostic(
+                "command-transmit controller=\(diagnosticID) sequence=\(entry.sequence) wirePending=\(pendingCommands.count) commandCategory=\(Self.commandCategory(entry.command))"
+            )
+        }
+        armCommandResponseWatchdog()
+        let wire = entries.map { entry in
+            entry.command.hasSuffix("\n") ? entry.command : entry.command + "\n"
+        }.joined()
+        transmitControlBytes(Array(wire.utf8), publishedSize: entries.compactMap {
+            Self.publishedClientSize(in: $0.command)
+        }.last)
     }
 
     private func transmitControlCommandPair(_ first: PendingCommand, _ second: PendingCommand) {
@@ -1705,42 +2625,235 @@ public final class TmuxController {
                 "command-transmit controller=\(diagnosticID) sequence=\(entry.sequence) wirePending=\(pendingCommands.count) commandCategory=\(Self.commandCategory(entry.command))"
             )
         }
+        armCommandResponseWatchdog()
         let firstLine = first.command.hasSuffix("\n") ? first.command : first.command + "\n"
         let secondLine = second.command.hasSuffix("\n") ? second.command : second.command + "\n"
-        sendBytes?(Array((firstLine + secondLine).utf8))
+        transmitControlBytes(Array((firstLine + secondLine).utf8), publishedSize:
+            Self.publishedClientSize(in: second.command) ?? Self.publishedClientSize(in: first.command))
     }
 
     private func transmitControlCommand(_ entry: PendingCommand) {
         pendingCommands.append(entry)
         Self.logDiagnostic(
-            "command-transmit controller=\(diagnosticID) sequence=\(entry.sequence) wirePending=\(pendingCommands.count) commandCategory=\(Self.commandCategory(entry.command))"
+            "command-transmit controller=\(diagnosticID) sequence=\(entry.sequence) wirePending=\(pendingCommands.count) commandCategory=\(Self.commandCategory(entry.command))\(entry.correlation.map { " corr=\($0)" } ?? "")"
         )
+        armCommandResponseWatchdog()
         let command = entry.command
         let line = command.hasSuffix("\n") ? command : command + "\n"
-        sendBytes?(Array(line.utf8))
+        commandWriteDiagnostic?(entry.sequence, entry.correlation)
+        transmitControlBytes(Array(line.utf8), publishedSize: Self.publishedClientSize(in: command))
     }
 
-    /// Capture the active pane's normal-buffer viewport plus a bounded slice of
-    /// server-side tmux history and return terminal repaint bytes that seed a
-    /// local SwiftTerm scrollback buffer. This is used by the mosh side-channel:
-    /// mosh itself synchronizes only the visible screen, so local scrollback has
-    /// to be synthesized from tmux on demand.
-    public func captureActivePrimaryPaneScrollback(
-        depth: Int,
-        clientRows: Int? = nil,
-        completion: @escaping (ScrollbackCapture?) -> Void
-    ) {
-        captureActivePrimaryPaneScrollbackResult(
-            depth: depth,
-            clientRows: clientRows
-        ) { result in
-            if case .captured(let capture) = result {
-                completion(capture)
-            } else {
-                completion(nil)
-            }
+    private static func publishedClientSize(in command: String) -> TmuxClientGeometry? {
+        let prefix = "refresh-client -C "
+        guard command.hasPrefix(prefix) else { return nil }
+        let dimensions = command.dropFirst(prefix.count).trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: ",")
+        guard dimensions.count == 2,
+              let columns = Int(dimensions[0]), let rows = Int(dimensions[1])
+        else { return nil }
+        return try? TmuxClientGeometry(columns: columns, rows: rows)
+    }
+
+    private func transmitControlBytes(_ bytes: [UInt8], publishedSize: TmuxClientGeometry?) {
+        let generation = controlConnectionGeneration
+        let admitted: Bool
+        if let sendBytesAdmitting {
+            admitted = sendBytesAdmitting(bytes)
+        } else if let sendBytes {
+            sendBytes(bytes)
+            admitted = true
+        } else {
+            admitted = false
+        }
+        // Compatibility senders may synchronously reset the connection.
+        guard admitted, let publishedSize, mode == .tmuxControl,
+              controlConnectionGeneration == generation else { return }
+        lastPublishedClientSize = publishedSize
+        if participatesInGridAuthority, gridAuthorityLifecycle.claim == nil {
+            applyGridAuthorityLifecycleEffects(reduceGridAuthority(.sizeAdvertised(
+                TmuxGridSize(columns: publishedSize.columns, rows: publishedSize.rows)
+            )))
         }
     }
+
+    // MARK: - Command-queue poisoning detection and recovery
+
+    /// One task per non-empty FIFO episode. It sleeps until the oldest
+    /// pending command's response deadline, then either re-arms (the head
+    /// changed because responses are draining normally) or declares the
+    /// queue poisoned and recovers. Detection is gated on observed server
+    /// activity below the hard timeout so a fully stalled link stays the
+    /// transport layer's problem.
+    private func armCommandResponseWatchdog() {
+        guard commandResponseWatchdogTask == nil, !pendingCommands.isEmpty else { return }
+        let generation = controlConnectionGeneration
+        commandResponseWatchdogTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self,
+                      self.controlConnectionGeneration == generation,
+                      self.mode == .tmuxControl,
+                      let oldest = self.pendingCommands.first
+                else { break }
+                let poison = Duration.seconds(self.commandResponsePoisonThreshold)
+                let interactivePoison = Duration.seconds(
+                    self.commandResponseInteractivePoisonThreshold
+                )
+                let hard = Duration.seconds(self.commandResponseHardTimeout)
+                var ageStart = oldest.transmittedAt
+                if let baseline = self.commandResponseWatchdogBaseline,
+                   baseline > ageStart {
+                    ageStart = baseline
+                }
+                let now = ContinuousClock.now
+                let age = ageStart.duration(to: now)
+                let interactiveEntry = self.pendingCommands
+                    .first(where: { Self.isInteractiveCommand($0.command) })
+                let interactiveAge: Duration? = interactiveEntry.map { entry in
+                        var start = entry.transmittedAt
+                        if let baseline = self.commandResponseWatchdogBaseline,
+                           baseline > start {
+                            start = baseline
+                        }
+                        return start.duration(to: now)
+                    }
+                let interactiveExpired = interactiveAge.map { $0 >= interactivePoison } ?? false
+                let outputQuiet = Duration.seconds(self.commandResponseOutputQuietPeriod)
+                let outputCongested = self.cooperativeOutputIngestDepth > 0
+                    || (self.lastPaneOutputAt.map {
+                        $0 >= ageStart && $0.duration(to: now) < outputQuiet
+                    } ?? false)
+                let interactiveServerActive = (interactiveEntry.map { entry in
+                    var evidenceStart = entry.transmittedAt
+                    if let baseline = self.commandResponseWatchdogBaseline,
+                       baseline > evidenceStart {
+                        evidenceStart = baseline
+                    }
+                    return self.lastControlActivityAt.map {
+                        $0 >= evidenceStart
+                    } ?? false
+                } ?? false) && !outputCongested
+                if age < poison && !interactiveExpired {
+                    let headWait = poison - age
+                    let interactiveWait = interactiveAge.map {
+                        max(.zero, interactivePoison - $0)
+                    } ?? headWait
+                    try? await Task.sleep(for: min(headWait, interactiveWait))
+                    continue
+                }
+                let serverActive = self.lastControlActivityAt
+                    .map { $0 >= ageStart } ?? false
+                if (serverActive && age >= poison && !outputCongested)
+                    || (interactiveExpired && interactiveServerActive)
+                    || (age >= hard && !outputCongested) {
+                    self.commandResponseWatchdogTask = nil
+                    let trigger: String
+                    if age >= hard {
+                        trigger = "hard-timeout"
+                    } else if interactiveExpired && interactiveServerActive {
+                        trigger = "interactive-server-active"
+                    } else {
+                        trigger = "server-active"
+                    }
+                    self.recoverPoisonedCommandQueue(
+                        oldestAge: age,
+                        trigger: trigger
+                    )
+                    return
+                }
+                let remainingToHard = max(.zero, hard - age)
+                let retryDelay = remainingToHard > .zero
+                    ? min(.milliseconds(250), remainingToHard)
+                    : .milliseconds(250)
+                try? await Task.sleep(for: retryDelay)
+            }
+            self?.commandResponseWatchdogTask = nil
+        }
+    }
+
+    private func cancelCommandResponseWatchdog() {
+        commandResponseWatchdogTask?.cancel()
+        commandResponseWatchdogTask = nil
+        pendingCommandFence = nil
+        commandQueueAwaitingTransportRecovery = false
+    }
+
+    /// Fail every stuck completion and resynchronize response correlation
+    /// with a fence command. At-most-once is preserved: nothing is
+    /// retransmitted — `send-keys` may or may not have executed remotely, and
+    /// replaying it could duplicate user input. Completions observe
+    /// `.timedOut` (not `.cancelled`) so callers can distinguish ambiguous
+    /// delivery from a torn-down channel.
+    private func recoverPoisonedCommandQueue(oldestAge: Duration, trigger: String) {
+        guard mode == .tmuxControl else { return }
+        let stuck = drainPendingCommands()
+        guard !stuck.isEmpty else { return }
+        commandQueueRecoveries += 1
+        let oldestAgeMs = oldestAge.components.seconds * 1_000
+            + Int64(oldestAge.components.attoseconds / 1_000_000_000_000_000)
+        Self.logDiagnostic(
+            "command-queue-poisoned controller=\(diagnosticID) trigger=\(trigger) stuck=\(stuck.count) oldestAgeMs=\(oldestAgeMs) recoveries=\(commandQueueRecoveries) headCategory=\(stuck.first.map { Self.commandCategory($0.command) } ?? "none") headCorr=\(stuck.first?.correlation ?? "none")"
+        )
+        if let requestTransportRecovery = onCommandQueueTransportRecoveryRequired {
+            commandQueueAwaitingTransportRecovery = true
+            applyGridAuthorityLifecycleEffects(reduceGridAuthority(.channelLiveness(false)))
+            pendingCommandFence = nil
+            for entry in stuck {
+                entry.completion(.failure(.timedOut))
+            }
+            Self.logDiagnostic(
+                "command-queue-transport-recovery-requested controller=\(diagnosticID) path=\(controlPath) recoveries=\(commandQueueRecoveries)"
+            )
+            requestTransportRecovery(commandQueueRecoveries)
+            return
+        }
+
+        let nonce = "tessera-cq-fence-\(commandQueueRecoveries)-\(String(UUID().uuidString.prefix(8)))"
+        pendingCommandFence = CommandQueueFence(nonce: nonce, armedAt: ContinuousClock.now)
+        // The fence is armed before completions fire so a completion that
+        // synchronously enqueues a follow-up command lands after the fence
+        // on the wire and correlates exactly once the nonce drains.
+        sendBytes?(Array("display-message -p \(nonce)\n".utf8))
+        for entry in stuck {
+            entry.completion(.failure(.timedOut))
+        }
+    }
+
+    private static func isInteractiveCommand(_ command: String) -> Bool {
+        switch commandCategory(command) {
+        case "send-keys", "select": true
+        default: false
+        }
+    }
+
+    /// Fence matched: correlation is exact again. Stale render work owned by
+    /// the failed commands is invalidated by re-claiming the active viewport
+    /// through the normal authority path, which rehydrates metadata and
+    /// repaints from authoritative server state.
+    private func completeCommandQueueRecovery() {
+        Self.logDiagnostic(
+            "command-queue-recovered controller=\(diagnosticID) recoveries=\(commandQueueRecoveries) pendingAfterFence=\(pendingCommands.count)"
+        )
+        // Commands that waited out the fence measure their response age from
+        // the resync, not from transmit — their replies are typically already
+        // in flight right behind the nonce.
+        commandResponseWatchdogBaseline = ContinuousClock.now
+        armCommandResponseWatchdog()
+        if controlPath == .inline {
+            claimActiveViewport(reason: "command-queue-recovery", repaintEvenIfSame: true)
+        }
+    }
+
+    #if DEBUG
+    /// Test seam: the active recovery fence nonce, if any.
+    public var _debugPendingCommandFenceNonce: String? { pendingCommandFence?.nonce }
+    /// Test seam: pending command-FIFO depth.
+    public var _debugPendingCommandCount: Int { pendingCommands.count }
+    /// Test seam: exact FIFO order, used to keep causal-selection tests from
+    /// guessing how many render/window hydration commands an event inserted.
+    public var _debugPendingCommands: [String] { pendingCommands.map(\.command) }
+    #endif
+
 
     public func queryActivePaneInteractionState(
         completion: @escaping (PaneInteractionState?) -> Void
@@ -1803,147 +2916,6 @@ public final class TmuxController {
         }
     }
 
-    public func captureActivePrimaryPaneScrollbackResult(
-        depth: Int,
-        clientRows: Int? = nil,
-        completion: @escaping (ScrollbackCaptureResult) -> Void
-    ) {
-        guard mode == .tmuxControl else {
-            Self.logDiagnostic("scrollback-capture skipped reason=not-in-tmux")
-            completion(.skipped(.notInTmux))
-            return
-        }
-
-        guard let paneId = activePaneId ?? activeWindowId.flatMap({ window($0)?.activePaneId }) else {
-            Self.logDiagnostic("scrollback-capture skipped reason=no-active-pane")
-            completion(.skipped(.noActivePane))
-            return
-        }
-
-        let requestedDepth = max(0, depth)
-        let generation = stateGeneration
-        let target = paneId.description
-        Self.logDiagnostic(
-            "scrollback-capture metadata send pane=\(paneId) depth=\(requestedDepth) generation=\(generation)"
-        )
-
-        sendControlCommand(
-            "display-message -p -t \(target) '\(Self.renderedPaneMetadataFormat)'"
-        ) { [weak self] result in
-            guard let self else { return }
-            guard self.isCurrentGeneration(generation),
-                  self.activePaneId == paneId || self.activeWindowId.flatMap({ self.window($0)?.activePaneId }) == paneId
-            else {
-                Self.logDiagnostic(
-                    "scrollback-capture metadata stale pane=\(paneId) generation=\(generation) result='\(Self.describe(result))'"
-                )
-                completion(.skipped(.stale))
-                return
-            }
-
-            guard case .success(let lines) = result,
-                  let head = lines.first(where: { !$0.isEmpty }),
-                  let state = Self.parseRenderedPaneState(head)
-            else {
-                Self.logDiagnostic(
-                    "scrollback-capture metadata failed pane=\(paneId) generation=\(generation) result='\(Self.describe(result))'"
-                )
-                completion(.skipped(.metadataUnavailable))
-                return
-            }
-
-            self.updatePaneInteractionState(
-                paneId: paneId,
-                isAlternateScreen: state.paneInAltScreen,
-                isMouseReporting: state.isMouseReporting,
-                isSgrMouse: state.mouseSgr
-            )
-
-            guard !state.paneInAltScreen else {
-                Self.logDiagnostic(
-                    "scrollback-capture skipped reason=alt-screen pane=\(paneId) generation=\(generation)"
-                )
-                completion(.skipped(.alternateScreen))
-                return
-            }
-
-            self.sendScrollbackCaptureCommand(
-                paneId: paneId,
-                state: state,
-                requestedDepth: requestedDepth,
-                generation: generation,
-                clientRows: clientRows,
-                completion: completion
-            )
-        }
-    }
-
-    private func sendScrollbackCaptureCommand(
-        paneId: PaneId,
-        state: RenderedPaneState,
-        requestedDepth: Int,
-        generation: Int,
-        clientRows: Int?,
-        completion: @escaping (ScrollbackCaptureResult) -> Void
-    ) {
-        let target = paneId.description
-        // Preserve tmux's hard-wrapped row geometry. `-J` would join wrapped
-        // rows and can drop colored trailing blanks; the local SwiftTerm
-        // surface already has the same width we pushed to tmux via
-        // `updateClientSize`, so raw rows make the live/history seam line up.
-        let command = "capture-pane -p -e -N -S -\(requestedDepth) -t \(target)"
-        Self.logDiagnostic(
-            "scrollback-capture send pane=\(paneId) depth=\(requestedDepth) generation=\(generation) commandCategory=\(Self.commandCategory(command))"
-        )
-
-        sendControlCommand(command) { [weak self] result in
-            guard let self else { return }
-            guard self.isCurrentGeneration(generation),
-                  self.activePaneId == paneId || self.activeWindowId.flatMap({ self.window($0)?.activePaneId }) == paneId
-            else {
-                Self.logDiagnostic(
-                    "scrollback-capture stale pane=\(paneId) generation=\(generation) result='\(Self.describe(result))'"
-                )
-                completion(.skipped(.stale))
-                return
-            }
-
-            guard case .success(let captureLines) = result else {
-                Self.logDiagnostic(
-                    "scrollback-capture failed pane=\(paneId) generation=\(generation) result='\(Self.describe(result))'"
-                )
-                completion(.skipped(.captureFailed))
-                return
-            }
-            guard !captureLines.isEmpty else {
-                Self.logDiagnostic(
-                    "scrollback-capture rejected-empty pane=\(paneId) generation=\(generation) clientRows=\(clientRows ?? self.lastKnownSize?.rows ?? -1)"
-                )
-                completion(.skipped(.captureFailed))
-                return
-            }
-
-            let bytes = RepaintAssembly.assemble(
-                state: state,
-                captureLines: captureLines,
-                historyLines: [],
-                savedPrimaryLines: [],
-                altScreenLines: nil,
-                terminalIsInAltScreen: false,
-                clientRows: clientRows ?? lastKnownSize?.rows
-            )
-            Self.logDiagnostic(
-                "scrollback-capture complete pane=\(paneId) depth=\(requestedDepth) lines=\(captureLines.count) bytes=\(bytes.count) historySize=\(String(describing: state.historySize))"
-            )
-            completion(.captured(ScrollbackCapture(
-                paneId: paneId,
-                requestedDepth: requestedDepth,
-                historySize: state.historySize,
-                capturedLineCount: captureLines.count,
-                repaintBytes: bytes
-            )))
-        }
-    }
 
     /// While another device holds the grid, window commands from this
     /// client must not run: `select-window`/`new-window` from a control
@@ -1965,7 +2937,272 @@ public final class TmuxController {
     public func newWindow() {
         guard !userMutationsSuppressedWhileYielded else { return }
         replayClientSize(reason: "new-window")
-        sendControlCommand("new-window -e COLORTERM=truecolor")
+        performWindowSelection(
+            TmuxWindowCommands.newWindowAtEnd(target: ownSessionId?.description),
+            expectedWindowID: nil
+        )
+    }
+
+    /// Move a tracked window to a zero-based position. The portable planner is
+    /// the sole owner of tmux command spelling and the expected order. The
+    /// optimistic snapshot remains published through command ACK and is
+    /// reconciled only by a subsequent authoritative full-list reply.
+    public func moveWindow(_ windowId: WindowId, to destination: Int) {
+        guard canReorderWindows,
+              let sessionID = ownSessionId
+        else { return }
+        windowOrderError = nil
+        let connectionGeneration = controlConnectionGeneration
+        let order = windows.map(\.id)
+        let capabilities = snapshot.capabilities
+            ?? TmuxWindowCapabilities.forVersion(serverVersion ?? "")
+        guard let plan = TmuxWindowReorderPlanner.plan(
+            order: order,
+            moving: windowId,
+            to: destination,
+            capabilities: capabilities,
+            sessionID: sessionID,
+            activeWindowID: nil,
+            highestIndex: windows.compactMap(\.index).max()
+        ) else {
+            windowOrderError = "The window order changed. Try again."
+            return
+        }
+        guard !plan.commands.isEmpty else { return }
+        guard let token = beginWindowOrderOptimism(
+            expectedOrder: plan.expectedOrder,
+            connectionGeneration: connectionGeneration
+        ) else { return }
+        sendControlCommand(TmuxSessionGroupQuery.command) { [weak self] result in
+            guard let self,
+                  self.controlConnectionGeneration == connectionGeneration,
+                  self.mode == .tmuxControl,
+                  self.pendingWindowReorderToken == token
+            else { return }
+            guard case .success(let lines) = result else {
+                self.abandonWindowOrderMutation(
+                    token: token,
+                    error: Self.windowOrderErrorMessage(
+                        result,
+                        fallback: "Could not verify the tmux session group."
+                    ) ?? "Could not verify the tmux session group."
+                )
+                return
+            }
+            guard let states = TmuxSessionGroupQuery.parse(
+                lines: lines,
+                containing: sessionID
+            ) else {
+                self.abandonWindowOrderMutation(
+                    token: token,
+                    error: "Could not verify the tmux session group."
+                )
+                Self.logDiagnostic(
+                    "window-order group parse failed own=\(sessionID) lines=\(lines.count)"
+                )
+                return
+            }
+            guard self.runtimeEngine.snapshot.authoritativeWindowOrder == order else {
+                self.abandonWindowOrderMutation(token: token, error: "The window order changed. Try again.")
+                return
+            }
+            guard let grouped = TmuxSessionGroupQuery.renumberPlan(for: states, preservingAttached: sessionID) else { return }
+            self.beginWindowOrderMutation(
+                plan: TmuxWindowMutationPlan(mutationCommands: plan.commands, selectionRestoreCommands: grouped.selectionRestoreCommands),
+                expectedOrder: plan.expectedOrder,
+                connectionGeneration: connectionGeneration,
+                existingToken: token
+            )
+        }
+    }
+
+    /// Compact window indexes for every member of the attached session group.
+    /// Group membership is discovered from tmux on each invocation because a
+    /// user may add members beyond Tessera's normal owner/view pair.
+    public func renumberWindows() {
+        guard canTidyWindows,
+              let ownSessionId
+        else { return }
+        windowOrderError = nil
+        let connectionGeneration = controlConnectionGeneration
+        guard let token = beginWindowOrderOptimism(expectedOrder: windows.map(\.id), connectionGeneration: connectionGeneration) else { return }
+        sendControlCommand(TmuxSessionGroupQuery.command) { [weak self] result in
+            guard let self,
+                  self.controlConnectionGeneration == connectionGeneration,
+                  self.mode == .tmuxControl,
+                  self.pendingWindowReorderToken == token
+            else { return }
+            guard case .success(let lines) = result,
+                  let states = TmuxSessionGroupQuery.parse(
+                      lines: lines,
+                      containing: ownSessionId
+                  ),
+                  !states.isEmpty
+            else {
+                self.abandonWindowOrderMutation(token: token, error: Self.windowOrderErrorMessage(result, fallback: "Could not discover the tmux session group.") ?? "Could not discover the tmux session group.")
+                return
+            }
+            guard let plan = TmuxSessionGroupQuery.renumberPlan(
+                for: states,
+                preservingAttached: ownSessionId
+            ) else {
+                self.abandonWindowOrderMutation(token: token, error: "Could not build a safe tmux tidy operation.")
+                return
+            }
+            self.beginWindowOrderMutation(
+                plan: plan,
+                expectedOrder: self.windows.map(\.id),
+                connectionGeneration: connectionGeneration,
+                existingToken: token
+            )
+        }
+    }
+
+    private func beginWindowOrderMutation(
+        plan: TmuxWindowMutationPlan,
+        expectedOrder: [WindowId],
+        connectionGeneration: UInt64,
+        existingToken: UInt64? = nil
+    ) {
+        guard self.controlConnectionGeneration == connectionGeneration,
+              mode == .tmuxControl,
+              isWindowListHydrated,
+              !gridAuthority.isPeer
+        else {
+            if let existingToken,
+               pendingWindowReorderToken == existingToken {
+                abandonWindowOrderMutation(
+                    token: existingToken,
+                    error: "The tmux session changed before the window could move."
+                )
+            } else {
+                windowOrderOperationPending = false
+            }
+            return
+        }
+        let token: UInt64
+        if let existingToken {
+            guard pendingWindowReorderToken == existingToken,
+                  runtimeEngine.snapshot.isReorderPending
+            else { return }
+            token = existingToken
+        } else {
+            guard let started = beginWindowOrderOptimism(
+                expectedOrder: expectedOrder,
+                connectionGeneration: connectionGeneration
+            ) else { return }
+            token = started
+        }
+
+        armWindowOrderDeadline(token: token, connectionGeneration: connectionGeneration)
+        enqueueControlCommands(plan.commands) { [weak self] results in
+            guard let self,
+                  self.controlConnectionGeneration == connectionGeneration,
+                  self.pendingWindowReorderToken == token
+            else { return }
+            self.windowOrderOperationPending = false
+            for (command, result) in zip(plan.selectionRestoreCommands, results.dropFirst(plan.mutationCommands.count)) {
+                if case .failure = result { Self.logDiagnostic("window-order selection restore failed command=\(command)") }
+            }
+            if results.prefix(plan.mutationCommands.count).allSatisfy({ result in
+                if case .success = result { return true }
+                return false
+            }) {
+                _ = self.runtimeEngine.confirmReorder(token: token)
+                self.armWindowOrderDeadline(token: token, connectionGeneration: connectionGeneration)
+            } else {
+                _ = self.runtimeEngine.abandonReorder(token: token)
+                self.pendingWindowReorderToken = nil
+                self.windowOrderDeadlineTask?.cancel()
+                self.windowOrderDeadlineTask = nil
+                self.windowOrderError = results.lazy.compactMap { result in
+                    Self.windowOrderErrorMessage(result, fallback: nil)
+                }.first ?? "Could not update the tmux window order."
+            }
+            self.projectCoreSnapshot()
+            self.sendPendingWindowOrderRefreshIfNeeded()
+        }
+    }
+
+    private func beginWindowOrderOptimism(
+        expectedOrder: [WindowId],
+        connectionGeneration: UInt64
+    ) -> UInt64? {
+        guard self.controlConnectionGeneration == connectionGeneration,
+              let token = runtimeEngine.beginReorder(expecting: expectedOrder)
+        else { return nil }
+        pendingWindowReorderToken = token
+        windowOrderOperationPending = true
+        projectCoreSnapshot()
+        armWindowOrderDeadline(token: token, connectionGeneration: connectionGeneration)
+        return token
+    }
+
+    private func abandonWindowOrderMutation(token: UInt64, error: String) {
+        guard pendingWindowReorderToken == token else { return }
+        _ = runtimeEngine.abandonReorder(token: token)
+        pendingWindowReorderToken = nil
+        windowOrderOperationPending = false
+        windowOrderDeadlineTask?.cancel()
+        windowOrderDeadlineTask = nil
+        windowOrderError = error
+        projectCoreSnapshot()
+        sendPendingWindowOrderRefreshIfNeeded()
+    }
+
+    private func armWindowOrderDeadline(
+        token: UInt64,
+        connectionGeneration: UInt64
+    ) {
+        windowOrderDeadlineTask?.cancel()
+        let interval = windowOrderDeadlineInterval
+        windowOrderDeadlineTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(interval))
+            guard !Task.isCancelled,
+                  let self,
+                  self.controlConnectionGeneration == connectionGeneration,
+                  self.pendingWindowReorderToken == token
+            else { return }
+            _ = self.runtimeEngine.abandonReorder(token: token)
+            self.pendingWindowReorderToken = nil
+            self.windowOrderOperationPending = false
+            self.windowOrderDeadlineTask = nil
+            self.windowOrderError = "The tmux window order did not update in time."
+            self.projectCoreSnapshot()
+            self.sendPendingWindowOrderRefreshIfNeeded()
+        }
+    }
+
+    private func finishConfirmedWindowOrderMutationIfNeeded() {
+        guard pendingWindowReorderToken != nil,
+              !runtimeEngine.snapshot.isReorderPending
+        else { return }
+        pendingWindowReorderToken = nil
+        windowOrderOperationPending = false
+        windowOrderDeadlineTask?.cancel()
+        windowOrderDeadlineTask = nil
+    }
+
+    private static func windowOrderErrorMessage(
+        _ result: Result<[String], CommandError>,
+        fallback: String?
+    ) -> String? {
+        switch result {
+        case .success:
+            return fallback
+        case .failure(.tmuxError(let lines)):
+            let message = lines.joined(separator: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return message.isEmpty ? (fallback ?? "tmux rejected the window order change.") : message
+        case .failure(.timedOut):
+            return "The tmux window order command timed out."
+        case .failure(.cancelled):
+            return fallback ?? "The tmux window order change was cancelled."
+        case .failure(.notInTmuxMode):
+            return fallback ?? "The tmux control connection is unavailable."
+        case .failure(.refusedByAuthority):
+            return fallback ?? "This session is being controlled from another device."
+        }
     }
 
     /// Ask tmux to kill the current window. tmux responds with
@@ -1973,7 +3210,7 @@ public final class TmuxController {
     /// `%session-window-changed` naming the successor.
     public func killCurrentWindow() {
         guard !userMutationsSuppressedWhileYielded else { return }
-        sendControlCommand("kill-window")
+        performWindowSelection("kill-window", expectedWindowID: nil)
     }
 
     /// Ask tmux to kill a specific tracked window. The explicit `@id` target
@@ -1986,7 +3223,44 @@ public final class TmuxController {
               isWindowListHydrated,
               windows.contains(where: { $0.id == windowId })
         else { return }
-        sendControlCommand("kill-window -t \(windowId.description)")
+        let command = "kill-window -t \(windowId.description)"
+        guard controlPath == .sideChannel,
+              let sessionID = ownSessionId,
+              let identity = gridAuthorityIdentity
+        else {
+            sendControlCommand(command)
+            return
+        }
+
+        // An inactive tab close must not move the separately attached Mosh
+        // painter. Prove whether this target is current before deciding if the
+        // close needs the same post-mutation visible-client reconciliation as
+        // `killCurrentWindow`.
+        let selectionGeneration = visibleClientSelectionGeneration
+        let connectionGeneration = controlConnectionGeneration
+        sendControlCommand(TmuxRuntimeHydrationQuery.activeWindowCommand) { [weak self] result in
+            guard let self else { return }
+            guard self.isCurrentVisibleClientSelectionContext(
+                sessionID: sessionID,
+                identityID: identity.id,
+                selectionGeneration: selectionGeneration,
+                connectionGeneration: connectionGeneration
+            ) else {
+                Self.logDiagnostic(
+                    "targeted window close skipped window=\(windowId) stage=stale-preflight"
+                )
+                return
+            }
+            let closesActiveWindow = (try? result.get()).flatMap({
+                TmuxRuntimeHydrationQuery.activeWindowID(lines: $0)
+            }) == windowId
+
+            if closesActiveWindow {
+                self.performWindowSelection(command, expectedWindowID: nil)
+            } else {
+                self.sendControlCommand(command)
+            }
+        }
     }
 
     /// Rename a tracked window from compact touch UI. Strip control scalars so
@@ -2012,13 +3286,13 @@ public final class TmuxController {
     /// Previous tmux window in the session (wraps).
     public func previousWindow() {
         guard !userMutationsSuppressedWhileYielded else { return }
-        sendControlCommand("previous-window")
+        performWindowSelection("previous-window", expectedWindowID: nil)
     }
 
     /// Next tmux window in the session (wraps).
     public func nextWindow() {
         guard !userMutationsSuppressedWhileYielded else { return }
-        sendControlCommand("next-window")
+        performWindowSelection("next-window", expectedWindowID: nil)
     }
 
     /// Select the tmux window at a given 1-based tab position in our
@@ -2038,8 +3312,7 @@ public final class TmuxController {
               position <= windows.count
         else { return }
         let windowId = windows[position - 1].id
-        clearBell(forWindowID: windowId.rawValue)
-        sendControlCommand("select-window -t \(windowId.description)")
+        selectKnownWindow(windowId)
     }
 
     /// Select a known window by its stable tmux `@id`.
@@ -2053,8 +3326,382 @@ public final class TmuxController {
               isWindowListHydrated,
               windows.contains(where: { $0.id == windowId })
         else { return }
+        selectKnownWindow(windowId)
+    }
+
+    private func selectKnownWindow(_ windowId: WindowId) {
         clearBell(forWindowID: windowId.rawValue)
-        sendControlCommand("select-window -t \(windowId.description)")
+        // W2: name our own session. A bare `@W` resolves to the most recently
+        // active session holding W, which in a group is often a sibling (the
+        // mosh view session, a user's `tmux new -t`), so the switch would land
+        // on someone else's screen. Fail open to the bare spelling only in
+        // the brief window before `%session-changed` names our session.
+        performWindowSelection(
+            ownSessionId.map {
+                TmuxWindowCommands.selectWindow(windowId, inOwnSession: $0)
+            } ?? TmuxWindowCommands.selectWindow(windowId),
+            expectedWindowID: windowId
+        )
+    }
+
+    /// Run a command which changes this control client's selected window and,
+    /// for Mosh side-channel sessions, causally mirror the command's resulting
+    /// target to the separately attached pixel-producing client. Dynamic
+    /// commands (`new`, `next`, `previous`, active close) discover that target
+    /// through the shared strict active-window query after their reply.
+    private func performWindowSelection(
+        _ command: String,
+        expectedWindowID: WindowId?
+    ) {
+        visibleClientSelectionGeneration &+= 1
+        let selectionGeneration = visibleClientSelectionGeneration
+
+        guard controlPath == .sideChannel,
+              let sessionID = ownSessionId,
+              let identity = gridAuthorityIdentity
+        else {
+            sendControlCommand(command)
+            return
+        }
+
+        let connectionGeneration = controlConnectionGeneration
+        sendControlCommand(command) { [weak self] result in
+            guard let self,
+                  case .success = result,
+                  self.isCurrentVisibleClientSelectionContext(
+                      sessionID: sessionID,
+                      identityID: identity.id,
+                      selectionGeneration: selectionGeneration,
+                      connectionGeneration: connectionGeneration
+                  )
+            else {
+                Self.logDiagnostic(
+                    "visible-client selection skipped window=\(String(describing: expectedWindowID)) stage=select-control-client"
+                )
+                return
+            }
+            self.proveActiveWindowBeforeVisibleMoshSelection(
+                expectedWindowID: expectedWindowID,
+                sessionID: sessionID,
+                identity: identity,
+                selectionGeneration: selectionGeneration,
+                connectionGeneration: connectionGeneration
+            )
+        }
+    }
+
+    /// A side-channel Mosh session has a metadata/control client and a separate
+    /// tmux client whose PTY supplies visible pixels. Keep pane selection on the
+    /// same verified, newest-intent path as window selection so the render
+    /// ledger cannot bind P2 while the UDP painter remains on P1.
+    func selectPaneAcrossTmuxClients(
+        _ paneId: PaneId,
+        preservingWindowZoom: Bool
+    ) {
+        let command = "select-pane "
+            + (preservingWindowZoom ? "-Z " : "")
+            + "-t \(paneId.description)"
+        visibleClientSelectionGeneration &+= 1
+        let selectionGeneration = visibleClientSelectionGeneration
+
+        guard controlPath == .sideChannel,
+              let sessionID = ownSessionId,
+              let identity = gridAuthorityIdentity,
+              let windowID = windows.first(where: { window in
+                  window.panes.contains(where: { $0.id == paneId })
+                      || window.layout?.paneIds.contains(paneId) == true
+              })?.id
+        else {
+            sendControlCommand(command) { [weak self] result in
+                self?.reportPaneSelectionError(result)
+            }
+            return
+        }
+
+        let connectionGeneration = controlConnectionGeneration
+        sendControlCommand(command) { [weak self] result in
+            guard let self else { return }
+            guard case .success = result else {
+                self.reportPaneSelectionError(result)
+                return
+            }
+            guard self.isCurrentVisibleClientSelection(
+                windowId: windowID,
+                paneId: paneId,
+                sessionID: sessionID,
+                identityID: identity.id,
+                selectionGeneration: selectionGeneration,
+                connectionGeneration: connectionGeneration,
+                requireActiveTarget: false
+            ) else {
+                Self.logDiagnostic(
+                    "visible-client selection skipped window=\(windowID) pane=\(paneId) stage=select-control-client"
+                )
+                return
+            }
+            self.proveActivePaneBeforeVisibleMoshSelection(
+                windowID: windowID,
+                paneID: paneId,
+                preservingWindowZoom: preservingWindowZoom,
+                sessionID: sessionID,
+                identity: identity,
+                selectionGeneration: selectionGeneration,
+                connectionGeneration: connectionGeneration
+            )
+        }
+    }
+
+    private func reportPaneSelectionError(
+        _ result: Result<[String], CommandError>
+    ) {
+        guard case .failure(.tmuxError(let lines)) = result else { return }
+        let message = lines
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        onCommandError?(message)
+    }
+
+    private func proveActivePaneBeforeVisibleMoshSelection(
+        windowID: WindowId,
+        paneID: PaneId,
+        preservingWindowZoom: Bool,
+        sessionID: SessionId,
+        identity: GridAuthorityIdentity,
+        selectionGeneration: UInt64,
+        connectionGeneration: UInt64
+    ) {
+        sendControlCommand(
+            TmuxRuntimeHydrationQuery.activePaneCommand(windowID: windowID)
+        ) { [weak self] result in
+            guard let self,
+                  self.isCurrentVisibleClientSelection(
+                      windowId: windowID,
+                      paneId: paneID,
+                      sessionID: sessionID,
+                      identityID: identity.id,
+                      selectionGeneration: selectionGeneration,
+                      connectionGeneration: connectionGeneration,
+                      requireActiveTarget: false
+                  ),
+                  case .success(let lines) = result,
+                  TmuxRuntimeHydrationQuery.activePaneMatches(
+                      windowID: windowID,
+                      paneID: paneID,
+                      lines: lines
+                  )
+            else {
+                Self.logDiagnostic(
+                    "visible-client selection skipped window=\(windowID) pane=\(paneID) stage=prove-active-pane"
+                )
+                return
+            }
+            self.mirrorSelectionToVisibleMoshClient(
+                windowID: windowID,
+                paneID: paneID,
+                preservingWindowZoom: preservingWindowZoom,
+                sessionID: sessionID,
+                identity: identity,
+                selectionGeneration: selectionGeneration,
+                connectionGeneration: connectionGeneration
+            )
+        }
+    }
+
+    /// A mosh+tmux session has two tmux clients: this `-CC` side channel owns
+    /// metadata and the main mosh PTY owns visible pixels. Selecting a window
+    /// on only the control client advances the render ledger while leaving the
+    /// painter on the previous window, so no causally-new SSP frame can ever
+    /// complete the owner handoff. Resolve the device-stamped visible client,
+    /// prove that exact name/PID/creation tuple is still attached to our
+    /// session, then mirror only the newest selection intent.
+    private func proveActiveWindowBeforeVisibleMoshSelection(
+        expectedWindowID: WindowId?,
+        sessionID: SessionId,
+        identity: GridAuthorityIdentity,
+        selectionGeneration: UInt64,
+        connectionGeneration: UInt64
+    ) {
+        sendControlCommand(TmuxRuntimeHydrationQuery.activeWindowCommand) { [weak self] result in
+            guard let self,
+                  self.isCurrentVisibleClientSelectionContext(
+                      sessionID: sessionID,
+                      identityID: identity.id,
+                      selectionGeneration: selectionGeneration,
+                      connectionGeneration: connectionGeneration
+                  ),
+                  case .success(let lines) = result,
+                  let windowID = TmuxRuntimeHydrationQuery.activeWindowID(lines: lines),
+                  expectedWindowID.map({ $0 == windowID }) ?? true,
+                  self.isCurrentVisibleClientSelection(
+                      windowId: windowID,
+                      sessionID: sessionID,
+                      identityID: identity.id,
+                      selectionGeneration: selectionGeneration,
+                      connectionGeneration: connectionGeneration
+                  )
+            else {
+                Self.logDiagnostic(
+                    "visible-client selection skipped window=\(String(describing: expectedWindowID)) stage=prove-active-window"
+                )
+                return
+            }
+            self.mirrorSelectionToVisibleMoshClient(
+                windowID: windowID,
+                paneID: nil,
+                preservingWindowZoom: false,
+                sessionID: sessionID,
+                identity: identity,
+                selectionGeneration: selectionGeneration,
+                connectionGeneration: connectionGeneration
+            )
+        }
+    }
+
+    private func mirrorSelectionToVisibleMoshClient(
+        windowID: WindowId,
+        paneID: PaneId?,
+        preservingWindowZoom: Bool,
+        sessionID: SessionId,
+        identity: GridAuthorityIdentity,
+        selectionGeneration: UInt64,
+        connectionGeneration: UInt64
+    ) {
+        let visibleOption = Self.gridAuthorityVisibleClientOption(identityID: identity.id)
+        sendControlCommand(
+            "show-options -qv -t \(sessionID.description) \(visibleOption)"
+        ) { [weak self] result in
+            guard let self,
+                  self.isCurrentVisibleClientSelection(
+                      windowId: windowID,
+                      paneId: paneID,
+                      sessionID: sessionID,
+                      identityID: identity.id,
+                      selectionGeneration: selectionGeneration,
+                      connectionGeneration: connectionGeneration
+                  ),
+                  case .success(let optionLines) = result,
+                  optionLines.filter({ !$0.isEmpty }).count == 1,
+                  let stampedIdentity = optionLines.first(where: { !$0.isEmpty }),
+                  let visibleClient = Self.visibleClientName(from: stampedIdentity)
+            else {
+                Self.logDiagnostic(
+                    "visible-client selection skipped window=\(windowID) pane=\(String(describing: paneID)) stage=resolve-option"
+                )
+                return
+            }
+
+            self.sendControlCommand(
+                "list-clients -t \(sessionID.description) -F '#{client_name}|#{client_pid}|#{client_created}'"
+            ) { [weak self] attachedResult in
+                guard let self,
+                      self.isCurrentVisibleClientSelection(
+                          windowId: windowID,
+                          paneId: paneID,
+                          sessionID: sessionID,
+                          identityID: identity.id,
+                          selectionGeneration: selectionGeneration,
+                          connectionGeneration: connectionGeneration
+                      ),
+                      case .success(let attachedLines) = attachedResult,
+                      attachedLines.filter({ $0 == stampedIdentity }).count == 1
+                else {
+                    Self.logDiagnostic(
+                        "visible-client selection skipped window=\(windowID) pane=\(String(describing: paneID)) stage=verify-attached"
+                    )
+                    return
+                }
+                // Windows/panes are shared by grouped sessions. A bare @id
+                // or %id lets tmux choose the owner session, silently moving
+                // the visible mosh client out of the control client's view.
+                let target = TmuxWindowCommands.sessionQualifiedTarget(
+                    windowID,
+                    sessionID: sessionID,
+                    paneID: paneID
+                )
+                let zoomFlag = preservingWindowZoom && paneID != nil ? "-Z " : ""
+                self.sendControlCommand(
+                    "switch-client \(zoomFlag)-c \(Self.singleQuotedTmuxArgument(visibleClient)) -t \(target)"
+                ) { result in
+                    switch result {
+                    case .success:
+                        Self.logDiagnostic(
+                            "visible-client selection completed window=\(windowID) pane=\(String(describing: paneID))"
+                        )
+                    case .failure:
+                        Self.logDiagnostic(
+                            "visible-client selection failed window=\(windowID) pane=\(String(describing: paneID))"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private func isCurrentVisibleClientSelection(
+        windowId: WindowId,
+        paneId: PaneId? = nil,
+        sessionID: SessionId,
+        identityID: String,
+        selectionGeneration: UInt64,
+        connectionGeneration: UInt64,
+        requireActiveTarget: Bool = true
+    ) -> Bool {
+        isCurrentVisibleClientSelectionContext(
+            sessionID: sessionID,
+            identityID: identityID,
+            selectionGeneration: selectionGeneration,
+            connectionGeneration: connectionGeneration
+        )
+            && (!requireActiveTarget || (
+                runtimeEngine.snapshot.activeWindowID == windowId
+                    && (paneId == nil || runtimeEngine.snapshot.windows.first(where: {
+                        $0.id == windowId
+                    })?.activePaneID == paneId)
+            ))
+            && windows.contains(where: { window in
+                window.id == windowId
+                    && (paneId.map { targetPaneID in
+                        window.panes.contains(where: { $0.id == targetPaneID })
+                            || window.layout?.paneIds.contains(targetPaneID) == true
+                    } ?? true)
+            })
+    }
+
+    private func isCurrentVisibleClientSelectionContext(
+        sessionID: SessionId,
+        identityID: String,
+        selectionGeneration: UInt64,
+        connectionGeneration: UInt64
+    ) -> Bool {
+        mode == .tmuxControl
+            && controlPath == .sideChannel
+            && controlConnectionGeneration == connectionGeneration
+            && visibleClientSelectionGeneration == selectionGeneration
+            && ownSessionId == sessionID
+            && gridAuthorityIdentity?.id == identityID
+            && !userMutationsSuppressedWhileYielded
+    }
+
+    /// Parse only the exact tuple written by `moshVisibleClientCommand`.
+    /// `client_name` is later shell-quoted, but malformed/ambiguous option
+    /// values still fail closed before any client-targeted mutation is queued.
+    nonisolated static func visibleClientName(from stampedIdentity: String) -> String? {
+        let fields = stampedIdentity.split(
+            separator: "|",
+            omittingEmptySubsequences: false
+        )
+        guard fields.count == 3,
+              !fields[0].isEmpty,
+              fields[0].utf8.count <= 100,
+              !fields[0].unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              }),
+              fields[1].unicodeScalars.allSatisfy({ (48...57).contains($0.value) }),
+              fields[2].unicodeScalars.allSatisfy({ (48...57).contains($0.value) }),
+              let pid = UInt64(fields[1]), pid > 0,
+              let created = UInt64(fields[2]), created > 0
+        else { return nil }
+        return String(fields[0])
     }
 
     public func clearBell(forWindowID windowID: Int) {
@@ -2085,41 +3732,64 @@ public final class TmuxController {
     /// `new-window`) otherwise create panes at the side-channel's stale geometry
     /// until user input through the visible mosh client forces a repaint.
     public func updateClientSize(cols: Int, rows: Int) {
-        if cols > 0, rows > 0 {
-            localViewportSize = (cols, rows)
-            if clientSizePolicy == .preserveServerGeometry,
-               !reverseAttachPeers.isEmpty,
-               reverseAttachBaselineSize == nil {
-                reverseAttachBaselineSize = (cols, rows)
-                considerReverseAttachCedeFromKnownWindows()
-            }
+        guard let geometry = try? TmuxClientGeometry(columns: cols, rows: rows) else {
+            Self.logDiagnostic("client-size rejected local=\(cols)x\(rows)")
+            return
         }
-        if clientSizePolicy == .preserveServerGeometry {
-            guard compactClientSizeRole == .owner,
-                  !hasCededGridOwnership,
-                  cols > 0,
-                  rows > 0
-            else {
+        let cols = geometry.columns
+        let rows = geometry.rows
+        localViewportSize = (cols, rows)
+        if clientSizePolicy == .preserveServerGeometry,
+           !reverseAttachPeers.isEmpty,
+           reverseAttachBaselineSize == nil {
+            reverseAttachBaselineSize = (cols, rows)
+            considerReverseAttachCedeFromKnownWindows()
+        }
+        let ownsPreservedGeometry = compactClientSizeRole == .owner
+            && !hasCededGridOwnership
+        guard TmuxGeometryCapability.canPublishLocalGeometry(
+            policy: clientSizePolicy,
+            ownsPreservedGeometry: ownsPreservedGeometry
+        ) else {
+            if clientSizePolicy == .preserveServerGeometry,
+               compactClientSizeRole != .owner {
                 Self.logDiagnostic(
                     "client-size ignored local=\(cols)x\(rows) path=\(controlPath) policy=preserve-server role=\(String(describing: compactClientSizeRole))"
                 )
-                return
             }
+            return
+        }
+        if clientSizePolicy == .preserveServerGeometry {
             let previous = lastKnownSize
             lastKnownSize = (cols, rows)
             guard previous?.cols != cols || previous?.rows != rows else { return }
             replayClientSize(reason: "compact-owner-size-change", previous: previous)
             return
         }
-        guard clientSizePolicy == .resizeTmux else {
-            Self.logDiagnostic(
-                "client-size ignored local=\(cols)x\(rows) path=\(controlPath) policy=preserve-server"
-            )
-            return
-        }
         let previous = lastKnownSize
         lastKnownSize = (cols, rows)
-        replayClientSize(reason: "size-change", previous: previous)
+        let priorClaimGeneration = gridAuthorityLifecycle.claim?.generation
+        // A late claim waits for its own force's confirmation (§6.10 rule
+        // 3); its churn is replayed only after it settles.
+        let lateClaim = gridAuthorityLifecycle.claim != nil
+            && !gridAuthoritySession.claimMayAdvertiseGeometry
+        if previous?.cols != cols || previous?.rows != rows, !lateClaim {
+            windowSizeReplayAttempts.removeAll()
+            passiveWindowSizeProbe = nil
+        }
+        if participatesInGridAuthority, previous?.cols != cols || previous?.rows != rows {
+            applyGridAuthorityLifecycleEffects(reduceGridAuthority(.localSize(TmuxGridSize(columns: cols, rows: rows))))
+        }
+        if let claim = gridAuthorityLifecycle.claim, claim.generation != priorClaimGeneration,
+           claim.hasAdvertisedGrid(.init(columns: cols, rows: rows)) { return }
+        if resumeDeferredGridAuthorityClaim(reason: "measured-viewport") { return }
+        let sizeChanged = previous?.cols != cols || previous?.rows != rows
+        if sizeChanged || !participatesInGridAuthority {
+            // A participating device re-asserting an unchanged size is not a
+            // geometry change: on the inline path it would also fence
+            // `latest` (and stamp), i.e. seize the grid outside a claim.
+            replayClientSize(reason: "size-change", previous: previous)
+        }
     }
 
     /// Resolve whether an inline compact control client owns the tmux grid or
@@ -2233,24 +3903,83 @@ public final class TmuxController {
         replayClientSize(reason: "adopt-server-geometry", previous: previous)
     }
 
+    /// Why a replay sent nothing. P11: a keyboard animation replays on
+    /// every frame, so a gated replay is logged once when its gate begins
+    /// and the repeats are counted into one line when it ends, instead of a
+    /// line per frame saturating the diagnostics budget.
+    private enum ClientSizeGate: String {
+        case inactive = "deferred (inactive)"
+        case withheld = "withheld (authority unresolved)"
+        case yielded = "deferred (yielded)"
+        case lateClaim = "deferred (late claim)"
+    }
+    @ObservationIgnored private var clientSizeGateLogged: ClientSizeGate?
+    @ObservationIgnored private var clientSizeGateRepeats = 0
+
+    private func noteClientSizeGated(
+        _ gate: ClientSizeGate,
+        size: (cols: Int, rows: Int),
+        reason: String
+    ) {
+        guard clientSizeGateLogged != gate else {
+            clientSizeGateRepeats += 1
+            return
+        }
+        endClientSizeGate()
+        clientSizeGateLogged = gate
+        Self.logDiagnostic("client-size \(gate.rawValue) cols=\(size.cols) rows=\(size.rows) reason=\(reason)")
+    }
+
+    private func endClientSizeGate() {
+        guard let gate = clientSizeGateLogged else { return }
+        if clientSizeGateRepeats > 0 {
+            Self.logDiagnostic("client-size \(gate.rawValue) repeated=\(clientSizeGateRepeats)")
+        }
+        clientSizeGateLogged = nil
+        clientSizeGateRepeats = 0
+    }
+
     private func replayClientSize(
         reason: String,
         previous: (cols: Int, rows: Int)? = nil,
-        expectsReconnectClaimEcho: Bool = false,
         belongsToGridClaimFence: Bool = false
     ) {
         guard mode == .tmuxControl, let size = lastKnownSize else { return }
-        // While yielded, local size churn (keyboard, rotation, split view)
-        // must not steal the grid back from the active peer. The size stays
-        // latched in `lastKnownSize`; a reclaim replays it explicitly.
-        if gridAuthority.isPeer,
-           !gridAuthorityReclaimInFlight,
-           !gridAuthorityClaimPending {
-            Self.logDiagnostic(
-                "client-size deferred (yielded) cols=\(size.cols) rows=\(size.rows) reason=\(reason)"
-            )
+        if participatesInGridAuthority, !belongsToGridClaimFence {
+            // Both control paths: an inactive app sizes nothing. The
+            // foreground read (or the pending intent's own read) decides
+            // what the size it returns to may do; an inline replay here
+            // would stamp and fence `latest` before that read lands.
+            if appIsInactive {
+                noteClientSizeGated(.inactive, size: size, reason: reason)
+                return
+            }
+            // D3, both control paths: nothing sizes the window until the
+            // authority read resolves. Attach, reconnect and foreground all
+            // land here first; the reply releases or keeps the hold.
+            if gridAuthorityGeometryWithheld {
+                let gate: ClientSizeGate = gridAuthority.isPeer && gridAuthorityLifecycle.claim == nil ? .yielded : .withheld
+                noteClientSizeGated(gate, size: size, reason: reason)
+                return
+            }
+        }
+        // §6.10 rule 2: a late claim advertises nothing, its own fence
+        // included. It finishes on the geometry it already sent; the churn
+        // stays latched in `lastKnownSize` and the settlement replays it as
+        // an ordinary owner resize.
+        if gridAuthorityLifecycle.claim != nil,
+           !gridAuthoritySession.claimMayAdvertiseGeometry {
+            noteClientSizeGated(.lateClaim, size: size, reason: reason)
             return
         }
+        // While yielded, local size churn (keyboard, rotation, split view)
+        // must not steal the grid back from the active peer. The size stays
+        // latched in `lastKnownSize`; a claim replays it explicitly.
+        if gridAuthority.isPeer, gridAuthorityLifecycle.claim == nil {
+            noteClientSizeGated(.yielded, size: size, reason: reason)
+            return
+        }
+        endClientSizeGate()
         // Logged so we can catch a transient bogus width (e.g. a half-width cols
         // during a layout/font transition) being pushed to tmux — that would
         // shrink the pane, and on the way back to full width the vacated columns
@@ -2258,17 +3987,40 @@ public final class TmuxController {
         Self.logDiagnostic(
             "client-size cols=\(size.cols) rows=\(size.rows) prevCols=\(previous?.cols ?? -1) prevRows=\(previous?.rows ?? -1) path=\(controlPath) reason=\(reason)"
         )
-        // Stamp before the resize lands so peers can raise their veil ahead
-        // of the first foreign-sized frame.
-        let authorityStamp = writeGridAuthorityStamp(reason: reason)
-        if expectsReconnectClaimEcho {
-            gridAuthorityReconnectClaimExpectedStamp = authorityStamp
-        }
-        lastClientSizeReplayAt = Date()
-        clientSizeEpoch &+= 1
-        sendControlCommand("refresh-client -C \(size.cols),\(size.rows)")
-        forceWindowSizesToClientSize(size)
-        if gridAuthorityClaimPending, !belongsToGridClaimFence {
+        // P5: a replay never writes the stamp. Only a claim does, once, after
+        // its fence and authoritative repaint (Core's fence -> repaint ->
+        // stamp chain, `commitGridAuthorityLifecycleStamp`). An ordinary
+        // replay runs only on the owner (a yielded device defers above, and a
+        // device whose read found no stamp sizes with a bare refresh and
+        // never stamps), so every peer already holds our stamp from the claim
+        // that made us owner and is already veiled; "stamp before size" gave
+        // them nothing new. It did cost: each fresh generation redrew every
+        // tty client on the server, fanned a subscription burst out to every
+        // peer and re-rendered their session view, on every keyboard frame
+        // and rotation. Worse, a changed stamp is a new foreign write to a
+        // peer's in-flight claim, which aborts it as contested: an owner's
+        // keyboard toggle could cancel the take-back the user just tapped on
+        // another device.
+        //
+        // Before the fact: a confirmed claim that re-targets is pending again
+        // by the time the ledger decides whether this replay brings its own
+        // `latest` fence (the claim's fence sequence follows below instead).
+        noteGridClaimAdvertised(size, reason: reason)
+        if participatesInGridAuthority, gridAuthoritySession.geometryHold == .withheld { return }
+        // The shared replay sequence (`TmuxClientSizeReplay`): on the inline
+        // path the refresh is fenced with a targetless no-op `select-window`
+        // so this client becomes tmux's `latest`. Without it any client that
+        // attached or typed since the last replay — an `ignore-size` phone, a
+        // laptop `tmux attach` — holds `latest`, tmux answers the refresh with
+        // "no size change", and the window freezes at its old grid while this
+        // device renders the new one. A claim acks its replay and sends its
+        // own fence (`queueGridClaimFenceSequence`), so it adds none here.
+        submitRenderFact(.clientSize(columns: size.cols, rows: size.rows))
+        forceWindowSizesToClientSize(
+            size, belongsToGridClaimFence: belongsToGridClaimFence,
+            evenIfLayoutMatches: belongsToGridClaimFence
+        )
+        if gridClaimAwaitsFence, !belongsToGridClaimFence, let claim = gridAuthorityLifecycle.claim {
             // Keyboard/rotation churn can update the viewport while a claim's
             // first fence is still queued. Invalidate that fence and append a
             // new policy/fence after this newest replay; otherwise a non-latest
@@ -2276,59 +4028,231 @@ public final class TmuxController {
             // size commands have reached tmux.
             queueGridClaimFenceSequence(
                 connectionGeneration: controlConnectionGeneration,
-                claimGeneration: gridAuthorityClaimGeneration,
+                claimGeneration: claim.generation,
                 reason: "pending-size-\(reason)",
                 replaySize: false
             )
         }
     }
 
-    /// `refresh-client -C` only resizes windows indirectly, via tmux's
-    /// `window-size latest` recalculation — and that recalculation considers
-    /// ONLY the window's latest-active client. Tessera's mosh topology
-    /// attaches every visible client with `ignore-size` (so typing on one
-    /// device can't yank the shared grid away from another), but the visible
-    /// mosh client still claims `latest` every time its PTY resizes over SSP.
-    /// From then on the recalculation finds no usable candidate ("no
-    /// calculated size", verified against a tmux 3.4 -vv server log) and the
-    /// window FREEZES at whatever transient it last applied — on iPhone,
-    /// a mid-keyboard-animation height. The frozen window no longer matches
-    /// the mosh PTY or the local grid, so the pane renders as a top-left crop
-    /// with the content and cursor out of view until input scrolls it.
-    ///
-    /// So when the mosh side channel is the sizing authority, don't rely on
-    /// the recalculation: force each window to the advertised size directly.
-    /// `resize-window` stamps the per-window `window-size` option to
-    /// `manual`; unset it right after so windows keep inheriting the
-    /// session/global sizing behavior — a plain laptop tmux client attaching
-    /// later must still resize windows natively.
+    /// §6.10 rule 3: record a grid the live claim advertises, so its echo is
+    /// never a loss. A confirmed claim re-targets: it returns to its
+    /// geometry phase and drops the repaint in flight, which shows the old
+    /// grid; the replay's own fence sequence follows (`replayClientSize`).
+    private func noteGridClaimAdvertised(_ size: (cols: Int, rows: Int), reason: String) {
+        guard let claim = gridAuthorityLifecycle.claim,
+              gridAuthoritySession.claimMayAdvertiseGeometry
+        else { return }
+        let effects = reduceGridAuthority(.claimAdvertisedGeometry(
+            generation: claim.generation,
+            size: TmuxGridSize(columns: size.cols, rows: size.rows)
+        ))
+        gridClaimGeometryEpoch &+= 1
+        if claim.phase == .awaitingRepaint,
+           gridAuthorityLifecycle.claim?.phase == .awaitingFence {
+            Self.logDiagnostic(
+                "grid-authority claim re-targeted gen=\(claim.generation) grid=\(size.cols)x\(size.rows) reason=\(reason): repaint dropped"
+            )
+            clearGridAuthorityRepaintTargets()
+            gridAuthorityClaimChangedGeometry = true
+        }
+        if !effects.isEmpty { applyGridAuthorityLifecycleEffects(effects) }
+    }
+
+    /// A Mosh visible client takes tmux's `latest` on every keystroke or
+    /// PTY resize even though it is `ignore-size`; the recalculation then
+    /// finds no usable candidate ("no calculated size", tmux 3.4 -vv) and the
+    /// window freezes at its last transient, on iPhone a mid-keyboard height,
+    /// rendered as a top-left crop. A plain laptop can hold `latest` too, so
+    /// `refresh-client -C` alone cannot restore our grid. Advertise the side
+    /// channel's size first, then use the shared replay: resize, targetless
+    /// `select-window`, unset. The fence makes this control client latest in
+    /// its own session before the unset recalculates sizing, so the window
+    /// does not snap back to the plain client (D2); the unset keeps windows
+    /// inheriting session/global sizing so a laptop attaching later still
+    /// resizes them natively. Keep the manual resize/unset until the next
+    /// protocol step's live lane proves they can be removed; confirmation
+    /// follows all mutation replies in a separate write so it sees the final,
+    /// policy-governed geometry.
     ///
     /// Scoped to the side channel: an inline `-CC` client has no separate
-    /// visible PTY, so it cannot freeze its own session — only a mosh peer
-    /// can freeze it, and that peer's own side channel re-asserts through
-    /// this same path.
+    /// visible PTY, so it cannot freeze its own session.
     ///
-    /// Called from every client-size replay AND from window-list hydration:
-    /// on a continuity resume the viewport is already settled when control
-    /// mode comes up, so the only replay fires during attach-init — before
-    /// the `list-windows` reply has populated `windows` — and no later size
-    /// change ever replays again. Without the hydration call a frozen window
-    /// stays frozen for the whole session (verified against a device
-    /// diagnostics log: single 47x20 replay at attach, windows hydrate 80ms
-    /// later, no further replay until the app returns to foreground).
+    /// Hydration also uses this path: on a continuity resume the only replay
+    /// fires during attach-init, before `list-windows` populates `windows`,
+    /// and no later size change replays again (seen in a device diagnostics
+    /// log), so without it a frozen window stays frozen for the session.
     private func forceWindowSizesToClientSize(
-        _ size: (cols: Int, rows: Int)
+        _ size: (cols: Int, rows: Int),
+        belongsToGridClaimFence: Bool = false,
+        onlyWindowID: WindowId? = nil,
+        evenIfLayoutMatches: Bool = false,
+        recoveryCompletion: ((Bool) -> Void)? = nil
     ) {
-        guard controlPath == .sideChannel,
-              clientSizePolicy == .resizeTmux
+        var submitted = false
+        defer { if !submitted { recoveryCompletion?(false) } }
+        guard mode == .tmuxControl,
+              controlPath == .sideChannel,
+              clientSizePolicy == .resizeTmux,
+              !commandQueueAwaitingTransportRecovery,
+              let requested = try? TmuxClientGeometry(columns: size.cols, rows: size.rows)
         else { return }
-        for window in windows {
-            let target = window.id.description
-            sendControlCommand(
-                "resize-window -x \(size.cols) -y \(size.rows) -t \(target)"
-            )
-            sendControlCommand("set-option -w -u -t \(target) window-size")
+        // The yield gate, and §6.10 rule 2: a late claim forces nothing.
+        if gridAuthorityLifecycle.claim != nil,
+           !gridAuthoritySession.claimMayAdvertiseGeometry {
+            return
         }
+        if gridAuthority.isPeer, gridAuthorityLifecycle.claim == nil {
+            return
+        }
+        if participatesInGridAuthority,
+           appIsInactive || gridAuthorityGeometryWithheld
+            || gridAuthorityOrdinaryGeometryIsUnstamped,
+           !belongsToGridClaimFence {
+            return
+        }
+        if appIsInactive, !belongsToGridClaimFence { return }
+        let validWindows = Set(windows.map(\.id))
+        windowSizeReplayAttempts = windowSizeReplayAttempts.filter { validWindows.contains($0.key) }
+        // The window a claim settles on (`confirmGridClaimIfSettled`). Only it
+        // is forced at a matching layout, and only its failure can abort the
+        // claim: a background window that already fits keeps its own
+        // window-size policy, and one that vanished mid-force says nothing
+        // about the take-back.
+        let claimWindowID = gridAuthorityLifecycle.claim != nil ? (activeWindowId ?? renderedWindowId) : nil
+        if gridAuthorityLifecycle.claim != nil, claimWindowID == nil { return }
+        for window in windows {
+            if let claimWindowID, window.id != claimWindowID { continue }
+            if let onlyWindowID, window.id != onlyWindowID { continue }
+            let observed = window.layout.flatMap { layout in
+                try? TmuxClientGeometry(columns: layout.root.rect.width, rows: layout.root.rect.height)
+            }
+            guard (evenIfLayoutMatches && window.id == claimWindowID) || TmuxWindowSizeReplay.decision(
+                requested: requested,
+                observed: observed,
+                lastAttempt: windowSizeReplayAttempts[window.id]?.requested
+            ) == .replay else {
+                continue
+            }
+            let commands = TmuxWindowSizeReplay.commands(windowID: window.id, requested: requested)
+            guard commands.count == 4 else { continue }
+            nextWindowSizeReplayToken &+= 1
+            let attempt = WindowSizeReplayAttempt(
+                token: nextWindowSizeReplayToken,
+                connectionGeneration: controlConnectionGeneration,
+                requested: requested
+            )
+            let windowID = window.id
+            // Register before transmission: sendBytes may synchronously deliver
+            // replies. Matching layout notifications do not retire this attempt.
+            windowSizeReplayAttempts[windowID] = attempt
+            reportGridClaimFenceForce()
+
+            let counted = noteGridClaimCommandSent()
+            submitted = true
+            enqueueControlCommands(Array(commands.dropLast())) { [weak self] results in
+                guard let self else { return }
+                self.noteGridClaimReplyReceived(counted)
+                defer { self.endGridClaimIfStalledLate(context: "window-size-force") }
+                guard self.controlConnectionGeneration == attempt.connectionGeneration,
+                      self.windowSizeReplayAttempts[windowID] == attempt
+                else { recoveryCompletion?(false); return }
+                guard results.count == commands.count - 1,
+                      results.allSatisfy({ if case .success = $0 { return true }; return false })
+                else {
+                    if recoveryCompletion != nil {
+                        self.windowSizeReplayAttempts.removeValue(forKey: windowID)
+                    }
+                    recoveryCompletion?(false)
+                    Self.logDiagnostic("window-size force failed window=\(windowID): attempt \(recoveryCompletion == nil ? "retained" : "retired")")
+                    if let counted, windowID == claimWindowID,
+                       self.gridAuthorityLifecycle.claim?.generation == counted {
+                        self.applyGridAuthorityLifecycleEffects(
+                            self.reduceGridAuthority(.abortClaim(generation: counted, reason: .adapterFailure))
+                        )
+                    }
+                    return
+                }
+                // Unsetting window-size schedules tmux's recalculation. A query
+                // in the mutation batch can see the temporary manual size, so
+                // send it only after all three acknowledgements return to the client.
+                let confirmCounted = counted.flatMap { _ in self.noteGridClaimCommandSent() }
+                self.sendControlCommand(commands[3]) { [weak self] result in
+                    guard let self else { return }
+                    self.noteGridClaimReplyReceived(confirmCounted)
+                    defer { self.endGridClaimIfStalledLate(context: "window-size-confirmation") }
+                    guard self.controlConnectionGeneration == attempt.connectionGeneration,
+                          self.windowSizeReplayAttempts[windowID] == attempt
+                    else { recoveryCompletion?(false); return }
+                    guard case .success(let lines) = result,
+                          TmuxWindowSizeReplay.confirms(
+                            windowID: windowID,
+                            requested: requested,
+                            reply: lines.joined(separator: "\n")
+                          )
+                    else {
+                        if recoveryCompletion != nil {
+                            self.windowSizeReplayAttempts.removeValue(forKey: windowID)
+                        }
+                        recoveryCompletion?(false)
+                        Self.logDiagnostic("window-size confirmation mismatch window=\(windowID): attempt \(recoveryCompletion == nil ? "retained" : "retired")")
+                        return
+                    }
+                    self.windowSizeReplayAttempts.removeValue(forKey: windowID)
+                    recoveryCompletion?(true)
+                    self.reportGridClaimFenceForce()
+                }
+            }
+        }
+    }
+
+    /// Selection and hydration can install a known layout without a
+    /// `%layout-change`. Reconcile after the complete read (including policy
+    /// and authority replies), using the same passive proof as layout drift.
+    /// Discovery alone never sizes a background window.
+    private func reconcilePresentedWindowSizeIfNeeded() {
+        guard mode == .tmuxControl, presentedWindowRecoveryReserved, !reconcilingPresentedWindowSize,
+              let windowID = activeWindowId ?? renderedWindowId else { return }
+        if window(windowID)?.layout == nil || (windowLayoutQueriesInFlight[windowID] ?? 0) > 0 || (gridAuthorityRederiveInFlight && gridAuthoritySession.channelIsLive),
+           !appIsInactive, !gridAuthoritySession.hidden,
+           !gridAuthoritySession.inBackground, gridAuthority == .mine, gridAuthorityLifecycle.claim == nil { return }
+        reconcilingPresentedWindowSize = true
+        defer { reconcilingPresentedWindowSize = false }
+        reconcilePresentedWindowSize(windowId: windowID)
+        if presentedWindowRecoveryReserved {
+            presentedWindowRecoveryReserved = false
+            if passiveWindowSizeProbe == nil {
+                applyGridAuthorityLifecycleEffects(reduceGridAuthority(.ordinaryRecovery(active: false, proven: false)))
+            }
+        }
+    }
+
+    /// Let positive client proof judge a newly presented foreign grid before
+    /// the stamp-less layout heuristic can yield away our cached own stamp.
+    /// This reserves no geometry permission and sends no mutation.
+    private func reservePresentedWindowRecovery(_ facts: TmuxAuthorityGeometryEvidence.WindowFacts) {
+        if let probe = passiveWindowSizeProbe,
+           probe.windowID.rawValue != facts.activeWindow?.id {
+            // Carry recovery across the switch; only the new facts may judge it.
+            if gridAuthoritySession.ordinaryRecoveryActive { presentedWindowRecoveryReserved = true }
+            passiveWindowSizeProbe = nil
+        }
+        guard !presentedWindowRecoveryReserved, passiveWindowSizeProbe == nil,
+              mode == .tmuxControl, controlPath == .sideChannel,
+              clientSizePolicy == .resizeTmux, gridAuthority == .mine,
+              !appIsInactive, !gridAuthorityGeometryHeld,
+              gridAuthorityLifecycle.claim == nil,
+              facts.hydrated, let window = facts.activeWindow, window.authoritative,
+              gridAuthoritySession.evidence.policy(for: window.id)?.isLatest != false,
+              let size = lastKnownSize,
+              window.size?.columns != size.cols || window.size?.rows != size.rows else { return }
+        presentedWindowRecoveryReserved = true
+        // A public authority update can synchronously run the end-of-turn
+        // hook; do not release this reservation before installing its facts.
+        let wasReconciling = reconcilingPresentedWindowSize
+        reconcilingPresentedWindowSize = true
+        applyGridAuthorityLifecycleEffects(reduceGridAuthority(.ordinaryRecovery(active: true, proven: false)))
+        reconcilingPresentedWindowSize = wasReconciling
     }
 
     // MARK: - Continuity grid authority (takeover overlay)
@@ -2340,20 +4264,27 @@ public final class TmuxController {
         gridAuthorityIdentity != nil && clientSizePolicy == .resizeTmux
     }
 
+    /// Whether a veil gesture would be admitted now. A gesture while no
+    /// control channel is live is still admitted: it records a tap intent
+    /// that the next attach resolves (`requestTakeBack(channelLive:)`).
+    public var canReclaimGridAuthority: Bool {
+        participatesInGridAuthority
+            && gridAuthorityLifecycle.authority.isPeer
+            && gridAuthorityLifecycle.claim?.presentationVisible != true
+    }
+
+    /// Whether the control channel can carry a claim right now. A side
+    /// channel that dropped (or a command queue awaiting transport recovery)
+    /// cannot, even before the reducer has seen the reset.
+    private var gridAuthorityChannelLive: Bool {
+        mode == .tmuxControl && !commandQueueAwaitingTransportRecovery
+    }
+
     /// Restrict stamp tokens to a shell- and format-safe alphabet; the value
     /// travels inside single quotes on the control channel and back through
     /// a `%subscription-changed` line.
     nonisolated static func sanitizedAuthorityToken(_ raw: String) -> String {
-        let allowed = raw.unicodeScalars.map { scalar -> Character in
-            switch scalar {
-            case "a"..."z", "A"..."Z", "0"..."9", "-", "_", ".":
-                return Character(scalar)
-            default:
-                return "-"
-            }
-        }
-        let token = String(allowed)
-        return token.isEmpty ? "-" : token
+        TmuxGridAuthorityStamp.sanitizeToken(raw)
     }
 
     /// Device-scoped session option written by the visible mosh client. The
@@ -2363,129 +4294,528 @@ public final class TmuxController {
     public nonisolated static func gridAuthorityVisibleClientOption(
         identityID: String
     ) -> String {
-        "@tessera-visible-\(sanitizedAuthorityToken(identityID))"
+        TmuxGridAuthority.visibleClientOption(identityID: identityID)
     }
 
-    /// Write our stamp into the session option. Called from every size
-    /// replay, so "we claimed the grid" and "we sized the grid" stay one
-    /// atomic batch on the command FIFO.
+    /// Runs one reducer event and logs the core's own description of the
+    /// transition, so an iOS diagnostics report reads exactly like an Android
+    /// one (`TmuxGridAuthorityLifecycleReducer.describeTransition`). A no-op
+    /// reduction (no effects, equal state) skips the trace entirely: the
+    /// same stamp is re-observed once per pane on every subscription echo.
     @discardableResult
-    private func writeGridAuthorityStamp(reason: String) -> String? {
+    private func reduceGridAuthority(_ event: TmuxGridAuthoritySession.Event) -> [TmuxGridAuthoritySession.Effect] {
+        let before = gridAuthoritySession
+        let effects = gridAuthoritySession.reduce(event, now: gridAuthorityNow())
+        if before != gridAuthoritySession || !effects.isEmpty { gridAuthorityReductionRevision &+= 1 }
+        projectGridAuthority(gridAuthorityLifecycle.authority)
+        let measurementOnly: Bool
+        switch event {
+        case .localSize, .sizeAdvertised, .windowFacts: measurementOnly = true
+        default: measurementOnly = false
+        }
+        if (!measurementOnly || before.reducer != gridAuthoritySession.reducer
+            || before.query != gridAuthoritySession.query || !effects.isEmpty),
+           let trace = TmuxGridAuthoritySession.describeTransition(
+            event: event, before: before, after: gridAuthoritySession, effects: effects
+        ) {
+            Self.logDiagnostic("grid-authority session \(trace)")
+        }
+        updateGridAuthorityPresentation()
+        scheduleGridAuthorityWake()
+        return effects
+    }
+
+    private func scheduleGridAuthorityWake() {
+        let deadline = gridAuthoritySession.nextDeadline
+        guard deadline != gridAuthorityWakeDeadline || (deadline != nil && gridAuthorityWakeTask == nil) else { return }
+        gridAuthorityWakeTask?.cancel()
+        gridAuthorityWakeTask = nil
+        gridAuthorityWakeDeadline = deadline
+        guard let deadline else { return }
+        let delay = max(0, deadline - gridAuthorityNow())
+        gridAuthorityWakeTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(delay), clock: .continuous)
+            guard !Task.isCancelled, let self else { return }
+            self.gridAuthorityWakeTask = nil
+            self.gridAuthorityWakeDeadline = nil
+            self.applyGridAuthorityLifecycleEffects(self.reduceGridAuthority(.tick))
+        }
+    }
+
+    /// Execute the session's instructions with the existing command FIFO and
+    /// render ledger. Authority policy and deadlines stay inside the session.
+    private func applyGridAuthorityLifecycleEffects(_ effects: [TmuxGridAuthoritySession.Effect]) {
+        let revision = gridAuthorityReductionRevision
+        for effect in effects {
+            // A single reduction can replace a due retry with a newer show
+            // read. Only the session's current query should reach the FIFO.
+            if case .queryAuthority(let id) = effect,
+               gridAuthoritySession.query.current?.id != id { continue }
+            if revision != gridAuthorityReductionRevision {
+                // A synchronous wire callback may have advanced the session.
+                // Keep only instructions it still owns; an unrelated query
+                // bookkeeping change must not strand a current read/claim.
+                let stillOwned: Bool
+                switch effect {
+                case .queryAuthority(let id):
+                    stillOwned = gridAuthoritySession.query.current?.id == id
+                case .beginClaim(let claim):
+                    stillOwned = gridAuthorityLifecycle.claim?.generation == claim.generation
+                case .commitAuthorityStamp(let generation):
+                    stillOwned = gridAuthorityLifecycle.claim?.generation == generation
+                        && gridAuthorityLifecycle.claim?.phase == .awaitingStampCommit
+                case .refenceClaim(let generation), .requestRepaint(let generation):
+                    stillOwned = gridAuthorityLifecycle.claim?.generation == generation
+                default:
+                    stillOwned = false
+                }
+                guard stillOwned else { continue }
+            }
+            switch effect {
+            case .authorityChanged(let authority):
+                projectGridAuthority(authority)
+            case .hideReclaimPresentation:
+                break
+            case .claimAborted(let reason):
+                Self.logDiagnostic("grid-authority claim aborted reason=\(reason.wireName)")
+                clearGridAuthorityClaimBookkeeping()
+            case .claimSettled:
+                windowSizeReplayAttempts.removeAll()
+                passiveWindowSizeProbe = nil
+                clearGridAuthorityClaimBookkeeping()
+            case .commitAuthorityStamp(let generation):
+                commitGridAuthorityLifecycleStamp(generation: generation)
+            case .beginClaim(let claim):
+                startGridAuthorityClaim(claim)
+            case .queryAuthority(let id):
+                issueGridAuthorityQuery(id: id)
+            case .releaseGeometry(let release):
+                switch release {
+                case .none: break
+                case .advertise: advertiseGridAuthorityClientSize()
+                case .ownerReplay:
+                    if appIsInactive, participatesInGridAuthority {
+                        gridAuthorityOwnerReplayDeferred = true
+                        Self.logDiagnostic("grid-authority owner replay deferred reason=inactive")
+                    } else {
+                        replayClientSize(reason: "authority-owned-geometry")
+                    }
+                }
+            case .raiseStamplessPeer:
+                break // The shared verdict is projected after the effects loop.
+            case .controlChannelUnresponsive:
+                Self.logDiagnostic("grid-authority control channel unresponsive path=\(controlPath)")
+                if controlPath == .sideChannel, !commandQueueAwaitingTransportRecovery,
+                   let reconnect = onCommandQueueTransportRecoveryRequired {
+                    commandQueueAwaitingTransportRecovery = true
+                    applyGridAuthorityLifecycleEffects(reduceGridAuthority(.channelLiveness(false)))
+                    commandQueueRecoveries += 1
+                    reconnect(commandQueueRecoveries)
+                }
+            case .refenceClaim(let generation):
+                refenceGridClaimAfterGeometryLoss(generation: generation)
+            case .requestRepaint(let generation):
+                guard gridAuthorityLifecycle.claim?.generation == generation,
+                      gridAuthorityLifecycle.claim?.phase == .awaitingRepaint else { continue }
+                // Fence confirmation is drained after the ledger's layout
+                // step, so these targets bind to the surface that will paint.
+                performGridAuthorityClaimRepaint(context: "authority-session")
+            }
+        }
+        projectGridAuthority(gridAuthorityLifecycle.authority)
+        updateGridAuthorityPresentation()
+        let authorityChanged = runtimeEngine.projectAuthority(
+            participatesInGridAuthority ? gridAuthorityLifecycle.authority : .unknown
+        )
+        if revision == gridAuthorityReductionRevision,
+           authorityChanged || effects.contains(where: { effect in
+            switch effect {
+            case .authorityChanged, .claimSettled, .raiseStamplessPeer: return true
+            default: return false
+            }
+        }) {
+            let base = executingCommandReplySnapshot ?? runtimeEngine.snapshot
+            let snapshot = TmuxSnapshot(
+                sessionID: base.sessionID, sessionName: base.sessionName,
+                activeWindowID: base.activeWindowID,
+                isActiveWindowAuthoritative: base.isActiveWindowAuthoritative,
+                windows: base.windows, authority: runtimeEngine.snapshot.authority,
+                capabilities: base.capabilities, isReorderPending: base.isReorderPending,
+                authoritativeWindowOrder: base.authoritativeWindowOrder, isWindowListHydrated: base.isWindowListHydrated,
+                revision: base.revision
+            )
+            executeRenderEffects(renderLedger.noteAuthority(snapshot: snapshot), snapshot: snapshot)
+        }
+        if effects.contains(.hideReclaimPresentation) {
+            endGridClaimIfStalledLate(context: "presentation-hidden")
+        }
+        if controlProcessingDepth == 0 { reconcilePresentedWindowSizeIfNeeded() }
+    }
+
+    /// P6 is enforced by the ledger. A read's advertise release is always a
+    /// bare -C, even over an own stamp; it never transfers latest or forces a window.
+    private func advertiseGridAuthorityClientSize() {
+        guard mode == .tmuxControl, !gridAuthorityGeometryWithheld,
+              let size = lastKnownSize else { return }
+        updateRenderLedgerConfiguration(advertiseOnly: true)
+        executeRenderEffects(renderLedger.reduce(
+            .clientSize(columns: size.cols, rows: size.rows), snapshot: runtimeEngine.snapshot
+        ))
+        updateRenderLedgerConfiguration()
+    }
+
+    /// Starts the wire side of the session's claim: geometry replay, policy
+    /// probe and fence (`beginGridClaimWire`). The session owns its deadline.
+    private func startGridAuthorityClaim(_ claim: TmuxGridAuthorityLifecycleReducer.Claim) {
+        if (claim.reason == .show || claim.reason == .explicitOpen), claim.contestedPeer == nil {
+            gridAuthorityForegroundRecoveryGeneration = claim.generation
+            gridAuthorityForegroundRecoveryOwner = renderLedger.owner(for: .live)
+        } else {
+            gridAuthorityForegroundRecoveryGeneration = nil
+            gridAuthorityForegroundRecoveryOwner = nil
+        }
+        beginGridClaimWire(generation: claim.generation, reason: "authority-\(claim.reason.rawValue)")
+    }
+
+    /// Derives the one observed presentation from reducer state (never from
+    /// `authority` alone) and writes it only when it changed.
+    private func updateGridAuthorityPresentation() {
+        let enabled = participatesInGridAuthority && (mode == .tmuxControl
+            || (controlPath == .sideChannel && gridAuthorityLifecycle.hasAttached))
+        let next: GridAuthorityPresentation
+        if !enabled { next = .none }
+        else {
+            switch gridAuthoritySession.presentation {
+            case .none: next = .none
+            case .resuming(let waiting): next = .resuming(awaitingConnection: waiting)
+            case .veiled(let name): next = .veiled(peerName: name)
+            case .reclaiming(let name, let waiting): next = .reclaiming(peerName: name, awaitingConnection: waiting)
+            }
+        }
+        if next != gridAuthorityPresentation { gridAuthorityPresentation = next }
+        let allowsInput = !enabled || !gridAuthoritySession.gatesTyping
+        if allowsInput != gridAuthorityAllowsInput { gridAuthorityAllowsInput = allowsInput }
+        let refusal = enabled ? gridAuthoritySession.mutationRefusal : nil
+        if gridAuthorityMutationRefusal != refusal { gridAuthorityMutationRefusal = refusal }
+        if gridAuthorityGeometryHold != gridAuthoritySession.geometryHold {
+            gridAuthorityGeometryHold = gridAuthoritySession.geometryHold
+        }
+        if gridAuthorityNextDeadline != gridAuthoritySession.nextDeadline {
+            gridAuthorityNextDeadline = gridAuthoritySession.nextDeadline
+        }
+    }
+
+    private func commitGridAuthorityLifecycleStamp(generation: UInt64) {
         guard participatesInGridAuthority,
               mode == .tmuxControl,
-              let identity = gridAuthorityIdentity
-        else { return nil }
-        gridAuthorityGeneration += 1
-        let value = "v1 \(identity.id) \(gridAuthorityGeneration) \(identity.displayName)"
-        // Force the subscription echo of this very write to be processed —
-        // it is the reclaim ack (T3).
-        lastSeenAuthorityRawValue = nil
-        sendControlCommand("set-option \(Self.gridAuthorityOption) '\(value)'")
-        Self.logDiagnostic("grid-authority stamp gen=\(gridAuthorityGeneration) reason=\(reason)")
-        return value
-    }
-
-    /// Parse a stamp value; returns the peer display name when the stamp
-    /// belongs to a different device, nil when it is ours / empty / garbled.
-    private func foreignAuthorityDisplayName(inRawValue raw: String) -> String? {
-        let trimmed = raw.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return nil }
-        let fields = trimmed.split(separator: " ")
-        guard fields.count >= 4, fields[0] == "v1" else { return nil }
-        guard let identity = gridAuthorityIdentity, String(fields[1]) != identity.id else {
-            return nil
-        }
-        return fields[3...].joined(separator: " ")
-    }
-
-    /// Fold a stamp observation (subscription echo or explicit query) into
-    /// `gridAuthority`. The value arrives once per subscribed pane, so
-    /// dedupe on the raw string.
-    private func handleGridAuthoritySubscription(value: String) {
-        let trimmed = value.trimmingCharacters(in: .whitespaces)
-        guard trimmed != lastSeenAuthorityRawValue else { return }
-        lastSeenAuthorityRawValue = trimmed
-        guard participatesInGridAuthority,
-              let identity = gridAuthorityIdentity
+              gridAuthorityIdentity != nil,
+              let claim = gridAuthorityLifecycle.claim,
+              claim.generation == generation,
+              claim.phase == .awaitingStampCommit
         else { return }
-        // Empty (unstamped session) or unparseable values change nothing —
-        // the layout-mismatch fallback covers stamp-less takeovers.
-        let fields = trimmed.split(separator: " ")
-        guard fields.count >= 4, fields[0] == "v1" else { return }
 
-        if String(fields[1]) == identity.id {
-            let resolvesReconnectOrderingRace = trimmed
-                == gridAuthorityReconnectClaimExpectedStamp
-            if resolvesReconnectOrderingRace {
-                gridAuthorityReconnectClaimExpectedStamp = nil
-            }
-            // Our own stamp echo is advisory only — it can NOT complete a
-            // reclaim, because the stamp and tmux's own sizing-client state
-            // can disagree; geometry confirmation lives in
-            // `confirmGridClaimIfSettled`. It only labels the steady state
-            // while nothing is contested.
-            if resolvesReconnectOrderingRace,
-               gridAuthority.isPeer,
-               !gridAuthorityReclaimInFlight {
-                Self.logDiagnostic(
-                    "grid-authority reconnect echo followed intervening peer stamp: fencing claim"
+        guard sideChannelClaimGeometryIsCurrent else {
+            applyGridAuthorityLifecycleEffects(
+                reduceGridAuthority(.abortClaim(generation: generation, reason: .adapterFailure))
+            )
+            return
+        }
+
+        if controlPath == .sideChannel, gridAuthorityGeometryPolicyIsLatest {
+            // The claim's target, not the local grid: churn while the stamp
+            // waits is either advertised (visible) or held back (late), and
+            // must never strand the claim here (§6.10 rules 3 and 6).
+            guard let windowID = activeWindowId ?? renderedWindowId,
+                  let size = gridClaimTargetSize,
+                  let requested = try? TmuxClientGeometry(columns: size.cols, rows: size.rows)
+            else {
+                applyGridAuthorityLifecycleEffects(
+                    reduceGridAuthority(.abortClaim(generation: generation, reason: .adapterFailure))
                 )
-                gridAuthorityReclaimInFlight = true
-                claimActiveViewport(reason: "authority-reconnect-ordering")
-                scheduleGridAuthorityReclaimTimeout()
-            } else if !gridAuthorityReclaimInFlight, gridAuthority == .unknown {
-                gridAuthority = .mine
+                return
+            }
+            let connectionGeneration = controlConnectionGeneration
+            let command = TmuxWindowSizeReplay.sizeQuery(windowID: windowID)
+            // Native delivery proves the local canvas. This final query proves
+            // the remote window still fits before committing its ownership.
+            sendControlCommand(command) { [weak self] result in
+                guard let self,
+                      self.controlConnectionGeneration == connectionGeneration,
+                      self.gridAuthorityLifecycle.claim?.generation == generation,
+                      self.gridAuthorityLifecycle.claim?.phase == .awaitingStampCommit
+                else { return }
+                guard case .success(let lines) = result,
+                      (self.activeWindowId ?? self.renderedWindowId) == windowID,
+                      self.sideChannelClaimGeometryIsCurrent,
+                      TmuxWindowSizeReplay.confirms(
+                        windowID: windowID,
+                        requested: requested,
+                        reply: lines.joined(separator: "\n")
+                      )
+                else {
+                    self.applyGridAuthorityLifecycleEffects(
+                        self.reduceGridAuthority(.abortClaim(generation: generation, reason: .adapterFailure))
+                    )
+                    return
+                }
+                self.writeGridAuthorityLifecycleStamp(generation: generation)
+            }
+            return
+        }
+        writeGridAuthorityLifecycleStamp(generation: generation)
+    }
+
+    private func writeGridAuthorityLifecycleStamp(generation: UInt64) {
+        guard let identity = gridAuthorityIdentity,
+              gridAuthorityLifecycle.claim?.generation == generation,
+              gridAuthorityLifecycle.claim?.phase == .awaitingStampCommit
+        else { return }
+
+        let connectionGeneration = controlConnectionGeneration
+        let stamp = TmuxGridAuthorityStamp(
+            identity: identity,
+            generation: generation
+        )
+        let scope = gridAuthorityScope
+        let commands = TmuxGridAuthority.writeCommands(stamp, scope: scope)
+        sendControlCommand(commands[0]) { [weak self] result in
+            if case .failure(.tmuxError) = result {
+                self?.abandonGridAuthorityOwnerScope(scope, connection: connectionGeneration, reason: "owner-write-failed")
+            }
+            guard let self,
+                  self.mode == .tmuxControl,
+                  self.controlConnectionGeneration == connectionGeneration,
+                  let liveClaim = self.gridAuthorityLifecycle.claim,
+                  liveClaim.generation == generation,
+                  liveClaim.phase == .awaitingStampCommit
+            else { return }
+
+            guard case .success = result else {
+                Self.logDiagnostic(
+                    "grid-authority lifecycle stamp failed gen=\(generation): stay yielded"
+                )
+                self.applyGridAuthorityLifecycleEffects(
+                    reduceGridAuthority(.abortClaim(generation: generation, reason: .adapterFailure))
+                )
+                return
+            }
+
+            self.applyGridAuthorityLifecycleEffects(
+                reduceGridAuthority(.stampCommitSucceeded(
+                    generation: generation
+                ))
+            )
+            guard self.gridAuthorityLifecycle.claim?.phase == .awaitingSettlement else {
+                return
+            }
+            self.applyGridAuthorityLifecycleEffects(
+                reduceGridAuthority(.settleClaim(generation: generation))
+            )
+            Self.logDiagnostic(
+                "grid-authority lifecycle stamp committed gen=\(generation); presentation active"
+            )
+        }
+        for command in commands.dropFirst() { sendControlCommand(command) }
+    }
+
+    private func clearGridAuthorityClaimBookkeeping() {
+        gridAuthorityForegroundRecoveryGeneration = nil
+        gridAuthorityForegroundRecoveryOwner = nil
+        clearGridAuthorityRepaintTargets()
+        gridAuthorityClaimChangedGeometry = false
+    }
+
+    /// Fold a live subscription edge through the shared session. Its raw memo
+    /// owns pane fan-out dedupe; local parsing only explains diagnostics and
+    /// retires adapter bookkeeping after a foreign write.
+    private func handleGridAuthoritySubscription(value: String) {
+        guard participatesInGridAuthority, let identity = gridAuthorityIdentity else { return }
+        let previousAuthority = gridAuthority
+        let previousSession = gridAuthoritySession
+        let lifecycleEffects = reduceGridAuthority(.stampObserved(raw: value))
+        applyGridAuthorityLifecycleEffects(lifecycleEffects)
+        // The session already rejected a pane fan-out replay before parsing.
+        // Diagnostics must not parse that same replay again locally.
+        guard previousSession != gridAuthoritySession || !lifecycleEffects.isEmpty else { return }
+        guard let stamp = TmuxGridAuthorityStamp.parse(value.trimmingCharacters(in: .whitespacesAndNewlines)) else { return }
+        if stamp.deviceID == TmuxGridAuthorityStamp.sanitizeToken(identity.id) {
+            if !lifecycleEffects.contains(where: { if case .beginClaim = $0 { return true }; return false }),
+               gridAuthorityLifecycle.claim == nil,
+               previousAuthority == .unknown,
+               !gridAuthority.isPeer {
                 Self.logDiagnostic("grid-authority stamp echo (steady state)")
             }
         } else {
-            let peerName = fields[3...].joined(separator: " ")
-            let wasPeer = gridAuthority.isPeer
-            gridAuthority = .peer(displayName: peerName)
-            // A foreign stamp while our claim is pending is the contested
-            // race (T4): the peer wrote after us, so we fold back to yielded
-            // and disarm the claim entirely — its late acks must not
-            // complete against the peer's grid.
-            if gridAuthorityReclaimInFlight || gridAuthorityClaimPending {
-                gridAuthorityReclaimInFlight = false
-                gridAuthorityClaimPending = false
-                gridAuthorityClaimFenceAcknowledged = false
-                gridAuthorityClaimPolicyResolved = false
-                gridAuthorityFenceTarget = nil
-                clearGridAuthorityRepaintTargets()
-                gridAuthorityAutoReclaimPeerName = nil
-                gridAuthorityReclaimTimeoutTask?.cancel()
-                Self.logDiagnostic("grid-authority reclaim contested by \(peerName)")
-            } else if !wasPeer {
-                Self.logDiagnostic("grid-authority yielded to \(peerName)")
+            if lifecycleEffects.contains(where: { if case .claimAborted = $0 { return true }; return false }) {
+                Self.logDiagnostic("grid-authority reclaim contested by \(stamp.displayName)")
+            } else if !previousAuthority.isPeer, gridAuthority.isPeer {
+                Self.logDiagnostic("grid-authority yielded to \(stamp.displayName)")
             }
         }
     }
 
-    /// User- or auto-initiated take-back (T2/T5): claim the active viewport
-    /// through the tmux-native path and lift the veil only when the observed
-    /// window layout matches our grid. The stamp is advisory copy for peers,
-    /// never the success condition — tmux's own `window-size latest` client
-    /// state is the geometry source of truth and the two can disagree.
-    public func reclaimGridAuthority(reason: String = "user") {
-        guard participatesInGridAuthority, mode == .tmuxControl else { return }
-        guard gridAuthority.isPeer, !gridAuthorityReclaimInFlight else { return }
-        if reason != "peer-departed" {
-            gridAuthorityAutoReclaimPeerName = nil
+    /// The veil gesture (R4): a pointer tap, Return or a printable key on
+    /// the continued-elsewhere veil. Claims at once over a live channel;
+    /// otherwise records a tap intent bound to the peer the veil names, which
+    /// the next attach resolves. Returns true when the reducer admitted it.
+    @discardableResult
+    public func reclaimGridAuthority(reason: String = "user") -> Bool {
+        guard participatesInGridAuthority else {
+            Self.logDiagnostic(
+                "grid-authority take-back rejected reason=\(reason) participates=false"
+            )
+            return false
         }
-        gridAuthorityReclaimInFlight = true
-        claimActiveViewport(reason: "authority-reclaim-\(reason)")
-        scheduleGridAuthorityReclaimTimeout()
+        applyGridAuthorityLifecycleEffects(reduceGridAuthority(.channelLiveness(gridAuthorityChannelLive)))
+        let before = gridAuthorityLifecycle
+        let effects = reduceGridAuthority(.requestTakeBack)
+        applyGridAuthorityLifecycleEffects(effects)
+        let admitted = gridAuthorityLifecycle != before
+        if !admitted {
+            Self.logDiagnostic(
+                "grid-authority take-back ignored reason=\(reason) authority=\(gridAuthority) claim=\(gridAuthorityLifecycle.claim.traceLabel)"
+            )
+        }
+        return admitted
     }
+
+    /// The session became displayed on this device (R1), or an explicit
+    /// open targeted it even though it already was. Records an intent and
+    /// always sends a fresh `show-options` read when the channel is live, so
+    /// the reply postdates everything tmux queued before the show.
+    ///
+    /// - Parameter intentElapsed: time the user's step has already spent
+    ///   before reaching this controller (a show carried from a replaced
+    ///   session object). The R3 window runs from the step, not from here;
+    ///   a step that already outlived it is dropped.
+    public func gridAuthorityShown(
+        source: TmuxGridAuthorityLifecycleReducer.ShowSource = .show,
+        intentElapsed: TimeInterval = 0
+    ) {
+        guard participatesInGridAuthority else { return }
+        let stepAt = gridAuthorityNow() - Int64(max(0, intentElapsed) * 1_000)
+        applyGridAuthorityLifecycleEffects(reduceGridAuthority(.shown(source: source, stepAt: stepAt)))
+    }
+
+    /// A replacement of an already shown slot adopts visibility without a gesture.
+    public func gridAuthorityAdoptShown() {
+        guard participatesInGridAuthority else { return }
+        applyGridAuthorityLifecycleEffects(reduceGridAuthority(.adoptShown))
+    }
+
+    /// Real background boundaries are distinct from transparent render inactivity.
+    public func gridAuthorityBackgrounded() {
+        // Capture app state even before the owner installs its identity.
+        applyGridAuthorityLifecycleEffects(reduceGridAuthority(.backgrounded))
+        noteGridAuthorityPaintable()
+    }
+
+    public func gridAuthorityForegrounded() {
+        applyGridAuthorityLifecycleEffects(reduceGridAuthority(.foregrounded))
+        noteGridAuthorityPaintable()
+    }
+
+    /// A hide edge: drops an intent and, while the session stays hidden,
+    /// keeps a peer's veil from being drawn on a surface the user cannot
+    /// see (it shows as `.resuming` until the next show decides). A claim
+    /// whose wire work has started finishes on its own (S4′); one that is
+    /// still waiting for a measured viewport never sent anything, so it is
+    /// abandoned rather than carried out from a hidden session (L2).
+    public func gridAuthorityHidden() {
+        guard participatesInGridAuthority else { return }
+        abandonUnsentGridAuthorityClaim(context: "hidden")
+        applyGridAuthorityLifecycleEffects(
+            reduceGridAuthority(.hidden)
+        )
+        updateGridAuthorityPresentation()
+    }
+
+    /// A claim still waiting for a measured viewport has sent nothing (it
+    /// never advertised a target); a hide or a cancel abandons it rather
+    /// than letting it run later.
+    private func abandonUnsentGridAuthorityClaim(context: String) {
+        guard let claim = gridAuthorityLifecycle.claim,
+              claim.phase == .awaitingFence,
+              claim.targetGrid == nil
+        else { return }
+        Self.logDiagnostic(
+            "grid-authority \(context): abandoning unsent claim gen=\(claim.generation)"
+        )
+        applyGridAuthorityLifecycleEffects(
+            reduceGridAuthority(.abortClaim(
+                generation: claim.generation,
+                reason: .superseded
+            ))
+        )
+    }
+
+    /// Time the pending intent's user step has used of its R3 window; nil
+    /// without one. Zero while a prompt pauses the clock (answering it
+    /// restarts the full window).
+    public var gridAuthorityIntentElapsed: TimeInterval? {
+        gridAuthoritySession.intentClock.elapsed(now: gridAuthorityNow()).map { Double($0) / 1_000 }
+            ?? gridAuthoritySession.carriedShow(now: gridAuthorityNow()).map { Double(max(0, gridAuthorityNow() - $0.stepAt)) / 1_000 }
+    }
+
+    /// The pending-state "cancel" (the X on "takes control when
+    /// reconnected" and on the show pill): ends the waiting intent now,
+    /// exactly as its R3 expiry would, and abandons a claim that never sent
+    /// its commands. It is not a hide: the session is still on screen, so
+    /// the show-rule hidden flag is left alone and a peer that holds the
+    /// grid is drawn as the tappable veil once the channel reads it.
+    public func cancelGridAuthorityIntent() {
+        guard participatesInGridAuthority else { return }
+        abandonUnsentGridAuthorityClaim(context: "cancel")
+        applyGridAuthorityLifecycleEffects(reduceGridAuthority(.cancelIntent))
+    }
+
+    /// R3 pause while a host-key, password, OTP or Face ID prompt is on
+    /// screen. Answering it is the user's next step, so resuming restarts the
+    /// full window rather than continuing the old one.
+    public func setGridAuthorityIntentClockPaused(_ paused: Bool) {
+        // The slot coordinator already combines session prompts with connect
+        // prompts for this target; its effective pause is a session prompt here.
+        applyGridAuthorityLifecycleEffects(reduceGridAuthority(.prompt(scope: .session, active: paused)))
+    }
+
+    public func setGridAuthorityPromptState(session: Bool, connect: Bool) {
+        // Raise a new scope before lowering an old one so switching prompts
+        // does not briefly resume/expire R3 between the two facts.
+        if session { applyGridAuthorityLifecycleEffects(reduceGridAuthority(.prompt(scope: .session, active: true))) }
+        applyGridAuthorityLifecycleEffects(reduceGridAuthority(.prompt(scope: .connect, active: connect)))
+        if !session { applyGridAuthorityLifecycleEffects(reduceGridAuthority(.prompt(scope: .session, active: false))) }
+    }
+
+    /// A user step that keeps a pending intent alive (a prompt answered, an
+    /// in-place retry): restart its R3 window.
+    public func noteGridAuthorityUserStep() {
+        applyGridAuthorityLifecycleEffects(reduceGridAuthority(.userStep))
+    }
+
+    /// R3: the pending intent expires `gridAuthorityIntentTimeout` after the
+    /// user's step whether or not a channel has attached yet; only a prompt
+    /// on screen pauses it. A first connection that outlives the window
+    /// (without a prompt) resolves as a plain attach: read, never claim.
 
     public func setGridAuthorityUsesCompactSinglePaneGrid(_ compact: Bool) {
         guard gridAuthorityUsesCompactSinglePaneGrid != compact else { return }
         gridAuthorityUsesCompactSinglePaneGrid = compact
+        noteGridAuthorityPaintable()
         if let activeWindowId {
             reconcileGridAuthorityRepaintForLayout(windowId: activeWindowId)
         }
     }
 
-    /// Claim the active viewport for this client.
+    /// The refresh command (⌘R, `requestFullRepaint`): a repaint and nothing
+    /// else (D9). Control moves only on a show edge or a veil gesture, so no
+    /// stamp, no `latest` fence and no claim that a contest could strand.
+    /// `repaintEvenIfSame` is the shared command's; every refresh repaints.
+    public func claimActiveViewport(reason: String, repaintEvenIfSame: Bool = false) {
+        guard mode == .tmuxControl else { return }
+        repaintActiveViewportWithoutClaim(reason: reason)
+    }
+
+    /// The wire side of the session's claim `generation`.
     ///
     /// `refresh-client -C` alone does not reliably transfer tmux's
     /// `window-size latest` ownership — a diagnostics log showed the iPad
@@ -2494,24 +4824,35 @@ public final class TmuxController {
     /// no-op `select-window` on the *current* window from this control
     /// client, which does make this client latest (verified against a
     /// disposable tmux 3.4 fixture; no visible switch, no `resize-window`,
-    /// no manual window-size option). The side channel keeps its existing
-    /// direct `resize-window` force — that topology's visible clients are
-    /// `ignore-size` and the recalculation cannot be trusted there.
+    /// no manual window-size option). The side channel uses the same targetless
+    /// fence inside its shared resize/fence/unset sequence, so the unset
+    /// recalculates from this control client's already advertised grid.
     ///
-    /// Confirmation requires both the command fence and settled geometry:
-    /// `confirmGridClaimIfSettled` passes only after the server has processed
-    /// the replay/selection and the active window's layout equals our grid.
-    public func claimActiveViewport(
-        reason: String,
-        repaintEvenIfSame: Bool = false
-    ) {
-        guard mode == .tmuxControl, lastKnownSize != nil else { return }
-        // A yielded client claims only through reclaimGridAuthority — the
-        // chrome refresh button must not half-claim from under the veil.
-        if gridAuthority.isPeer, !gridAuthorityReclaimInFlight { return }
-        let connectionGeneration = controlConnectionGeneration
-        gridAuthorityClaimGeneration &+= 1
-        let claimGeneration = gridAuthorityClaimGeneration
+    /// The session confirms the claim's fence (`ClaimFence`) once the server
+    /// has processed the replay and the selection and, under `latest`, the
+    /// active window's layout equals the claim's target.
+    private func beginGridClaimWire(generation: UInt64, reason: String) {
+        guard mode == .tmuxControl,
+              let claim = gridAuthorityLifecycle.claim, claim.generation == generation
+        else { return }
+        // Core admits the intent before UIKit has necessarily measured a
+        // viewport (`resumeDeferredGridAuthorityClaim`).
+        guard lastKnownSize != nil else {
+            Self.logDiagnostic("grid-authority claim deferred: viewport unavailable gen=\(generation) reason=\(reason)")
+            return
+        }
+        guard gridAuthoritySession.claimMayAdvertiseGeometry else {
+            // §6.10 rule 2: a claim that may not advertise the viewport has
+            // nothing to fence, and nothing else to finish.
+            stallGridClaim(context: "viewport-measured-late", canProgress: false, fenceAgain: false)
+            return
+        }
+        windowSizeReplayAttempts.removeAll()
+        passiveWindowSizeProbe = nil
+        if gridAuthorityForegroundRecoveryGeneration != generation {
+            gridAuthorityForegroundRecoveryGeneration = nil
+            gridAuthorityForegroundRecoveryOwner = nil
+        }
         let localSize = lastKnownSize
         let currentRect = (activeWindowId ?? renderedWindowId)
             .flatMap(indexOfWindow)
@@ -2519,26 +4860,77 @@ public final class TmuxController {
         gridAuthorityClaimChangedGeometry = currentRect == nil
             || currentRect?.width != localSize?.cols
             || currentRect?.height != localSize?.rows
-        gridAuthorityClaimForcesRepaint = repaintEvenIfSame
         clearGridAuthorityRepaintTargets()
-        gridAuthorityClaimPending = true
-        gridAuthorityClaimFenceAcknowledged = false
-        gridAuthorityClaimPolicyResolved = false
-        gridAuthorityFenceTarget = nil
-        gridAuthorityRefenceCount = 0
         queueGridClaimFenceSequence(
-            connectionGeneration: connectionGeneration,
-            claimGeneration: claimGeneration,
+            connectionGeneration: controlConnectionGeneration,
+            claimGeneration: generation,
             reason: reason,
             replaySize: true
         )
     }
 
+    /// D9 manual refresh: repaint the visible surfaces when this device may
+    /// render authoritatively. A participating controller repaints nothing
+    /// while a peer holds the grid, a claim is in flight or the authority
+    /// read has not resolved (the read's own outcome repaints).
+    private func repaintActiveViewportWithoutClaim(reason: String) {
+        let authority = gridAuthorityLifecycle.authority
+        if participatesInGridAuthority {
+            guard !authority.isPeer,
+                  gridAuthorityLifecycle.claim == nil,
+                  !gridAuthorityGeometryWithheld
+            else {
+                Self.logDiagnostic(
+                    "grid-authority manual refresh skipped reason=\(reason) authority=\(authority.traceLabel) claim=\(gridAuthorityLifecycle.claim.traceLabel) held=\(gridAuthorityGeometryHeld)"
+                )
+                return
+            }
+        }
+        Self.logDiagnostic("grid-authority manual refresh repaint reason=\(reason) path=\(controlPath)")
+        switch controlPath {
+        case .sideChannel:
+            // Mosh paints outside this control connection. The request is
+            // untracked: nothing waits for its acknowledgement.
+            guard let requestRepaint = onGridAuthoritySideChannelRepaintRequired else { return }
+            onGridAuthoritySideChannelRepaintPreparing?()
+            gridAuthoritySideChannelRepaintGeneration &+= 1
+            requestRepaint(false, gridAuthoritySideChannelRepaintGeneration)
+        case .inline:
+            guard !appIsInactive else { return }
+            _ = advanceStateGeneration(reason: "manual-refresh")
+            let surfaces = currentRenderDeclarations.isEmpty
+                ? [defaultRenderSurfaceDeclaration]
+                : currentRenderDeclarations
+            for declaration in surfaces {
+                submitRenderFact(.refreshRequested(
+                    declaration.surfaceID,
+                    stage: .viewport,
+                    reason: reason
+                ))
+            }
+        }
+    }
+
+    /// Resume only the admitted claim whose wire work has not started.
+    /// A changed foreign stamp aborts it in Core, so a later measurement cannot
+    /// silently take the grid back after that cancellation.
+    @discardableResult
+    private func resumeDeferredGridAuthorityClaim(reason: String) -> Bool {
+        guard mode == .tmuxControl,
+              lastKnownSize != nil,
+              let claim = gridAuthorityLifecycle.claim,
+              claim.phase == .awaitingFence,
+              claim.targetGrid == nil
+        else { return false }
+        beginGridClaimWire(generation: claim.generation, reason: reason)
+        return true
+    }
+
     /// Probe the effective policy of the exact window this claim will fence.
     /// The query is queued after any size replay/unset mutations and before the
     /// fence, so FIFO ordering makes the policy authoritative by the time the
-    /// fence can acknowledge. A window move starts a new fence generation and
-    /// invalidates every callback from the older target.
+    /// fence can acknowledge. Each sequence is a new fence in the session
+    /// (`claimFenceSent`), which retires every reply to an older one.
     private func queueGridClaimFenceSequence(
         connectionGeneration: UInt64,
         claimGeneration: UInt64,
@@ -2547,27 +4939,49 @@ public final class TmuxController {
     ) {
         guard mode == .tmuxControl,
               controlConnectionGeneration == connectionGeneration,
-              gridAuthorityClaimGeneration == claimGeneration,
-              gridAuthorityClaimPending,
-              let target = activeWindowId ?? renderedWindowId
+              let claim = gridAuthorityLifecycle.claim,
+              claim.generation == claimGeneration,
+              claim.phase == .awaitingFence
         else {
-            Self.logDiagnostic(
-                "grid-authority fence deferred reason=\(reason): active window unavailable"
-            )
             return
         }
-
-        gridAuthorityFenceGeneration &+= 1
-        let fenceGeneration = gridAuthorityFenceGeneration
-        gridAuthorityFenceTarget = target
-        gridAuthorityClaimFenceAcknowledged = false
-        gridAuthorityClaimPolicyResolved = false
         if replaySize {
             replayClientSize(
                 reason: reason,
                 belongsToGridClaimFence: true
             )
         }
+        // Only geometry the claim advertised can be fenced.
+        guard gridClaimAwaitsFence, liveGridClaimGeneration == claimGeneration else { return }
+        // A claim that may no longer advertise fences nothing either (rule 2,
+        // as Android's `sendTmuxGridAuthorityFence`): a late one ends once
+        // nothing of its own is left on the wire.
+        guard gridAuthoritySession.claimMayAdvertiseGeometry else {
+            endGridClaimIfStalledLate(context: "fence-withheld")
+            return
+        }
+        guard let target = activeWindowId ?? renderedWindowId else {
+            Self.logDiagnostic(
+                "grid-authority fence deferred reason=\(reason): active window unavailable"
+            )
+            // A `-C` this claim sent may still be on the wire, and no claim
+            // aborts over its own geometry (I3): a counted no-op behind it
+            // keeps a late claim from stalling before tmux has processed it.
+            // Every deferral sends one, so none precedes a newer `-C`.
+            let counted = noteGridClaimCommandSent()
+            sendControlCommand("display-message -p ''") { [weak self] _ in
+                guard let self else { return }
+                self.noteGridClaimReplyReceived(counted)
+                self.endGridClaimIfStalledLate(context: "fence-deferred")
+            }
+            return
+        }
+        applyGridAuthorityLifecycleEffects(reduceGridAuthority(.claimFenceSent(
+            generation: claimGeneration, windowID: target.rawValue
+        )))
+        guard let fence = gridAuthoritySession.claimFence, fence.generation == claimGeneration else { return }
+        // The replay's window force went out before this fence existed.
+        reportGridClaimFenceForce()
         // Side-channel replay temporarily makes every known window manual,
         // then unsets that override. Probe only after those FIFO mutations so
         // this claim observes the policy that will actually govern settlement.
@@ -2575,46 +4989,184 @@ public final class TmuxController {
             windowId: target,
             connectionGeneration: connectionGeneration,
             claimGeneration: claimGeneration,
-            fenceGeneration: fenceGeneration,
+            fenceID: fence.id,
             reason: reason
         )
-        // Ack-sequence the fence: only after the server has processed the
-        // size replay do we read the (then-fresh) current window and send
-        // the no-op select — a fence built from a pre-replay snapshot can
-        // target a window the peer already left, and select-window on a
-        // NON-current window visibly switches every attached client.
-        sendControlCommand("display-message -p ''") { [weak self] _ in
-            guard let self,
-                  self.controlConnectionGeneration == connectionGeneration,
-                  self.gridAuthorityClaimGeneration == claimGeneration,
-                  self.gridAuthorityFenceGeneration == fenceGeneration,
-                  (self.activeWindowId ?? self.renderedWindowId) == target
-            else { return }
-            self.sendGridClaimFence(
-                connectionGeneration: connectionGeneration,
-                claimGeneration: claimGeneration,
-                fenceGeneration: fenceGeneration,
-                target: target
-            )
+        // The fence goes out in the same FIFO burst as the replay and the
+        // probe. It used to wait one extra round trip (a `display-message`
+        // hop) so that a `select-window -t @W` built from a pre-replay
+        // snapshot could not name a window the peer had already left. The
+        // inline fence now names no window (W2), so tmux resolves it to our
+        // session's current window when it runs, and the hop has nothing left
+        // to protect.
+        sendGridClaimFence(
+            connectionGeneration: connectionGeneration,
+            claimGeneration: claimGeneration,
+            fenceID: fence.id,
+            target: target
+        )
+        sendGridClaimRepaintBehindFence(
+            claimGeneration: claimGeneration,
+            fenceID: fence.id,
+            target: target
+        )
+    }
+
+    /// P8: when the claim cannot change geometry (our grid already equals
+    /// the window's, so the fence's `select-window` recalculates to the same
+    /// size and tmux resizes nothing), the repaint the confirmation would
+    /// request after the fence's reply goes out now, behind the fence in the
+    /// same burst, and the take-back costs two round trips (this burst, then
+    /// the stamp commit) instead of three. Even a first-on-connection
+    /// `refresh-client -C` at an equal size only echoes an identical layout,
+    /// which the ledger ignores. A claim that resizes the window keeps the
+    /// confirmation-time repaint: a capture queued here would run before
+    /// tmux applies the deferred resize.
+    private func sendGridClaimRepaintBehindFence(
+        claimGeneration: UInt64,
+        fenceID: UInt64,
+        target: WindowId
+    ) {
+        gridAuthorityClaimRepaintInFlight = nil
+        guard controlPath == .inline,
+              mode == .tmuxControl,
+              !appIsInactive,
+              gridClaimAwaitsFence,
+              gridAuthoritySession.claimFence?.id == fenceID,
+              gridAuthorityLifecycle.claim?.generation == claimGeneration,
+              !gridAuthorityClaimChangedGeometry,
+              let size = gridClaimTargetSize,
+              let window = window(target),
+              let rect = window.layout?.root.rect,
+              rect.width == size.cols, rect.height == size.rows
+        else { return }
+        submitCorrelatedGridClaimRepaint(
+            claimGeneration: claimGeneration,
+            fenceID: fenceID,
+            target: target,
+            window: window,
+            relied: false,
+            context: "behind fence"
+        )
+    }
+
+    /// Sends a claim's visible repaint as correlated refreshes, which queue
+    /// behind the commands already on the wire (P8) rather than waiting for
+    /// the FIFO to drain, and records it as the claim's repaint in flight.
+    /// Returns false, sending nothing, when a target surface is not mounted
+    /// and painted yet: that one needs the foreground path's first fill.
+    @discardableResult
+    private func submitCorrelatedGridClaimRepaint(
+        claimGeneration: UInt64,
+        fenceID: UInt64,
+        target: WindowId,
+        window: WindowInfo,
+        relied: Bool,
+        context: String
+    ) -> Bool {
+        let surfaces: [SurfaceId]
+        let panes: Set<PaneId>
+        if window.rendersAsPaneGrid {
+            panes = gridAuthorityVisiblePaneTargets(in: window)
+            surfaces = panes
+                .sorted { $0.rawValue < $1.rawValue }
+                .map(Self.inlinePaneSurfaceID)
+            let declared = Set(currentRenderDeclarations.map(\.surfaceID))
+            // Pane surfaces mount a turn after the shape changes. Repaint
+            // only surfaces that are mounted and painted; an unpainted one
+            // needs the foreground path's deep first fill.
+            guard !surfaces.isEmpty,
+                  surfaces.allSatisfy({ declared.contains($0) && renderLedger.owner(for: $0) != nil })
+            else { return false }
+        } else {
+            panes = []
+            surfaces = [.live]
+            guard currentRenderDeclarations.isEmpty
+                    || currentRenderDeclarations.contains(where: { $0.surfaceID == .live }),
+                  renderLedger.owner(for: .live) != nil
+            else { return false }
         }
+        gridAuthorityClaimRepaintInFlight = GridAuthorityClaimRepaintInFlight(
+            claimGeneration: claimGeneration,
+            fenceID: fenceID,
+            window: window.rendersAsPaneGrid ? nil : target,
+            panes: panes,
+            relied: relied
+        )
+        Self.logDiagnostic(
+            "grid-authority claim repaint \(context) gen=\(claimGeneration) fence=\(fenceID) surfaces=\(surfaces.count)"
+        )
+        // No state-generation advance here, unlike the foreground repaint:
+        // the correlation already scopes these refreshes, and an advance
+        // would retire unrelated callbacks still in flight (hydration
+        // replies queued behind a reconnect's authority read, a pane
+        // interaction query) that this repaint does not replace.
+        for surfaceID in surfaces {
+            // In place when the surface already shows this pane; the ledger
+            // rebinds (and deepens after settlement) when it does not.
+            submitRenderFact(.correlatedRefreshRequested(
+                surfaceID,
+                stage: .viewportOnly,
+                reason: "authority-claim",
+                correlation: claimGeneration
+            ))
+        }
+        return true
+    }
+
+    /// Whether the repaint sent behind this claim's fence covers exactly the
+    /// targets confirmation just armed; if so it is adopted, not repeated.
+    private func adoptGridClaimRepaintBehindFence() -> Bool {
+        guard var inFlight = gridAuthorityClaimRepaintInFlight,
+              inFlight.claimGeneration == liveGridClaimGeneration,
+              inFlight.fenceID == gridAuthoritySession.claimFence?.id,
+              inFlight.window == gridAuthorityRepaintWindow,
+              inFlight.panes == gridAuthorityRepaintPanes
+        else {
+            gridAuthorityClaimRepaintInFlight = nil
+            return false
+        }
+        inFlight.relied = true
+        gridAuthorityClaimRepaintInFlight = inFlight
+        return true
+    }
+
+    /// A correlated claim repaint ended without a frame (superseded by
+    /// another refresh, aborted, transport boundary). Before confirmation
+    /// nothing relied on it; after, request the ordinary repaint.
+    private func gridClaimRepaintBehindFenceFailed(correlation: UInt64, reason: String) {
+        guard let inFlight = gridAuthorityClaimRepaintInFlight,
+              inFlight.claimGeneration == correlation
+        else { return }
+        gridAuthorityClaimRepaintInFlight = nil
+        guard inFlight.relied,
+              gridAuthorityLifecycle.claim?.generation == correlation,
+              gridAuthorityRepaintWindow != nil || !gridAuthorityRepaintPanes.isEmpty,
+              !appIsInactive
+        else { return }
+        Self.logDiagnostic(
+            "grid-authority claim repaint behind fence failed gen=\(correlation) reason=\(reason): repainting"
+        )
+        refreshActiveWindowOnForeground()
     }
 
     private func probeGridAuthorityWindowSizePolicy(
         windowId: WindowId,
         connectionGeneration: UInt64,
         claimGeneration: UInt64,
-        fenceGeneration: UInt64,
+        fenceID: UInt64,
         reason: String
     ) {
+        let counted = noteGridClaimCommandSent()
         sendControlCommand(
             "show-options -wA -v -t \(windowId.description) window-size"
         ) { [weak self] result in
-            guard let self,
-                  self.mode == .tmuxControl,
+            guard let self else { return }
+            self.noteGridClaimReplyReceived(counted)
+            defer { self.endGridClaimIfStalledLate(context: "window-size-policy") }
+            guard self.mode == .tmuxControl,
                   self.controlConnectionGeneration == connectionGeneration,
-                  self.gridAuthorityClaimGeneration == claimGeneration,
-                  self.gridAuthorityFenceGeneration == fenceGeneration,
-                  (self.activeWindowId ?? self.renderedWindowId) == windowId
+                  self.gridAuthorityLifecycle.claim?.generation == claimGeneration
             else { return }
             guard case .success(let lines) = result else {
                 Self.logDiagnostic(
@@ -2624,15 +5176,17 @@ public final class TmuxController {
             }
             let value = (lines.first(where: { !$0.isEmpty }) ?? "latest")
                 .trimmingCharacters(in: .whitespaces)
-            self.gridAuthorityGeometryPolicyKnown = true
-            self.gridAuthorityGeometryPolicyIsLatest = value.isEmpty || value == "latest"
-            self.gridAuthorityClaimPolicyResolved = true
-            if !self.gridAuthorityGeometryPolicyIsLatest {
+            // Speaks for the fence only while it is the claim's latest; the
+            // session confirms the fence once it has settled.
+            self.applyGridAuthorityLifecycleEffects(self.reduceGridAuthority(.windowSizePolicyReplied(
+                windowID: windowId.rawValue, raw: lines.joined(separator: "\n"), fenceID: fenceID
+            )))
+            if self.gridAuthoritySession.claimFence?.id == fenceID,
+               self.gridAuthoritySession.claimFence?.policyIsLatest == false {
                 Self.logDiagnostic(
                     "grid-authority window-size=\(value) window=\(windowId): layout fallback disabled, claim confirms on ack"
                 )
             }
-            self.confirmGridClaimIfSettled(context: "window-size-policy")
         }
     }
 
@@ -2645,11 +5199,10 @@ public final class TmuxController {
     ) {
         guard participatesInGridAuthority,
               mode == .tmuxControl,
-              !gridAuthorityClaimPending
+              !gridClaimAwaitsFence
         else { return }
         let connectionGeneration = controlConnectionGeneration
         let sessionId = ownSessionId
-        gridAuthorityGeometryPolicyKnown = false
         sendControlCommand(
             "show-options -wA -v -t \(windowId.description) window-size"
         ) { [weak self] result in
@@ -2657,14 +5210,16 @@ public final class TmuxController {
                   self.mode == .tmuxControl,
                   self.controlConnectionGeneration == connectionGeneration,
                   self.ownSessionId == sessionId,
-                  !self.gridAuthorityClaimPending,
+                  !self.gridClaimAwaitsFence,
                   (self.activeWindowId ?? self.renderedWindowId) == windowId,
                   case .success(let lines) = result
             else { return }
             let value = (lines.first(where: { !$0.isEmpty }) ?? "latest")
                 .trimmingCharacters(in: .whitespaces)
-            self.gridAuthorityGeometryPolicyKnown = true
-            self.gridAuthorityGeometryPolicyIsLatest = value.isEmpty || value == "latest"
+            self.reservePresentedWindowRecovery(self.gridAuthorityWindowFacts())
+            self.applyGridAuthorityLifecycleEffects(self.reduceGridAuthority(.windowSizePolicyReplied(
+                windowID: windowId.rawValue, raw: lines.joined(separator: "\n")
+            )))
             Self.logDiagnostic(
                 "grid-authority steady window-size=\(value.isEmpty ? "latest" : value) window=\(windowId) reason=\(reason)"
             )
@@ -2672,75 +5227,184 @@ public final class TmuxController {
             // flight. Re-evaluate the model's latest layout now so that brief
             // policy-unknown windows do not permanently miss a bare tmux
             // client's resize.
-            self.noteLayoutSizeForAuthorityFallback(
-                self.window(windowId)?.layout,
-                windowId: windowId
-            )
+            self.noteGridAuthorityWindowFacts()
+            self.reconcilePresentedWindowSize(windowId: windowId)
         }
     }
 
-    /// Send (or re-send) the inline latest-client-transfer fence against the
-    /// model's *current* window. Re-issued from `%session-window-changed`
-    /// when the current window moves while the claim is pending.
+    /// Send (or re-send) the claim fence `fenceID`. `target` is the window
+    /// the model expected to be current, and a reply that finds another one
+    /// current is dropped (the window-moved re-fence owns that case).
+    ///
+    /// Inline, the fence is the targetless latest-client transfer
+    /// (`TmuxClientSizeReplay.latestFenceCommand`): with no `-t`, tmux
+    /// resolves `select-window` to this control client's own session and its
+    /// current window, so it can neither switch a window nor reach a grouped
+    /// sibling (W2). On the side channel the shared resize/fence/unset is already
+    /// queued, and a no-op `display-message` reply alone orders the
+    /// confirmation after it.
     private func sendGridClaimFence(
         connectionGeneration: UInt64,
         claimGeneration: UInt64,
-        fenceGeneration: UInt64,
+        fenceID: UInt64,
         target: WindowId
     ) {
         guard mode == .tmuxControl,
               controlConnectionGeneration == connectionGeneration,
-              gridAuthorityClaimGeneration == claimGeneration,
-              gridAuthorityFenceGeneration == fenceGeneration,
+              gridAuthorityLifecycle.claim?.generation == claimGeneration,
+              gridAuthoritySession.claimFence?.id == fenceID,
               (activeWindowId ?? renderedWindowId) == target,
-              gridAuthorityClaimPending
+              gridClaimAwaitsFence
         else { return }
-        guard controlPath == .inline else {
-            // Side channel (resize-window force already queued) or no
-            // hydrated window yet: the ack alone orders the confirmation.
-            gridAuthorityClaimFenceAcknowledged = true
-            confirmGridClaimIfSettled(context: "claim-fence")
-            return
-        }
-        sendControlCommand("select-window -t \(target.description)") { [weak self] _ in
-            guard let self,
-                  self.controlConnectionGeneration == connectionGeneration,
-                  self.gridAuthorityClaimGeneration == claimGeneration,
-                  self.gridAuthorityFenceGeneration == fenceGeneration,
+        let fence = controlPath == .inline
+            ? TmuxClientSizeReplay.latestFenceCommand
+            : "display-message -p ''"
+        let epoch = gridClaimGeometryEpoch
+        let counted = noteGridClaimCommandSent()
+        sendControlCommand(fence) { [weak self] _ in
+            guard let self else { return }
+            // Counted until this reply's work is done: `sendBytes` may answer
+            // the probe below synchronously, and that answer's stall check
+            // must not find the claim idle before its repaint is requested.
+            defer {
+                self.noteGridClaimReplyReceived(counted)
+                self.endGridClaimIfStalledLate(context: "claim-fence")
+            }
+            // A reply that outlived its claim (an abort, a contest) or its
+            // fence acknowledges nothing for the next one.
+            guard self.controlConnectionGeneration == connectionGeneration,
+                  self.gridAuthorityLifecycle.claim?.generation == claimGeneration,
+                  self.gridAuthoritySession.claimFence?.id == fenceID,
                   (self.activeWindowId ?? self.renderedWindowId) == target
             else { return }
-            self.gridAuthorityClaimFenceAcknowledged = true
-            self.confirmGridClaimIfSettled(context: "claim-fence")
+            // Acknowledged before the probe goes out, so even a synchronous
+            // answer finds the fence acknowledged; the repaint a confirmation
+            // requests goes out after the probe, queued behind it.
+            let acknowledged = self.reduceGridAuthority(.claimFenceAcknowledged(fenceID: fenceID))
+            if self.gridClaimGeometryEpoch == epoch {
+                self.sendGridClaimSettleProbe(
+                    connectionGeneration: connectionGeneration,
+                    claimGeneration: claimGeneration,
+                    fenceID: fenceID,
+                    epoch: epoch,
+                    target: target
+                )
+            }
+            self.applyGridAuthorityLifecycleEffects(acknowledged)
+        }
+    }
+
+    /// §6.10 rule 5: one size read, written once the claim's fence was
+    /// acknowledged and therefore in a write of its own. tmux delivers the
+    /// fence's `%layout-change` before this reply (verified on 3.4 and
+    /// 3.6a), so the answer shows where the claim's geometry landed: from
+    /// then on a size the claim never advertised is a loss, not a stale
+    /// layout. Confirmation never waits for it. A newer advertisement or
+    /// re-fence (`gridClaimGeometryEpoch`) or fence makes the answer moot.
+    private func sendGridClaimSettleProbe(
+        connectionGeneration: UInt64,
+        claimGeneration: UInt64,
+        fenceID: UInt64,
+        epoch: UInt64,
+        target: WindowId
+    ) {
+        guard participatesInGridAuthority,
+              gridAuthorityLifecycle.claim?.generation == claimGeneration,
+              gridAuthoritySession.claimFence?.policyIsLatest != false
+        else { return }
+        let counted = noteGridClaimCommandSent()
+        sendControlCommand(TmuxWindowSizeReplay.sizeQuery(windowID: target)) { [weak self] result in
+            guard let self else { return }
+            self.noteGridClaimReplyReceived(counted)
+            defer { self.endGridClaimIfStalledLate(context: "settle-probe") }
+            guard self.mode == .tmuxControl,
+                  self.controlConnectionGeneration == connectionGeneration,
+                  self.gridAuthorityLifecycle.claim?.generation == claimGeneration,
+                  self.gridAuthoritySession.claimFence?.id == fenceID,
+                  self.gridClaimGeometryEpoch == epoch,
+                  (self.activeWindowId ?? self.renderedWindowId) == target
+            else { return }
+            guard case .success(let lines) = result,
+                  let reported = TmuxWindowSizeReplay.reportedGeometry(
+                      windowID: target,
+                      reply: lines.joined(separator: "\n")
+                  )
+            else {
+                Self.logDiagnostic(
+                    "grid-authority settle probe unreadable gen=\(claimGeneration) window=\(target)"
+                )
+                return
+            }
+            Self.logDiagnostic(
+                "grid-authority settle probe gen=\(claimGeneration) window=\(target) size=\(reported.columns)x\(reported.rows)"
+            )
+            // The session judges the probe first: a force proven below can
+            // confirm the fence only on a window the probe found at target.
+            self.observeGridClaimWindow(
+                columns: reported.columns,
+                rows: reported.rows,
+                settleProbe: true,
+                context: "settle-probe",
+                checkForStall: false
+            )
+            // Side channel: a read after the unset's recalculation that finds
+            // the window at a force's size confirms that force, even one
+            // whose own read caught another size first.
+            if self.windowSizeReplayAttempts[target]?.requested == reported {
+                self.windowSizeReplayAttempts.removeValue(forKey: target)
+                self.reportGridClaimFenceForce()
+            }
         }
     }
 
     /// Re-issue the fence if the session's current window moved while our
-    /// claim was pending (the peer switched windows between our snapshot
-    /// and the fence landing). Called from `%session-window-changed`.
+    /// claim was in its geometry or repaint phase (the peer switched windows
+    /// between our snapshot and the fence landing). Called from
+    /// `%session-window-changed`.
     private func refenceGridClaimIfCurrentWindowMoved() {
         let repaintWasInFlight = gridAuthorityRepaintWindow != nil
             || !gridAuthorityRepaintPanes.isEmpty
             || gridAuthoritySideChannelRepaintPending
-        guard gridAuthorityClaimPending || repaintWasInFlight,
-              mode == .tmuxControl
+        guard mode == .tmuxControl,
+              let claim = gridAuthorityLifecycle.claim,
+              claim.targetGrid != nil,
+              claim.phase == .awaitingFence || (claim.phase == .awaitingRepaint && repaintWasInFlight)
         else { return }
+        guard gridAuthoritySession.claimMayAdvertiseGeometry else {
+            if claim.phase == .awaitingFence, gridAuthoritySession.claimFence == nil {
+                // Its fence waited for a window: tmux named one, nothing
+                // moved (Android's `window-known`). It fences none now, and
+                // ends once its own commands are answered (I3).
+                endGridClaimIfStalledLate(context: "window-known")
+                return
+            }
+            // §6.10 rules 2 and 6: a late claim fences no other window.
+            // It cannot finish on the one it fenced, so it ends.
+            stallGridClaim(context: "current-window-moved", canProgress: false, fenceAgain: false)
+            return
+        }
+        // The new window has not seen this claim's geometry land.
+        if let target = claim.targetGrid {
+            reduceGridAuthority(.claimAdvertisedGeometry(
+                generation: claim.generation,
+                size: TmuxGridSize(columns: target.columns, rows: target.rows)
+            ))
+            gridClaimGeometryEpoch &+= 1
+        }
         if repaintWasInFlight {
             // The capture/frame we were waiting for belongs to the previous
             // active window. It can no longer prove that the newly visible
-            // surface is authoritative, so return to the geometry/fence phase
-            // and keep the veil closed until the new window has been sized and
-            // repainted.
+            // surface is authoritative: the claim is back in its geometry
+            // phase, and the veil stays closed until the new window has been
+            // sized and repainted.
             clearGridAuthorityRepaintTargets()
-            gridAuthorityClaimPending = true
-            gridAuthorityClaimFenceAcknowledged = false
         }
-        gridAuthorityRefenceCount += 1
         Self.logDiagnostic(
-            "grid-authority re-fence #\(gridAuthorityRefenceCount): current window moved during claim"
+            "grid-authority re-fence: current window moved during claim gen=\(claim.generation)"
         )
         queueGridClaimFenceSequence(
             connectionGeneration: controlConnectionGeneration,
-            claimGeneration: gridAuthorityClaimGeneration,
+            claimGeneration: claim.generation,
             reason: "current-window-moved",
             // A newly current window may have been unknown during the first
             // side-channel force. Replay there so resize/unset reaches it;
@@ -2749,81 +5413,79 @@ public final class TmuxController {
         )
     }
 
-    /// Complete a pending claim once the server's geometry actually matches
-    /// our viewport, then order the one required authoritative repaint before
-    /// exposing the terminal. Layout unknown or mismatched → stay pending (a
-    /// later `%layout-change` or fence ack re-checks).
-    /// `gridAuthorityClaimPending` deliberately survives the 3s UI timeout:
-    /// the claim's server-side effects cannot be recalled, so a late success
-    /// must still lift the veil instead of stranding both devices behind one.
-    /// Under a non-`latest` window-size policy the equality can never hold by
-    /// design, so the fence ack completes it.
+    /// Confirms the live claim's fence, or re-arms the repaint of a
+    /// confirmed one whose layout changed shape. The session decides
+    /// whether the fence has settled (`ClaimFence`): the server processed
+    /// the replay and the fence, the fence read the window's policy, and
+    /// under `latest` the fenced window stands at the claim's target with no
+    /// settle probe or window force saying otherwise. Under any other
+    /// policy the window never follows a client, so the acknowledgement
+    /// confirms. The claim stays in its geometry phase past the
+    /// presentation deadline: its server-side effects cannot be recalled,
+    /// so a late success must still lift the veil instead of stranding both
+    /// devices behind one (§6.10 rule 1).
     private func confirmGridClaimIfSettled(context: String) {
-        guard gridAuthorityClaimPending, mode == .tmuxControl else { return }
-        guard gridAuthorityClaimPolicyResolved else { return }
-        guard gridAuthorityClaimFenceAcknowledged else { return }
-        guard let size = lastKnownSize else { return }
-        if gridAuthorityGeometryPolicyIsLatest {
-            guard let windowId = activeWindowId ?? renderedWindowId,
-                  let idx = indexOfWindow(windowId),
-                  let rect = windows[idx].layout?.root.rect,
-                  rect.width == size.cols, rect.height == size.rows
-            else {
-                Self.logDiagnostic("grid-authority claim unsettled context=\(context)")
-                return
+        guard mode == .tmuxControl, let claim = gridAuthorityLifecycle.claim else { return }
+        switch claim.phase {
+        case .awaitingFence:
+            guard claim.targetGrid != nil else { return }
+            let effects = reduceGridAuthority(.confirmClaimFence)
+            if gridAuthorityLifecycle.claim?.phase == .awaitingFence {
+                Self.logDiagnostic(
+                    "grid-authority claim unsettled context=\(context) fence=\(gridAuthoritySession.claimFence.traceLabel)"
+                )
             }
+            // `requestRepaint` runs the repaint.
+            applyGridAuthorityLifecycleEffects(effects)
+        case .awaitingRepaint:
+            guard !gridClaimRepaintArmed, gridAuthoritySession.claimFenceSettled else { return }
+            performGridAuthorityClaimRepaint(context: context)
+        case .awaitingStampCommit, .awaitingSettlement:
+            return
         }
-        gridAuthorityClaimPending = false
+    }
+
+    /// The confirmed claim's repaint has targets or a frame on its way.
+    private var gridClaimRepaintArmed: Bool {
+        gridAuthorityRepaintWindow != nil
+            || !gridAuthorityRepaintPanes.isEmpty
+            || gridClaimSideChannelRepaintRequested
+            || gridAuthoritySideChannelRepaintPending
+    }
+
+    /// The session's repaint effect uses the platform's existing reservation,
+    /// inline target selection and P8 capture adoption. Re-arming a
+    /// confirmed claim's repaint after its layout changed shape also enters
+    /// here.
+    private func performGridAuthorityClaimRepaint(context: String) {
+        guard let generation = liveGridClaimGeneration, let size = gridClaimTargetSize else { return }
         Self.logDiagnostic(
             "grid-authority claim settled size=\(size.cols)x\(size.rows) context=\(context)"
         )
 
-        let needsRepaint = gridAuthorityClaimChangedGeometry
-            || gridAuthorityClaimForcesRepaint
-        guard needsRepaint else {
-            finishGridAuthorityClaimPresentation(context: context)
-            return
-        }
-
         switch controlPath {
         case .sideChannel:
+            if !gridAuthorityRepaintPreservesHistory {
+                onGridAuthoritySideChannelRepaintPreparing?()
+            }
             // Mosh paints outside this control connection. Keep the veil up
             // until the view reports that the forced framebuffer output was
             // consumed by SwiftTerm; merely enqueueing the driver operation
             // recreates the stale-frame flash this feature is meant to avoid.
-            guard let requestRepaint = onGridAuthoritySideChannelRepaintRequired else {
-                Self.logDiagnostic(
-                    "grid-authority side repaint callback unavailable: keeping yielded presentation"
-                )
-                if gridAuthority.isPeer {
-                    // Production wires the callback before transport start.
-                    // Fail closed if an integration does not: a stale frame
-                    // is never evidence that this device reclaimed safely.
-                    gridAuthorityClaimPending = true
-                } else {
-                    finishGridAuthorityClaimPresentation(
-                        context: "\(context)-side-refresh-unobserved"
-                    )
-                }
-                return
-            }
-            gridAuthoritySideChannelRepaintGeneration &+= 1
-            let repaintGeneration = gridAuthoritySideChannelRepaintGeneration
-            if gridAuthority.isPeer {
-                gridAuthoritySideChannelRepaintPending = true
-                requestRepaint(
-                    gridAuthorityClaimChangedGeometry,
-                    repaintGeneration
-                )
-            } else {
-                // Manual refresh while already authoritative has no veil to
-                // hold. Queue the repaint, then settle the bookkeeping.
-                requestRepaint(
-                    gridAuthorityClaimChangedGeometry,
-                    repaintGeneration
-                )
-                finishGridAuthorityClaimPresentation(context: "\(context)-side-refresh")
-            }
+            //
+            // The reservation is held by the render ledger, not here: the
+            // ledger is what rebinds surfaces and advances owner epochs, so it
+            // is what must decide whether a frame reserved against the old
+            // owner is re-issued or failed. Before this, each platform
+            // re-derived that rule privately and iOS got it wrong — a reclaim's
+            // own geometry force rebound the surface and retired the frame the
+            // claim was waiting on, aborting every mosh take-back.
+            gridClaimSideChannelRepaintRequested = true
+            submitRenderFact(.correlatedTransportFullFrameRequested(
+                .live,
+                reason: "authority-reclaim",
+                correlation: generation
+            ))
 
         case .inline:
             guard let windowId = activeWindowId ?? renderedWindowId,
@@ -2832,10 +5494,7 @@ public final class TmuxController {
                 // Metadata is briefly unavailable during reattach. Re-arm the
                 // geometry phase; the next layout/fence observation retries
                 // without revealing an unpainted terminal.
-                gridAuthorityClaimPending = true
-                Self.logDiagnostic(
-                    "grid-authority repaint deferred: active window unavailable"
-                )
+                deferGridClaimConfirmation(context: "active-window-unavailable")
                 return
             }
             if window.rendersAsPaneGrid {
@@ -2843,43 +5502,112 @@ public final class TmuxController {
                     in: window
                 )
                 guard !gridAuthorityRepaintPanes.isEmpty else {
-                    gridAuthorityClaimPending = true
-                    Self.logDiagnostic(
-                        "grid-authority repaint deferred: pane grid unavailable"
-                    )
+                    deferGridClaimConfirmation(context: "pane-grid-unavailable")
                     return
                 }
             } else {
                 gridAuthorityRepaintWindow = windowId
             }
+            guard !appIsInactive else {
+                // A read can resolve into a claim while the app is inactive.
+                // Its repaint is the app's own foreground refresh; forcing it
+                // here would mark the app foreground behind the user's back.
+                Self.logDiagnostic(
+                    "grid-authority inline repaint awaits app foreground"
+                )
+                return
+            }
+            if adoptGridClaimRepaintBehindFence() {
+                Self.logDiagnostic(
+                    "grid-authority claim repaint already behind the fence gen=\(generation)"
+                )
+                return
+            }
+            // A claim confirming again after losing its geometry has its
+            // re-fence (and possibly the lost repaint) still on the wire.
+            // Its repaint queues behind them rather than waiting for the
+            // FIFO to drain: a stale foreign layout then costs one round
+            // trip, the repaint the lost one could not stand in for. So does
+            // one confirming while its settle probe is out (a resized
+            // window's layout arrives right after the fence's reply), which
+            // keeps the probe off the take-back's critical path (§6.10
+            // rule 5).
+            let refenced = gridAuthorityLifecycle.claim?.geometryRefenced == true
+            if refenced || gridClaimHasOwnCommandsInFlight,
+               let fence = gridAuthoritySession.claimFence,
+               submitCorrelatedGridClaimRepaint(
+                   claimGeneration: generation,
+                   fenceID: fence.id,
+                   target: windowId,
+                   window: window,
+                   relied: true,
+                   context: refenced ? "after geometry loss" : "behind the settle probe"
+               ) {
+                return
+            }
             refreshActiveWindowOnForeground()
         }
     }
 
-    /// Final authority transition. Inline callers reach this only after the
-    /// captured viewport has been fed into the visible terminal surface;
-    /// yielded side-channel callers reach it after mosh's forced frame was
-    /// consumed by that surface.
-    private func finishGridAuthorityClaimPresentation(context: String) {
-        let autoReclaimPeer = gridAuthorityAutoReclaimPeerName
-        clearGridAuthorityRepaintTargets()
-        gridAuthorityClaimFenceAcknowledged = false
-        gridAuthorityClaimPolicyResolved = false
-        gridAuthorityFenceTarget = nil
-        gridAuthorityClaimChangedGeometry = false
-        gridAuthorityClaimForcesRepaint = false
-        gridAuthorityReclaimInFlight = false
-        gridAuthorityReclaimTimeoutTask?.cancel()
-        gridAuthorityReclaimTimeoutTask = nil
-        gridAuthority = .mine
-        gridAuthorityAutoReclaimPeerName = nil
-        gridAuthorityReconnectClaimExpectedStamp = nil
-        Self.logDiagnostic(
-            "grid-authority presentation active context=\(context)"
-        )
-        if let autoReclaimPeer {
-            onGridAuthorityAutoReclaimed?(autoReclaimPeer)
+    /// Force one transport-painted frame for a reservation the ledger issued.
+    ///
+    /// Called once per issue *and* once per re-issue: the ledger re-emits the
+    /// request under the same correlation whenever it rebinds the surface to
+    /// the same window and pane, which is what a reclaim's own geometry force
+    /// provokes. The platform therefore never has to notice a rebind or decide
+    /// whether the claim survives it — it just paints for the owner named here.
+    private func requestCorrelatedTransportFullFrame(
+        owner: RenderOwner?,
+        correlation: UInt64,
+        reason: String
+    ) {
+        guard let requestRepaint = onGridAuthoritySideChannelRepaintRequired else {
+            // Production wires this before transport start. Fail closed: a
+            // stale frame is never evidence that this device reclaimed safely.
+            Self.logDiagnostic(
+                "grid-authority transport frame request unserviceable correlation=\(correlation)"
+            )
+            failGridAuthoritySideChannelRepaint(generation: correlation)
+            return
         }
+        Self.logDiagnostic(
+            "grid-authority transport frame requested correlation=\(correlation) "
+                + "reason=\(reason) owner=\(owner.map(String.init(describing:)) ?? "unbound")"
+        )
+        gridAuthoritySideChannelRepaintPending = true
+        gridAuthoritySideChannelRepaintGeneration &+= 1
+        gridAuthorityTransportFrameCorrelation = correlation
+        gridAuthorityTransportFrameOwner = owner
+        requestRepaint(
+            gridAuthorityClaimChangedGeometry,
+            gridAuthoritySideChannelRepaintGeneration
+        )
+    }
+
+    /// Consume the authoritative repaint. The claim enqueues the stamp only
+    /// now and remains veiled until tmux acknowledges that write.
+    private func finishGridAuthorityClaimPresentation(context: String) {
+        // The stamp follows this repaint in the same turn, so this is the
+        // last point at which a window off the claim's target can stop it:
+        // core tells our own geometry and a stale layout from a loss.
+        if let rect = (activeWindowId ?? renderedWindowId).flatMap(window)?.layout?.root.rect,
+           gridClaimWindowIsOffTarget(rect) {
+            observeGridClaimWindow(
+                columns: rect.width,
+                rows: rect.height,
+                settleProbe: false,
+                context: "repaint-\(context)"
+            )
+            return
+        }
+        clearGridAuthorityRepaintTargets()
+        guard let generation = liveGridClaimGeneration else { return }
+        applyGridAuthorityLifecycleEffects(
+            reduceGridAuthority(.repaintSucceeded(generation: generation))
+        )
+        Self.logDiagnostic(
+            "grid-authority repaint consumed context=\(context)"
+        )
     }
 
     private func completeGridAuthoritySharedRepaintIfNeeded(
@@ -2897,10 +5625,78 @@ public final class TmuxController {
         finishGridAuthorityClaimPresentation(context: "inline-pane-repaint")
     }
 
+    private func scheduleGridAuthorityDeliveryRetry(
+        rejectedWindows: Set<WindowId>,
+        rejectedPanes: Set<PaneId>
+    ) {
+        let retryWindow = gridAuthorityRepaintWindow.flatMap { target in
+            rejectedWindows.contains(target) ? target : nil
+        }
+        let retryPanes = gridAuthorityRepaintPanes.intersection(rejectedPanes)
+        guard retryWindow != nil || !retryPanes.isEmpty else { return }
+        if let retryWindow {
+            gridAuthorityDeliveryRetryWindow = retryWindow
+        }
+        gridAuthorityDeliveryRetryPanes.formUnion(retryPanes)
+        guard gridAuthorityDeliveryRetryTask == nil else { return }
+        gridAuthorityDeliveryRetryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(for: .seconds(max(0, self.renderRefreshRetryDelay)))
+            guard !Task.isCancelled else { return }
+            self.gridAuthorityDeliveryRetryTask = nil
+            let retryWindow = self.gridAuthorityDeliveryRetryWindow.flatMap { target in
+                self.gridAuthorityRepaintWindow == target ? target : nil
+            }
+            let retryPanes = self.gridAuthorityRepaintPanes.intersection(
+                self.gridAuthorityDeliveryRetryPanes
+            )
+            self.gridAuthorityDeliveryRetryWindow = nil
+            self.gridAuthorityDeliveryRetryPanes.removeAll(keepingCapacity: true)
+            guard retryWindow != nil || !retryPanes.isEmpty else { return }
+            guard self.gridAuthorityDeliveryRetryAttempts < self.maxRenderRefreshAttempts else {
+                Self.logDiagnostic(
+                    "grid-authority delivery retry exhausted windows=\(retryWindow == nil ? 0 : 1) panes=\(retryPanes.count)"
+                )
+                // §6.10 rule 6: never wait on a repaint nothing retries.
+                self.stallGridClaim(context: "delivery-exhausted", canProgress: true, fenceAgain: true)
+                return
+            }
+            self.gridAuthorityDeliveryRetryAttempts += 1
+            let attempt = self.gridAuthorityDeliveryRetryAttempts
+            Self.logDiagnostic(
+                "grid-authority delivery retry attempt=\(attempt) windows=\(retryWindow == nil ? 0 : 1) panes=\(retryPanes.count)"
+            )
+            if let retryWindow,
+               self.gridAuthorityRepaintWindow == retryWindow {
+                self.submitRenderFact(.refreshRequested(
+                    .live,
+                    stage: .viewport,
+                    reason: "grid-authority-delivery-retry"
+                ))
+            }
+            for paneID in retryPanes.sorted(by: { $0.rawValue < $1.rawValue })
+            where self.gridAuthorityRepaintPanes.contains(paneID) {
+                self.submitRenderFact(.refreshRequested(
+                    Self.inlinePaneSurfaceID(paneID),
+                    stage: .viewport,
+                    reason: "grid-authority-delivery-retry"
+                ))
+            }
+        }
+    }
+
     private func clearGridAuthorityRepaintTargets() {
         gridAuthorityRepaintWindow = nil
         gridAuthorityRepaintPanes.removeAll(keepingCapacity: true)
+        gridClaimSideChannelRepaintRequested = false
+        // Whoever re-arms targets after this re-decides how to repaint.
+        gridAuthorityClaimRepaintInFlight = nil
         gridAuthoritySideChannelRepaintPending = false
+        gridAuthorityDeliveryRetryTask?.cancel()
+        gridAuthorityDeliveryRetryTask = nil
+        gridAuthorityDeliveryRetryAttempts = 0
+        gridAuthorityDeliveryRetryWindow = nil
+        gridAuthorityDeliveryRetryPanes.removeAll(keepingCapacity: true)
     }
 
     /// Complete the side-channel half of a claim after Mosh's forced full
@@ -2909,12 +5705,67 @@ public final class TmuxController {
     public func completeGridAuthoritySideChannelRepaint(
         generation: UInt64
     ) {
+        reportGridAuthorityTransportFrame(issueToken: generation, failure: nil)
+    }
+
+    /// Hand the platform's acknowledgement to the ledger, which holds the
+    /// reservation and is therefore the only thing that can say whether this
+    /// frame still authorises anything. The controller checks only that the
+    /// ack belongs to the issue currently outstanding; the owner match, the
+    /// correlation match and the single-terminal-outcome guarantee are the
+    /// ledger's.
+    private func reportGridAuthorityTransportFrame(
+        issueToken: UInt64,
+        failure: String?
+    ) {
         guard gridAuthoritySideChannelRepaintPending,
-              generation == gridAuthoritySideChannelRepaintGeneration,
-              gridAuthority.isPeer
+              issueToken == gridAuthoritySideChannelRepaintGeneration,
+              let correlation = gridAuthorityTransportFrameCorrelation
         else { return }
+        let owner = gridAuthorityTransportFrameOwner
         gridAuthoritySideChannelRepaintPending = false
-        finishGridAuthorityClaimPresentation(context: "side-channel-repaint-delivered")
+        let failure = failure ?? (sideChannelClaimGeometryIsCurrent ? nil : "remote-geometry-changed")
+        if let failure {
+            submitRenderFact(.transportFullFramePresentationFailed(
+                .live,
+                owner: owner,
+                correlation: correlation,
+                reason: failure
+            ))
+        } else {
+            submitRenderFact(.transportFullFramePresented(
+                .live,
+                owner: owner,
+                correlation: correlation
+            ))
+        }
+    }
+
+    /// The window is at the claim's target, and the force for that target
+    /// is confirmed. A force still in flight for another grid is our own
+    /// later churn, not a reason to doubt the target.
+    private var sideChannelClaimGeometryIsCurrent: Bool {
+        guard controlPath == .sideChannel, gridAuthorityGeometryPolicyIsLatest else { return true }
+        guard let windowID = activeWindowId ?? renderedWindowId,
+              let size = gridClaimTargetSize,
+              let rect = window(windowID)?.layout?.root.rect
+        else { return false }
+        let targetForceInFlight = windowSizeReplayAttempts[windowID].map {
+            $0.requested.columns == size.cols && $0.requested.rows == size.rows
+        } ?? false
+        return rect.width == size.cols && rect.height == size.rows && !targetForceInFlight
+    }
+
+    /// Abort only the claim whose side-channel repaint was retired before it
+    /// produced an admissible full frame. A stale failure from a replaced
+    /// request must not disturb the current claim.
+    public func failGridAuthoritySideChannelRepaint(
+        generation: UInt64
+    ) {
+        reportGridAuthorityTransportFrame(
+            issueToken: generation,
+            failure: "platform-repaint-failed"
+        )
     }
 
     /// A split/collapse can land after claim geometry settled but before the
@@ -2945,8 +5796,109 @@ public final class TmuxController {
             "grid-authority repaint retargeted after layout shape change window=\(windowId) panes=\(expectedPanes.map(\.description))"
         )
         clearGridAuthorityRepaintTargets()
-        gridAuthorityClaimPending = true
-        confirmGridClaimIfSettled(context: "repaint-layout-changed")
+        // Like the layout's own confirmation: the ledger reduces this
+        // layout after `handleLayoutChange` returns.
+        confirmGridClaimAtStepEnd(context: "repaint-layout-changed")
+    }
+
+    /// Whether a lifecycle claim waiting on its repaint sees the window off
+    /// its target, under a `latest` policy this claim read.
+    private func gridClaimWindowIsOffTarget(_ rect: CellRect) -> Bool {
+        guard mode == .tmuxControl,
+              gridAuthoritySession.claimFence?.policyIsLatest == true,
+              let claim = gridAuthorityLifecycle.claim,
+              claim.phase == .awaitingRepaint,
+              let target = claim.targetGrid
+        else { return false }
+        return rect.width != target.columns || rect.height != target.rows
+    }
+
+    /// §6.10 rules 3–4: report the claimed window's size to core, which
+    /// tells our own geometry and a stale layout from a loss. Only under a
+    /// `latest` policy this claim read: under any other the size proves
+    /// nothing. A claim sent back to its geometry phase (unsettled, or lost
+    /// and fencing again) stops counting the repaint in flight, which shows
+    /// a grid other than its target.
+    private func observeGridClaimWindow(
+        columns: Int,
+        rows: Int,
+        settleProbe: Bool,
+        context: String,
+        checkForStall: Bool = true
+    ) {
+        guard mode == .tmuxControl,
+              gridAuthoritySession.claimFence?.policyIsLatest == true,
+              let claim = gridAuthorityLifecycle.claim,
+              claim.phase == .awaitingFence || claim.phase == .awaitingRepaint
+        else { return }
+        let effects = reduceGridAuthority(.claimObservedGeometry(
+            generation: claim.generation,
+            size: TmuxGridSize(columns: columns, rows: rows),
+            settleProbe: settleProbe
+        ))
+        let after = gridAuthorityLifecycle.claim
+        let lost = effects.contains { effect in
+            switch effect {
+            case .refenceClaim, .claimAborted: return true
+            default: return false
+            }
+        }
+        if lost || (claim.phase == .awaitingRepaint && after?.phase == .awaitingFence) {
+            let target = claim.targetGrid.map { "\($0.columns)x\($0.rows)" } ?? "-"
+            Self.logDiagnostic(
+                "grid-authority claim geometry \(lost ? "lost" : "unsettled") gen=\(claim.generation) layout=\(columns)x\(rows) target=\(target) context=\(context)"
+            )
+        }
+        if let after, after.generation == claim.generation,
+           claim.phase == .awaitingRepaint, after.phase == .awaitingFence {
+            clearGridAuthorityRepaintTargets()
+        }
+        if !effects.isEmpty { applyGridAuthorityLifecycleEffects(effects) }
+        // Own replies that observe and confirm judge stalling in their
+        // outer defer, after confirmation had a chance to arm the repaint.
+        // Notifications with no confirmation still judge it here.
+        if checkForStall { endGridClaimIfStalledLate(context: context) }
+    }
+
+    /// Core's one re-fence for a claim whose landed geometry another client
+    /// took (§6.10 rule 4): only the fence goes out again, inline a bare
+    /// `select-window`, on the side channel the shared resize/fence/unset
+    /// sequence at the target. It answers under the same `ClaimFence`: the
+    /// window's policy is already read for it and its acknowledgement
+    /// stands, so confirmation needs only the window back at the target;
+    /// this fence's own settle probe lands it again. A repaint that
+    /// confirmation sends queues behind this fence, so it captures the
+    /// window after tmux made us `latest` again.
+    private func refenceGridClaimAfterGeometryLoss(generation: UInt64) {
+        guard mode == .tmuxControl,
+              let claim = gridAuthorityLifecycle.claim,
+              claim.generation == generation,
+              let fence = gridAuthoritySession.claimFence,
+              let target = activeWindowId ?? renderedWindowId,
+              target.rawValue == fence.windowID
+        else { return }
+        Self.logDiagnostic(
+            "grid-authority re-fence after geometry loss gen=\(generation) window=\(target)"
+        )
+        gridClaimGeometryEpoch &+= 1
+        if controlPath == .sideChannel, let grid = claim.targetGrid {
+            // The cached layout may still show the target (a settle probe
+            // found the loss before its notification), so it cannot veto
+            // the force.
+            windowSizeReplayAttempts.removeValue(forKey: target)
+            forceWindowSizesToClientSize(
+                (grid.columns, grid.rows),
+                belongsToGridClaimFence: true,
+                onlyWindowID: target,
+                evenIfLayoutMatches: true
+            )
+        }
+        sendGridClaimFence(
+            connectionGeneration: controlConnectionGeneration,
+            claimGeneration: generation,
+            fenceID: fence.id,
+            target: target
+        )
     }
 
     private func gridAuthorityVisiblePaneTargets(
@@ -2961,37 +5913,135 @@ public final class TmuxController {
         return Set(renderLayout?.paneIds ?? [])
     }
 
-    private func scheduleGridAuthorityReclaimTimeout() {
-        gridAuthorityReclaimTimeoutTask?.cancel()
-        gridAuthorityReclaimTimeoutTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            guard !Task.isCancelled, let self else { return }
-            if self.gridAuthorityReclaimInFlight {
-                self.gridAuthorityReclaimInFlight = false
-                Self.logDiagnostic("grid-authority reclaim ack timeout")
+    /// The grid the live claim confirms at (§6.10 rule 3), which a late
+    /// claim's local churn no longer moves.
+    private var gridClaimTargetSize: (cols: Int, rows: Int)? {
+        gridAuthorityLifecycle.claim?.targetGrid.map { ($0.columns, $0.rows) }
+    }
+
+    /// Tells the session whether a side-channel force at the claim's target
+    /// on its fenced window still awaits proof (`ClaimFence`). Under
+    /// `latest` the window can show the target before the force's unset has
+    /// recalculated it, so that layout alone confirms nothing.
+    private func reportGridClaimFenceForce() {
+        guard let fence = gridAuthoritySession.claimFence,
+              let target = gridAuthorityLifecycle.claim?.targetGrid
+        else { return }
+        let outstanding = windowSizeReplayAttempts[WindowId(fence.windowID)].map {
+            $0.requested.columns == target.columns && $0.requested.rows == target.rows
+        } ?? false
+        guard outstanding != fence.forceOutstanding else { return }
+        applyGridAuthorityLifecycleEffects(reduceGridAuthority(.claimFenceForce(
+            fenceID: fence.id, outstanding: outstanding
+        )))
+    }
+
+    /// Counts one of the live claim's own commands onto the wire; its reply
+    /// hands the returned generation to `noteGridClaimReplyReceived`. Nil
+    /// outside a claim.
+    private func noteGridClaimCommandSent() -> UInt64? {
+        guard let generation = liveGridClaimGeneration else { return nil }
+        if gridClaimCommandsGeneration != generation {
+            gridClaimCommandsGeneration = generation
+            gridClaimCommandsInFlight = 0
+        }
+        gridClaimCommandsInFlight += 1
+        return generation
+    }
+
+    private var gridClaimHasOwnCommandsInFlight: Bool {
+        gridClaimCommandsGeneration == liveGridClaimGeneration && gridClaimCommandsInFlight > 0
+    }
+
+    private func noteGridClaimReplyReceived(_ generation: UInt64?) {
+        guard let generation,
+              gridClaimCommandsGeneration == generation,
+              gridClaimCommandsInFlight > 0
+        else { return }
+        gridClaimCommandsInFlight -= 1
+    }
+
+    /// Work that can still consume the claim's repaint targets. Armed
+    /// targets alone are no proof: the ledger may retain an exhausted
+    /// ownership cut solely to keep live output off the stale surface.
+    private var gridClaimRepaintInFlight: Bool {
+        (gridAuthorityRepaintWindow != nil && renderLedger.isRefreshInFlight(for: .live))
+            || gridAuthorityRepaintPanes.contains {
+                renderLedger.isRefreshInFlight(for: Self.inlinePaneSurfaceID($0))
             }
+            || gridAuthorityDeliveryRetryTask != nil
+            || gridAuthoritySideChannelRepaintPending
+            || gridClaimSideChannelRepaintRequested
+    }
+
+    /// §6.10 rule 6 for a late claim: with no command of its own awaiting a
+    /// reply and no repaint in flight, nothing can confirm or repaint it any
+    /// more, so it ends now rather than waiting under the veil. Checked at
+    /// the deadline and after each of its own replies, which bounds a late
+    /// claim to the round trips already on the wire.
+    private func endGridClaimIfStalledLate(context: String) {
+        guard let claim = gridAuthorityLifecycle.claim,
+              !claim.presentationVisible,
+              claim.phase == .awaitingFence || claim.phase == .awaitingRepaint,
+              !gridClaimHasOwnCommandsInFlight,
+              !gridClaimRepaintInFlight
+        else { return }
+        stallGridClaim(context: "late-\(context)", canProgress: false, fenceAgain: false)
+    }
+
+    /// §6.10 rule 6: the claim cannot progress as it stands. Core sends a
+    /// visible claim that can still move (`canProgress`) back to its
+    /// geometry phase, where it fences again (`fenceAgain`) or waits for
+    /// its next observation; anything else ends as an adapter failure.
+    private func stallGridClaim(context: String, canProgress: Bool, fenceAgain: Bool) {
+        guard let claim = gridAuthorityLifecycle.claim else { return }
+        let effects = reduceGridAuthority(.claimStalled(
+            generation: claim.generation,
+            canProgress: canProgress
+        ))
+        if let live = gridAuthorityLifecycle.claim, live.generation == claim.generation {
+            guard live.phase == .awaitingFence else { return }
+            Self.logDiagnostic(
+                "grid-authority claim stalled gen=\(claim.generation) context=\(context): geometry phase again"
+            )
+            clearGridAuthorityRepaintTargets()
+            if fenceAgain {
+                queueGridClaimFenceSequence(
+                    connectionGeneration: controlConnectionGeneration,
+                    claimGeneration: claim.generation,
+                    reason: "stalled-\(context)",
+                    replaySize: false
+                )
+            }
+        } else {
+            Self.logDiagnostic(
+                "grid-authority claim stalled gen=\(claim.generation) context=\(context): gave up"
+            )
+        }
+        if !effects.isEmpty { applyGridAuthorityLifecycleEffects(effects) }
+    }
+
+    /// Confirmation found the window's metadata incomplete. A visible claim
+    /// re-enters its geometry phase and confirms on the next layout or fence
+    /// observation; a late one waits only while its own replies are still
+    /// coming (§6.10 rule 6).
+    private func deferGridClaimConfirmation(context: String) {
+        Self.logDiagnostic("grid-authority repaint deferred: \(context)")
+        if gridAuthoritySession.claimMayAdvertiseGeometry {
+            stallGridClaim(context: context, canProgress: true, fenceAgain: false)
+        } else {
+            endGridClaimIfStalledLate(context: context)
         }
     }
 
-    /// T5: after a client detach (or a reconnect that re-derived a foreign
-    /// stamp) while yielded, auto-reclaim only when every attached client can
-    /// be positively identified as belonging to this device. A count is not
-    /// proof on mosh: if our visible client and a peer's side channel disappear
-    /// together, the remaining local side channel + peer visible client still
-    /// totals two. The visible mosh launch therefore records a name/PID/created
-    /// tuple in a device-scoped session option; this control connection resolves
-    /// its own tuple directly. Missing/ambiguous identity fails closed.
-    private func scheduleGridAuthorityPeerCheck(reason: String) {
-        guard participatesInGridAuthority,
-              gridAuthority.isPeer,
-              !gridAuthorityReclaimInFlight,
-              !gridAuthorityClaimPending,
-              !gridAuthorityPeerCheckInFlight,
-              mode == .tmuxControl,
-              let sessionId = ownSessionId
-        else { return }
-        let connectionGeneration = controlConnectionGeneration
-        gridAuthorityPeerCheckInFlight = true
+    /// Resolves this device's own tmux client identities (control client,
+    /// plus the visible mosh client on the side channel) for the passive
+    /// window-size probe's exclusive-ownership proof.
+    private func queryOwnGridAuthorityClientIdentities(
+        sessionId: SessionId,
+        connectionGeneration: UInt64,
+        completion: @escaping (Set<String>?) -> Void
+    ) {
         sendControlCommand(
             "display-message -p '#{client_name}|#{client_pid}|#{client_created}'"
         ) { [weak self] result in
@@ -3000,18 +6050,16 @@ public final class TmuxController {
                   self.ownSessionId == sessionId
             else { return }
             guard case .success(let lines) = result,
-                  let controlClientIdentity = lines.first(where: { !$0.isEmpty })
+                  lines.count == 1,
+                  let controlClientIdentity = lines.first, !controlClientIdentity.isEmpty
             else {
-                self.gridAuthorityPeerCheckInFlight = false
-                Self.logDiagnostic(
-                    "grid-authority peer check (\(reason)): own control client unknown — stay yielded"
-                )
+                completion(nil)
                 return
             }
 
             if self.controlPath == .sideChannel {
                 guard let identity = self.gridAuthorityIdentity else {
-                    self.gridAuthorityPeerCheckInFlight = false
+                    completion(nil)
                     return
                 }
                 let visibleOption = Self.gridAuthorityVisibleClientOption(
@@ -3025,194 +6073,220 @@ public final class TmuxController {
                           self.ownSessionId == sessionId
                     else { return }
                     guard case .success(let visibleLines) = visibleResult,
-                          let visibleClientIdentity = visibleLines.first(where: { !$0.isEmpty })
+                          visibleLines.count == 1,
+                          let visibleClientIdentity = visibleLines.first, !visibleClientIdentity.isEmpty
                     else {
-                        self.gridAuthorityPeerCheckInFlight = false
-                        Self.logDiagnostic(
-                            "grid-authority peer check (\(reason)): own visible client unknown — stay yielded"
-                        )
+                        completion(nil)
                         return
                     }
-                    self.finishGridAuthorityPeerCheck(
-                        reason: reason,
-                        sessionId: sessionId,
-                        connectionGeneration: connectionGeneration,
-                        controlClientIdentity: controlClientIdentity,
-                        ownClientIdentities: Set([
-                            controlClientIdentity,
-                            visibleClientIdentity,
-                        ])
-                    )
+                    completion(Set([controlClientIdentity, visibleClientIdentity]))
                 }
             } else {
-                self.finishGridAuthorityPeerCheck(
-                    reason: reason,
-                    sessionId: sessionId,
-                    connectionGeneration: connectionGeneration,
-                    controlClientIdentity: controlClientIdentity,
-                    ownClientIdentities: Set([controlClientIdentity])
-                )
+                completion(Set([controlClientIdentity]))
             }
         }
     }
 
-    private func finishGridAuthorityPeerCheck(
-        reason: String,
-        sessionId: SessionId,
-        connectionGeneration: UInt64,
-        controlClientIdentity: String,
-        ownClientIdentities: Set<String>
-    ) {
-        sendControlCommand(
-            "list-clients -t \(sessionId.description) -F '#{client_name}|#{client_pid}|#{client_created}'"
-        ) { [weak self] result in
-            guard let self else { return }
-            guard self.controlConnectionGeneration == connectionGeneration,
-                  self.ownSessionId == sessionId
-            else { return }
-            self.gridAuthorityPeerCheckInFlight = false
-            guard self.gridAuthority.isPeer,
-                  !self.gridAuthorityReclaimInFlight,
-                  !self.gridAuthorityClaimPending,
-                  case .success(let lines) = result
-            else { return }
-            let attached = Set(lines.filter { !$0.isEmpty })
-            guard attached.contains(controlClientIdentity),
-                  !attached.isEmpty,
-                  attached.isSubset(of: ownClientIdentities)
-            else {
-                Self.logDiagnostic(
-                    "grid-authority peer check (\(reason)): attached=\(attached.count) provenOwn=\(attached.intersection(ownClientIdentities).count) — stay yielded"
-                )
-                return
-            }
-            Self.logDiagnostic(
-                "grid-authority truly alone (\(reason)) attached=\(attached.count) → auto-reclaim"
-            )
-            self.gridAuthorityAutoReclaimPeerName = self.gridAuthority.peerDisplayName
-            self.reclaimGridAuthority(reason: "peer-departed")
-        }
+    /// Facts come from the ordered snapshot, only when they change. The
+    /// shared session judges only its hydrated, authoritative active window.
+    private func gridAuthorityWindowFacts(_ snapshot: TmuxSnapshot? = nil) -> TmuxAuthorityGeometryEvidence.WindowFacts {
+        var facts = TmuxAuthorityGeometryEvidence.WindowFacts(of: snapshot ?? executingCommandReplySnapshot ?? runtimeEngine.snapshot)
+        facts.hydrated = isWindowListHydrated && facts.hydrated
+        return facts
     }
 
-    /// Fallback for stamp-less attachers (a laptop's bare `tmux attach`): a
-    /// window resize we did not initiate, away from our own grid, means some
-    /// client took the size. Suppressed near our own replays so rotation /
-    /// keyboard churn and the resize's own echo never trigger it.
-    ///
-    /// Scoped to the window this device actually renders: `window-size
-    /// latest` is per-window, so background windows legitimately keep other
-    /// clients' (or stale) geometry — a pane exit in a background window
-    /// must not veil the device that owns the active grid.
-    private func noteLayoutSizeForAuthorityFallback(
-        _ layout: WindowLayout?,
-        windowId: WindowId
-    ) {
-        guard participatesInGridAuthority,
-              gridAuthorityGeometryPolicyKnown,
-              gridAuthorityGeometryPolicyIsLatest,
-              !gridAuthorityRederiveInFlight,
-              !gridAuthority.isPeer,
-              !gridAuthorityReclaimInFlight,
-              windowId == (activeWindowId ?? renderedWindowId),
-              let rect = layout?.root.rect,
-              let local = lastKnownSize,
-              rect.width > 0, rect.height > 0,
-              rect.width != local.cols || rect.height != local.rows
-        else { return }
-        if let last = lastClientSizeReplayAt, Date().timeIntervalSince(last) < 2.0 {
-            return
+    private func noteGridAuthorityWindowFacts(_ snapshot: TmuxSnapshot? = nil) {
+        guard participatesInGridAuthority else { return }
+        let snapshot = snapshot ?? executingCommandReplySnapshot ?? runtimeEngine.snapshot
+        let priorSnapshot = executingCommandReplySnapshot
+        executingCommandReplySnapshot = snapshot
+        defer { executingCommandReplySnapshot = priorSnapshot }
+        let facts = gridAuthorityWindowFacts(snapshot)
+        let previous = gridAuthoritySession.evidence.windowFacts
+        guard previous != facts else { return }
+        if previous.hydrated, previous.activeWindow?.id != facts.activeWindow?.id || previous.activeWindow?.size == nil {
+            reservePresentedWindowRecovery(facts)
         }
-        Self.logDiagnostic(
-            "grid-authority fallback: foreign layout \(rect.width)x\(rect.height) vs local \(local.cols)x\(local.rows) window=\(windowId)"
-        )
-        gridAuthority = .peer(displayName: "another device")
+        applyGridAuthorityLifecycleEffects(reduceGridAuthority(.windowFacts(
+            hydrated: facts.hydrated,
+            activeWindow: facts.activeWindow
+        )))
     }
 
-    /// Attach-init size replay, T6-aware: only a fresh controller's FIRST
-    /// attach (a user-initiated connect) claims the grid blindly. Every
-    /// later attach — auto-reconnect, session change — first re-derives
-    /// authority from the stamp: a peer can have taken over during ANY
-    /// drop, not just one that began while yielded, and an automatic
-    /// reconnect must never steal the grid from a device that kept working.
-    /// The attach-once flag is never consumed, so a second drop landing
-    /// mid-re-derive simply re-derives again on the next attach.
+    private func noteGridAuthorityPaintable() {
+        guard participatesInGridAuthority else { return }
+        let mounted: Bool
+        if controlPath == .sideChannel {
+            mounted = !currentRenderDeclarations.isEmpty && onGridAuthoritySideChannelRepaintRequired != nil
+        } else if let window = activeWindowId.flatMap(window), window.rendersAsPaneGrid {
+            let targets = gridAuthorityVisiblePaneTargets(in: window)
+            mounted = !targets.isEmpty && targets.allSatisfy { paneRenderSurfaces[$0] != nil || paneSinks[$0] != nil || renderFeedSurface != nil }
+        } else {
+            mounted = !currentRenderDeclarations.isEmpty && (feedTerminal != nil || feedTerminalWithContext != nil || renderFeedSurface != nil)
+        }
+        let paintable = mode == .tmuxControl && !appIsInactive && !gridAuthoritySession.inBackground && mounted
+        guard paintable != gridAuthoritySession.paintable else { return }
+        applyGridAuthorityLifecycleEffects(reduceGridAuthority(.paintable(paintable)))
+    }
+
+    /// Attach-init: a control channel attached (first connect, reconnect,
+    /// session change or restore alike). Attaching never claims and never
+    /// sizes the window before authority is known (R5, D3): it withholds
+    /// geometry and reads the stamp. The reply releases the hold (own window
+    /// at our size, or one ordinary owned replay), keeps it (yielded,
+    /// unknown), or resolves a pending show/tap intent into a claim.
     private func replayAttachInitClientSize() {
-        guard participatesInGridAuthority, gridAuthorityHasAttachedOnce else {
-            gridAuthorityHasAttachedOnce = true
+        guard participatesInGridAuthority else {
             replayClientSize(reason: "attach-init")
             return
         }
-        let connectionGeneration = controlConnectionGeneration
-        let sessionId = ownSessionId
-        gridAuthorityRederiveInFlight = true
-        sendControlCommand(
-            "show-options -qv \(Self.gridAuthorityOption)"
-        ) { [weak self] result in
-            guard let self,
-                  self.mode == .tmuxControl,
-                  self.controlConnectionGeneration == connectionGeneration,
-                  self.ownSessionId == sessionId
-            else { return }
-            self.gridAuthorityRederiveInFlight = false
-            let value = (try? result.get())?.first(where: { !$0.isEmpty }) ?? ""
-            if let peerName = self.foreignAuthorityDisplayName(inRawValue: value) {
-                self.lastSeenAuthorityRawValue = value.trimmingCharacters(in: .whitespaces)
-                self.gridAuthority = .peer(displayName: peerName)
-                Self.logDiagnostic("grid-authority reconnect re-derived: still \(peerName)")
-                // Guard against a stale stamp from a crashed peer leaving
-                // this device blurred forever: if nobody else is actually
-                // attached, the truly-alone check reclaims immediately.
-                self.scheduleGridAuthorityPeerCheck(reason: "reconnect-rederive")
-            } else if self.gridAuthority.isPeer {
-                // A side-channel reset deliberately kept the previous peer
-                // veil fail-closed. Once the replacement channel proves the
-                // stamp is empty/ours, reclaim through the full policy,
-                // geometry, and repaint fence; replayClientSize alone would
-                // reject itself while `.peer` and strand the veil forever.
-                self.gridAuthorityReclaimInFlight = true
-                self.claimActiveViewport(
-                    reason: "authority-reconnect-rederived",
-                    repaintEvenIfSame: true
-                )
-                self.scheduleGridAuthorityReclaimTimeout()
-            } else {
-                self.replayClientSize(
-                    reason: "attach-init-rederived",
-                    expectsReconnectClaimEcho: true
-                )
+
+        applyGridAuthorityLifecycleEffects(
+            reduceGridAuthority(.attached)
+        )
+    }
+
+    /// Set before attaching a mosh side channel; inline never resolves a group owner.
+    @ObservationIgnored public var gridAuthorityOwnerSessionName: String?
+    @ObservationIgnored private var gridAuthorityScope: TmuxGridAuthorityScope = .ownSession
+    @ObservationIgnored private var gridAuthorityScopeGeneration: UInt64?
+    @ObservationIgnored private var gridAuthorityScopeResolving = false
+    @ObservationIgnored private var heldGridAuthorityQueryID: UInt64?
+    @ObservationIgnored private var heldGridAuthorityPassiveRead: (() -> Void)?
+    @ObservationIgnored private var gridAuthoritySubscriptionRequested = false
+    @ObservationIgnored private var subscriptionFlushScheduled = false
+
+    private func beginGridAuthorityScopeResolution() {
+        guard controlPath == .sideChannel,
+              gridAuthorityScopeGeneration != controlConnectionGeneration else { return }
+        gridAuthorityScopeGeneration = controlConnectionGeneration
+        gridAuthorityScope = .ownSession
+        guard let name = gridAuthorityOwnerSessionName else {
+            Self.logDiagnostic("authority scope=own reason=missing-owner-name")
+            return
+        }
+        gridAuthorityScopeResolving = true
+        let connection = controlConnectionGeneration
+        var ownerReply: [String]?
+        var ownReply: [String]?
+        var replies = 0
+        let commands = TmuxGridAuthority.ownerResolutionCommands(ownerSessionName: name)
+        for (index, command) in commands.enumerated() {
+            sendControlCommand(command) { [weak self] result in
+                guard let self, self.controlConnectionGeneration == connection,
+                      self.gridAuthorityScopeResolving else { return }
+                if case .success(let lines) = result {
+                    if index == 0 { ownerReply = lines } else { ownReply = lines }
+                }
+                replies += 1
+                guard replies == 2 else { return }
+                let owner = TmuxGridAuthority.resolveOwner(ownerReply: ownerReply, ownReply: ownReply)
+                self.gridAuthorityScope = owner.map { .owner($0) } ?? .ownSession
+                self.gridAuthorityScopeResolving = false
+                Self.logDiagnostic("authority scope=\(owner == nil ? "own" : "owner") reason=\(owner == nil ? "unresolved-group" : "group-owner")")
+                if self.gridAuthoritySubscriptionRequested {
+                    self.sendGridAuthoritySubscription()
+                }
+                let held = self.heldGridAuthorityQueryID
+                self.heldGridAuthorityQueryID = nil
+                if let held, self.gridAuthoritySession.query.current?.id == held {
+                    self.issueGridAuthorityQuery(id: held)
+                }
+                let passive = self.heldGridAuthorityPassiveRead
+                self.heldGridAuthorityPassiveRead = nil
+                passive?()
             }
         }
     }
 
-    private func resetGridAuthorityState(
-        preserveYieldedPresentation: Bool = false
-    ) {
-        let yieldedPeer = preserveYieldedPresentation
-            ? gridAuthority.peerDisplayName
-            : nil
-        gridAuthority = yieldedPeer.map(GridAuthority.peer) ?? .unknown
-        gridAuthorityReclaimInFlight = false
-        gridAuthorityClaimPending = false
-        gridAuthorityClaimFenceAcknowledged = false
-        gridAuthorityRefenceCount = 0
-        gridAuthorityFenceGeneration &+= 1
-        gridAuthorityClaimPolicyResolved = false
-        gridAuthorityFenceTarget = nil
-        gridAuthorityClaimChangedGeometry = false
-        gridAuthorityClaimForcesRepaint = false
-        clearGridAuthorityRepaintTargets()
-        gridAuthorityAutoReclaimPeerName = nil
-        gridAuthorityReconnectClaimExpectedStamp = nil
-        gridAuthorityRederiveInFlight = false
-        gridAuthorityGeometryPolicyIsLatest = true
-        gridAuthorityGeometryPolicyKnown = false
-        gridAuthorityReclaimTimeoutTask?.cancel()
-        gridAuthorityReclaimTimeoutTask = nil
-        gridAuthorityPeerCheckInFlight = false
-        lastSeenAuthorityRawValue = nil
-        // gridAuthorityHasAttachedOnce deliberately survives: it marks
-        // "this controller has claimed before", which is what forces the
-        // reconnect re-derive.
+    /// A grouped view outlives a killed owner: owner reads then find no
+    /// owner and owner writes fail. Fall back to our own session (the
+    /// behaviour before owner resolution) rather than reading a dead owner
+    /// as unstamped; the caller's retry uses the new scope. Reconnecting
+    /// resolves the owner afresh.
+    private func abandonGridAuthorityOwnerScope(_ scope: TmuxGridAuthorityScope, connection: UInt64, reason: String) {
+        guard case .owner = scope, gridAuthorityScope == scope,
+              controlConnectionGeneration == connection else { return }
+        gridAuthorityScope = .ownSession
+        Self.logDiagnostic("authority scope=own reason=\(reason)")
+        if gridAuthoritySubscriptionRequested {
+            sendGridAuthoritySubscription()
+        }
+    }
+
+    private func sendGridAuthoritySubscription() {
+        gridAuthoritySubscriptionRequested = true
+        guard !gridAuthorityScopeResolving else { return }
+        runtimeEngine.subscriptionRequests.authority = gridAuthorityScope
+        sendPendingSubscriptionCommands()
+    }
+
+    private func sendGridAuthorityPassiveRead(ifCurrent: @escaping () -> Bool, completion: @escaping (Result<[String], CommandError>) -> Void) {
+        if gridAuthorityScopeResolving {
+            heldGridAuthorityPassiveRead = { [weak self] in self?.sendGridAuthorityPassiveRead(ifCurrent: ifCurrent, completion: completion) }
+            return
+        }
+        guard ifCurrent() else { return }
+        let scope = gridAuthorityScope
+        let connection = controlConnectionGeneration
+        sendControlCommand(TmuxGridAuthority.queryCommand(scope)) { [weak self] result in
+            guard case .success(let reply) = result else { completion(result); return }
+            guard let lines = TmuxGridAuthority.queryReplyLines(reply, scope: scope) else {
+                self?.abandonGridAuthorityOwnerScope(scope, connection: connection, reason: "owner-missing")
+                completion(.failure(.tmuxError(lines: reply)))
+                return
+            }
+            completion(.success(lines))
+        }
+    }
+
+    /// Sends one explicit authority read. Reads coalesce only with one
+    /// already in flight for the same pending intent (or the same absence of
+    /// one) on this connection: a show edge records a new intent and so
+    /// always gets its own read, ordered after everything tmux queued before
+    /// the show.
+    private func issueGridAuthorityQuery(id: UInt64) {
+        guard participatesInGridAuthority, mode == .tmuxControl else { return }
+        if gridAuthorityScopeResolving {
+            heldGridAuthorityQueryID = id
+            return
+        }
+        let connectionGeneration = controlConnectionGeneration
+        let scope = gridAuthorityScope
+        sendControlCommand(TmuxGridAuthority.queryCommand(scope)) { [weak self] result in
+            guard let self, self.mode == .tmuxControl,
+                  self.controlConnectionGeneration == connectionGeneration else { return }
+            switch result {
+            case .success(let reply):
+                guard let lines = TmuxGridAuthority.queryReplyLines(reply, scope: scope) else {
+                    self.abandonGridAuthorityOwnerScope(scope, connection: connectionGeneration, reason: "owner-missing")
+                    self.applyGridAuthorityLifecycleEffects(self.reduceGridAuthority(.queryFailed(id: id)))
+                    return
+                }
+                let raw = lines.joined(separator: "\n")
+                self.applyGridAuthorityLifecycleEffects(self.reduceGridAuthority(.queryReplied(id: id, raw: raw)))
+            case .failure:
+                self.applyGridAuthorityLifecycleEffects(self.reduceGridAuthority(.queryFailed(id: id)))
+            }
+        }
+    }
+
+    /// `resettingSession` false: the session already reset itself, as a
+    /// known `controlSessionChanged` does.
+    private func resetGridAuthorityState(preserveYieldedPresentation: Bool = false, resettingSession: Bool = true) {
+        gridAuthorityScope = .ownSession
+        gridAuthorityScopeGeneration = nil
+        gridAuthorityScopeResolving = false
+        heldGridAuthorityQueryID = nil
+        heldGridAuthorityPassiveRead = nil
+        gridAuthoritySubscriptionRequested = false
+        // The old connection's release does not speak for the next one.
+        gridAuthorityOwnerReplayDeferred = false
+        if resettingSession {
+            applyGridAuthorityLifecycleEffects(reduceGridAuthority(.resetTransport(preservingPeer: preserveYieldedPresentation)))
+        }
+        clearGridAuthorityClaimBookkeeping()
+        noteGridAuthorityPaintable()
     }
 
     /// A preserving client starts as the size owner only when it created the
@@ -3583,7 +6657,6 @@ public final class TmuxController {
         // owner remains authoritative at this same promoted size.
         let sizeCommand = "refresh-client -C \(serverCols),\(serverRows)"
 
-        clientSizeEpoch &+= 1
         sendControlCommand(sizeCommand) { [weak self] firstResult in
             guard let self,
                   self.mode == .tmuxControl,
@@ -3595,6 +6668,14 @@ public final class TmuxController {
                 return
             }
 
+            // The size command itself was enqueued through the ledger-owned
+            // platform FIFO. Record its acknowledged geometry without sending
+            // a duplicate replay, so any younger capture observes the new
+            // size epoch and resynchronises before it can paint.
+            self.executeRenderEffects(self.renderLedger.noteAppliedClientSize(
+                columns: serverCols,
+                rows: serverRows
+            ))
             let previous = self.lastKnownSize
             self.lastKnownSize = (serverCols, serverRows)
             self.hasCededGridOwnership = true
@@ -3683,12 +6764,12 @@ public final class TmuxController {
         guard let activeWindowId,
               window(activeWindowId)?.rendersAsPaneGrid == false
         else { return }
-        let generation = advanceStateGeneration(reason: "grid-collapse-resync")
-        refreshRenderedWindow(
-            windowId: activeWindowId,
-            generation: generation,
+        _ = advanceStateGeneration(reason: "grid-collapse-resync")
+        submitRenderFact(.refreshRequested(
+            .live,
+            stage: .viewport,
             reason: "grid-collapse-resync"
-        )
+        ))
     }
 
     /// Close the rendered-output gate as soon as the app leaves the active
@@ -3698,14 +6779,19 @@ public final class TmuxController {
     /// SwiftTerm's existing deep buffer.
     public func prepareForAppInactivity() {
         appIsInactive = true
-        guard controlPath == .inline else { return }
-        awaitingAppForegroundRefresh = true
-        foregroundOutputRefreshGeneration = nil
+        if participatesInGridAuthority {
+            noteGridAuthorityPaintable()
+        }
+        // Suspend response-liveness detection: ContinuousClock keeps running
+        // while the process is frozen, so post-resume ages would spuriously
+        // exceed the hard timeout. The fence (if armed) survives — correlation
+        // stays unsynchronized across a suspension.
+        commandResponseWatchdogTask?.cancel()
+        commandResponseWatchdogTask = nil
         guard mode == .tmuxControl else { return }
-        beginForegroundOutputCoalescing()
-        Self.logDiagnostic(
-            "foreground-output coalescing-begin window=\(activeWindowId?.description ?? "nil") renderedPane=\(renderedPaneId?.description ?? "nil")"
-        )
+        renderDropSummaryBoundary?("app-background")
+        submitRenderFact(.appBackground)
+        Self.logDiagnostic("render-ledger app-background path=\(controlPath)")
     }
 
     /// Force a fresh visible repaint of the active window. Call on foreground
@@ -3723,58 +6809,32 @@ public final class TmuxController {
     /// window/pane mismatch still takes the normal viewport+deep path so its
     /// scrollback is rebuilt from tmux truth.
     public func refreshActiveWindowOnForeground() {
+        let resumedFromBackground = appIsInactive
         appIsInactive = false
-        guard controlPath == .inline else { return }
-        guard mode == .tmuxControl else {
-            // `prepareForAppInactivity()` also latches while passthrough is
-            // waiting to enter control mode. Clear that latch if the app became
-            // active before tmux attached, or future initial rendering would be
-            // deferred forever.
-            endForegroundOutputCoalescing()
-            return
+        if resumedFromBackground, participatesInGridAuthority {
+            noteGridAuthorityPaintable()
         }
-        guard let activeWindowId else {
-            endForegroundOutputCoalescing()
-            resumePausedForegroundRecoveryPanes()
-            return
+        // The replay a foreground read released while inactive goes now,
+        // before the re-derive below holds geometry for its own read. Its
+        // usual gates still apply: a peer or a hold since then drops it.
+        if gridAuthorityOwnerReplayDeferred {
+            gridAuthorityOwnerReplayDeferred = false
+            replayClientSize(reason: "authority-owned-geometry-deferred")
         }
-        awaitingAppForegroundRefresh = false
-        beginForegroundOutputCoalescing()
-        Self.logDiagnostic("foreground-refresh window=\(activeWindowId)")
-        if window(activeWindowId)?.rendersAsPaneGrid == true {
-            // Grid windows are painted per-pane; repaint each visible pane.
-            foregroundOutputRefreshGeneration = nil
-            relinquishForegroundPaneRefreshOwnership()
-            let paneIds = Set(paneSinks.keys)
-            guard !paneIds.isEmpty else {
-                // SwiftUI may not have mounted the grid surfaces yet. Keep the
-                // lifecycle barrier armed across that gap; the app follows
-                // each sink registration with refreshPane(), which inherits
-                // foreground ownership and releases after authoritative paint.
-                return
-            }
-            for paneId in paneIds {
-                refreshPane(
-                    paneId: paneId,
-                    deep: paneId == activePaneId,
-                    foregroundRecovery: true
-                )
-            }
-            return
+        // A transparent inactive period still re-derives without hiding a claim.
+        if resumedFromBackground, participatesInGridAuthority {
+            applyGridAuthorityLifecycleEffects(reduceGridAuthority(.foregrounded))
         }
-        relinquishForegroundPaneRefreshOwnership()
-        let refreshesRenderedPaneInPlace = renderedWindowId == activeWindowId
-            && renderedPaneId != nil
-            && renderedPaneId == activePaneId
-        let stage: RenderStage = refreshesRenderedPaneInPlace ? .viewportOnly : .viewport
-        let generation = advanceStateGeneration(reason: "foreground-refresh")
-        foregroundOutputRefreshGeneration = generation
-        refreshRenderedWindow(
-            windowId: activeWindowId,
-            generation: generation,
-            reason: "foreground-refresh",
-            stage: stage
-        )
+        // Re-baseline response ages: time spent suspended must not count
+        // toward poisoning. Genuine post-resume poisoning re-triggers 10s
+        // after this instant.
+        commandResponseWatchdogBaseline = ContinuousClock.now
+        armCommandResponseWatchdog()
+        guard mode == .tmuxControl else { return }
+        renderDropSummaryBoundary?("app-foreground")
+        _ = advanceStateGeneration(reason: "app-foreground")
+        submitRenderFact(.appForeground)
+        Self.logDiagnostic("render-ledger app-foreground path=\(controlPath)")
     }
 
     /// Update the rendered active pane's display title from an OSC title
@@ -3791,7 +6851,7 @@ public final class TmuxController {
     /// has been identified yet.
     public func updateActiveWindowName(_ title: String) {
         guard mode == .tmuxControl,
-              pendingRenderRefresh == nil
+              !renderLedger.hasPendingRender
         else { return }
         let targetWindowId = renderedWindowId ?? activeWindowId
         guard let targetWindowId,
@@ -3807,6 +6867,20 @@ public final class TmuxController {
             windows[idx].activePaneTitle = nil
             windows[idx].activePaneTitleIsDefault = false
         }
+        if let paneID = windows[idx].activePaneId,
+           let paneIndex = windows[idx].panes.firstIndex(where: { $0.id == paneID }) {
+            windows[idx].panes[paneIndex].title = Self.nonEmpty(title)
+            windows[idx].panes[paneIndex].titleIsDefault = false
+        } else if let paneID = windows[idx].activePaneId {
+            windows[idx].panes.append(PaneInfo(
+                id: paneID,
+                title: Self.nonEmpty(title),
+                titleIsDefault: false,
+                isActive: true
+            ))
+        }
+        publishWindowMetadataToCore(targetWindowId)
+        projectCoreSnapshot()
     }
 
     /// Reset all state. Use on session disconnect or reattach.
@@ -3819,34 +6893,45 @@ public final class TmuxController {
     /// and silently no-ops instead of re-queueing work on a half-
     /// -reset controller.
     public func reset() {
+        renderDropSummaryBoundary?("transport-lost")
+        // P11: a gate episode ends with its connection; the next one logs
+        // its own first line.
+        endClientSizeGate()
         let cancelled = drainPendingCommands()
+        executeRenderEffects(renderLedger.reduce(.transportLost, snapshot: runtimeEngine.snapshot))
+        executeRenderEffects(renderLedger.reduce(.surfacesDeclared([]), snapshot: runtimeEngine.snapshot))
+        ledgerRenderedOwners.removeAll(keepingCapacity: true)
+        for task in renderTimerTasks.values { task.cancel() }
+        renderTimerTasks.removeAll(keepingCapacity: true)
+        cancelCommandResponseWatchdog()
         controlConnectionGeneration &+= 1
         isWindowListHydrated = false
         advanceStateGeneration(reason: "reset")
         clearProtocolState(keepWindowModel: false)
-        resetRenderHardeningState()
         suppressPassthroughOutputUntilControlMode = false
         isInitialRenderReady = false
         mode = .passthrough
         activePaneId = nil
         renderedWindowId = nil
         renderedPaneId = nil
-        pendingRenderRefresh = nil
         windows.removeAll()
         windowLayoutQueriesInFlight.removeAll()
         bellingWindows.removeAll()
-        pausedPanes.removeAll()
         windowBellFlags.removeAll()
         paneWindowTable.removeAll()
         paneCurrentPaths.removeAll()
         paneSinks.removeAll()
-        pendingPaneRefreshes.removeAll()
-        paneSizeResyncAttempts.removeAll()
-        deepRefreshedPanes.removeAll()
+        paneRenderSurfaces.removeAll()
         pendingPaneFocus.removeAll()
         moshPaneBorderWindows.removeAll()
         activeWindowId = nil
+        activeWindowQueryRebase = nil
+        pendingHydratedActiveWindow = nil
+        legacyTopologyReplayConnectionGeneration = nil
+        executingCommandReplySnapshot = nil
+        currentRenderDeclarations.removeAll(keepingCapacity: true)
         ownSessionId = nil
+        ownSessionName = nil
         reverseAttachPeers.removeAll()
         reverseAttachBaselineSize = nil
         reverseAttachOwnerGridBaseline = nil
@@ -3886,20 +6971,29 @@ public final class TmuxController {
             return
         }
 
+        renderDropSummaryBoundary?("side-channel-disconnected")
+        endClientSizeGate()
         let cancelled = drainPendingCommands()
+        executeRenderEffects(renderLedger.reduce(.transportLost, snapshot: runtimeEngine.snapshot))
+        for task in renderTimerTasks.values { task.cancel() }
+        renderTimerTasks.removeAll(keepingCapacity: true)
+        cancelCommandResponseWatchdog()
         controlConnectionGeneration &+= 1
         isWindowListHydrated = false
         advanceStateGeneration(reason: "sidechannel-disconnected")
         clearProtocolState(keepWindowModel: true)
-        resetRenderHardeningState()
         suppressPassthroughOutputUntilControlMode = false
         isInitialRenderReady = false
         mode = .passthrough
         activePaneId = nil
         renderedWindowId = nil
         renderedPaneId = nil
-        pendingRenderRefresh = nil
+        activeWindowQueryRebase = nil
+        pendingHydratedActiveWindow = nil
+        legacyTopologyReplayConnectionGeneration = nil
+        executingCommandReplySnapshot = nil
         ownSessionId = nil
+        ownSessionName = nil
         reverseAttachPeers.removeAll()
         reverseAttachBaselineSize = nil
         reverseAttachOwnerGridBaseline = nil
@@ -3925,7 +7019,6 @@ public final class TmuxController {
         // `.unknown` here would remove every input/overlay guard before the
         // replacement side channel has re-derived the session stamp.
         resetGridAuthorityState(preserveYieldedPresentation: true)
-        pausedPanes.removeAll()
         windowBellFlags.removeAll()
         pendingPaneFocus.removeAll()
         for entry in cancelled {
@@ -3935,106 +7028,33 @@ public final class TmuxController {
 
     // MARK: - DCS entry detection
 
-    /// The DCS prologue tmux emits on `-CC` attach: ESC P 1 0 0 0 p.
-    /// When we spot it in the output stream we flush any bytes before
-    /// it to the terminal and switch into tmux mode for the remainder.
-    private static let dcsEnterSequence: [UInt8] = [
-        0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70
-    ]
-
     private func handlePassthrough(_ chunk: [UInt8]) {
-        // Fast path: if there's no pending reserve from a previous
-        // chunk AND the incoming chunk can't contain a DCS prefix at
-        // its tail (the common case for normal shell output), flush
-        // it straight through without touching the rolling buffer.
-        // This is the typing-echo hot path — a naive approach that
-        // unconditionally reserves the last N-1 bytes creates a
-        // visible 6-character input lag that feels dreadful.
-        if dcsBuffer.isEmpty {
-            // Scan the chunk for an in-place DCS match first.
-            if let dcsStart = firstIndex(of: Self.dcsEnterSequence, in: chunk) {
-                enterTmuxMode(splittingChunk: chunk, atDcsStart: dcsStart)
-                return
-            }
-            // No DCS. Figure out whether the tail of this chunk could
-            // be the start of a DCS that finishes in the next chunk.
-            let prefixLen = longestDcsPrefixMatchAtTail(of: chunk)
-            if prefixLen == 0 {
-                // Not even the first DCS byte at the tail. Flush everything.
-                feedPassthrough(ArraySlice(chunk))
-                return
-            }
-            // Flush the non-suspicious prefix and reserve the ambiguous tail.
-            let flushCount = chunk.count - prefixLen
-            if flushCount > 0 {
-                feedPassthrough(ArraySlice(chunk[..<flushCount]))
-            }
-            dcsBuffer.append(contentsOf: chunk[flushCount...])
-            return
+        let detection = controlModeDetector.feed(chunk)
+        if !detection.passthroughBytes.isEmpty {
+            feedPassthrough(ArraySlice(detection.passthroughBytes))
         }
-
-        // Slow path: there's a pending reserve from the previous chunk,
-        // so we can't short-circuit — the DCS might straddle the seam.
-        dcsBuffer.append(contentsOf: chunk)
-
-        if let dcsStart = firstIndex(of: Self.dcsEnterSequence, in: dcsBuffer) {
-            enterTmuxMode(splittingChunk: dcsBuffer, atDcsStart: dcsStart)
-            dcsBuffer.removeAll(keepingCapacity: true)
-            return
-        }
-
-        // Still no DCS. Reserve only the bytes that actually match a
-        // DCS prefix at the tail — everything else flushes immediately.
-        let prefixLen = longestDcsPrefixMatchAtTail(of: dcsBuffer)
-        if dcsBuffer.count > prefixLen {
-            let flushCount = dcsBuffer.count - prefixLen
-            feedPassthrough(ArraySlice(dcsBuffer[..<flushCount]))
-            dcsBuffer.removeFirst(flushCount)
-        }
+        guard detection.enteredControlMode else { return }
+        enterTmuxMode(
+            controlBytes: detection.controlBytes,
+            passthroughByteCount: detection.passthroughBytes.count
+        )
     }
 
     private func handlePassthroughCooperatively(_ chunk: [UInt8]) async {
-        if dcsBuffer.isEmpty {
-            if let dcsStart = firstIndex(of: Self.dcsEnterSequence, in: chunk) {
-                await enterTmuxModeCooperatively(
-                    splittingChunk: chunk,
-                    atDcsStart: dcsStart
-                )
-                return
-            }
-            let prefixLen = longestDcsPrefixMatchAtTail(of: chunk)
-            if prefixLen == 0 {
-                await feedPassthroughCooperatively(ArraySlice(chunk))
-                return
-            }
-            let flushCount = chunk.count - prefixLen
-            if flushCount > 0 {
-                await feedPassthroughCooperatively(ArraySlice(chunk[..<flushCount]))
-            }
-            dcsBuffer.append(contentsOf: chunk[flushCount...])
-            return
+        let detection = controlModeDetector.feed(chunk)
+        if !detection.passthroughBytes.isEmpty {
+            await feedPassthroughCooperatively(ArraySlice(detection.passthroughBytes))
         }
-
-        dcsBuffer.append(contentsOf: chunk)
-        if let dcsStart = firstIndex(of: Self.dcsEnterSequence, in: dcsBuffer) {
-            await enterTmuxModeCooperatively(
-                splittingChunk: dcsBuffer,
-                atDcsStart: dcsStart
-            )
-            dcsBuffer.removeAll(keepingCapacity: true)
-            return
-        }
-
-        let prefixLen = longestDcsPrefixMatchAtTail(of: dcsBuffer)
-        if dcsBuffer.count > prefixLen {
-            let flushCount = dcsBuffer.count - prefixLen
-            await feedPassthroughCooperatively(ArraySlice(dcsBuffer[..<flushCount]))
-            dcsBuffer.removeFirst(flushCount)
-        }
+        guard detection.enteredControlMode else { return }
+        await enterTmuxModeCooperatively(
+            controlBytes: detection.controlBytes,
+            passthroughByteCount: detection.passthroughBytes.count
+        )
     }
 
     private func feedPassthrough(_ bytes: ArraySlice<UInt8>) {
         guard !suppressPassthroughOutputUntilControlMode else { return }
+        observeRawProgramStatus(bytes)
         deliverToSharedTerminal(
             bytes,
             context: TerminalFeedContext(source: .passthrough)
@@ -4043,7 +7063,8 @@ public final class TmuxController {
 
     private func feedPassthroughCooperatively(_ bytes: ArraySlice<UInt8>) async {
         guard !suppressPassthroughOutputUntilControlMode else { return }
-        var budget = CooperativeFeedBudget()
+        observeRawProgramStatus(bytes)
+        var budget = CooperativeFeedBudget(previousWork: cooperativeFeedWork)
         await deliverToSharedTerminalCooperatively(
             bytes,
             context: TerminalFeedContext(
@@ -4052,9 +7073,11 @@ public final class TmuxController {
             ),
             budget: &budget
         )
-        await budget.yieldAtEndIfSubstantialWork()
+        await budget.yieldIfNeeded()
+        cooperativeFeedWork = budget.unyieldedWork
         ingestStages.yieldWaitMs += budget.yieldWaitMs
         ingestStages.yields += budget.yieldCount
+        cooperativeYieldGeneration &+= UInt64(budget.yieldCount)
     }
 
     private func deliverToSharedTerminal(
@@ -4068,9 +7091,6 @@ public final class TmuxController {
         }
     }
 
-    /// Split a buffer at the DCS match point: pre-DCS bytes go to the
-    /// terminal, post-DCS bytes enter tmux parsing, mode flips.
-    ///
     /// Note that we DON'T push any commands to tmux yet — the initial
     /// state-discovery queries (`refresh-client -C`, `list-windows`,
     /// `display-message`) are deferred until `flushAttachInitQueries()`
@@ -4078,113 +7098,99 @@ public final class TmuxController {
     /// `%begin/%end` frame. tmux marks server-originated frames with
     /// flags bit0 clear; only frames with bit0 set are responses to
     /// commands written by this control client and may pop the FIFO.
-    private func enterTmuxMode(splittingChunk chunk: [UInt8], atDcsStart dcsStart: Int) {
-        let dcsEnd = dcsStart + Self.dcsEnterSequence.count
-        if dcsStart > 0 {
-            feedPassthrough(ArraySlice(chunk[..<dcsStart]))
-        }
-        let messages = activateTmuxMode(
-            trailingChunk: chunk,
-            dcsStart: dcsStart,
-            dcsEnd: dcsEnd
+    private func enterTmuxMode(
+        controlBytes: [UInt8],
+        passthroughByteCount: Int
+    ) {
+        let events = activateTmuxMode(
+            controlBytes: controlBytes,
+            passthroughByteCount: passthroughByteCount
         )
-        process(messages: messages)
+        process(steps: events)
     }
 
     private func enterTmuxModeCooperatively(
-        splittingChunk chunk: [UInt8],
-        atDcsStart dcsStart: Int
+        controlBytes: [UInt8],
+        passthroughByteCount: Int
     ) async {
-        let dcsEnd = dcsStart + Self.dcsEnterSequence.count
-        if dcsStart > 0 {
-            await feedPassthroughCooperatively(ArraySlice(chunk[..<dcsStart]))
-        }
-        let messages = activateTmuxMode(
-            trailingChunk: chunk,
-            dcsStart: dcsStart,
-            dcsEnd: dcsEnd
+        let events = activateTmuxMode(
+            controlBytes: controlBytes,
+            passthroughByteCount: passthroughByteCount
         )
-        await processCooperatively(messages: messages)
+        await processCooperatively(steps: events)
     }
 
     private func activateTmuxMode(
-        trailingChunk chunk: [UInt8],
-        dcsStart: Int,
-        dcsEnd: Int
-    ) -> [TmuxMessage] {
+        controlBytes: [UInt8],
+        passthroughByteCount: Int
+    ) -> [TmuxRuntimeBatch.OrderedStep] {
         mode = .tmuxControl
         suppressPassthroughOutputUntilControlMode = false
         isInitialRenderReady = controlPath == .sideChannel
         attachInitFlushed = false
-        if controlPath == .inline {
-            if appIsInactive {
-                awaitingAppForegroundRefresh = true
-                beginForegroundOutputCoalescing()
-            }
-            startInitialRenderWatchdog()
+        applyGridAuthorityLifecycleEffects(reduceGridAuthority(.channelLiveness(gridAuthorityChannelLive)))
+        updateGridAuthorityPresentation()
+        if currentRenderDeclarations.isEmpty {
+            currentRenderDeclarations = [defaultRenderSurfaceDeclaration]
         }
+        renderDropSummaryBoundary?("transport-attached")
+        updateRenderLedgerConfiguration()
+        executeRenderEffects(renderLedger.reduce(
+            .surfacesDeclared(currentRenderDeclarations),
+            snapshot: runtimeEngine.snapshot
+        ))
+        executeRenderEffects(renderLedger.reduce(
+            .transportAttached(controlPath == .inline ? .inline : .sideChannel),
+            snapshot: runtimeEngine.snapshot
+        ))
+        if appIsInactive {
+            executeRenderEffects(renderLedger.reduce(
+                .appBackground,
+                snapshot: runtimeEngine.snapshot
+            ))
+        }
+        noteGridAuthorityPaintable()
         Self.logDiagnostic(
-            "entered-control-mode path=\(controlPath) dcsStart=\(dcsStart) trailingBytes=\(max(0, chunk.count - dcsEnd))"
+            "entered-control-mode path=\(controlPath) dcsStart=\(passthroughByteCount) trailingBytes=\(controlBytes.count)"
         )
-        if dcsEnd < chunk.count {
-            return parser.feed(Array(chunk[dcsEnd...]))
-        }
-        return []
-    }
-
-    /// Length of the longest suffix of `buffer` that matches a prefix
-    /// of the DCS enter sequence, up to `dcsEnterSequence.count - 1`.
-    /// A full-length match would have been caught by the earlier
-    /// `firstIndex(of:)` scan, so we only care about partial prefixes
-    /// that could complete on the next chunk. Returns 0 when no tail
-    /// byte could begin a DCS — the normal case for shell output,
-    /// which enables the immediate-flush fast path.
-    private func longestDcsPrefixMatchAtTail(of buffer: [UInt8]) -> Int {
-        let dcs = Self.dcsEnterSequence
-        let maxCheck = Swift.min(dcs.count - 1, buffer.count)
-        var length = maxCheck
-        while length > 0 {
-            var match = true
-            let tailStart = buffer.count - length
-            for i in 0..<length where buffer[tailStart + i] != dcs[i] {
-                match = false
-                break
-            }
-            if match { return length }
-            length -= 1
-        }
-        return 0
-    }
-
-    /// Return the index of the first occurrence of `needle` in
-    /// `haystack`, or nil if not found. Straightforward O(n*m) scan —
-    /// DCS sequences are short and chunks are small, so Boyer–Moore
-    /// would be overkill.
-    private func firstIndex(of needle: [UInt8], in haystack: [UInt8]) -> Int? {
-        guard !needle.isEmpty, needle.count <= haystack.count else { return nil }
-        outer: for i in 0...(haystack.count - needle.count) {
-            for j in 0..<needle.count where haystack[i + j] != needle[j] {
-                continue outer
-            }
-            return i
-        }
-        return nil
+        // The raw terminal's foreground program is now tmux itself.
+        programStatusMonitor.noteTerminalClosed(.raw)
+        publishProgramStatus()
+        guard !controlBytes.isEmpty else { return [] }
+        let batch = runtimeEngine.feed(controlBytes)
+        observeProgramStatus(batch)
+        return batch.orderedSteps
     }
 
     private func drainPendingCommands() -> [PendingCommand] {
         let cancelled = pendingCommands
         pendingCommands.removeAll(keepingCapacity: true)
+        renderLedger.resetCommandQueue()
         return cancelled
     }
 
     private func clearProtocolState(keepWindowModel: Bool) {
-        inflightLines.removeAll(keepingCapacity: true)
-        inflightFrameGuard = nil
+        lastPublishedClientSize = nil
+        windowSizeReplayAttempts.removeAll()
+        passiveWindowSizeProbe = nil
+        presentedWindowRecoveryReserved = false
+        windowOrderDeadlineTask?.cancel()
+        windowOrderDeadlineTask = nil
+        pendingWindowReorderToken = nil
+        windowOrderOperationPending = false
+        // The next connection asks again from its own hydrate.
+        runtimeEngine.subscriptionRequests = .init()
+        windowOrderError = nil
         attachInitFlushed = false
-        parser.reset()
+        runtimeEngine.reset(keepingSnapshot: keepWindowModel)
+        applyGridAuthorityLifecycleEffects([])
         outputTitleScanners.removeAll(keepingCapacity: true)
         preloadedTerminalDefaultColorPanes.removeAll(keepingCapacity: true)
-        dcsBuffer.removeAll(keepingCapacity: true)
+        controlModeDetector.reset()
+        // Reports emitted while the channel was gone are lost; what was known
+        // is history until fresh reports arrive.
+        programStatusMonitor.noteTransportLost()
+        publishProgramStatus()
     }
 
     @discardableResult
@@ -4198,192 +7204,6 @@ public final class TmuxController {
         mode == .tmuxControl && stateGeneration == generation
     }
 
-    private func resetRenderHardeningState() {
-        cancelInitialRenderWatchdog()
-        cancelRenderRetry(resetAttempts: true)
-        renderCommandQueueWaitTask?.cancel()
-        renderCommandQueueWaitTask = nil
-        allowUngatedLatchFallback = false
-        establishedRenderIsFailClosed = false
-        abortedRenderedWindowId = nil
-        endForegroundOutputCoalescing()
-    }
-
-    private func beginForegroundOutputCoalescing() {
-        guard controlPath == .inline else { return }
-        isForegroundOutputCoalescing = true
-    }
-
-    @discardableResult
-    private func coalesceForegroundOutputIfNeeded(paneId: PaneId, data: [UInt8]) -> Bool {
-        guard isForegroundOutputCoalescing else { return false }
-        if foregroundOutputOverflowedPanes.contains(paneId) { return true }
-        let limit = max(0, maxForegroundOutputBytes)
-        guard coalescedForegroundOutputByteCount + data.count <= limit else {
-            let discarded = coalescedForegroundOutput.removeValue(forKey: paneId)?.count ?? 0
-            coalescedForegroundOutputByteCount -= discarded
-            foregroundOutputOverflowedPanes.insert(paneId)
-            Self.logDiagnostic(
-                "foreground-output overflow pane=\(paneId) limit=\(limit) discarded=\(discarded) incoming=\(data.count)"
-            )
-            return true
-        }
-        coalescedForegroundOutput[paneId, default: []].append(contentsOf: data)
-        coalescedForegroundOutputByteCount += data.count
-        return true
-    }
-
-    private func takeCoalescedForegroundOutput(for paneId: PaneId) -> (bytes: [UInt8], overflowed: Bool) {
-        let bytes = coalescedForegroundOutput.removeValue(forKey: paneId) ?? []
-        coalescedForegroundOutputByteCount -= bytes.count
-        let overflowed = foregroundOutputOverflowedPanes.remove(paneId) != nil
-        return (bytes, overflowed)
-    }
-
-    private func discardCoalescedForegroundOutput(for paneId: PaneId) {
-        _ = takeCoalescedForegroundOutput(for: paneId)
-    }
-
-    private func finishForegroundPaneRefresh(_ paneId: PaneId, requestID: Int) {
-        guard foregroundPaneRefreshTargets[paneId] == requestID else { return }
-        foregroundPaneRefreshTargets.removeValue(forKey: paneId)
-        if foregroundPaneRefreshTargets.isEmpty {
-            endForegroundOutputCoalescing()
-        }
-    }
-
-    /// Invalidate grid-pane foreground work when the shared terminal becomes
-    /// the new recovery owner. Do not end the barrier or discard retained
-    /// bytes: the replacement shared capture must stay fail-closed until it
-    /// paints authoritative state. Old pane callbacks become harmless stale
-    /// completions because both their request ids and retry tasks are removed.
-    private func relinquishForegroundPaneRefreshOwnership() {
-        let targets = foregroundPaneRefreshTargets
-        foregroundPaneRefreshTargets.removeAll(keepingCapacity: true)
-        for (paneId, requestID) in targets {
-            if pendingPaneRefreshes[paneId] == requestID {
-                pendingPaneRefreshes.removeValue(forKey: paneId)
-            }
-            foregroundPaneRetryTasks.removeValue(forKey: paneId)?.cancel()
-            foregroundPaneRetryAttempts.removeValue(forKey: paneId)
-        }
-    }
-
-    /// Release the foreground barrier. Successful refreshes consume each
-    /// relevant pane buffer immediately before repaint. Overflow and surface
-    /// invalidation paths drop retained redraw streams atomically so they cannot
-    /// reintroduce the high-speed replay this barrier exists to prevent.
-    private func endForegroundOutputCoalescing() {
-        guard isForegroundOutputCoalescing || !coalescedForegroundOutput.isEmpty else {
-            awaitingAppForegroundRefresh = false
-            foregroundOutputRefreshGeneration = nil
-            coalescedForegroundOutputByteCount = 0
-            foregroundOutputOverflowedPanes.removeAll(keepingCapacity: true)
-            foregroundPaneRefreshTargets.removeAll(keepingCapacity: true)
-            for task in foregroundPaneRetryTasks.values { task.cancel() }
-            foregroundPaneRetryTasks.removeAll(keepingCapacity: true)
-            foregroundPaneRetryAttempts.removeAll(keepingCapacity: true)
-            return
-        }
-        let bufferedBytes = coalescedForegroundOutputByteCount
-        let overflowedPanes = foregroundOutputOverflowedPanes.count
-        Self.logDiagnostic(
-            "foreground-output coalescing-end bufferedBytes=\(bufferedBytes) overflowedPanes=\(overflowedPanes)"
-        )
-        isForegroundOutputCoalescing = false
-        awaitingAppForegroundRefresh = false
-        foregroundOutputRefreshGeneration = nil
-        coalescedForegroundOutput.removeAll(keepingCapacity: true)
-        coalescedForegroundOutputByteCount = 0
-        foregroundOutputOverflowedPanes.removeAll(keepingCapacity: true)
-        foregroundPaneRefreshTargets.removeAll(keepingCapacity: true)
-        for task in foregroundPaneRetryTasks.values { task.cancel() }
-        foregroundPaneRetryTasks.removeAll(keepingCapacity: true)
-        foregroundPaneRetryAttempts.removeAll(keepingCapacity: true)
-    }
-
-    private func resumePausedForegroundRecoveryPanes() {
-        let recoveryPaneIds = Set([activePaneId, renderedPaneId].compactMap { $0 })
-        for paneId in recoveryPaneIds where pausedPanes.contains(paneId) {
-            resumePausedPane(paneId)
-        }
-    }
-
-    /// The window whose content was on screen when an aborted swap
-    /// cleared the rendered ids. The terminal keeps showing that
-    /// window's pixels, so the retried swap must still report it as
-    /// the `from` of `displayWillSwap` or the app layer skips the
-    /// outgoing kitty/bracketed-paste snapshot.
-    @ObservationIgnored private var abortedRenderedWindowId: WindowId?
-
-    private func cancelInitialRenderWatchdog() {
-        initialRenderWatchdogTask?.cancel()
-        initialRenderWatchdogTask = nil
-    }
-
-    private func cancelRenderRetry(resetAttempts: Bool) {
-        renderRetryTask?.cancel()
-        renderRetryTask = nil
-        if resetAttempts {
-            renderRetryAttemptsByGeneration.removeAll(keepingCapacity: true)
-            renderSizeResyncAttempts = 0
-        }
-    }
-
-    /// A shared-terminal repaint can be superseded by a surface transition
-    /// that leaves no shared terminal to paint (the active window becomes a
-    /// pane grid or the final window closes). Retire every shared owner so a
-    /// failed established swap cannot keep observer queries fail-closed after
-    /// its retry target has disappeared. In-flight command replies are left in
-    /// the FIFO and made stale by the caller's generation advance.
-    private func abandonSharedRenderRecovery() {
-        pendingRenderRefresh = nil
-        cancelRenderRetry(resetAttempts: true)
-        renderCommandQueueWaitTask?.cancel()
-        renderCommandQueueWaitTask = nil
-        establishedRenderIsFailClosed = false
-        abortedRenderedWindowId = nil
-        foregroundOutputRefreshGeneration = nil
-    }
-
-    private func waitForCommandQueueBeforeRender(
-        windowId: WindowId,
-        generation: Int,
-        reason: String,
-        stage: RenderStage,
-        startedAt: TimeInterval
-    ) {
-        renderCommandQueueWaitTask?.cancel()
-        renderCommandQueueWaitTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 20_000_000)
-            guard !Task.isCancelled else { return }
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                self.renderCommandQueueWaitTask = nil
-                guard self.isCurrentGeneration(generation),
-                      self.activeWindowId == windowId,
-                      let pending = self.pendingRenderRefresh,
-                      pending.windowId == windowId,
-                      pending.generation == generation,
-                      pending.stage == stage
-                else { return }
-                self.refreshRenderedWindow(
-                    windowId: windowId,
-                    generation: generation,
-                    reason: reason,
-                    stage: stage,
-                    queueWaitStartedAt: startedAt
-                )
-            }
-        }
-    }
-
-    /// One-shot on the first attach hydration: ask the server to echo a tab
-    /// plus its version, and log what the tab came back as. A host whose tmux
-    /// mangles the separator in command replies is the root-cause signature
-    /// behind `metadata-parse fallback engaged` (2026-08-17 field report);
-    /// the version pins which build does it. `result=intact` also certifies
-    /// that capture-pane bodies travel unmangled on this host — the reply
     /// path is the same.
     private func sendSeparatorProbeIfNeeded() {
         // The probe adds a command slot to the reply FIFO, so only the
@@ -4393,8 +7213,9 @@ public final class TmuxController {
         guard separatorProbeEnabled else { return }
         guard !sentSeparatorProbe else { return }
         sentSeparatorProbe = true
-        sendControlCommand("display-message -p 'tessera-sep\t#{version}'") { result in
+        sendControlCommand("display-message -p 'tessera-sep\t#{version}'") { [weak self] result in
             Self.logDiagnostic("separator-probe \(Self.classifySeparatorProbe(result))")
+            self?.noteServerVersion(Self.parseServerVersion(result))
         }
     }
 
@@ -4413,6 +7234,10 @@ public final class TmuxController {
             return "result=failed reason=not-in-tmux"
         case .failure(.cancelled):
             return "result=failed reason=cancelled"
+        case .failure(.timedOut):
+            return "result=failed reason=timed-out"
+        case .failure(.refusedByAuthority):
+            return "result=failed reason=controlled-elsewhere"
         case .success(let lines):
             guard let line = lines.first(where: { !$0.isEmpty }) else {
                 return "result=empty"
@@ -4439,158 +7264,20 @@ public final class TmuxController {
 
     /// App-level nudge for a stalled attach hydration (the launch overlay's
     /// hydration watchdog): re-run the authoritative refresh with a fresh
-    /// generation and retry budget, and let the first live `%output` latch
-    /// the pane ungated if capture metadata keeps failing. No-op once the
-    /// initial render is ready or outside inline control mode.
+    /// generation and the ledger's retry budget. No-op once the initial
+    /// render is ready or outside inline control mode.
     public func forceInitialRenderRecovery(reason: String) {
         guard controlPath == .inline, mode == .tmuxControl, !isInitialRenderReady else { return }
         Self.logDiagnostic(
             "initial-render force-recovery reason=\(reason) activeWindowPresent=\(activeWindowId != nil) generation=\(stateGeneration)"
         )
-        allowUngatedLatchFallback = true
-        guard let activeWindowId else { return }
-        let generation = advanceStateGeneration(reason: reason)
-        refreshRenderedWindow(
-            windowId: activeWindowId,
-            generation: generation,
-            reason: reason
-        )
-    }
-
-    private func startInitialRenderWatchdog() {
-        guard controlPath == .inline else { return }
-        cancelInitialRenderWatchdog()
-        let interval = initialRenderWatchdogInterval
-        initialRenderWatchdogTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: Self.nanoseconds(for: interval))
-            guard !Task.isCancelled else { return }
-            await MainActor.run { [weak self] in
-                // A cancel can land between the post-sleep check and this
-                // hop; re-validate on the actor or a cancelled watchdog
-                // from a dead attach fires into the next one's state.
-                guard !Task.isCancelled,
-                      let self,
-                      self.mode == .tmuxControl,
-                      !self.isInitialRenderReady,
-                      self.renderedPaneId == nil
-                else { return }
-                Self.logDiagnostic(
-                    "initial-render watchdog fired activeWindow=\(String(describing: self.activeWindowId)) generation=\(self.stateGeneration)"
-                )
-                self.allowUngatedLatchFallback = true
-                if let activeWindowId = self.activeWindowId {
-                    let generation = self.advanceStateGeneration(reason: "watchdog-retry")
-                    self.refreshRenderedWindow(
-                        windowId: activeWindowId,
-                        generation: generation,
-                        reason: "watchdog-retry"
-                    )
-                }
-            }
-        }
+        guard activeWindowId != nil else { return }
+        _ = advanceStateGeneration(reason: reason)
+        submitRenderFact(.refreshRequested(.live, stage: .deep, reason: reason))
     }
 
     private func markInitialRenderReady() {
         isInitialRenderReady = true
-        // The ungated latch exists only to escape a failed cold attach. Once a
-        // complete terminal has rendered, carrying it into later window swaps
-        // would allow incremental output to paint over stale full-screen state.
-        allowUngatedLatchFallback = false
-        cancelInitialRenderWatchdog()
-    }
-
-    private func abortRenderRefreshIfCurrent(
-        windowId: WindowId,
-        generation: Int,
-        stage: RenderStage,
-        reason: String
-    ) {
-        clearPendingRenderRefresh(windowId: windowId, generation: generation)
-        guard controlPath == .inline,
-              isCurrentGeneration(generation),
-              activeWindowId == windowId
-        else { return }
-
-        // An in-place foreground repair must leave the already-rendered pane
-        // and its local scrollback intact while tmux's metadata channel rides
-        // out a transient post-background stall. Real swaps keep the existing
-        // fail-closed behavior.
-        if stage == .viewport || (stage == .deep && !isInitialRenderReady) {
-            if stage == .viewport, isInitialRenderReady {
-                establishedRenderIsFailClosed = true
-            }
-            if renderedWindowId != nil {
-                abortedRenderedWindowId = renderedWindowId
-            }
-            renderedWindowId = nil
-            renderedPaneId = nil
-        }
-        scheduleRenderRefreshRetry(
-            windowId: windowId,
-            generation: generation,
-            stage: stage,
-            reason: "\(reason)-retry"
-        )
-    }
-
-    private func scheduleRenderRefreshRetry(
-        windowId: WindowId,
-        generation: Int,
-        stage: RenderStage,
-        reason: String
-    ) {
-        let nextAttempt = (renderRetryAttemptsByGeneration[generation] ?? 0) + 1
-        // Fail-open output is safe only during the initial attach, when there
-        // is no prior window on screen to corrupt. During a later window swap,
-        // latching the new pane after metadata stalls paints only its next few
-        // incremental updates over the old full-screen image — a mostly stale
-        // viewport with a small sliver from the newly active window. Keep
-        // established sessions fail-closed until an authoritative capture lands.
-        if nextAttempt > 1, !isInitialRenderReady {
-            allowUngatedLatchFallback = true
-        }
-        // Only the viewport stage (the visible screen) self-heals with extra
-        // attempts — that's the repaint whose failure leaves stale cross-window
-        // content on screen. The deep stage is scrollback enrichment layered on
-        // an already-rendered viewport, so it keeps the single-retry give-up.
-        let isForegroundRecovery = foregroundOutputRefreshGeneration == generation
-        let isEstablishedSwapRecovery = stage == .viewport && establishedRenderIsFailClosed
-        let maxAttempts = stage == .deep ? 1 : maxRenderRefreshAttempts
-        guard isForegroundRecovery || isEstablishedSwapRecovery || nextAttempt <= maxAttempts else {
-            Self.logDiagnostic(
-                "render-refresh retry exhausted window=\(windowId) generation=\(generation) stage=\(stage) attempt=\(nextAttempt) reason=\(reason)"
-            )
-            return
-        }
-
-        // Only the current generation can ever retry; drop stale
-        // entries so the map can't grow across a long session.
-        renderRetryAttemptsByGeneration = [generation: nextAttempt]
-        renderRetryTask?.cancel()
-        // Linear backoff (capped) so a multi-second channel stall — the empty
-        // render-metadata window right after foreground restore — is ridden out
-        // without hammering tmux. The first retry keeps the original delay.
-        let delay = renderRefreshRetryDelay * Double(min(nextAttempt, 6))
-        Self.logDiagnostic(
-            "render-refresh retry scheduled window=\(windowId) generation=\(generation) stage=\(stage) attempt=\(nextAttempt) delay=\(delay) reason=\(reason)"
-        )
-        renderRetryTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: Self.nanoseconds(for: delay))
-            guard !Task.isCancelled else { return }
-            await MainActor.run { [weak self] in
-                guard let self,
-                      self.isCurrentGeneration(generation),
-                      self.activeWindowId == windowId
-                else { return }
-                self.renderRetryTask = nil
-                self.refreshRenderedWindow(
-                    windowId: windowId,
-                    generation: generation,
-                    reason: reason,
-                    stage: stage
-                )
-            }
-        }
     }
 
     private nonisolated static func nanoseconds(for interval: TimeInterval) -> UInt64 {
@@ -4602,22 +7289,6 @@ public final class TmuxController {
 
     private func indexOfWindow(_ windowId: WindowId) -> Int? {
         windows.firstIndex(where: { $0.id == windowId })
-    }
-
-    /// Restore tmux index order after a window's `#{window_index}` is learned
-    /// mid-session. Stable: unknown-index windows (details reply still in
-    /// flight) sink to the end in arrival order, matching where `ensureWindow`
-    /// appended them. Assigns only on an actual order change so observers
-    /// (tab strip `onChange`) don't churn on the common already-sorted case.
-    private func resortWindowsByTmuxIndex() {
-        let sorted = windows.enumerated().sorted { lhs, rhs in
-            let lhsIndex = lhs.element.index ?? Int.max
-            let rhsIndex = rhs.element.index ?? Int.max
-            if lhsIndex != rhsIndex { return lhsIndex < rhsIndex }
-            return lhs.offset < rhs.offset
-        }.map(\.element)
-        guard sorted.map(\.id) != windows.map(\.id) else { return }
-        windows = sorted
     }
 
     @discardableResult
@@ -4670,7 +7341,8 @@ public final class TmuxController {
         paneId: PaneId?,
         paneTitle: String?,
         activePaneTitleIsDefault: Bool = false,
-        clearTitleWhenMissing: Bool = false
+        clearTitleWhenMissing: Bool = false,
+        preloadTerminalReport: Bool = true
     ) {
         let idx = ensureWindow(windowId)
         let previousPaneId = windows[idx].activePaneId
@@ -4684,9 +7356,28 @@ public final class TmuxController {
         }
         if let paneId {
             paneWindowTable[paneId] = windowId
-            preloadTerminalDefaultColorReportIfNeeded(for: paneId)
+            if preloadTerminalReport {
+                preloadTerminalDefaultColorReportIfNeeded(for: paneId)
+            }
+            if let paneIndex = windows[idx].panes.firstIndex(where: { $0.id == paneId }) {
+                if let paneTitle = Self.nonEmpty(paneTitle) {
+                    windows[idx].panes[paneIndex].title = paneTitle
+                    windows[idx].panes[paneIndex].titleIsDefault = activePaneTitleIsDefault
+                } else if clearTitleWhenMissing || previousPaneId != paneId {
+                    windows[idx].panes[paneIndex].title = nil
+                    windows[idx].panes[paneIndex].titleIsDefault = false
+                }
+            } else {
+                windows[idx].panes.append(PaneInfo(
+                    id: paneId,
+                    title: Self.nonEmpty(paneTitle),
+                    titleIsDefault: activePaneTitleIsDefault,
+                    isActive: true
+                ))
+            }
         }
         reconcileActivePaneFlags(windowIdx: idx)
+        publishWindowMetadataToCore(windowId)
     }
 
     private func updateWindowMetadata(
@@ -4715,8 +7406,25 @@ public final class TmuxController {
         if let activePaneId {
             paneWindowTable[activePaneId] = windowId
             preloadTerminalDefaultColorReportIfNeeded(for: activePaneId)
+            if let paneIndex = windows[idx].panes.firstIndex(where: { $0.id == activePaneId }) {
+                if let activePaneTitle = Self.nonEmpty(activePaneTitle) {
+                    windows[idx].panes[paneIndex].title = activePaneTitle
+                    windows[idx].panes[paneIndex].titleIsDefault = activePaneTitleIsDefault
+                } else if clearTitleWhenMissing || previousPaneId != activePaneId {
+                    windows[idx].panes[paneIndex].title = nil
+                    windows[idx].panes[paneIndex].titleIsDefault = false
+                }
+            } else {
+                windows[idx].panes.append(PaneInfo(
+                    id: activePaneId,
+                    title: Self.nonEmpty(activePaneTitle),
+                    titleIsDefault: activePaneTitleIsDefault,
+                    isActive: true
+                ))
+            }
         }
         reconcileActivePaneFlags(windowIdx: idx)
+        publishWindowMetadataToCore(windowId)
     }
 
     private func window(_ windowId: WindowId) -> WindowInfo? {
@@ -4756,7 +7464,7 @@ public final class TmuxController {
     }
 
     private func updatePaneCurrentPath(_ currentPath: String?, for paneId: PaneId) {
-        // Skip no-op writes: the %* pane-metadata subscription fires for
+        // Skip no-op writes: the per-pane metadata subscriptions fire for
         // every pane on every change (command, title, …), and @Observable
         // publishes on every set — an unconditional reassign would
         // re-render every observer of `paneCurrentPaths` per message.
@@ -4817,7 +7525,30 @@ public final class TmuxController {
             windows[widx].panes[pidx].isAlternateScreen = isAlternateScreen
             windows[widx].panes[pidx].isMouseReporting = isMouseReporting
             windows[widx].panes[pidx].isSgrMouse = isSgrMouse
+            publishWindowMetadataToCore(windowId)
         }
+    }
+
+    /// The subscription fans out on every pane title change (agent spinners
+    /// redraw constantly), so only a real mode change republishes the window.
+    /// Each mode applies on its own; a nil one leaves the known value alone.
+    private func updatePaneInteractionStateIfChanged(
+        paneId: PaneId,
+        isAlternateScreen: Bool?,
+        isMouseReporting: Bool?,
+        isSgrMouse: Bool?
+    ) {
+        guard let windowId = paneWindowTable[paneId] ?? activeWindowId,
+              let widx = windows.firstIndex(where: { $0.id == windowId }),
+              let pidx = windows[widx].panes.firstIndex(where: { $0.id == paneId })
+        else { return }
+        var pane = windows[widx].panes[pidx]
+        pane.isAlternateScreen = isAlternateScreen ?? pane.isAlternateScreen
+        pane.isMouseReporting = isMouseReporting ?? pane.isMouseReporting
+        pane.isSgrMouse = isSgrMouse ?? pane.isSgrMouse
+        guard pane != windows[widx].panes[pidx] else { return }
+        windows[widx].panes[pidx] = pane
+        publishWindowMetadataToCore(windowId)
     }
 
     /// Insert or update a single pane's per-pane info on its window, without
@@ -4886,9 +7617,252 @@ public final class TmuxController {
 
     // MARK: - Control-mode message processing
 
-    private func process(messages: [TmuxMessage]) {
-        for message in messages {
-            handle(message: message)
+    /// The end of one ordered step, in both ingest loops: confirm a grid
+    /// claim that `handleLayoutChange` found settled mid-step, now that the
+    /// ledger has reduced the same step. It runs after every step, a command
+    /// correlation included: a `%window-add` details reply applies its layout
+    /// through `handleLayoutChange` too, and a deferral it leaves must not
+    /// wait for some later notification. Production inline SSH ingests
+    /// through `processCooperatively`, so a drain in `process(steps:)` alone
+    /// left a take-back that resized the window unconfirmed.
+    private func finishDeferredGridClaimConfirmation() {
+        guard let deferral = deferredGridClaimConfirmation,
+              deferral.depth >= controlProcessingDepth
+        else { return }
+        defer { endGridClaimIfStalledLate(context: "step-confirmation") }
+        deferredGridClaimConfirmation = nil
+        confirmGridClaimIfSettled(context: deferral.context)
+    }
+
+    /// Confirms the claim now, or, inside an ingest step, at the end of that
+    /// step once the ledger has reduced it (`finishDeferredGridClaimConfirmation`).
+    /// A nested step that asks again keeps the outer step's depth: the
+    /// confirmation waits for every step that asked for it.
+    private func confirmGridClaimAtStepEnd(context: String) {
+        guard controlProcessingDepth > 0 else {
+            confirmGridClaimIfSettled(context: context)
+            endGridClaimIfStalledLate(context: context)
+            return
+        }
+        let depth = min(
+            deferredGridClaimConfirmation?.depth ?? controlProcessingDepth,
+            controlProcessingDepth
+        )
+        deferredGridClaimConfirmation = (context: context, depth: depth)
+    }
+
+    /// Every step drains its own deferral, so a loop starts with none at its
+    /// depth; an outer step's may still be pending.
+    private func assertNoGridClaimDeferralAtThisDepth() {
+        assert(
+            deferredGridClaimConfirmation.map { $0.depth < controlProcessingDepth } ?? true,
+            "a grid claim confirmation deferral outlived its step"
+        )
+    }
+
+    private func process(steps: [TmuxRuntimeBatch.OrderedStep]) {
+        controlProcessingDepth += 1
+        defer { controlProcessingDepth -= 1 }
+        assertNoGridClaimDeferralAtThisDepth()
+        if !steps.isEmpty { lastControlActivityAt = ContinuousClock.now }
+        for step in steps {
+            let event = step.event
+            let orderedSnapshot = snapshotRebasedAfterActiveWindowQuery(step)
+            switch event {
+            case .message(let message):
+                switch message {
+                case .output(let paneID, let data),
+                     .extendedOutput(let paneID, _, let data):
+                    let provisionalSnapshot = observePaneOutput(
+                        paneId: paneID,
+                        data: data,
+                        answerTerminalQueries: false,
+                        orderedSnapshot: orderedSnapshot
+                    )
+                    let renderSnapshot = provisionalSnapshot ?? orderedSnapshot
+                    updateRenderLedgerConfiguration()
+                    let effects = renderLedger.reduce(
+                        event,
+                        snapshot: renderSnapshot
+                    )
+                    // Queue terminal replies after the reducer has taken its
+                    // FIFO cut, but transmit them before touching the emulator.
+                    // This keeps first-output fail-open from mistaking its own
+                    // OSC response for older attach work.
+                    if effects.contains(where: { effect in
+                        guard case .bindSurface(_, let owner) = effect else { return false }
+                        return owner.paneID == paneID
+                    }) {
+                        preloadTerminalDefaultColorReportIfNeeded(for: paneID)
+                    }
+                    sendTerminalResponseForOutputIfNeeded(paneId: paneID, data: data)
+                    executeRenderEffects(effects, snapshot: renderSnapshot)
+                default:
+                    handle(message: message, snapshot: orderedSnapshot)
+                    let topologySnapshot = snapshotAfterLegacyTopologyMutation(
+                        step,
+                        fallback: orderedSnapshot
+                    )
+                    noteGridAuthorityWindowFacts(topologySnapshot)
+                    let reducerSnapshot = snapshotWithCurrentGridAuthority(topologySnapshot)
+                    reconcileRenderSurfacesAfterTopology(
+                        message,
+                        snapshot: reducerSnapshot
+                    )
+                    updateRenderLedgerConfiguration()
+                    executeRenderEffects(
+                        renderLedger.reduce(event, snapshot: reducerSnapshot),
+                        snapshot: reducerSnapshot
+                    )
+                }
+            case .correlation(let event):
+                handleCommandCorrelation(event, snapshot: orderedSnapshot)
+            }
+            finishDeferredGridClaimConfirmation()
+        }
+        if controlProcessingDepth == 1 {
+            commitActiveWindowQueryRebaseIfNeeded()
+            legacyTopologyReplayConnectionGeneration = nil
+        }
+        projectCoreSnapshot()
+        if controlProcessingDepth == 1 { reconcilePresentedWindowSizeIfNeeded() }
+        sendPendingSubscriptionCommands()
+        finishConfirmedWindowOrderMutationIfNeeded()
+        sendPendingWindowOrderRefreshIfNeeded()
+    }
+
+    /// Ordered topology is captured before the adapter reduces stamps and
+    /// replies. Overlay only the current shared verdict, or a later step in
+    /// the same read would restore the pre-reduction authority in the ledger.
+    /// Equal authority returns the stored value without constructing anything.
+    private func snapshotWithCurrentGridAuthority(_ base: TmuxSnapshot) -> TmuxSnapshot {
+        let authority = participatesInGridAuthority ? gridAuthorityLifecycle.authority : .unknown
+        guard base.authority != authority else { return base }
+        return TmuxSnapshot(
+            sessionID: base.sessionID, sessionName: base.sessionName,
+            activeWindowID: base.activeWindowID,
+            isActiveWindowAuthoritative: base.isActiveWindowAuthoritative,
+            windows: base.windows, authority: authority,
+            capabilities: base.capabilities, isReorderPending: base.isReorderPending,
+            authoritativeWindowOrder: base.authoritativeWindowOrder,
+            isWindowListHydrated: base.isWindowListHydrated, revision: base.revision
+        )
+    }
+
+    private func snapshotRebasedAfterActiveWindowQuery(
+        _ step: TmuxRuntimeBatch.OrderedStep
+    ) -> TmuxSnapshot {
+        snapshotWithCurrentGridAuthority(snapshotRebasedTopologyAfterActiveWindowQuery(step))
+    }
+
+    private func snapshotRebasedTopologyAfterActiveWindowQuery(
+        _ step: TmuxRuntimeBatch.OrderedStep
+    ) -> TmuxSnapshot {
+        guard let rebase = activeWindowQueryRebase else { return step.snapshot }
+        guard step.snapshot.sessionID == rebase.sessionID,
+              !activeWindowQueryIsSuperseded(by: step.event, rebase: rebase)
+        else {
+            activeWindowQueryRebase = nil
+            return step.snapshot
+        }
+        let dynamicSnapshot = runtimeEngine.snapshot
+        let rebasedWindows: [TmuxWindowSnapshot]
+        if step.snapshot.windows.contains(where: { $0.id == rebase.windowID }) {
+            rebasedWindows = step.snapshot.windows
+        } else if dynamicSnapshot.sessionID == rebase.sessionID,
+                  dynamicSnapshot.windows.contains(where: { $0.id == rebase.windowID }) {
+            // Earlier legacy list replies from this same read have now been
+            // published into RuntimeEngine, while this precomputed ordered
+            // step still predates those callbacks. Borrow topology only when
+            // its session matches; session boundaries remain fail closed.
+            rebasedWindows = dynamicSnapshot.windows
+        } else {
+            activeWindowQueryRebase = nil
+            return step.snapshot
+        }
+        return TmuxSnapshot(
+            sessionID: step.snapshot.sessionID,
+            sessionName: step.snapshot.sessionName,
+            activeWindowID: rebase.windowID,
+            // The rebase is the correlated active-window reply for this
+            // session, so tmux named this window.
+            isActiveWindowAuthoritative: true,
+            windows: rebasedWindows,
+            authority: step.snapshot.authority,
+            isWindowListHydrated: step.snapshot.isWindowListHydrated,
+            revision: step.snapshot.revision
+        )
+    }
+
+    private func activeWindowQueryIsSuperseded(
+        by event: TmuxRuntimeBatch.OrderedEvent,
+        rebase: (
+            windowID: WindowId,
+            sessionID: SessionId?,
+            connectionGeneration: UInt64
+        )
+    ) -> Bool {
+        switch event {
+        case .message(.sessionWindowChanged(let sessionID, _)):
+            return rebase.sessionID == nil || sessionID == rebase.sessionID
+        case .message(.windowClose(let windowID)),
+             .message(.unlinkedWindowClose(let windowID)):
+            return windowID == rebase.windowID
+        case .correlation(.frameCompleted(let frame)):
+            return frame.status == .success
+                && TmuxRuntimeHydrationQuery.activeWindowID(lines: frame.lines) != nil
+        default:
+            return false
+        }
+    }
+
+    private func snapshotAfterLegacyTopologyMutation(
+        _ step: TmuxRuntimeBatch.OrderedStep,
+        fallback: TmuxSnapshot
+    ) -> TmuxSnapshot {
+        guard legacyTopologyReplayConnectionGeneration == controlConnectionGeneration,
+              case .message(let message) = step.event,
+              runtimeEngine.replayTopologyNotification(message)
+        else { return fallback }
+        let replayedStep = TmuxRuntimeBatch.OrderedStep(
+            event: step.event,
+            snapshot: runtimeEngine.snapshot,
+            isActiveWindowAuthoritative: runtimeEngine.isActiveWindowAuthoritative
+        )
+        guard activeWindowQueryRebase != nil else { return replayedStep.snapshot }
+        return snapshotRebasedAfterActiveWindowQuery(replayedStep)
+    }
+
+    /// Commit the staged legacy query only after every later event from the
+    /// already-parsed read has had a chance to supersede it. This preserves a
+    /// later authoritative window/session transition in RuntimeEngine while
+    /// still correcting non-authoritative layout snapshots from the same read.
+    private func commitActiveWindowQueryRebaseIfNeeded() {
+        guard let rebase = activeWindowQueryRebase else {
+            pendingHydratedActiveWindow = nil
+            return
+        }
+        defer {
+            activeWindowQueryRebase = nil
+            pendingHydratedActiveWindow = nil
+        }
+        let finalSnapshot = runtimeEngine.snapshot
+        guard controlConnectionGeneration == rebase.connectionGeneration,
+              mode == .tmuxControl,
+              finalSnapshot.sessionID == rebase.sessionID,
+              finalSnapshot.windows.contains(where: { $0.id == rebase.windowID })
+        else { return }
+        _ = runtimeEngine.ingestActiveWindowQuery(rebase.windowID)
+        let committedSnapshot = runtimeEngine.snapshot
+        projectCoreSnapshot(committedSnapshot)
+        if let pending = pendingHydratedActiveWindow,
+           pending.windowID == rebase.windowID {
+            finalizeHydratedActiveWindow(
+                pending.windowID,
+                generation: pending.generation,
+                reason: pending.reason,
+                snapshot: committedSnapshot
+            )
         }
     }
 
@@ -4948,6 +7922,7 @@ public final class TmuxController {
     }
 
     @ObservationIgnored var ingestStages = IngestStageStats()
+    @ObservationIgnored private var cooperativeFeedWork: Duration = .zero
 
     /// MainActor-isolated deliberately: this package builds in Swift 5 mode,
     /// where a nonisolated async method hops to the global executor on every
@@ -4963,9 +7938,17 @@ public final class TmuxController {
         private let turnBudget: Duration = .milliseconds(4)
         private var turnStartedAt: ContinuousClock.Instant
         private var bytesSinceYield = 0
+        private var previousWork: Duration
 
-        init() {
+        init(previousWork: Duration) {
             turnStartedAt = clock.now
+            self.previousWork = previousWork
+        }
+
+        // Carry work, not elapsed idle/network time, between ingress calls.
+        // A run of cheap 1 KB packets shares the same 4 ms UI work budget.
+        var unyieldedWork: Duration {
+            previousWork + (bytesSinceYield > 0 ? turnStartedAt.duration(to: clock.now) : .zero)
         }
 
         mutating func noteRenderedWork(byteCount: Int) {
@@ -4975,9 +7958,9 @@ public final class TmuxController {
         private(set) var yieldWaitMs: Double = 0
         private(set) var yieldCount = 0
 
-        mutating func yieldIfNeeded(force: Bool = false) async {
+        mutating func yieldIfNeeded() async {
             guard bytesSinceYield > 0 else { return }
-            guard force || turnStartedAt.duration(to: clock.now) >= turnBudget else {
+            guard unyieldedWork >= turnBudget else {
                 return
             }
             let yieldStart = clock.now
@@ -4986,20 +7969,7 @@ public final class TmuxController {
             yieldCount += 1
             turnStartedAt = clock.now
             bytesSinceYield = 0
-        }
-
-        /// End-of-ingest yield, charged only once a full renderer slice went
-        /// unyielded. The previous trigger — "more than one slice delivered" —
-        /// force-yielded after nearly every chunk of a tiny-write storm (a TUI
-        /// keystroke redraw arrives as several 10–50 byte `%output` frames per
-        /// SSH chunk), paying a main-queue round trip for a few dozen bytes.
-        /// Interactive echo latency comes first; large repaints still slice at
-        /// `cooperativeFeedChunkBytes` and reliably yield here.
-        mutating func yieldAtEndIfSubstantialWork() async {
-            guard bytesSinceYield >= TmuxController.cooperativeFeedChunkBytes else {
-                return
-            }
-            await yieldIfNeeded(force: true)
+            previousWork = .zero
         }
     }
 
@@ -5028,15 +7998,58 @@ public final class TmuxController {
         }
     }
 
-    private func processCooperatively(messages: [TmuxMessage]) async {
-        var budget = CooperativeFeedBudget()
+    private func processCooperatively(steps: [TmuxRuntimeBatch.OrderedStep]) async {
+        controlProcessingDepth += 1
+        defer { controlProcessingDepth -= 1 }
+        assertNoGridClaimDeferralAtThisDepth()
+        if !steps.isEmpty { lastControlActivityAt = ContinuousClock.now }
+        var budget = CooperativeFeedBudget(previousWork: cooperativeFeedWork)
 
-        for message in messages {
+        for step in steps {
+            // Every step ends here, whichever branch it takes; see
+            // `finishDeferredGridClaimConfirmation`. The confirmation is
+            // control work, so it counts toward the control stage.
+            defer {
+                if deferredGridClaimConfirmation != nil {
+                    let drainStart = IngestStageStats.now()
+                    finishDeferredGridClaimConfirmation()
+                    ingestStages.controlMs += IngestStageStats.elapsedMs(since: drainStart)
+                }
+            }
+            let event = step.event
+            let orderedSnapshot = snapshotRebasedAfterActiveWindowQuery(step)
+            if case .correlation(let correlation) = event {
+                ingestStages.controlMessages += 1
+                let controlStart = IngestStageStats.now()
+                handleCommandCorrelation(correlation, snapshot: orderedSnapshot)
+                ingestStages.controlMs += IngestStageStats.elapsedMs(since: controlStart)
+                continue
+            }
+            guard case .message(let message) = event else { continue }
             switch message {
             case .output(let paneId, let data):
-                await handlePaneOutputCooperatively(
+                let provisionalSnapshot = observePaneOutput(
                     paneId: paneId,
                     data: data,
+                    answerTerminalQueries: false,
+                    orderedSnapshot: orderedSnapshot
+                )
+                let renderSnapshot = provisionalSnapshot ?? orderedSnapshot
+                updateRenderLedgerConfiguration()
+                let effects = renderLedger.reduce(
+                    event,
+                    snapshot: renderSnapshot
+                )
+                if effects.contains(where: { effect in
+                    guard case .bindSurface(_, let owner) = effect else { return false }
+                    return owner.paneID == paneId
+                }) {
+                    preloadTerminalDefaultColorReportIfNeeded(for: paneId)
+                }
+                sendTerminalResponseForOutputIfNeeded(paneId: paneId, data: data)
+                await executeRenderEffectsCooperatively(
+                    effects,
+                    snapshot: renderSnapshot,
                     budget: &budget
                 )
 
@@ -5046,59 +8059,169 @@ public final class TmuxController {
                         "extended-output delayed pane=\(paneId) ageMs=\(ageMs) bytes=\(data.count)"
                     )
                 }
-                await handlePaneOutputCooperatively(
+                let provisionalSnapshot = observePaneOutput(
                     paneId: paneId,
                     data: data,
+                    answerTerminalQueries: false,
+                    orderedSnapshot: orderedSnapshot
+                )
+                let renderSnapshot = provisionalSnapshot ?? orderedSnapshot
+                updateRenderLedgerConfiguration()
+                let effects = renderLedger.reduce(
+                    event,
+                    snapshot: renderSnapshot
+                )
+                if effects.contains(where: { effect in
+                    guard case .bindSurface(_, let owner) = effect else { return false }
+                    return owner.paneID == paneId
+                }) {
+                    preloadTerminalDefaultColorReportIfNeeded(for: paneId)
+                }
+                sendTerminalResponseForOutputIfNeeded(paneId: paneId, data: data)
+                await executeRenderEffectsCooperatively(
+                    effects,
+                    snapshot: renderSnapshot,
                     budget: &budget
                 )
 
             default:
                 ingestStages.controlMessages += 1
                 let controlStart = IngestStageStats.now()
-                handle(message: message)
+                handle(message: message, snapshot: orderedSnapshot)
+                let topologySnapshot = snapshotAfterLegacyTopologyMutation(
+                    step,
+                    fallback: orderedSnapshot
+                )
+                noteGridAuthorityWindowFacts(topologySnapshot)
+                let reducerSnapshot = snapshotWithCurrentGridAuthority(topologySnapshot)
+                reconcileRenderSurfacesAfterTopology(
+                    message,
+                    snapshot: reducerSnapshot
+                )
+                updateRenderLedgerConfiguration()
+                executeRenderEffects(
+                    renderLedger.reduce(event, snapshot: reducerSnapshot),
+                    snapshot: reducerSnapshot
+                )
                 ingestStages.controlMs += IngestStageStats.elapsedMs(since: controlStart)
             }
         }
 
-        await budget.yieldAtEndIfSubstantialWork()
+        if controlProcessingDepth == 1 {
+            commitActiveWindowQueryRebaseIfNeeded()
+            legacyTopologyReplayConnectionGeneration = nil
+        }
+        projectCoreSnapshot()
+        if controlProcessingDepth == 1 { reconcilePresentedWindowSizeIfNeeded() }
+        sendPendingSubscriptionCommands()
+        finishConfirmedWindowOrderMutationIfNeeded()
+        sendPendingWindowOrderRefreshIfNeeded()
+
+        await budget.yieldIfNeeded()
+        cooperativeFeedWork = budget.unyieldedWork
         ingestStages.yieldWaitMs += budget.yieldWaitMs
         ingestStages.yields += budget.yieldCount
+        cooperativeYieldGeneration &+= UInt64(budget.yieldCount)
     }
 
-    private func handlePaneOutputCooperatively(
-        paneId: PaneId,
-        data: [UInt8],
+    /// Preserve the renderer's bounded-yield hot path while keeping all
+    /// reducer effects in their declared order. Only live `%output` is sliced;
+    /// authoritative capture feeds remain atomic in `executeRenderEffects`.
+    private func executeRenderEffectsCooperatively(
+        _ effects: [RenderEffect],
+        snapshot: TmuxSnapshot,
         budget: inout CooperativeFeedBudget
     ) async {
-        let target = preparePaneOutput(paneId: paneId, data: data)
-        guard !data.isEmpty else { return }
-        switch target {
-        case .none:
-            return
-
-        case .paneSink(let sink):
-            var offset = 0
-            while offset < data.count {
-                let end = min(offset + Self.cooperativeFeedChunkBytes, data.count)
+        var effectIndex = effects.startIndex
+        while effectIndex < effects.endIndex {
+            guard case .feed(let surfaceID, let owner, let reference, let source) = effects[effectIndex],
+                  source == .paneOutput else {
+                // Preserve each maximal non-live-feed run as one executor
+                // transaction. In particular, adjacent ledger commands must
+                // reach `sendBytes` atomically even on cooperative ingestion;
+                // one-effect dispatch would re-open the synchronous callback
+                // window that can invert wire order against the shared FIFO.
+                var end = effects.index(after: effectIndex)
+                while end < effects.endIndex {
+                    if case .feed(_, _, _, let candidateSource) = effects[end],
+                       candidateSource == .paneOutput {
+                        break
+                    }
+                    end = effects.index(after: end)
+                }
+                executeRenderEffects(
+                    Array(effects[effectIndex..<end]),
+                    snapshot: snapshot
+                )
+                effectIndex = end
+                continue
+            }
+            effectIndex = effects.index(after: effectIndex)
+            guard let bytes = renderLedger.takeRenderBytes(reference) else {
+                Self.logDiagnostic(
+                    "render-ledger missing-bytes-ref controller=\(diagnosticID) id=\(reference.rawValue)"
+                )
+                continue
+            }
+            let context = terminalFeedContext(
+                owner: owner,
+                source: .paneOutput,
+                originalByteCount: bytes.count
+            )
+            var offset = bytes.startIndex
+            while offset < bytes.endIndex {
+                let end = TmuxLiveOutputFramer.chunkEnd(
+                    in: bytes[...], from: offset,
+                    maximumCount: Self.cooperativeFeedChunkBytes
+                )
+                let slice = bytes[offset..<end]
                 let deliverStart = IngestStageStats.now()
-                sink(data[offset..<end])
+                if let renderFeedSurface {
+                    _ = renderFeedSurface(surfaceID, owner, slice, source)
+                } else if surfaceID == .live {
+                    deliverToSharedTerminal(slice, context: context)
+                } else if let paneID = owner.paneID,
+                          let surface = paneRenderSurfaces[paneID] {
+                    surface.feed(owner, slice)
+                } else if let paneID = owner.paneID,
+                          let legacySink = paneSinks[paneID] {
+                    legacySink(slice)
+                }
                 ingestStages.deliverMs += IngestStageStats.elapsedMs(since: deliverStart)
                 ingestStages.sliceFeeds += 1
-                budget.noteRenderedWork(byteCount: end - offset)
-                offset = end
+                budget.noteRenderedWork(byteCount: slice.count)
                 await budget.yieldIfNeeded()
+                offset = end
             }
-            return
-
-        case .shared(let context):
-            await deliverToSharedTerminalCooperatively(
-                data[...],
-                context: context,
-                budget: &budget
-            )
-            markInitialRenderReady()
+            if surfaceID == .live {
+                if owner.windowID == nil, let paneID = owner.paneID {
+                    runtimeEngine.ingestProvisionalActivePane(paneID)
+                }
+                renderedWindowId = owner.windowID
+                renderedPaneId = owner.paneID
+                activePaneId = owner.paneID
+                markInitialRenderReady()
+            }
         }
     }
+
+    /// Topology is authoritative before the SwiftUI view tree reacts to the
+    /// published snapshot. Reconcile in this same ordered wire turn so a
+    /// single shared surface cannot begin a capture for a window that has
+    /// already become a pane grid.
+    private func reconcileRenderSurfacesAfterTopology(
+        _ message: TmuxMessage,
+        snapshot: TmuxSnapshot
+    ) {
+        switch message {
+        case .layoutChange, .sessionWindowChanged, .windowPaneChanged,
+             .windowAdd, .unlinkedWindowAdd, .windowClose, .unlinkedWindowClose:
+            redeclareInlineRenderSurfaces(snapshot: snapshot)
+        default:
+            break
+        }
+    }
+
 
     private func windowInfo(forPaneId paneId: PaneId) -> WindowInfo? {
         // Exact mapping from the rebuilt layout table — covers non-active
@@ -5146,12 +8269,19 @@ public final class TmuxController {
             paneWindowIdx = activePaneWindowIdx
         }
 
-        guard let widx = paneWindowIdx,
-              let pidx = windows[widx].panes.firstIndex(where: { $0.id == paneId })
-        else { return }
-
-        windows[widx].panes[pidx].title = Self.nonEmpty(title)
-        windows[widx].panes[pidx].titleIsDefault = false
+        guard let widx = paneWindowIdx else { return }
+        if let pidx = windows[widx].panes.firstIndex(where: { $0.id == paneId }) {
+            windows[widx].panes[pidx].title = Self.nonEmpty(title)
+            windows[widx].panes[pidx].titleIsDefault = false
+        } else {
+            windows[widx].panes.append(PaneInfo(
+                id: paneId,
+                title: Self.nonEmpty(title),
+                titleIsDefault: false,
+                isActive: windows[widx].activePaneId == paneId
+            ))
+        }
+        publishWindowMetadataToCore(windows[widx].id)
     }
 
     private func indexOfWindowForPaneTitleUpdate(paneId: PaneId) -> Int? {
@@ -5173,19 +8303,15 @@ public final class TmuxController {
         return nil
     }
 
-    private enum PaneOutputRenderTarget {
-        case none
-        case paneSink((ArraySlice<UInt8>) -> Void)
-        case shared(TerminalFeedContext)
-    }
-
-    /// Run content observers and resolve one renderer destination. Cooperative
-    /// ingestion changes only delivery pacing after this synchronous routing;
-    /// pane latching, refresh gates, and terminal replies keep their ordering.
-    private func preparePaneOutput(
+    @discardableResult
+    private func observePaneOutput(
         paneId: PaneId,
-        data: [UInt8]
-    ) -> PaneOutputRenderTarget {
+        data: [UInt8],
+        answerTerminalQueries: Bool = true,
+        orderedSnapshot: TmuxSnapshot? = nil
+    ) -> TmuxSnapshot? {
+        guard !renderLedger.isProgramStatusPaneOutput else { return nil }
+        lastPaneOutputAt = ContinuousClock.now
         ingestStages.outputMessages += 1
         let observerStart = IngestStageStats.now()
         paneDidOutput?(paneId)
@@ -5195,93 +8321,312 @@ public final class TmuxController {
         updatePaneTitleFromOutput(paneId: paneId, data: data)
         ingestStages.titleScanMs += IngestStageStats.elapsedMs(since: titleStart)
         let queryStart = IngestStageStats.now()
-        sendTerminalResponseForOutputIfNeeded(paneId: paneId, data: data)
+        if answerTerminalQueries {
+            sendTerminalResponseForOutputIfNeeded(paneId: paneId, data: data)
+        }
         ingestStages.queryScanMs += IngestStageStats.elapsedMs(since: queryStart)
 
-        // Grid path: a registered per-pane sink takes priority over the shared
-        // single-pane terminal. This is the explicit fallthrough boundary — if
-        // a pane has no sink, control drops to the byte-identical single-pane
-        // fast path below. Drop output while this pane's capture-repaint is in
-        // flight so stale bytes can't bleed in ahead of the capture.
-        if let sink = paneSinks[paneId] {
-            guard controlPath == .inline else { return .none }
-            if coalesceForegroundOutputIfNeeded(paneId: paneId, data: data) { return .none }
-            if pendingPaneRefreshes[paneId] != nil { return .none }
-            return .paneSink(sink)
-        }
-
-        guard controlPath == .inline else { return .none }
-        let isForegroundRecoveryPane = paneId == renderedPaneId
-            || paneId == activePaneId
-            || (renderedPaneId == nil && activePaneId == nil)
-        if isForegroundRecoveryPane,
-           coalesceForegroundOutputIfNeeded(paneId: paneId, data: data) {
-            return .none
-        }
-        if pendingRenderRefresh != nil { return .none }
-
-        // On attach, tmux can flood output before hydration names any active
-        // window. The latch opens only once a window is known, except for the
-        // watchdog's fail-open path. While a failed swap awaits its retry
-        // the gate stays closed too — otherwise a chatty pane latches and
-        // paints mid-stream bytes (and drops the launch overlay) during
-        // the ~0.5 s retry window on attach.
-        let latchGateOpen = controlPath == .inline
-            && !establishedRenderIsFailClosed
-            && ((activeWindowId != nil && renderRetryTask == nil) || allowUngatedLatchFallback)
-        if latchGateOpen,
-           renderedPaneId == nil,
-           activePaneId == nil,
-           (windows.count == 1 || allowUngatedLatchFallback) {
-            activePaneId = paneId
-            preloadTerminalDefaultColorReportIfNeeded(for: paneId)
-            if let activeWindowId {
-                updateActivePane(windowId: activeWindowId, paneId: paneId, paneTitle: nil)
-            }
-        }
-        if latchGateOpen, renderedPaneId == nil, paneId == activePaneId {
-            renderedPaneId = paneId
-            renderedWindowId = activeWindowId
-            preloadTerminalDefaultColorReportIfNeeded(for: paneId)
-        }
-        if paneId == renderedPaneId {
-            return .shared(
-                TerminalFeedContext(
-                    source: .paneOutput,
-                    paneId: paneId,
-                    windowId: renderedWindowId,
-                    originalByteCount: data.count
-                )
+        // A newly created single-pane window can emit `%output` before tmux
+        // publishes `%window-pane-changed` or hydration names its pane.  This
+        // is topology discovery, not a rendering decision: seed the portable
+        // snapshot so the ledger can bind the first authenticated output to
+        // the only known active window in this same ordered turn.
+        let routingSnapshot = orderedSnapshot ?? runtimeEngine.snapshot
+        if controlPath == .inline,
+           let activeWindowID = routingSnapshot.activeWindowID,
+           routingSnapshot.windows.count == 1,
+           routingSnapshot.windows
+                .first(where: { $0.id == activeWindowID })?
+                .activePaneID == nil {
+            updateActivePane(
+                windowId: activeWindowID,
+                paneId: paneId,
+                paneTitle: nil,
+                preloadTerminalReport: answerTerminalQueries
+            )
+            projectCoreSnapshot()
+            return Self.snapshot(
+                routingSnapshot,
+                seedingActivePane: paneId,
+                in: activeWindowID
             )
         }
-        return .none
+        return nil
     }
 
-    private func handlePaneOutput(paneId: PaneId, data: [UInt8]) {
-        switch preparePaneOutput(paneId: paneId, data: data) {
-        case .none:
-            break
-        case .paneSink(let sink):
-            sink(ArraySlice(data))
-        case .shared(let context):
-            deliverToSharedTerminal(ArraySlice(data), context: context)
-            markInitialRenderReady()
+    /// Controller-level first-output discovery happens after the portable
+    /// runtime has produced this wire step. Enrich only that exact step rather
+    /// than falling back to the batch-final runtime snapshot, which may already
+    /// include later window switches from the same read.
+    private static func snapshot(
+        _ snapshot: TmuxSnapshot,
+        seedingActivePane paneID: PaneId,
+        in windowID: WindowId
+    ) -> TmuxSnapshot {
+        let windows = snapshot.windows.map { window -> TmuxWindowSnapshot in
+            guard window.id == windowID else { return window }
+            var panes = window.panes.map { pane in
+                TmuxPaneSnapshot(
+                    id: pane.id,
+                    title: pane.title,
+                    titleIsDefault: pane.titleIsDefault,
+                    currentCommand: pane.currentCommand,
+                    currentPath: pane.currentPath,
+                    isActive: pane.id == paneID,
+                    isAlternateScreen: pane.isAlternateScreen,
+                    isMouseReporting: pane.isMouseReporting,
+                    isSgrMouse: pane.isSgrMouse,
+                    contentRect: pane.contentRect
+                )
+            }
+            if !panes.contains(where: { $0.id == paneID }) {
+                panes.append(TmuxPaneSnapshot(id: paneID, isActive: true))
+            }
+            return TmuxWindowSnapshot(
+                id: window.id,
+                index: window.index,
+                name: window.name,
+                activePaneID: paneID,
+                activePaneTitle: window.activePaneTitle,
+                activePaneTitleIsDefault: window.activePaneTitleIsDefault,
+                panes: panes,
+                layout: window.layout,
+                visibleLayout: window.visibleLayout,
+                isZoomed: window.isZoomed
+            )
+        }
+        return TmuxSnapshot(
+            sessionID: snapshot.sessionID,
+            sessionName: snapshot.sessionName,
+            activeWindowID: snapshot.activeWindowID,
+            isActiveWindowAuthoritative: snapshot.isActiveWindowAuthoritative,
+            windows: windows,
+            authority: snapshot.authority,
+            isWindowListHydrated: snapshot.isWindowListHydrated,
+            revision: snapshot.revision &+ 1
+        )
+    }
+
+
+    private func handleCommandCorrelation(
+        _ event: TmuxCorrelationEvent,
+        snapshot: TmuxSnapshot
+    ) {
+        let priorSnapshot = executingCommandReplySnapshot
+        executingCommandReplySnapshot = snapshot
+        defer { executingCommandReplySnapshot = priorSnapshot }
+        noteGridAuthorityWindowFacts(snapshot)
+        switch event {
+        case .frameStarted(let current, let discarded, let discardedLineCount):
+            if let discarded {
+                Self.logDiagnostic(
+                    "command-frame-overlap controller=\(diagnosticID) previousTime=\(discarded.time) previousNumber=\(discarded.commandNumber) previousFlags=\(discarded.flags) nextTime=\(current.time) nextNumber=\(current.commandNumber) nextFlags=\(current.flags) discardedLines=\(discardedLineCount)"
+                )
+            }
+            Self.logDiagnostic(
+                "command-frame-begin controller=\(diagnosticID) time=\(current.time) number=\(current.commandNumber) flags=\(current.flags) wirePending=\(pendingCommands.count) headSequence=\(pendingCommands.first?.sequence ?? -1) headCategory=\(pendingCommands.first.map { Self.commandCategory($0.command) } ?? "none")"
+            )
+
+        case .frameCompleted(let frame):
+            let status = frame.status == .success ? "end" : "error"
+            let begin = frame.begin
+            let end = frame.end
+            if let fence = pendingCommandFence {
+                // Recovery mode: correlation is unsynchronized, so no frame
+                // may pop the FIFO until the fence nonce proves the wire has
+                // drained past every pre-recovery command. Classification is
+                // deliberately ignored here — a misclassifying server (client
+                // responses tagged flags=0) still resynchronizes on the body.
+                if frame.status == .success,
+                   frame.lines.contains(fence.nonce) {
+                    pendingCommandFence = nil
+                    Self.logDiagnostic(
+                        "command-queue-fence-matched controller=\(diagnosticID) nonce=\(fence.nonce) waitedMs=\(Int(IngestStageStats.elapsedMs(since: fence.armedAt)))"
+                    )
+                    completeCommandQueueRecovery()
+                } else {
+                    Self.logDiagnostic(
+                        "command-queue-fence-discard controller=\(diagnosticID) status=\(status) effectiveFlags=\(frame.effectiveFlags) lines=\(frame.lines.count)"
+                    )
+                }
+                return
+            }
+            if let begin, !frame.guardMatches {
+                let recovery = begin.flags >= 0 ? "classify-from-begin"
+                    : frame.effectiveFlags >= 0 ? "classify-from-matching-end" : "unclassified"
+                Self.logDiagnostic(
+                    "command-frame-guard-mismatch controller=\(diagnosticID) status=\(status) beginTime=\(begin.time) beginNumber=\(begin.commandNumber) beginFlags=\(begin.flags) endTime=\(end.time) endNumber=\(end.commandNumber) endFlags=\(end.flags) bodyLines=\(frame.lines.count) recovery=\(recovery) effectiveFlags=\(frame.effectiveFlags)"
+                )
+            } else if begin == nil {
+                Self.logDiagnostic(
+                    "command-frame-missing-begin controller=\(diagnosticID) status=\(status) endTime=\(end.time) endNumber=\(end.commandNumber) endFlags=\(end.flags) bodyLines=\(frame.lines.count) recovery=classify-from-end effectiveFlags=\(frame.effectiveFlags)"
+                )
+            }
+
+            guard frame.isClientResponse else {
+                if frame.status == .success, !attachInitFlushed {
+                    attachInitFlushed = true
+                    Self.logDiagnostic("handshake-frame-drained path=\(controlPath)")
+                    flushAttachInitQueries()
+                } else {
+                    Self.logDiagnostic(
+                        "server-originated-frame-drained status=\(status) beginTime=\(begin?.time ?? -1) beginNumber=\(begin?.commandNumber ?? -1) beginFlags=\(begin?.flags ?? -1) endTime=\(end.time) endNumber=\(end.commandNumber) endFlags=\(end.flags) guardMatches=\(frame.guardMatches) lines=\(frame.lines.count)"
+                    )
+                }
+                return
+            }
+
+            let metadataSurfaceID = renderLedger.nextAuthoritativeMetadataSurfaceID
+            executingRenderReplyRows = frame.lines.count
+            executingRenderReplyReason = renderLedger.pendingReason(for: .live)
+            defer {
+                executingRenderReplyRows = nil
+                executingRenderReplyReason = nil
+            }
+            let effects = renderLedger.reduce(
+                .correlation(event),
+                snapshot: snapshotWithCurrentGridAuthority(snapshot)
+            )
+            if frame.status == .success, let metadataSurfaceID {
+                observeRenderedPaneMetadataReply(
+                    frame.lines,
+                    surfaceID: metadataSurfaceID
+                )
+            }
+            var executableEffects: [RenderEffect] = []
+            for effect in effects {
+                if case .commandReply(let tag, let success, let lines, _) = effect {
+                    if !executableEffects.isEmpty {
+                        executeRenderEffects(
+                            executableEffects,
+                            snapshot: snapshot
+                        )
+                        executableEffects.removeAll(keepingCapacity: true)
+                    }
+                    if let index = pendingCommands.firstIndex(where: { $0.tag == tag }) {
+                    let entry = pendingCommands.remove(at: index)
+                    Self.logDiagnostic(
+                        "command-response controller=\(diagnosticID) status=\(status) beginTime=\(begin?.time ?? -1) beginNumber=\(begin?.commandNumber ?? -1) beginFlags=\(begin?.flags ?? -1) endTime=\(end.time) endNumber=\(end.commandNumber) endFlags=\(end.flags) guardMatches=\(frame.guardMatches) effectiveFlags=\(frame.effectiveFlags) sequence=\(entry.sequence) commandCategory=\(Self.commandCategory(entry.command)) lines=\(lines.count) waitedMs=\(Int(IngestStageStats.elapsedMs(since: entry.transmittedAt)))\(entry.correlation.map { " corr=\($0)" } ?? "")"
+                    )
+                    let previousReplySnapshot = executingCommandReplySnapshot
+                    executingCommandReplySnapshot = snapshot
+                    if success {
+                        entry.completion(.success(lines))
+                    } else {
+                        entry.completion(.failure(.tmuxError(lines: lines)))
+                    }
+                    executingCommandReplySnapshot = previousReplySnapshot
+                    } else {
+                        completePlatformCommand(tag: tag, success: success, lines: lines)
+                    }
+                } else {
+                    executableEffects.append(effect)
+                }
+            }
+            if !executableEffects.isEmpty {
+                executeRenderEffects(
+                    executableEffects,
+                    snapshot: snapshot
+                )
+            }
         }
     }
 
-    private func handle(message: TmuxMessage) {
+    /// Render metadata replies are consumed by the ledger's private command
+    /// purpose, but the platform snapshot still owns titles and interaction
+    /// flags used by SwiftUI. The 22-field shape is unique and strictly
+    /// validated, so observing it here cannot turn arbitrary command output
+    /// into topology.
+    private func observeRenderedPaneMetadataReply(
+        _ lines: [String],
+        surfaceID: SurfaceId
+    ) {
+        guard let line = lines.first(where: { !$0.isEmpty }),
+              let state = Self.parseRenderedPaneState(line),
+              let windowID = paneWindowTable[state.paneId] ?? activeWindowId
+        else { return }
+        let isFixedSurfaceReply = currentRenderDeclarations.contains { declaration in
+            declaration.surfaceID == surfaceID
+                && declaration.presentation != .single
+                && declaration.paneID == state.paneId
+        }
+        if isFixedSurfaceReply {
+            // A grid/overlay metadata query targets one declared pane, not the
+            // window's active pane. Treating its `pane_id` as focus silently
+            // retargets topology and can promote a superseding foreground
+            // viewport repair into an unnecessary deep rebuild. Update only
+            // the queried pane while preserving the notification-owned focus.
+            let windowIndex = ensureWindow(windowID)
+            if let windowName = Self.nonEmpty(state.windowName) {
+                windows[windowIndex].windowName = windowName
+            }
+            let isActive = windows[windowIndex].activePaneId == state.paneId
+            let existing = windows[windowIndex].panes.first { $0.id == state.paneId }
+            upsertPaneInfo(
+                windowId: windowID,
+                paneId: state.paneId,
+                title: state.paneTitle,
+                titleIsDefault: state.paneTitleIsDefault,
+                currentCommand: existing?.currentCommand,
+                isActive: isActive,
+                contentRect: existing?.contentRect
+            )
+            paneWindowTable[state.paneId] = windowID
+            preloadTerminalDefaultColorReportIfNeeded(for: state.paneId)
+            if isActive {
+                windows[windowIndex].activePaneTitle = Self.nonEmpty(state.paneTitle)
+                windows[windowIndex].activePaneTitleIsDefault =
+                    state.paneTitleIsDefault && Self.nonEmpty(state.paneTitle) != nil
+            }
+            reconcileActivePaneFlags(windowIdx: windowIndex)
+            publishWindowMetadataToCore(windowID)
+        } else {
+            if renderedWindowId != nil,
+               (renderedWindowId != windowID || renderedPaneId != state.paneId) {
+                // The shared surface is now in a real swap. Keep its physical
+                // old owner until bind+feed can land atomically, but retire the
+                // legacy projection so no controller-side consumer mistakes
+                // the stale pane for paintable current state if capture fails.
+                renderedWindowId = nil
+                renderedPaneId = nil
+            }
+            updateWindowMetadata(
+                windowId: windowID,
+                windowName: state.windowName,
+                activePaneId: state.paneId,
+                activePaneTitle: state.paneTitle,
+                activePaneTitleIsDefault: state.paneTitleIsDefault,
+                clearTitleWhenMissing: true
+            )
+        }
+        updatePaneInteractionState(
+            paneId: state.paneId,
+            isAlternateScreen: state.paneInAltScreen,
+            isMouseReporting: state.isMouseReporting,
+            isSgrMouse: state.mouseSgr
+        )
+        if !isFixedSurfaceReply, activeWindowId == windowID {
+            activePaneId = state.paneId
+        }
+    }
+
+    private func handle(message: TmuxMessage, snapshot: TmuxSnapshot) {
+        let priorSnapshot = executingCommandReplySnapshot
+        executingCommandReplySnapshot = snapshot
+        defer { executingCommandReplySnapshot = priorSnapshot }
         switch message {
         case .bell(let paneID):
+            guard !renderLedger.isProgramStatusPaneOutput else { break }
             guard let window = windowInfo(forPaneId: PaneId(paneID)) else { break }
             let windowID = window.id.rawValue
-            let isActive = window.id == activeWindowId
+            let isActive = window.id == snapshot.activeWindowID
             onBell?(windowID, isActive, window.displayName)
             if !isActive {
                 bellingWindows.insert(windowID)
             }
 
         case .output(let paneId, let data):
-            handlePaneOutput(paneId: paneId, data: data)
+            observePaneOutput(paneId: paneId, data: data)
 
         case .extendedOutput(let paneId, let ageMs, let data):
             if ageMs > 2_000 {
@@ -5289,7 +8634,7 @@ public final class TmuxController {
                     "extended-output delayed pane=\(paneId) ageMs=\(ageMs) bytes=\(data.count)"
                 )
             }
-            handlePaneOutput(paneId: paneId, data: data)
+            observePaneOutput(paneId: paneId, data: data)
 
         case .windowAdd(let windowId):
             // Create the window if new; ensureWindow also drains any pane focus a
@@ -5300,8 +8645,8 @@ public final class TmuxController {
             // haven't been told otherwise yet. session-window-changed
             // will overwrite this with tmux's own view in a beat.
             if activeWindowId == nil {
-                activeWindowId = windowId
-                activePaneId = window(windowId)?.activePaneId
+                activeWindowId = snapshot.activeWindowID ?? windowId
+                activePaneId = activeWindowId.flatMap { window($0)?.activePaneId }
             }
             // Discover the window's actual name if the entry is still
             // on the `@N` placeholder. tmux fires `%window-renamed`
@@ -5333,9 +8678,13 @@ public final class TmuxController {
             // but plain `new-window` fills the lowest free tmux index — the
             // reply is what lets resortWindowsByTmuxIndex slot it where the
             // next reattach's hydration would.
-            if let idx = windows.firstIndex(where: { $0.id == windowId }),
-               windows[idx].windowName == nil || windows[idx].layout == nil
-                || windows[idx].index == nil {
+            // The "still undescribed" predicate is shared with Android so both
+            // clients ask on the same evidence.
+            if attachInitFlushed,
+               let idx = windows.firstIndex(where: { $0.id == windowId }),
+               TmuxRuntimeHydrationQuery.needsWindowDetails(
+                   coreWindowMetadata(windows[idx])
+               ) {
                 // While the layout half is unknown the pane count is a
                 // guess, so mark the query pending — close paths confirm
                 // instead of killing until the reply (or a real
@@ -5346,26 +8695,19 @@ public final class TmuxController {
                 queryWindowDetails(windowId: windowId)
             }
 
-        case .windowClose(let windowId),
-             .unlinkedWindowClose(let windowId):
-            // Both variants drop a window from our session's view:
-            //   - `%window-close @N` fires when the window was removed
-            //     from one winlink but another winlink in the same
-            //     session still holds it (rare).
-            //   - `%unlinked-window-close @N` fires when the window is
-            //     no longer in *any* winlink of the observing client's
-            //     session — tmux's own `control_notify_window_unlinked`
-            //     picks this variant. It's the one `kill-window`
-            //     actually produces in the v1 single-winlink-per-window
-            //     case (verified against tmux 3.6 via pty probe), so
-            //     we must handle it or the tab strip goes stale after
-            //     every ⌘⇧W.
-            // Either way the result for our UI is the same: drop the
-            // window from the tab list. If tmux hasn't already told us
-            // which sibling is active (normally it sends
-            // `%session-window-changed` *before* the close), fall back
-            // to the first remaining window so we don't leave a
-            // dangling activeWindowId.
+        case .windowClose:
+            // This is a winlink relink notification, including the vacated
+            // slot emitted by `move-window`. The window still belongs to this
+            // session, so preserve all pane topology, render ownership, bell
+            // state, and the last known index until the core's full-order
+            // refresh supplies authoritative truth.
+            break
+
+        case .unlinkedWindowClose(let windowId):
+            // The window is no longer present in this session. Remove only
+            // this true topology close; the core separately schedules a full
+            // order refresh because `renumber-windows on` may have restacked
+            // every survivor without another notification.
             windows.removeAll { $0.id == windowId }
             bellingWindows.remove(windowId.rawValue)
             windowBellFlags.removeValue(forKey: windowId)
@@ -5376,7 +8718,7 @@ public final class TmuxController {
             prunePaneCurrentPathsToKnownPanes()
             if activeWindowId == windowId {
                 let generation = advanceStateGeneration(reason: "active-window-closed")
-                activeWindowId = windows.first?.id
+                activeWindowId = snapshot.activeWindowID ?? windows.first?.id
                 activePaneId = activeWindowId.flatMap { window($0)?.activePaneId }
                 if let activePaneId {
                     preloadTerminalDefaultColorReportIfNeeded(for: activePaneId)
@@ -5384,11 +8726,10 @@ public final class TmuxController {
                 if let activeWindowId {
                     switch controlPath {
                     case .inline:
-                        refreshRenderedWindow(
-                            windowId: activeWindowId,
-                            generation: generation,
-                            reason: "active-window-closed"
-                        )
+                        // The ordered close event below is the single render
+                        // trigger; the ledger resolves and rebuilds the new
+                        // active surface from its authoritative snapshot.
+                        _ = generation
                     case .sideChannel:
                         refreshActivePaneMetadataIfNeeded(
                             windowId: activeWindowId,
@@ -5397,13 +8738,9 @@ public final class TmuxController {
                         )
                     }
                 } else {
-                    // The last active window disappeared. There is no shared
-                    // surface left to repaint, so retire both ordinary
-                    // established-swap recovery and foreground ownership.
-                    abandonSharedRenderRecovery()
-                    if isForegroundOutputCoalescing {
-                        endForegroundOutputCoalescing()
-                    }
+                    // The topology reconciliation below declares an empty
+                    // surface set; the ledger then releases any foreground
+                    // barrier when it consumes this ordered close event.
                 }
             }
             if renderedWindowId == windowId {
@@ -5437,12 +8774,13 @@ public final class TmuxController {
             ensureWindow(windowId)
             activePaneId = window(windowId)?.activePaneId
             // The session's current window moved while a viewport claim was
-            // pending: our queued fence now targets a stale window (a real
-            // select-window there would visibly switch the peer). Re-issue
-            // against the new current window (bounded).
+            // pending: the policy probe and the geometry check were for the
+            // old window, and the fence may have made us latest on it only.
+            // Re-issue against the new current window (bounded).
+            noteGridAuthorityWindowFacts(snapshot)
             if previousActive != windowId {
                 refenceGridClaimIfCurrentWindowMoved()
-                if !gridAuthorityClaimPending {
+                if !gridClaimAwaitsFence {
                     probeSteadyGridAuthorityWindowSizePolicy(
                         windowId: windowId,
                         reason: "session-window-changed"
@@ -5458,14 +8796,22 @@ public final class TmuxController {
             guard previousActive != windowId || renderedWindowId != windowId else {
                 break
             }
+            if controlPath == .inline,
+               renderedWindowId != windowId,
+               renderLedger.pendingStage(for: .live) != .deep {
+                // The ledger retains the old physical owner fail-closed until
+                // an authoritative bind+feed succeeds. This legacy projection
+                // represents current paintability, so a real window switch
+                // retires it immediately and cannot admit incremental slivers.
+                renderedWindowId = nil
+                renderedPaneId = nil
+            }
             let generation = advanceStateGeneration(reason: "session-window-changed")
             switch controlPath {
             case .inline:
-                refreshRenderedWindow(
-                    windowId: windowId,
-                    generation: generation,
-                    reason: "session-window-changed"
-                )
+                // Rendering is reduced from this ordered notification after
+                // the platform projection above has been updated.
+                _ = generation
             case .sideChannel:
                 refreshActivePaneMetadataIfNeeded(
                     windowId: windowId,
@@ -5497,17 +8843,20 @@ public final class TmuxController {
             Self.logDiagnostic(
                 "window-pane-changed path=\(controlPath) window=\(windowId) pane=\(activePaneId) activeWindow=\(String(describing: self.activeWindowId))"
             )
-            if windowId == activeWindowId {
+            if windowId == snapshot.activeWindowID {
                 self.activePaneId = activePaneId
+                if controlPath == .inline,
+                   renderedWindowId == windowId,
+                   renderedPaneId != activePaneId,
+                   renderLedger.pendingStage(for: .live) != .deep {
+                    renderedWindowId = nil
+                    renderedPaneId = nil
+                }
                 reconcileGridAuthorityRepaintForLayout(windowId: windowId)
                 let generation = advanceStateGeneration(reason: "window-pane-changed")
                 switch controlPath {
                 case .inline:
-                    refreshRenderedWindow(
-                        windowId: windowId,
-                        generation: generation,
-                        reason: "window-pane-changed"
-                    )
+                    _ = generation
                 case .sideChannel:
                     refreshActivePaneMetadataIfNeeded(
                         windowId: windowId,
@@ -5521,24 +8870,27 @@ public final class TmuxController {
             }
 
         case .subscriptionChanged(let name, let sessionId, let windowId, _, let paneId, let value):
-            // The pane-metadata subscription is registered with `%*`
-            // (all panes server-wide), so tmux delivers metadata for
-            // other sessions' panes too. The bell subscription uses the
-            // same wildcard target. Drop foreign-session updates
-            // up front (defense-in-depth: the `indexOfWindow` guard in
+            // Per-pane registrations outlive a session switch until the
+            // core reconciles them, and tmux names the session each update
+            // was read in. Drop foreign-session updates up front
+            // (defense-in-depth: the `indexOfWindow` guard in
             // handlePaneMetadataSubscription already rejects them once
             // the %session-window-changed filter keeps foreign windows
             // out of `windows[]`). Fail open while `ownSessionId` is nil.
             if let ownSessionId, sessionId != ownSessionId { break }
-            if name == Self.bellSubscriptionName {
-                handleBellSubscription(windowId: windowId, value: value)
+            if TmuxControlSubscriptions.name(name, isFeed: TmuxBellSubscription.name) {
+                handleBellSubscription(
+                    windowId: windowId,
+                    value: value,
+                    activeWindowID: snapshot.activeWindowID
+                )
                 break
             }
             if name == Self.gridAuthoritySubscriptionName {
                 handleGridAuthoritySubscription(value: value)
                 break
             }
-            guard name == Self.paneMetadataSubscriptionName,
+            guard TmuxControlSubscriptions.name(name, isFeed: Self.paneMetadataSubscriptionName),
                   let metadata = Self.parsePaneSubscriptionMetadata(
                     value,
                     fallbackWindowId: windowId,
@@ -5547,102 +8899,34 @@ public final class TmuxController {
             else { break }
             handlePaneMetadataSubscription(metadata)
 
-        case .pause(let paneId):
-            handlePause(paneId: paneId)
-
-        case .continue(let paneId):
-            pausedPanes.remove(paneId)
-
-        case .begin(let time, let commandNumber, let flags):
-            // Fresh command response — drop any leftover body from a
-            // previous response (shouldn't happen in normal flow, but
-            // keeps us robust to parser state mishaps).
-            if let previous = inflightFrameGuard {
-                Self.logDiagnostic(
-                    "command-frame-overlap controller=\(diagnosticID) previousTime=\(previous.time) previousNumber=\(previous.commandNumber) previousFlags=\(previous.flags) nextTime=\(time) nextNumber=\(commandNumber) nextFlags=\(flags) discardedLines=\(inflightLines.count)"
-                )
-            }
-            inflightLines.removeAll(keepingCapacity: true)
-            inflightFrameGuard = (time, commandNumber, flags)
-            Self.logDiagnostic(
-                "command-frame-begin controller=\(diagnosticID) time=\(time) number=\(commandNumber) flags=\(flags) wirePending=\(pendingCommands.count) headSequence=\(pendingCommands.first?.sequence ?? -1) headCategory=\(pendingCommands.first.map { Self.commandCategory($0.command) } ?? "none")"
-            )
-
-        case .commandOutputLine(let line):
-            inflightLines.append(line)
-
-        case .end(let time, let commandNumber, let flags):
-            let lines = inflightLines
-            inflightLines.removeAll(keepingCapacity: true)
-            let begin = inflightFrameGuard
-            inflightFrameGuard = nil
-            let effectiveFlags = begin?.flags ?? flags
-            let guardMatches = begin.map {
-                $0.time == time && $0.commandNumber == commandNumber && $0.flags == flags
-            } ?? false
-            if let begin, !guardMatches {
-                Self.logDiagnostic(
-                    "command-frame-guard-mismatch controller=\(diagnosticID) status=end beginTime=\(begin.time) beginNumber=\(begin.commandNumber) beginFlags=\(begin.flags) endTime=\(time) endNumber=\(commandNumber) endFlags=\(flags) bodyLines=\(lines.count) recovery=classify-from-begin effectiveFlags=\(effectiveFlags)"
-                )
-            } else if begin == nil {
-                Self.logDiagnostic(
-                    "command-frame-missing-begin controller=\(diagnosticID) status=end endTime=\(time) endNumber=\(commandNumber) endFlags=\(flags) bodyLines=\(lines.count) recovery=classify-from-end effectiveFlags=\(effectiveFlags)"
-                )
-            }
-            guard effectiveFlags & 1 == 1 else {
-                if !attachInitFlushed {
-                    attachInitFlushed = true
-                    Self.logDiagnostic("handshake-frame-drained path=\(controlPath)")
-                    flushAttachInitQueries()
-                } else {
-                    Self.logDiagnostic(
-                        "server-originated-frame-drained status=end beginTime=\(begin?.time ?? -1) beginNumber=\(begin?.commandNumber ?? -1) beginFlags=\(begin?.flags ?? -1) endTime=\(time) endNumber=\(commandNumber) endFlags=\(flags) guardMatches=\(guardMatches) lines=\(lines.count)"
-                    )
-                }
-                break
-            }
-            // tmux is serialized, so FIFO dequeue matches the `%end`
-            // with the oldest pending command.
-            if !pendingCommands.isEmpty {
-                let entry = pendingCommands.removeFirst()
-                Self.logDiagnostic(
-                    "command-response controller=\(diagnosticID) status=end beginTime=\(begin?.time ?? -1) beginNumber=\(begin?.commandNumber ?? -1) beginFlags=\(begin?.flags ?? -1) endTime=\(time) endNumber=\(commandNumber) endFlags=\(flags) guardMatches=\(guardMatches) effectiveFlags=\(effectiveFlags) sequence=\(entry.sequence) commandCategory=\(Self.commandCategory(entry.command)) lines=\(lines.count)"
-                )
-                entry.completion(.success(lines))
+        case .windowSubscriptionChanged(let name, let sessionId, _, _, let value):
+            // The session-level feeds ride one anchor window. Window order is
+            // folded into the shared runtime snapshot before this projection.
+            if let ownSessionId, sessionId != ownSessionId { break }
+            if name == Self.gridAuthoritySubscriptionName {
+                handleGridAuthoritySubscription(value: value)
             }
 
-        case .error(let time, let commandNumber, let flags):
-            let lines = inflightLines
-            inflightLines.removeAll(keepingCapacity: true)
-            let begin = inflightFrameGuard
-            inflightFrameGuard = nil
-            let effectiveFlags = begin?.flags ?? flags
-            let guardMatches = begin.map {
-                $0.time == time && $0.commandNumber == commandNumber && $0.flags == flags
-            } ?? false
-            if let begin, !guardMatches {
-                Self.logDiagnostic(
-                    "command-frame-guard-mismatch controller=\(diagnosticID) status=error beginTime=\(begin.time) beginNumber=\(begin.commandNumber) beginFlags=\(begin.flags) endTime=\(time) endNumber=\(commandNumber) endFlags=\(flags) bodyLines=\(lines.count) recovery=classify-from-begin effectiveFlags=\(effectiveFlags)"
-                )
-            } else if begin == nil {
-                Self.logDiagnostic(
-                    "command-frame-missing-begin controller=\(diagnosticID) status=error endTime=\(time) endNumber=\(commandNumber) endFlags=\(flags) bodyLines=\(lines.count) recovery=classify-from-end effectiveFlags=\(effectiveFlags)"
-                )
-            }
-            guard effectiveFlags & 1 == 1 else {
-                Self.logDiagnostic(
-                    "server-originated-frame-drained status=error beginTime=\(begin?.time ?? -1) beginNumber=\(begin?.commandNumber ?? -1) beginFlags=\(begin?.flags ?? -1) endTime=\(time) endNumber=\(commandNumber) endFlags=\(flags) guardMatches=\(guardMatches) lines=\(lines.count)"
-                )
-                break
-            }
-            if !pendingCommands.isEmpty {
-                let entry = pendingCommands.removeFirst()
-                Self.logDiagnostic(
-                    "command-response controller=\(diagnosticID) status=error beginTime=\(begin?.time ?? -1) beginNumber=\(begin?.commandNumber ?? -1) beginFlags=\(begin?.flags ?? -1) endTime=\(time) endNumber=\(commandNumber) endFlags=\(flags) guardMatches=\(guardMatches) effectiveFlags=\(effectiveFlags) sequence=\(entry.sequence) commandCategory=\(Self.commandCategory(entry.command)) lines=\(lines.count)"
-                )
-                entry.completion(.failure(.tmuxError(lines: lines)))
-            }
+        case .sessionSubscriptionChanged:
+            // Session-scoped order subscriptions are folded into the shared
+            // runtime snapshot before this legacy adapter projection runs.
+            break
 
+        case .pause, .continue:
+            // Flow control and the guarded repaint are ledger-owned.
+            break
+
+        case .pasteBufferChanged(let name):
+            handlePasteBufferChanged(name)
+
+        case .pasteBufferDeleted:
+            break
+
+        case .begin, .commandOutputLine, .end, .error:
+            // Framed and correlated by TmuxControlCore before this adapter
+            // sees the batch. These cases remain exhaustive for clients that
+            // call the legacy message handler from package tests.
+            break
         case .exit:
             // tmux control mode is ending. Drop back to passthrough so
             // the parent shell's next output lands in the terminal
@@ -5655,7 +8939,7 @@ public final class TmuxController {
             // leak their captured state.
             reset()
 
-        case .sessionChanged(let sessionId, _):
+        case .sessionChanged(let sessionId, let name):
             // tmux sends %session-changed ONLY to the control client whose
             // own attached session changed (per-client, not broadcast).
             // So this authoritatively tells us which `$N` is "ours" — latch
@@ -5674,6 +8958,10 @@ public final class TmuxController {
             // the very leak this filter closes.
             let priorSessionId = ownSessionId
             ownSessionId = sessionId
+            ownSessionName = name
+            if priorSessionId != sessionId, participatesInGridAuthority {
+                applyGridAuthorityLifecycleEffects(reduceGridAuthority(.controlSessionChanged(replacedKnownSession: priorSessionId != nil)))
+            }
             Self.logDiagnostic("session-changed own session set to \(sessionId)")
 
             // A later %session-changed can move this same -CC client to a
@@ -5682,6 +8970,8 @@ public final class TmuxController {
             // remain valid kill targets. Keep them visible but disabled until
             // a new authoritative list-windows response replaces the model.
             if let priorSessionId, priorSessionId != sessionId {
+                // The size this device last owned belonged to the old
+                // session's windows; it is no evidence about the new one.
                 reverseAttachPeers.removeAll()
                 reverseAttachBaselineSize = nil
                 reverseAttachOwnerGridBaseline = nil
@@ -5692,12 +8982,16 @@ public final class TmuxController {
                 reverseAttachCedeLookupInFlight = false
                 reverseAttachCedeMutationInFlight = false
                 pendingReverseAttachCedeSize = nil
+                // A new connection generation starts a new gate episode,
+                // as a disconnect does: count the old one's repeats now.
+                endClientSizeGate()
                 controlConnectionGeneration &+= 1
                 isWindowListHydrated = false
                 // Authority is a session option. Never carry a yielded stamp
                 // (or an in-flight claim) into the new session; the hydrate
                 // below re-derives that session before any reconnect replay.
-                resetGridAuthorityState()
+                // A participating session reset itself with the switch.
+                resetGridAuthorityState(resettingSession: !participatesInGridAuthority)
                 hydrateTmuxState(reason: "session-changed")
             }
 
@@ -5732,20 +9026,24 @@ public final class TmuxController {
                 pendingReverseAttachCedeSize = nil
                 reverseAttachBaselineSize = nil
             }
-            // T5: while yielded, a detach may mean the stamping device left —
-            // verify via list-clients and auto-reclaim when only we remain.
-            scheduleGridAuthorityPeerCheck(reason: "client-detached")
+            // A peer's departure is not an authority event (R5): the stamp
+            // stays where it is until a show or a veil gesture moves it.
 
         case let .layoutChange(windowId, layout, visibleLayout, rawFlags):
             handleLayoutChange(
                 windowId: windowId,
                 layout: layout,
                 visibleLayout: visibleLayout,
-                rawFlags: rawFlags
+                rawFlags: rawFlags,
+                snapshot: snapshot
             )
 
+        case .sessionRenamed(let sessionId, let name):
+            if ownSessionId == nil || ownSessionId == sessionId {
+                ownSessionName = name
+            }
+
         case .unlinkedWindowAdd, .unlinkedWindowRenamed,
-             .sessionRenamed,
              .sessionsChanged,
              .paneModeChanged, .unknown:
             // Parsed and ignored.
@@ -5770,7 +9068,8 @@ public final class TmuxController {
         windowId: WindowId,
         layout: String,
         visibleLayout: String?,
-        rawFlags: String?
+        rawFlags: String?,
+        snapshot: TmuxSnapshot? = nil
     ) {
         // %layout-change is session-filtered server-side, but only act on
         // windows we track (defense-in-depth against any cross-session leak).
@@ -5785,7 +9084,6 @@ public final class TmuxController {
         let zoomed = rawFlags?.contains("Z") ?? false
         // Stamp-less takeover fallback: a resize we did not initiate, away
         // from our grid, means some client (bare `tmux attach`) took the size.
-        noteLayoutSizeForAuthorityFallback(parsedLayout, windowId: windowId)
         windows[idx].layout = parsedLayout
         windows[idx].visibleLayout = parsedVisible ?? parsedLayout
         windows[idx].isZoomed = zoomed
@@ -5798,21 +9096,33 @@ public final class TmuxController {
         }
         rebuildPaneWindowTable()
 
+        noteGridAuthorityWindowFacts(snapshot)
+        // §6.10: core judges the claimed window first, so a layout that
+        // sends the claim back to its geometry phase also retires the
+        // repaint the shape check below would otherwise retarget.
+        if windowId == (activeWindowId ?? renderedWindowId),
+           let rect = parsedLayout?.root.rect {
+            let atTarget = gridClaimTargetSize.map {
+                rect.width == $0.cols && rect.height == $0.rows
+            } ?? false
+            observeGridClaimWindow(
+                columns: rect.width,
+                rows: rect.height,
+                settleProbe: false,
+                context: "layout-change",
+                checkForStall: !atTarget
+            )
+        }
         reconcileGridAuthorityRepaintForLayout(windowId: windowId)
 
         if controlPath == .inline,
            windowId == activeWindowId,
            !previouslyRenderedAsGrid,
            windows[idx].rendersAsPaneGrid {
-            // SwiftUI will replace the shared terminal with fresh per-pane
-            // surfaces after this model update. Invalidate any hidden shared
-            // capture/retry, but keep an existing lifecycle output barrier
-            // armed across the mount gap. The app's normal first per-pane
-            // refresh inherits that ownership and releases it only after every
-            // mounted surface has captured authoritative state. If the app is
-            // still inactive, foreground activation starts those pane repairs.
+            // SwiftUI replaces the shared terminal with pane surfaces after
+            // this model turn. The ledger keeps foreground ownership across
+            // that intentional declaration/mount gap.
             _ = advanceStateGeneration(reason: "shared-to-grid")
-            abandonSharedRenderRecovery()
         }
 
         // A pending viewport claim settles on geometry only after this
@@ -5820,12 +9130,31 @@ public final class TmuxController {
         // authoritative repaint against the pre-update shape can choose the
         // shared terminal just as the window becomes a grid, after which the
         // transition abandons that repaint and leaves the veil stranded.
-        if gridAuthorityClaimPending,
+        if gridClaimAwaitsFence,
            let rect = parsedLayout?.root.rect,
-           let size = lastKnownSize,
+           let size = gridClaimTargetSize,
            rect.width == size.cols, rect.height == size.rows,
            windowId == (activeWindowId ?? renderedWindowId) {
-            confirmGridClaimIfSettled(context: "layout-change")
+            // The render ledger has not seen this same `%layout-change` yet --
+            // the controller model is updated first, the ledger reduces after.
+            // Reserving now would take the reservation against the owner the
+            // ledger is about to replace, and the rebind would immediately
+            // re-issue it: two forced frames for one claim. Defer to the end of
+            // this step so the reservation names the owner that will actually
+            // paint.
+            //
+            // Inline, a take-back's confirmation hands the ledger the engine's
+            // snapshot through its foreground refresh, and that snapshot
+            // already holds this layout. The ledger would then reduce the
+            // notification as an echo of its own geometry and repaint the
+            // reflowed window in place, over history wrapped for the old
+            // grid. Reduced first, the relayout is either owed (P7, a peer
+            // still holds the grid) or a deep rebuild already asked for (no
+            // peer: a show after a rotation, say). Either way the claim's
+            // repaint inherits it, rebuilding the visible rows, and the
+            // history follows: at settlement under P8, at once without a
+            // peer.
+            confirmGridClaimAtStepEnd(context: "layout-change")
         }
 
         Self.logDiagnostic(
@@ -5849,6 +9178,126 @@ public final class TmuxController {
         }
 
         updateMoshPaneBorder(windowId: windowId, paneCount: windows[idx].paneCount)
+        reconcilePresentedWindowSize(windowId: windowId)
+    }
+
+    private func reconcilePresentedWindowSize(windowId: WindowId) {
+        guard controlPath == .sideChannel,
+              clientSizePolicy == .resizeTmux,
+              windowId == (activeWindowId ?? renderedWindowId),
+              gridAuthority == .mine,
+              currentGridAuthorityPolicy?.isLatest == true,
+              !appIsInactive,
+              !gridAuthorityRederiveInFlight,
+              !gridAuthorityGeometryHeld,
+              gridAuthorityLifecycle.claim == nil,
+              (windowLayoutQueriesInFlight[windowId] ?? 0) == 0,
+              window(windowId)?.layout != nil,
+              let sessionId = ownSessionId,
+              let size = lastKnownSize,
+              let requested = try? TmuxClientGeometry(columns: size.cols, rows: size.rows)
+        else { return }
+        guard case .mine(let authorityGeneration) = gridAuthorityLifecycle.authority else { return }
+        let observed = window(windowId)?.layout.flatMap {
+            try? TmuxClientGeometry(columns: $0.root.rect.width, rows: $0.root.rect.height)
+        }
+        if passiveWindowSizeProbe?.windowID != windowId || passiveWindowSizeProbe?.observed != observed {
+            passiveWindowSizeProbe = nil
+        }
+        guard TmuxWindowSizeReplay.decision(
+            requested: requested,
+            observed: observed,
+            lastAttempt: windowSizeReplayAttempts[windowId]?.requested
+        ) == .replay, passiveWindowSizeProbe == nil else { return }
+        nextWindowSizeReplayToken &+= 1
+        let probe = PassiveWindowSizeProbe(
+            token: nextWindowSizeReplayToken,
+            connectionGeneration: controlConnectionGeneration,
+            windowID: windowId,
+            requested: requested,
+            observed: observed,
+            authorityGeneration: authorityGeneration
+        )
+        // A competing claim publishes geometry before its committed stamp.
+        // Passive maintenance therefore needs positive own-client proof,
+        // rather than turning that ambiguous layout into another claim.
+        passiveWindowSizeProbe = probe
+        applyGridAuthorityLifecycleEffects(reduceGridAuthority(.ordinaryRecovery(active: true, proven: false)))
+        sendGridAuthorityPassiveRead(ifCurrent: { [weak self] in self?.passiveWindowSizeProbeIsCurrent(probe) == true }) { [weak self] result in
+            guard let self else { return }
+            guard self.passiveWindowSizeProbeIsCurrent(probe),
+                  case .success(let lines) = result,
+                  lines.count == 1
+            else { self.finishOrdinaryGridRecovery(probe, proven: false); return }
+            // The read sees the stamp as a subscription edge would, and the
+            // session reduces it as one: a peer's stamp is that peer's
+            // verdict now, not a layout for the stamp-less rule to judge.
+            let observed = self.gridAuthoritySession.classify(raw: lines[0])
+            self.applyGridAuthorityLifecycleEffects(self.reduceGridAuthority(.stampObserved(raw: lines[0])))
+            guard observed == .mine(generation: probe.authorityGeneration),
+                  self.passiveWindowSizeProbeIsCurrent(probe)
+            else {
+                // Only a missing stamp leaves the layout to that rule.
+                self.finishOrdinaryGridRecovery(probe, proven: observed != .unknown)
+                return
+            }
+            self.queryOwnGridAuthorityClientIdentities(
+                sessionId: sessionId,
+                connectionGeneration: probe.connectionGeneration
+            ) { [weak self] identities in
+                guard let self else { return }
+                guard self.passiveWindowSizeProbeIsCurrent(probe),
+                      let identities, identities.count == 2
+                else { self.finishOrdinaryGridRecovery(probe, proven: false); return }
+                let own = identities.sorted()
+                self.sendControlCommand(
+                    "list-clients -F '#{window_id}\t#{client_name}\t#{client_pid}\t#{client_created}'"
+                ) { [weak self] result in
+                    guard let self else { return }
+                    guard self.passiveWindowSizeProbeIsCurrent(probe),
+                          case .success(let lines) = result,
+                          TmuxWindowSizeReplay.provesExclusiveOwnership(
+                            windowID: windowId,
+                            controlIdentity: own[0],
+                            visibleIdentity: own[1],
+                            inventory: lines.joined(separator: "\n")
+                          )
+                    else { self.finishOrdinaryGridRecovery(probe, proven: false); return }
+                    self.forceWindowSizesToClientSize(size, onlyWindowID: windowId) { [weak self] proven in
+                        self?.finishOrdinaryGridRecovery(probe, proven: proven)
+                    }
+                }
+            }
+        }
+    }
+
+    private func finishOrdinaryGridRecovery(_ probe: PassiveWindowSizeProbe, proven: Bool) {
+        guard passiveWindowSizeProbe == probe,
+              probe.connectionGeneration == controlConnectionGeneration,
+              gridAuthoritySession.ordinaryRecoveryActive else { return }
+        applyGridAuthorityLifecycleEffects(reduceGridAuthority(.ordinaryRecovery(active: false, proven: proven)))
+    }
+
+    private func passiveWindowSizeProbeIsCurrent(_ probe: PassiveWindowSizeProbe) -> Bool {
+        guard passiveWindowSizeProbe == probe,
+              controlConnectionGeneration == probe.connectionGeneration,
+              mode == .tmuxControl,
+              !commandQueueAwaitingTransportRecovery,
+              !appIsInactive,
+              !gridAuthorityRederiveInFlight,
+              !gridAuthorityGeometryHeld,
+              gridAuthorityLifecycle.claim == nil,
+              gridAuthority == .mine,
+              gridAuthorityLifecycle.authority == .mine(generation: probe.authorityGeneration),
+              currentGridAuthorityPolicy?.isLatest == true,
+              (activeWindowId ?? renderedWindowId) == probe.windowID,
+              let size = lastKnownSize,
+              size.cols == probe.requested.columns, size.rows == probe.requested.rows
+        else { return false }
+        let observed = window(probe.windowID)?.layout.flatMap {
+            try? TmuxClientGeometry(columns: $0.root.rect.width, rows: $0.root.rect.height)
+        }
+        return observed == probe.observed
     }
 
     /// (Mosh/side-channel only) Toggle tmux's native per-pane title row for a
@@ -5872,7 +9321,11 @@ public final class TmuxController {
             sendControlCommand("set -t \(windowId.description) pane-border-format \"\(Self.moshPaneBorderFormat)\"")
         } else {
             moshPaneBorderWindows.remove(windowId)
-            sendControlCommand("set -t \(windowId.description) pane-border-status off")
+            // `-u`, not `off`: the window keeps whatever the user configured
+            // for pane borders. Forcing `off` here wrote our preference into
+            // their window and left it there for every client of that session.
+            sendControlCommand("set -u -t \(windowId.description) pane-border-status")
+            sendControlCommand("set -u -t \(windowId.description) pane-border-format")
         }
     }
 
@@ -5895,51 +9348,12 @@ public final class TmuxController {
         sendControlCommand("set -t \(windowId.description) pane-border-format \"\(Self.moshPaneBorderFormat)\"")
     }
 
-    private func handlePause(paneId: PaneId) {
-        pausedPanes.insert(paneId)
-        guard controlPath == .inline else { return }
-        let pausesRenderedPane = paneId == renderedPaneId
-        let pausesActiveUnrenderedPane = renderedPaneId == nil && paneId == activePaneId
-        guard pausesRenderedPane || pausesActiveUnrenderedPane,
-              let windowId = renderedWindowId ?? activeWindowId,
-              // A %pause for the still-rendered pane can land while a
-              // window-switch refresh is in flight (pause-after fires
-              // under floods — exactly when swaps are slow and users
-              // switch away). The rendered ids then point at the OLD
-              // window; resyncing it would resume the background
-              // flooder, advance the generation (killing the
-              // legitimate swap), and issue a refresh whose
-              // activeWindowId guard silently aborts with no retry —
-              // a sticky display/input split-brain. Leave the pane
-              // paused instead: the server discards its output
-              // harmlessly, bells survive via the window_bell_flag
-              // subscription, and finishRenderedWindowRefresh's
-              // swap-in resume continues it if the user returns.
-              windowId == activeWindowId
-        else { return }
 
-        // Foreground recovery already owns the authoritative viewport capture.
-        // Leave the pane paused until that repaint lands; starting the normal
-        // deep pause-resync here would replay history and supersede the exact
-        // output barrier that protects app activation.
-        if isForegroundOutputCoalescing { return }
-
-        resumePausedPane(paneId)
-        let generation = advanceStateGeneration(reason: "pause-resync")
-        refreshRenderedWindow(
-            windowId: windowId,
-            generation: generation,
-            reason: "pause-resync",
-            stage: .deep
-        )
-    }
-
-    private func resumePausedPane(_ paneId: PaneId) {
-        sendControlCommand("refresh-client -A '\(paneId.description):continue'")
-        pausedPanes.remove(paneId)
-    }
-
-    private func handleBellSubscription(windowId: WindowId, value: String) {
+    private func handleBellSubscription(
+        windowId: WindowId,
+        value: String,
+        activeWindowID: WindowId?
+    ) {
         let isBellSet = value.trimmingCharacters(in: .whitespacesAndNewlines) == "1"
         // tmux delivers each -B subscription's current value right after
         // registration, so the first observation per window is a seed,
@@ -5950,7 +9364,7 @@ public final class TmuxController {
         guard let wasBellSet = previousObservation,
               isBellSet,
               !wasBellSet,
-              windowId != activeWindowId
+              windowId != activeWindowID
         else { return }
 
         onBell?(windowId.rawValue, false, window(windowId)?.displayName)
@@ -5958,7 +9372,8 @@ public final class TmuxController {
     }
 
     private func sendTerminalResponseForOutputIfNeeded(paneId: PaneId, data: [UInt8]) {
-        guard let response = terminalResponseForOutput?(paneId, data[...]),
+        guard !renderLedger.isProgramStatusPaneOutput,
+              let response = terminalResponseForOutput?(paneId, data[...]),
               !response.isEmpty
         else { return }
         sendTerminalReport(response, to: paneId)
@@ -5978,10 +9393,212 @@ public final class TmuxController {
         sendTerminalReport(response, to: pane)
     }
 
+    /// Hand a terminal reply (OSC 10/11 colour reports) to tmux for `pane`.
+    ///
+    /// tmux ≥ 3.5 stores one colour per `refresh-client -r` — its parser
+    /// (`tty_keys_colours`) reads exactly one OSC sequence and ignores the
+    /// rest — so a combined fg+bg reply is split into one command per
+    /// sequence; sending both in one report silently dropped the background.
+    ///
+    /// tmux < 3.5 has no `-r` at all and answers a pane's OSC 10/11 query
+    /// itself from the first attached client's terminal colours. A control
+    /// client never initialises those (they stay at the zeroed `tty.fg/bg`),
+    /// so every query got black/black — Codex's status shimmer, which
+    /// blends default fg into bg, rendered invisible. There the pane's own
+    /// `window-style` is the only lever that changes that answer: an
+    /// explicit pane style is reported verbatim (`input_osc_10` checks
+    /// `COLOUR_DEFAULT` before consulting clients), and for control clients
+    /// it has no rendering side effect because their output is raw.
     private func sendTerminalReport(_ bytes: [UInt8], to pane: PaneId) {
-        guard let report = String(bytes: bytes, encoding: .utf8) else { return }
-        let argument = "\(pane.description):\(report)"
-        sendControlCommand("refresh-client -r \(Self.singleQuotedTmuxArgument(argument))")
+        let sequences = Self.splitOSCSequences(bytes)
+        let reports = sequences.isEmpty ? [bytes] : sequences
+        if serverSupportsClientReports == false {
+            sendPaneStyleColorFallback(reports, to: pane)
+            return
+        }
+        for report in reports {
+            guard let text = String(bytes: report, encoding: .utf8) else { continue }
+            let argument = "\(pane.description):\(text)"
+            sendControlCommand("refresh-client -r \(Self.singleQuotedTmuxArgument(argument))")
+        }
+    }
+
+    private func sendPaneStyleColorFallback(_ reports: [[UInt8]], to pane: PaneId) {
+        var styleParts: [String] = []
+        for report in reports {
+            guard let (code, rgb) = Self.parseOSCColorReport(report) else { continue }
+            switch code {
+            case 10: styleParts.append("fg=\(rgb)")
+            case 11: styleParts.append("bg=\(rgb)")
+            default: break
+            }
+        }
+        guard !styleParts.isEmpty else { return }
+        let style = styleParts.joined(separator: ",")
+        Self.logDiagnostic(
+            "color-report fallback=pane-style pane=\(pane.description) version=\(serverVersion ?? "nil") style=\(style)"
+        )
+        let argument = Self.singleQuotedTmuxArgument(style)
+        // `select-pane -t %N -P` also makes %N the active pane, so attaching
+        // to a split moved the user's typing to whichever pane was styled
+        // last. Since tmux 3.0 the same pane options can be set directly.
+        // Two commands, not one `;` list: each sent line must get exactly
+        // one reply.
+        if serverVersion.map(Self.versionSupportsPaneOptions) ?? true {
+            for option in ["window-style", "window-active-style"] {
+                sendControlCommand("set-option -p -t \(pane.description) \(option) \(argument)")
+            }
+            return
+        }
+        // Older servers only have `select-pane -P`: style the pane the user
+        // is already in, and leave the others' colours unanswered rather
+        // than move their focus.
+        guard pane == activePaneId else {
+            Self.logDiagnostic("color-report fallback=skipped pane=\(pane.description) reason=inactive-pane")
+            return
+        }
+        sendControlCommand("select-pane -t \(pane.description) -P \(argument)")
+    }
+
+    /// Records the server version from the separator probe. When the server
+    /// turns out to lack `refresh-client -r`, the colour preloads already
+    /// sent as reports were rejected (`unknown flag -r`), so they are redone
+    /// through the pane-style fallback for the panes currently in play.
+    func noteServerVersion(_ version: String?) {
+        guard let version, !version.isEmpty else { return }
+        serverVersion = version
+        guard Self.versionSupportsClientReports(version) == false else { return }
+        Self.logDiagnostic("server-version value=\(version) clientReports=unsupported")
+        preloadedTerminalDefaultColorPanes.removeAll(keepingCapacity: true)
+        for pane in [renderedPaneId, activePaneId].compactMap({ $0 }) {
+            preloadTerminalDefaultColorReportIfNeeded(for: pane)
+        }
+    }
+
+    /// Pulls the version token out of the separator probe reply
+    /// (`tessera-sep<sep>3.6a`), tolerant of a mangled separator.
+    static func parseServerVersion(_ result: Result<[String], CommandError>) -> String? {
+        guard case .success(let lines) = result,
+              let line = lines.first(where: { !$0.isEmpty }),
+              let range = line.range(of: "tessera-sep")
+        else { return nil }
+        let version = line[range.upperBound...]
+            .dropFirst()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return version.isEmpty ? nil : version
+    }
+
+    /// `refresh-client -r` landed in tmux 3.5. Unparseable versions (e.g.
+    /// "next-3.7", "master") fall back to assuming support.
+    static func versionSupportsClientReports(_ version: String) -> Bool {
+        guard let (major, minor) = versionComponents(version) else { return true }
+        return major > 3 || (major == 3 && minor >= 5)
+    }
+
+    /// Pane options (`set-option -p`) landed in tmux 3.0. Unparseable
+    /// versions count as current here too.
+    static func versionSupportsPaneOptions(_ version: String) -> Bool {
+        guard let (major, _) = versionComponents(version) else { return true }
+        return major >= 3
+    }
+
+    /// "3.4" → (3, 4), "3.6a" → (3, 6), "next-3.7" → (3, 7); nil without a
+    /// major.minor pair.
+    private static func versionComponents(_ version: String) -> (major: Int, minor: Int)? {
+        var digits = version[...]
+        if let firstDigit = digits.firstIndex(where: { $0.isNumber }) {
+            digits = digits[firstDigit...]
+        }
+        let components = digits.split(separator: ".", maxSplits: 1, omittingEmptySubsequences: false)
+        guard components.count == 2,
+              let major = Int(components[0].prefix(while: { $0.isNumber })),
+              let minor = Int(components[1].prefix(while: { $0.isNumber }))
+        else { return nil }
+        return (major, minor)
+    }
+
+    /// Splits `bytes` into its complete OSC sequences (`ESC ] … BEL` or
+    /// `ESC ] … ESC \`). Bytes outside any sequence are dropped; an empty
+    /// result means the payload was not OSC-shaped at all.
+    static func splitOSCSequences(_ bytes: [UInt8]) -> [[UInt8]] {
+        var sequences: [[UInt8]] = []
+        var index = 0
+        while index + 1 < bytes.count {
+            guard bytes[index] == 0x1B, bytes[index + 1] == 0x5D else {
+                index += 1
+                continue
+            }
+            var end = index + 2
+            var terminatorLength = 0
+            while end < bytes.count {
+                if bytes[end] == 0x07 {
+                    terminatorLength = 1
+                    break
+                }
+                if bytes[end] == 0x1B, end + 1 < bytes.count, bytes[end + 1] == 0x5C {
+                    terminatorLength = 2
+                    break
+                }
+                end += 1
+            }
+            guard terminatorLength > 0 else { break }
+            sequences.append(Array(bytes[index..<(end + terminatorLength)]))
+            index = end + terminatorLength
+        }
+        return sequences
+    }
+
+    /// Parses one `ESC ] 10;rgb:RRRR/GGGG/BBBB ST` (or 11) report into the
+    /// OSC code and a tmux style colour `#rrggbb`.
+    static func parseOSCColorReport(_ sequence: [UInt8]) -> (code: Int, rgb: String)? {
+        guard sequence.count > 2,
+              sequence[0] == 0x1B, sequence[1] == 0x5D,
+              let text = String(bytes: sequence.dropFirst(2), encoding: .utf8)
+        else { return nil }
+        let payload = text.trimmingCharacters(in: CharacterSet(charactersIn: "\u{07}\u{1B}\\"))
+        let fields = payload.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
+        guard fields.count == 2,
+              let code = Int(fields[0]),
+              fields[1].hasPrefix("rgb:")
+        else { return nil }
+        let channels = fields[1].dropFirst(4).split(separator: "/")
+        guard channels.count == 3 else { return nil }
+        var hex = "#"
+        for channel in channels {
+            // X11 rgb: components carry 1–4 hex digits; the leading two are
+            // the 8-bit value (rgb:d4d4/… → d4).
+            guard !channel.isEmpty, channel.allSatisfy({ $0.isHexDigit }) else { return nil }
+            let value = channel.count >= 2 ? String(channel.prefix(2)) : String(channel) + String(channel)
+            hex += value.lowercased()
+        }
+        return (code, hex)
+    }
+
+    /// `%paste-buffer-changed`: fetch the buffer text and hand it to the
+    /// owner. `show-buffer` prints the buffer as command-output lines, so a
+    /// trailing newline is indistinguishable from none — acceptable for
+    /// clipboard mirroring. Deferred while an authoritative repaint owns the
+    /// reply FIFO, the same rule background observer queries follow.
+    private func handlePasteBufferChanged(_ name: String, attempt: Int = 0) {
+        guard mode == .tmuxControl, onPasteBufferChanged != nil else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if isAuthoritativeRenderRefreshPending, attempt < 5 {
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(400))
+                self?.handlePasteBufferChanged(trimmed, attempt: attempt + 1)
+            }
+            return
+        }
+        sendControlCommand(
+            "show-buffer -b \(Self.singleQuotedTmuxArgument(trimmed))"
+        ) { [weak self] result in
+            guard let self, case .success(let lines) = result else { return }
+            let text = lines.joined(separator: "\n")
+            guard !text.isEmpty else { return }
+            Self.logDiagnostic("paste-buffer-changed name=\(trimmed) bytes=\(text.utf8.count)")
+            self.onPasteBufferChanged?(trimmed, text)
+        }
     }
 
     private static func singleQuotedTmuxArgument(_ value: String) -> String {
@@ -6007,17 +9624,42 @@ public final class TmuxController {
         hydrateTmuxState(reason: "attach-init")
     }
 
+    /// The pane history Tessera's deep capture wants, in lines.
+    static let desiredHistoryLimit = 10_000
+
+    /// Ask for more scrollback on new panes without ever asking for less, and
+    /// without leaving the session the user asked for.
+    ///
+    /// This used to be `set-option -g history-limit 10000`: a *global* write,
+    /// so a user whose `.tmux.conf` set a deeper limit had every future pane on
+    /// that server silently truncated to ours, permanently, from a terminal
+    /// they had merely connected once. An untargeted `set-option` in control
+    /// mode scopes to this client's own session, and reading the effective
+    /// value first means a user who already keeps more than we want keeps it.
+    private func raiseHistoryLimitForThisSession() {
+        let desired = Self.desiredHistoryLimit
+        sendControlCommand("display-message -p '#{history-limit}'") { [weak self] result in
+            guard let self,
+                  case .success(let lines) = result,
+                  let current = lines
+                      .lazy
+                      .map({ $0.trimmingCharacters(in: .whitespaces) })
+                      .first(where: { !$0.isEmpty })
+                      .flatMap(Int.init)
+            else { return }
+            guard current < desired else {
+                Self.logDiagnostic("history-limit kept user value=\(current)")
+                return
+            }
+            self.sendControlCommand("set-option history-limit \(desired)")
+        }
+    }
+
     private func hydrateTmuxState(reason: String) {
         let generation = advanceStateGeneration(reason: reason)
-        resetRenderHardeningState()
         if appIsInactive, controlPath == .inline {
-            awaitingAppForegroundRefresh = true
-            beginForegroundOutputCoalescing()
+            submitRenderFact(.appBackground)
         }
-        if controlPath == .inline {
-            startInitialRenderWatchdog()
-        }
-        pendingRenderRefresh = nil
         Self.logDiagnostic(
             "hydrate begin path=\(controlPath) reason=\(reason) generation=\(generation) size=\(String(describing: lastKnownSize))"
         )
@@ -6026,26 +9668,23 @@ public final class TmuxController {
             // tmux bakes history-limit into panes when they are created; this
             // covers post-attach windows while first-session panes keep the
             // server default and deep capture simply clamps to what's there.
-            sendControlCommand("set-option -g history-limit 10000")
+            raiseHistoryLimitForThisSession()
         }
         // PTY resize is silently ignored in -CC mode, including mosh's
         // side-channel client. Replay the visible terminal size before any
         // queries or user-triggered tmux commands depend on this client.
         // (T6-aware: a reconnect that dropped while yielded re-derives the
         // authority stamp first instead of stealing the grid back.)
+        if participatesInGridAuthority { beginGridAuthorityScopeResolution() }
         replayAttachInitClientSize()
 
-        sendControlCommand("refresh-client -f pause-after=5")
-        sendControlCommand(
-            "refresh-client -B '\(Self.bellSubscriptionName):%*:#{window_bell_flag}'"
-        )
+        sendControlCommand(RenderCommands.pauseAfter())
+        // Registered per pane once the window list below has answered; see
+        // `sendPendingSubscriptionCommands`.
+        runtimeEngine.subscriptionRequests.bell = true
+        runtimeEngine.subscriptionRequests.windowOrder = true
         if participatesInGridAuthority {
-            // Authority stamp push channel. Registered after the attach-init
-            // stamp write above, so the initial delivery already reflects our
-            // own claim on a fresh takeover.
-            sendControlCommand(
-                "refresh-client -B '\(Self.gridAuthoritySubscriptionName):%*:#{\(Self.gridAuthorityOption)}'"
-            )
+            sendGridAuthoritySubscription()
         }
 
         // Field order is load-bearing: fixed-grammar fields (id, index, layout,
@@ -6079,13 +9718,14 @@ public final class TmuxController {
             self.handleHydratedPaneList(lines: lines)
         }
 
-        sendControlCommand("display-message -p '#{window_id}'") { [weak self] result in
+        sendControlCommand(TmuxRuntimeHydrationQuery.activeWindowCommand) { [weak self] result in
             guard let self = self,
                   self.isCurrentGeneration(generation)
             else { return }
             guard case .success(let responseLines) = result,
-                  let head = responseLines.first(where: { !$0.isEmpty }),
-                  let activeId = Self.parseWindowIdString(head)
+                  let activeId = TmuxRuntimeHydrationQuery.activeWindowID(lines: responseLines)
+                    ?? responseLines.first(where: { !$0.isEmpty })
+                        .flatMap(Self.parseWindowIdString)
             else {
                 Self.logDiagnostic(
                     "hydrate active-window parse-failed result='\(Self.describe(result))'"
@@ -6109,6 +9749,9 @@ public final class TmuxController {
     }
 
     private func handleHydratedWindowList(lines: [String]) {
+        if executingCommandReplySnapshot != nil {
+            legacyTopologyReplayConnectionGeneration = controlConnectionGeneration
+        }
         var discoveredWindows: [WindowInfo] = []
 
         for line in lines {
@@ -6143,6 +9786,7 @@ public final class TmuxController {
         }
 
         windows = discoveredWindows
+        publishWindowListQueryToCore()
         isWindowListHydrated = true
         if clientSizePolicy == .preserveServerGeometry,
            reverseAttachPeers.isEmpty,
@@ -6201,7 +9845,7 @@ public final class TmuxController {
         // Skipped while yielded: forcing here would steal the grid back
         // from the peer that owns the authority stamp (T8).
         if let size = lastKnownSize,
-           !gridAuthority.isPeer || gridAuthorityReclaimInFlight {
+           !gridAuthority.isPeer || gridAuthorityLifecycle.claim != nil {
             forceWindowSizesToClientSize(size)
         }
     }
@@ -6246,6 +9890,7 @@ public final class TmuxController {
             activePaneId = window(activeWindowId)?.activePaneId
         }
         rebuildPaneWindowTable()
+        publishWindowListQueryToCore()
 
         Self.logDiagnostic(
             "hydrate panes active=\(windows.map { "\($0.id):\(String(describing: $0.activePaneId)):\($0.activePaneTitle ?? "nil")" }) paneCounts=\(windows.map { "\($0.id):\($0.panes.count)" })"
@@ -6276,17 +9921,43 @@ public final class TmuxController {
         Self.logDiagnostic(
             "hydrate active-window result=\(activeId) generation=\(generation) lines=\(responseLines.count)"
         )
-        ensureWindow(activeId)
-        activeWindowId = activeId
-        activePaneId = window(activeId)?.activePaneId
+        let querySnapshot = executingCommandReplySnapshot ?? runtimeEngine.snapshot
+        guard window(activeId) != nil else {
+            Self.logDiagnostic(
+                "hydrate active-window ignored missing-window=\(activeId) generation=\(generation)"
+            )
+            return
+        }
+        activeWindowQueryRebase = (
+            windowID: activeId,
+            sessionID: querySnapshot.sessionID,
+            connectionGeneration: controlConnectionGeneration
+        )
+        pendingHydratedActiveWindow = (
+            windowID: activeId,
+            generation: generation,
+            reason: reason
+        )
+    }
+
+    private func finalizeHydratedActiveWindow(
+        _ activeId: WindowId,
+        generation: Int,
+        reason: String,
+        snapshot: TmuxSnapshot
+    ) {
 
         switch controlPath {
         case .inline:
-            refreshRenderedWindow(
-                windowId: activeId,
-                generation: generation,
-                reason: "\(reason)-active",
-                stage: .deep
+            // Hydration has now supplied the authoritative layout. A split
+            // window must retire `.live` before the ledger can enqueue a
+            // shared repaint; PaneGridView declares pane surfaces as their
+            // emulators mount.
+            redeclareInlineRenderSurfaces()
+            updateRenderLedgerConfiguration()
+            executeRenderEffects(
+                renderLedger.synchronize(snapshot: snapshot),
+                snapshot: snapshot
             )
         case .sideChannel:
             refreshActivePaneMetadataIfNeeded(
@@ -6296,14 +9967,16 @@ public final class TmuxController {
             )
         }
 
-        if gridAuthorityClaimPending, gridAuthorityFenceTarget == nil {
+        if gridClaimAwaitsFence, gridAuthoritySession.claimFence == nil,
+           let claim = gridAuthorityLifecycle.claim {
+            // The claim's fence waited for an active window.
             queueGridClaimFenceSequence(
                 connectionGeneration: controlConnectionGeneration,
-                claimGeneration: gridAuthorityClaimGeneration,
+                claimGeneration: claim.generation,
                 reason: "\(reason)-window-hydrated",
                 replaySize: true
             )
-        } else if !gridAuthorityClaimPending {
+        } else if !gridClaimAwaitsFence {
             probeSteadyGridAuthorityWindowSizePolicy(
                 windowId: activeId,
                 reason: reason
@@ -6341,12 +10014,68 @@ public final class TmuxController {
         let windowName: String?
         let currentPath: String?
         let agentStateJSON: String?
+        var isAlternateScreen: Bool? = nil
+        var isMouseReporting: Bool? = nil
+        var isSgrMouse: Bool? = nil
     }
 
     private func sendPaneMetadataSubscription() {
-        sendControlCommand(
-            "refresh-client -B '\(Self.paneMetadataSubscriptionName):%*:\(Self.paneMetadataSubscriptionFormat)'"
-        )
+        runtimeEngine.subscriptionRequests.paneMetadata = true
+        sendPendingSubscriptionCommands()
+    }
+
+    /// Put the core's `refresh-client -B` changes on the wire: the requested
+    /// feeds for panes that appeared, removals for panes that closed. The
+    /// core registers nothing until this connection's window list has
+    /// answered, so this is asked after every read.
+    ///
+    /// Sent on the next main-actor turn, not inline: a hydration or a burst
+    /// of layout changes spans several reads, and one reconciliation after
+    /// them registers each pane once instead of interleaving registrations
+    /// with the render queries those same reads start. The engine, not this
+    /// turn, decides what is pending, so a flush that runs after a reconnect
+    /// registers the new connection's panes or nothing.
+    private func sendPendingSubscriptionCommands() {
+        guard mode == .tmuxControl, !subscriptionFlushScheduled else { return }
+        subscriptionFlushScheduled = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.subscriptionFlushScheduled = false
+            guard self.mode == .tmuxControl else { return }
+            for command in self.runtimeEngine.takePendingSubscriptionCommands() {
+                self.sendControlCommand(command)
+            }
+        }
+    }
+
+    /// Drain the core's coalesced order-refresh request through the same
+    /// correlated list query used by attach hydration. One dirty follow-up is
+    /// retained by the core while this command is in flight.
+    private func sendPendingWindowOrderRefreshIfNeeded() {
+        guard mode == .tmuxControl,
+              let command = runtimeEngine.takePendingOrderRefreshCommand()
+        else { return }
+        let connectionGeneration = controlConnectionGeneration
+        sendControlCommand(command) { [weak self] result in
+            guard let self,
+                  self.controlConnectionGeneration == connectionGeneration,
+                  self.mode == .tmuxControl
+            else { return }
+            switch result {
+            case .success(let lines):
+                // This is the core's tagged hydration row, already ingested
+                // before the correlated platform completion is delivered.
+                // Validate with the same strict shared parser; the legacy
+                // adapter parser expects an untagged @id first column.
+                let valid = TmuxRuntimeHydrationQuery.didIngestWindowList(lines: lines, snapshot: self.runtimeEngine.snapshot)
+                self.runtimeEngine.completeOrderRefresh(succeeded: valid)
+            case .failure:
+                self.runtimeEngine.completeOrderRefresh(succeeded: false)
+            }
+            self.projectCoreSnapshot()
+            self.finishConfirmedWindowOrderMutationIfNeeded()
+            self.sendPendingWindowOrderRefreshIfNeeded()
+        }
     }
 
     private static func parseWindowListLine(_ line: String) -> WindowInfo? {
@@ -6564,128 +10293,41 @@ public final class TmuxController {
         )
     }
 
+    /// Projects the portable parser into the Apple view model. The field
+    /// layout, escape decoding and default-title rule are all owned by
+    /// `TmuxPaneMetadataSubscription`.
     static func parsePaneSubscriptionMetadata(
         _ value: String,
         fallbackWindowId: WindowId,
         fallbackPaneId: PaneId
     ) -> PaneSubscriptionMetadata? {
-        let line = decodeControlEscapes(value)
-        let parts = line.split(
-            separator: "\t",
-            omittingEmptySubsequences: false
-        )
-        let windowId = parts.first
-            .flatMap { parseWindowIdString(String($0)) }
-            ?? fallbackWindowId
-        let paneId = parts.count >= 2
-            ? (parsePaneIdString(String(parts[1])) ?? fallbackPaneId)
-            : fallbackPaneId
-        let active = parts.count >= 3 ? String(parts[2]) == "1" : false
-        let contentRect: CellRect?
-        let currentCommandIndex: Int
-        if parts.count >= 11,
-           let left = Int(parts[3]),
-           let top = Int(parts[4]),
-           let width = Int(parts[5]),
-           let height = Int(parts[6]) {
-            contentRect = CellRect(width: width, height: height, x: left, y: top)
-            currentCommandIndex = 7
-        } else {
-            contentRect = nil
-            currentCommandIndex = 3
-        }
-        let currentCommand = parts.count > currentCommandIndex ? nonEmpty(String(parts[currentCommandIndex])) : nil
-        let titleIndex = currentCommandIndex + 1
-        let title = parts.count > titleIndex ? nonEmpty(String(parts[titleIndex])) : nil
-        let windowNameIndex = currentCommandIndex + 2
-        let windowName = parts.count > windowNameIndex ? nonEmpty(String(parts[windowNameIndex])) : nil
-        let hostIndex = currentCommandIndex + 3
-        let host = parts.count > hostIndex ? nonEmpty(String(parts[hostIndex])) : nil
-        let currentPathIndex = currentCommandIndex + 4
-        let currentPath = parts.count > currentPathIndex ? nonEmpty(String(parts[currentPathIndex])) : nil
-        let agentStateIndex = currentCommandIndex + 5
-        let agentStateJSON = parts.count > agentStateIndex ? nonEmpty(String(parts[agentStateIndex])) : nil
-
+        guard let update = TmuxPaneMetadataSubscription.parse(
+            value,
+            fallbackWindowID: fallbackWindowId,
+            fallbackPaneID: fallbackPaneId
+        ) else { return nil }
         return PaneSubscriptionMetadata(
-            windowId: windowId,
-            paneId: paneId,
-            isActive: active,
-            contentRect: contentRect,
-            currentCommand: currentCommand,
-            paneTitle: title,
-            paneTitleIsDefault: isDefaultPaneTitle(title, host: host),
-            windowName: windowName,
-            currentPath: currentPath,
-            agentStateJSON: agentStateJSON
+            windowId: update.windowID,
+            paneId: update.paneID,
+            isActive: update.isActive,
+            contentRect: update.contentRect,
+            currentCommand: update.currentCommand,
+            paneTitle: update.paneTitle,
+            paneTitleIsDefault: update.paneTitleIsDefault,
+            windowName: update.windowName,
+            currentPath: update.currentPath,
+            agentStateJSON: update.agentStateJSON,
+            isAlternateScreen: update.isAlternateScreen,
+            isMouseReporting: update.isMouseReporting,
+            isSgrMouse: update.isSgrMouse
         )
     }
 
-    private static func decodeControlEscapes(_ value: String) -> String {
-        let input = Array(value.utf8)
-        var output: [UInt8] = []
-        output.reserveCapacity(input.count)
-        var i = 0
-
-        while i < input.count {
-            guard input[i] == 0x5C /* \ */ else {
-                output.append(input[i])
-                i += 1
-                continue
-            }
-
-            if i + 1 < input.count {
-                switch input[i + 1] {
-                case 0x74: // t
-                    output.append(0x09)
-                    i += 2
-                    continue
-                case 0x72: // r
-                    output.append(0x0D)
-                    i += 2
-                    continue
-                case 0x6E: // n
-                    output.append(0x0A)
-                    i += 2
-                    continue
-                case 0x5C: // \
-                    output.append(0x5C)
-                    i += 2
-                    continue
-                default:
-                    break
-                }
-            }
-
-            if i + 3 < input.count,
-               isOctalDigit(input[i + 1]),
-               isOctalDigit(input[i + 2]),
-               isOctalDigit(input[i + 3])
-            {
-                let value = Int(input[i + 1] - 0x30) << 6
-                    | Int(input[i + 2] - 0x30) << 3
-                    | Int(input[i + 3] - 0x30)
-                if value < 256 {
-                    output.append(UInt8(value))
-                    i += 4
-                    continue
-                }
-            }
-
-            output.append(input[i])
-            i += 1
-        }
-
-        return String(decoding: output, as: UTF8.self)
-    }
-
-    private static func isOctalDigit(_ byte: UInt8) -> Bool {
-        byte >= 0x30 && byte <= 0x37
-    }
 
     private func handlePaneMetadataSubscription(_ metadata: PaneSubscriptionMetadata) {
-        if let agentStateJSON = metadata.agentStateJSON {
-            paneAgentStateObserver?(metadata.paneId, agentStateJSON)
-        }
+        // The pane's `@tessera_agent_state` is not read here: the shared
+        // runtime collects it for the whole batch, so both platforms observe
+        // one lifecycle feed instead of one each. See `deliverAgentStates`.
         guard indexOfWindow(metadata.windowId) != nil else { return }
 
         if let windowName = Self.nonEmpty(metadata.windowName) {
@@ -6693,7 +10335,7 @@ public final class TmuxController {
         }
 
         // Track every pane's title/flag, not just the active one — the wire
-        // already delivers all of them via the `%*` wildcard subscription.
+        // already delivers all of them, one subscription per pane.
         // This only updates the per-pane `panes[]` model; the window-level
         // `activePaneTitle` (tab label) stays gated to the active pane below.
         upsertPaneInfo(
@@ -6707,6 +10349,14 @@ public final class TmuxController {
         )
         paneWindowTable[metadata.paneId] = metadata.windowId
         updatePaneCurrentPath(metadata.currentPath, for: metadata.paneId)
+        // After the upsert, which forgets a pane's modes when its command
+        // changes: this payload read them from the server at the same moment.
+        updatePaneInteractionStateIfChanged(
+            paneId: metadata.paneId,
+            isAlternateScreen: metadata.isAlternateScreen,
+            isMouseReporting: metadata.isMouseReporting,
+            isSgrMouse: metadata.isSgrMouse
+        )
 
         let trackedActivePane = window(metadata.windowId)?.activePaneId
         guard metadata.isActive
@@ -6836,11 +10486,13 @@ public final class TmuxController {
     /// Pane titles are tracked separately and remain the preferred
     /// display label when present.
     private func queryWindowDetails(windowId: WindowId) {
-        // Same field-order contract as the attach-init `list-windows`:
-        // fixed-grammar fields (index, layout, visible_layout, zoomed_flag)
-        // first, `#{window_name}` LAST so a tab in the name can't shift them.
+        // Command grammar and reply parser both live in the shared core, so
+        // Android asks the same question and reads the same answer. The core's
+        // own runtime folds this tagged reply into the shared snapshot on its
+        // way past; the completion below only mirrors it into this
+        // controller's legacy window model.
         sendControlCommand(
-            "display-message -p -t \(windowId.description) '#{window_index}\t#{window_layout}\t#{window_visible_layout}\t#{window_zoomed_flag}\t#{window_name}'"
+            TmuxRuntimeHydrationQuery.windowDetailsCommand(windowID: windowId)
         ) { [weak self] result in
             guard let self else { return }
             // The query answered (or failed/cancelled) — the pane count is
@@ -6855,929 +10507,42 @@ public final class TmuxController {
                 }
             }
             guard case .success(let lines) = result,
-                  let line = lines.first(where: { !$0.isEmpty })
+                  let details = TmuxRuntimeHydrationQuery.windowDetails(lines: lines),
+                  case let queried = details.window,
+                  queried.id == windowId,
+                  let idx = self.windows.firstIndex(where: { $0.id == windowId })
             else { return }
-            // The index field is a pure integer while a layout string never
-            // is, so probing field 1 tolerates a pre-index 4-field reply.
-            let probe = line.split(
-                separator: "\t",
-                maxSplits: 1,
-                omittingEmptySubsequences: false
-            )
-            let index: Int? = probe.first.flatMap { Int($0) }
-            let fixedFieldOffset = index != nil ? 1 : 0
-            let fields = line.split(
-                separator: "\t",
-                maxSplits: 3 + fixedFieldOffset,
-                omittingEmptySubsequences: false
-            )
-            guard fields.count == 4 + fixedFieldOffset else { return }
-            guard var idx = self.windows.firstIndex(where: { $0.id == windowId })
-            else { return }
-            if let index {
+            if let index = queried.index {
                 self.windows[idx].index = index
-                // The new window may have filled an index gap left by an
-                // earlier close (plain `new-window` takes the lowest free
-                // index), so its arrival-order slot at the end of the array
-                // can be wrong. Re-sort now that the true index is known —
-                // otherwise the next reattach hydrates tmux's order and the
-                // tabs visibly reshuffle.
-                self.resortWindowsByTmuxIndex()
-                // The sort may have moved this window (and its neighbors).
-                guard let sortedIdx = self.windows.firstIndex(where: { $0.id == windowId })
-                else { return }
-                idx = sortedIdx
             }
-            if self.windows[idx].layout == nil, !fields[fixedFieldOffset].isEmpty {
+            // A real `%layout-change` that arrived while this query was in
+            // flight is fresher; only apply the reply when layout is still
+            // unknown.
+            if self.windows[idx].layout == nil, let layout = details.rawLayout {
                 // handleLayoutChange owns the downstream consequences
                 // (pane merge, pane→window table, mosh pane border),
                 // exactly as if tmux had notified us.
                 self.handleLayoutChange(
                     windowId: windowId,
-                    layout: String(fields[fixedFieldOffset]),
-                    visibleLayout: fields[1 + fixedFieldOffset].isEmpty
-                        ? nil
-                        : String(fields[1 + fixedFieldOffset]),
-                    rawFlags: fields[2 + fixedFieldOffset] == "1" ? "Z" : nil
+                    layout: layout,
+                    visibleLayout: details.rawVisibleLayout,
+                    rawFlags: queried.isZoomed ? "Z" : nil
                 )
             }
-            let name = String(fields[3 + fixedFieldOffset])
-            if !name.isEmpty,
+            // Don't overwrite a confirmed name from a real `%window-renamed`
+            // that landed between query and reply.
+            if let name = queried.name,
                let idx = self.windows.firstIndex(where: { $0.id == windowId }),
                self.windows[idx].windowName == nil {
                 self.windows[idx].windowName = name
             }
+            self.publishWindowMetadataToCore(windowId)
+            self.projectCoreSnapshot()
         }
     }
 
-    // MARK: - Inline rendered-window refresh
 
-    /// Query tmux for the target window's active pane, cursor, pane
-    /// title, window name, and terminal modes; then capture and repaint
-    /// SwiftTerm if the request is still current.
-    ///
-    /// The flow is necessarily asynchronous because tmux's responses
-    /// come back as separate `%begin`/`%end` frames on the wire. We
-    /// chain two callbacks via `sendControlCommand(_:completion:)`:
-    ///
-    /// 1. `display-message -p -t @N ...` resolves the active pane id,
-    ///    cursor position, pane title, and fallback window name in a
-    ///    single round trip.
-    /// 2. A viewport refresh captures the visible screen first; a deep
-    ///    refresh captures scrollback as well, or splits primary/alt
-    ///    buffers when tmux reports the pane is in alternate screen.
-    ///
-    /// On any failure — command error, malformed response, controller
-    /// reset mid-refresh, active-window switch — the refresh aborts.
-    /// This is a soft-fail rather than a visible error because the
-    /// user is mid-interaction and a pop-up would be distracting.
-    private func refreshRenderedWindow(
-        windowId: WindowId,
-        generation: Int,
-        reason: String,
-        stage: RenderStage = .viewport,
-        queueWaitStartedAt: TimeInterval? = nil
-    ) {
-        guard controlPath == .inline else { return }
-        if awaitingAppForegroundRefresh {
-            clearPendingRenderRefresh(windowId: windowId, generation: generation)
-            Self.logDiagnostic(
-                "render-refresh deferred-inactive window=\(windowId) generation=\(generation) stage=\(stage) reason=\(reason)"
-            )
-            return
-        }
-        if isForegroundOutputCoalescing {
-            // A state change can supersede the original foreground request.
-            // Transfer ownership only when this call will actually perform the
-            // replacement shared-surface capture; grid/no-window paths release
-            // the barrier explicitly instead.
-            relinquishForegroundPaneRefreshOwnership()
-            foregroundOutputRefreshGeneration = generation
-        }
-        // Grid windows are painted per-pane by the app (refreshPane), not the
-        // shared terminal — skip the shared repaint so the two paths don't
-        // fight over renderedPaneId / displayWillSwap. Mark ready so the launch
-        // overlay can still drop when switching to a grid window.
-        if window(windowId)?.rendersAsPaneGrid == true {
-            abandonSharedRenderRecovery()
-            if isForegroundOutputCoalescing {
-                endForegroundOutputCoalescing()
-            }
-            markInitialRenderReady()
-            return
-        }
-        pendingRenderRefresh = (windowId: windowId, generation: generation, stage: stage)
-        let requiresExclusiveCommandQueue = isInitialRenderReady && stage != .deep
-        if requiresExclusiveCommandQueue, !pendingCommands.isEmpty {
-            let now = ProcessInfo.processInfo.systemUptime
-            let startedAt = queueWaitStartedAt ?? now
-            let elapsed = now - startedAt
-            if elapsed < max(0, renderCommandQueueMaxWait) {
-                if queueWaitStartedAt == nil {
-                    Self.logDiagnostic(
-                        "render-refresh wait-command-queue controller=\(diagnosticID) window=\(windowId) generation=\(generation) stage=\(stage) pending=\(pendingCommands.count) maxWaitMs=\(Int(renderCommandQueueMaxWait * 1_000)) reason=\(reason)"
-                    )
-                }
-                waitForCommandQueueBeforeRender(
-                    windowId: windowId,
-                    generation: generation,
-                    reason: reason,
-                    stage: stage,
-                    startedAt: startedAt
-                )
-                return
-            }
-            Self.logDiagnostic(
-                "render-refresh command-queue-wait-expired controller=\(diagnosticID) window=\(windowId) generation=\(generation) stage=\(stage) pending=\(pendingCommands.count) waitedMs=\(Int(elapsed * 1_000)) reason=\(reason)"
-            )
-        }
-        renderCommandQueueWaitTask?.cancel()
-        renderCommandQueueWaitTask = nil
-        Self.logDiagnostic(
-            "render-refresh send-metadata window=\(windowId) generation=\(generation) stage=\(stage) reason=\(reason)"
-        )
-        let sizeEpoch = clientSizeEpoch
-        sendControlCommand(
-            "display-message -p -t \(windowId.description) '\(Self.renderedPaneMetadataFormat)'"
-        ) { [weak self] result in
-            guard let self else { return }
-            guard self.isCurrentGeneration(generation),
-                  self.controlPath == .inline,
-                  self.activeWindowId == windowId
-            else {
-                self.clearPendingRenderRefresh(windowId: windowId, generation: generation)
-                Self.logDiagnostic(
-                    "render-refresh metadata stale window=\(windowId) generation=\(generation) result='\(Self.describe(result))'"
-                )
-                return
-            }
-            if self.awaitingAppForegroundRefresh {
-                self.clearPendingRenderRefresh(windowId: windowId, generation: generation)
-                Self.logDiagnostic(
-                    "render-refresh metadata-deferred-inactive window=\(windowId) generation=\(generation) stage=\(stage) reason=\(reason)"
-                )
-                return
-            }
-            guard case .success(let lines) = result,
-                  let head = lines.first(where: { !$0.isEmpty }),
-                  let parsed = Self.parseRenderedPaneState(head)
-            else {
-                self.abortRenderRefreshIfCurrent(
-                    windowId: windowId,
-                    generation: generation,
-                    stage: stage,
-                    reason: "metadata"
-                )
-                Self.logDiagnostic(
-                    "render-refresh metadata failed window=\(windowId) generation=\(generation) stage=\(stage) result='\(Self.describe(result))' detail=\(Self.describeMetadataResponse(result))"
-                )
-                return
-            }
-
-            // A parse that succeeded on a tab-less reply means the host
-            // sanitized our separators — and it sanitizes every reply body
-            // the same way, so a capture-pane paint would render its escape
-            // sequences as literal garbage. On the initial attach, latch the
-            // pane the metadata named and let live `%output` (which travels
-            // escaped by the control protocol, not through reply bodies)
-            // paint the terminal. Established windows keep the fail-closed
-            // abort: stale-but-real content beats garbage.
-            if !head.contains("\t") {
-                self.commandRepliesSanitized = true
-                if !self.isInitialRenderReady {
-                    self.latchRenderedPaneWithoutCapture(
-                        windowId: windowId,
-                        state: parsed,
-                        generation: generation
-                    )
-                    return
-                }
-                self.abortRenderRefreshIfCurrent(
-                    windowId: windowId,
-                    generation: generation,
-                    stage: stage,
-                    reason: "metadata-sanitized"
-                )
-                return
-            }
-
-            let resolvedStage = self.resolvedRenderStage(
-                requestedStage: stage,
-                windowId: windowId,
-                state: parsed,
-                generation: generation
-            )
-            if resolvedStage != stage {
-                self.pendingRenderRefresh = (
-                    windowId: windowId,
-                    generation: generation,
-                    stage: resolvedStage
-                )
-                Self.logDiagnostic(
-                    "render-refresh promoted window=\(windowId) generation=\(generation) from=\(stage) to=\(resolvedStage) pane=\(parsed.paneId) paneAlt=\(parsed.paneInAltScreen)"
-                )
-            }
-
-            self.captureRenderedWindow(
-                windowId: windowId,
-                state: parsed,
-                generation: generation,
-                reason: reason,
-                stage: resolvedStage,
-                sizeEpoch: sizeEpoch
-            )
-        }
-    }
-
-    private func resolvedRenderStage(
-        requestedStage: RenderStage,
-        windowId: WindowId,
-        state: RenderedPaneState,
-        generation: Int
-    ) -> RenderStage {
-        guard requestedStage == .viewportOnly else { return requestedStage }
-        let previousRenderedWindowId = renderedWindowId ?? abortedRenderedWindowId
-        let terminalAltScreen = terminalIsInAltScreen?() == true
-        let retainedOutputCanAdvanceTerminalState = foregroundOutputRefreshGeneration == generation
-            && coalescedForegroundOutput[state.paneId]?.isEmpty == false
-        let canRefreshInPlace = previousRenderedWindowId == windowId
-            && renderedPaneId == state.paneId
-            && (terminalAltScreen == state.paneInAltScreen || retainedOutputCanAdvanceTerminalState)
-        return canRefreshInPlace ? .viewportOnly : .viewport
-    }
-
-    /// Sanitized-replies host, initial attach: skip the capture (its body
-    /// would paint garbage) and latch the pane the metadata named so live
-    /// `%output` — which travels octal-escaped through the control protocol,
-    /// untouched by reply sanitization — feeds the shared terminal directly.
-    /// The screen fills on the pane's next output; the app side pairs this
-    /// with a "press any key" affordance when the pane is quiet.
-    private func latchRenderedPaneWithoutCapture(
-        windowId: WindowId,
-        state: RenderedPaneState,
-        generation: Int
-    ) {
-        clearPendingRenderRefresh(windowId: windowId, generation: generation)
-        renderRetryTask?.cancel()
-        renderRetryTask = nil
-        activePaneId = state.paneId
-        updateActivePane(
-            windowId: windowId,
-            paneId: state.paneId,
-            paneTitle: state.paneTitle,
-            activePaneTitleIsDefault: state.paneTitleIsDefault
-        )
-        renderedPaneId = state.paneId
-        renderedWindowId = windowId
-        preloadTerminalDefaultColorReportIfNeeded(for: state.paneId)
-        markInitialRenderReady()
-        Self.logDiagnostic(
-            "render-refresh capture-skipped latched pane=\(state.paneId) generation=\(generation) reason=replies-sanitized"
-        )
-    }
-
-    private func captureRenderedWindow(
-        windowId: WindowId,
-        state: RenderedPaneState,
-        generation: Int,
-        reason: String,
-        stage: RenderStage,
-        sizeEpoch: Int
-    ) {
-        // Belt-and-braces for every flow that reaches a capture (attach,
-        // settled viewport, foreground repair): once a reply has proven this
-        // host sanitizes bodies, no capture may paint.
-        guard !commandRepliesSanitized else {
-            abortRenderRefreshIfCurrent(
-                windowId: windowId,
-                generation: generation,
-                stage: stage,
-                reason: "capture-suppressed-sanitized"
-            )
-            return
-        }
-        switch stage {
-        case .viewport, .viewportOnly:
-            captureViewport(windowId: windowId, state: state, generation: generation, reason: reason, stage: stage, sizeEpoch: sizeEpoch)
-        case .deep where state.paneInAltScreen:
-            captureDeepAltScreen(windowId: windowId, state: state, generation: generation, reason: reason, sizeEpoch: sizeEpoch)
-        case .deep:
-            captureDeepPrimary(windowId: windowId, state: state, generation: generation, reason: reason, sizeEpoch: sizeEpoch)
-        }
-    }
-
-    private func captureViewport(
-        windowId: WindowId,
-        state: RenderedPaneState,
-        generation: Int,
-        reason: String,
-        stage: RenderStage,
-        sizeEpoch: Int
-    ) {
-        sendCaptureCommand(
-            "capture-pane -p -e -N -t \(windowId.description)",
-            windowId: windowId,
-            generation: generation,
-            stage: stage,
-            failureReason: "capture"
-        ) { [weak self] captureLines in
-            self?.finishRenderedWindowRefresh(
-                windowId: windowId,
-                state: state,
-                generation: generation,
-                stage: stage,
-                reason: reason,
-                sizeEpoch: sizeEpoch,
-                captureLines: captureLines,
-                historyLines: [],
-                savedPrimaryLines: [],
-                altScreenLines: state.paneInAltScreen ? captureLines : nil
-            )
-        }
-    }
-
-    private func captureDeepPrimary(
-        windowId: WindowId,
-        state: RenderedPaneState,
-        generation: Int,
-        reason: String,
-        sizeEpoch: Int
-    ) {
-        let depth = max(0, deepRepaintHistoryDepth)
-        sendCaptureCommand(
-            "capture-pane -p -e -N -S -\(depth) -t \(windowId.description)",
-            windowId: windowId,
-            generation: generation,
-            stage: .deep,
-            failureReason: "deep-capture"
-        ) { [weak self] captureLines in
-            guard let self else { return }
-            let finish: (RenderedPaneState, [String]?) -> Void = { [weak self] settledState, scrubLines in
-                self?.finishRenderedWindowRefresh(
-                    windowId: windowId,
-                    state: settledState,
-                    generation: generation,
-                    stage: .deep,
-                    reason: reason,
-                    sizeEpoch: sizeEpoch,
-                    captureLines: captureLines,
-                    historyLines: [],
-                    savedPrimaryLines: [],
-                    altScreenLines: nil,
-                    scrubLines: scrubLines
-                )
-            }
-            // The ghost scrub (finishRenderedWindowRefresh) re-paints the
-            // visible screen after the deep feed. It must NOT reuse a suffix
-            // slice of this deep capture: capture-pane -e emits SGR
-            // cumulatively, so a slice can start mid-run with its bg/fg
-            // openers stranded above the boundary — legitimate colors repaint
-            // as default (the full-width black band). tmux re-serializes all
-            // open SGR state at row 0 of a viewport-only capture, so chain a
-            // fresh one whenever the scrub will run (history scrolled).
-            guard let visibleRows = self.lastKnownSize?.rows,
-                  visibleRows > 0,
-                  captureLines.count > visibleRows
-            else {
-                finish(state, nil)
-                return
-            }
-
-            // A deep history capture can take tens or hundreds of milliseconds.
-            // During continuity attach that is long enough for the remote TUI
-            // to finish redrawing for the phone grid and move its cursor, even
-            // though no further client-size epoch is emitted. Reusing the
-            // metadata sampled before the history capture then paints the fresh
-            // scrub with the old bottom-row cursor until input or rotation
-            // triggers another refresh. Queue the settled metadata and final
-            // viewport capture together so no other control command can land
-            // between their snapshots in tmux's FIFO.
-            Self.logDiagnostic(
-                "render-refresh send-settled-metadata window=\(windowId) generation=\(generation) stage=deep reason=\(reason)"
-            )
-            self.enqueueControlCommandPair(
-                "display-message -p -t \(windowId.description) '\(Self.renderedPaneMetadataFormat)'",
-                "capture-pane -p -e -N -t \(windowId.description)"
-            ) { [weak self] metadataResult, captureResult in
-                guard let self else { return }
-                guard self.isCurrentGeneration(generation),
-                      self.controlPath == .inline,
-                      self.activeWindowId == windowId
-                else {
-                    self.clearPendingRenderRefresh(windowId: windowId, generation: generation)
-                    Self.logDiagnostic(
-                        "render-refresh settled-pair stale window=\(windowId) generation=\(generation) metadata='\(Self.describe(metadataResult))' capture='\(Self.describe(captureResult))'"
-                    )
-                    return
-                }
-                guard case .success(let lines) = metadataResult,
-                      let head = lines.first(where: { !$0.isEmpty }),
-                      let settledState = Self.parseRenderedPaneState(head)
-                else {
-                    self.abortRenderRefreshIfCurrent(
-                        windowId: windowId,
-                        generation: generation,
-                        stage: .deep,
-                        reason: "deep-settled-metadata"
-                    )
-                    Self.logDiagnostic(
-                        "render-refresh settled-metadata failed window=\(windowId) generation=\(generation) result='\(Self.describe(metadataResult))' detail=\(Self.describeMetadataResponse(metadataResult))"
-                    )
-                    return
-                }
-                guard settledState.paneId == state.paneId,
-                      !settledState.paneInAltScreen
-                else {
-                    Self.logDiagnostic(
-                        "render-refresh settled-metadata changed window=\(windowId) generation=\(generation) oldPane=\(state.paneId) newPane=\(settledState.paneId) paneAlt=\(settledState.paneInAltScreen)"
-                    )
-                    self.refreshRenderedWindow(
-                        windowId: windowId,
-                        generation: generation,
-                        reason: "deep-settled-state-change",
-                        stage: .deep
-                    )
-                    return
-                }
-                guard case .success(let scrubLines) = captureResult,
-                      !scrubLines.isEmpty
-                else {
-                    self.abortRenderRefreshIfCurrent(
-                        windowId: windowId,
-                        generation: generation,
-                        stage: .deep,
-                        reason: "deep-scrub"
-                    )
-                    Self.logDiagnostic(
-                        "render-refresh capture failed window=\(windowId) generation=\(generation) stage=deep result='\(Self.describe(captureResult))' reason=deep-scrub"
-                    )
-                    return
-                }
-                if settledState.cursorX != state.cursorX || settledState.cursorY != state.cursorY {
-                    Self.logDiagnostic(
-                        "render-refresh cursor-resync window=\(windowId) generation=\(generation) old=\(state.cursorX),\(state.cursorY) new=\(settledState.cursorX),\(settledState.cursorY)"
-                    )
-                }
-                finish(settledState, scrubLines)
-            }
-        }
-    }
-
-    private func captureDeepAltScreen(
-        windowId: WindowId,
-        state: RenderedPaneState,
-        generation: Int,
-        reason: String,
-        sizeEpoch: Int
-    ) {
-        let sendSavedPrimary: ([String]) -> Void = { [weak self] historyLines in
-            guard let self else { return }
-            self.sendCaptureCommand(
-                "capture-pane -p -e -N -a -q -t \(windowId.description)",
-                windowId: windowId,
-                generation: generation,
-                stage: .deep,
-                failureReason: "deep-saved-primary",
-                bodyPolicy: .optionalSupplement
-            ) { [weak self] savedPrimaryLines in
-                guard let self else { return }
-                self.enqueueControlCommandPair(
-                    "display-message -p -t \(windowId.description) '\(Self.renderedPaneMetadataFormat)'",
-                    "capture-pane -p -e -N -t \(windowId.description)"
-                ) { [weak self] metadataResult, captureResult in
-                    guard let self else { return }
-                    guard self.isCurrentGeneration(generation),
-                          self.controlPath == .inline,
-                          self.activeWindowId == windowId
-                    else {
-                        self.clearPendingRenderRefresh(windowId: windowId, generation: generation)
-                        return
-                    }
-                    guard case .success(let metadataLines) = metadataResult,
-                          let head = metadataLines.first(where: { !$0.isEmpty }),
-                          let settledState = Self.parseRenderedPaneState(head)
-                    else {
-                        self.abortRenderRefreshIfCurrent(
-                            windowId: windowId,
-                            generation: generation,
-                            stage: .deep,
-                            reason: "deep-alt-settled-metadata"
-                        )
-                        return
-                    }
-                    guard settledState.paneId == state.paneId,
-                          settledState.paneInAltScreen
-                    else {
-                        Self.logDiagnostic(
-                            "render-refresh settled-alt-state changed window=\(windowId) generation=\(generation) oldPane=\(state.paneId) newPane=\(settledState.paneId) paneAlt=\(settledState.paneInAltScreen)"
-                        )
-                        self.refreshRenderedWindow(
-                            windowId: windowId,
-                            generation: generation,
-                            reason: "deep-alt-settled-state-change",
-                            stage: .deep
-                        )
-                        return
-                    }
-                    guard case .success(let altScreenLines) = captureResult,
-                          !altScreenLines.isEmpty
-                    else {
-                        self.abortRenderRefreshIfCurrent(
-                            windowId: windowId,
-                            generation: generation,
-                            stage: .deep,
-                            reason: "deep-alt"
-                        )
-                        return
-                    }
-                    if settledState.cursorX != state.cursorX || settledState.cursorY != state.cursorY {
-                        Self.logDiagnostic(
-                            "render-refresh cursor-resync window=\(windowId) generation=\(generation) old=\(state.cursorX),\(state.cursorY) new=\(settledState.cursorX),\(settledState.cursorY)"
-                        )
-                    }
-                    self.finishRenderedWindowRefresh(
-                        windowId: windowId,
-                        state: settledState,
-                        generation: generation,
-                        stage: .deep,
-                        reason: reason,
-                        sizeEpoch: sizeEpoch,
-                        captureLines: altScreenLines,
-                        historyLines: historyLines,
-                        savedPrimaryLines: savedPrimaryLines,
-                        altScreenLines: altScreenLines
-                    )
-                }
-            }
-        }
-
-        guard (state.historySize ?? 0) > 0 else {
-            sendSavedPrimary([])
-            return
-        }
-
-        let depth = max(0, deepRepaintHistoryDepth)
-        sendCaptureCommand(
-            "capture-pane -p -e -N -S -\(depth) -E -1 -t \(windowId.description)",
-            windowId: windowId,
-            generation: generation,
-            stage: .deep,
-            failureReason: "deep-history",
-            bodyPolicy: .optionalSupplement
-        ) { historyLines in
-            sendSavedPrimary(historyLines)
-        }
-    }
-
-    private func sendCaptureCommand(
-        _ command: String,
-        windowId: WindowId,
-        generation: Int,
-        stage: RenderStage,
-        failureReason: String,
-        bodyPolicy: CaptureBodyPolicy = .requiredGrid,
-        onSuccess: @escaping ([String]) -> Void
-    ) {
-        sendControlCommand(command) { [weak self] result in
-            guard let self else { return }
-            guard self.isCurrentGeneration(generation),
-                  self.controlPath == .inline,
-                  self.activeWindowId == windowId
-            else {
-                self.clearPendingRenderRefresh(windowId: windowId, generation: generation)
-                Self.logDiagnostic(
-                    "render-refresh capture stale window=\(windowId) generation=\(generation) stage=\(stage) result='\(Self.describe(result))'"
-                )
-                return
-            }
-            guard case .success(let captureLines) = result else {
-                self.abortRenderRefreshIfCurrent(
-                    windowId: windowId,
-                    generation: generation,
-                    stage: stage,
-                    reason: failureReason
-                )
-                Self.logDiagnostic(
-                    "render-refresh capture failed window=\(windowId) generation=\(generation) stage=\(stage) result='\(Self.describe(result))'"
-                )
-                return
-            }
-            // Visible/full-grid `capture-pane -p` emits one body line per
-            // terminal row, including empty strings for a genuinely blank
-            // pane. A successful response with zero rows therefore cannot
-            // describe that grid. Supplemental alternate-screen history and
-            // `capture-pane -a -q` are optional: history may race to empty,
-            // and no saved primary grid legitimately has no body.
-            // The July 19 device log showed an impossible zero-row viewport
-            // being committed as authoritative: RepaintAssembly cleared the
-            // shared SwiftTerm canvas and restored only the cursor, while the
-            // next repaint waited indefinitely behind a nonempty command FIFO.
-            //
-            // Treat zero rows like a transient command failure. Established
-            // swaps retain their previous pixels behind the existing
-            // fail-closed gate; deep-stage failures retain the valid viewport.
-            if case .requiredGrid = bodyPolicy, captureLines.isEmpty {
-                self.abortRenderRefreshIfCurrent(
-                    windowId: windowId,
-                    generation: generation,
-                    stage: stage,
-                    reason: "\(failureReason)-empty"
-                )
-                Self.logDiagnostic(
-                    "render-refresh capture rejected-empty window=\(windowId) generation=\(generation) stage=\(stage) commandCategory=\(Self.commandCategory(command)) clientRows=\(self.lastKnownSize?.rows ?? -1)"
-                )
-                return
-            }
-            onSuccess(captureLines)
-        }
-    }
-
-    private func clearPendingRenderRefresh(windowId: WindowId, generation: Int) {
-        guard let pending = pendingRenderRefresh,
-              pending.windowId == windowId,
-              pending.generation == generation
-        else { return }
-        pendingRenderRefresh = nil
-    }
-
-    /// Paint captured tmux state into SwiftTerm and restore the terminal
-    /// modes tmux reported for the active pane.
-    ///
-    /// Scrollback is cleared via the host's `changeScrollback` toggle, not
-    /// `ESC[3J`. The historical reason (SwiftTerm trimmed `buffer.lines`
-    /// without resyncing the UIScrollView geometry → black screen) is fixed
-    /// in the fork as of d34c15f, so remote `[3J` is safe; the toggle stays
-    /// because it is golden-tested and shipped, and the mosh path needs it
-    /// anyway (render-inert side channel — no controller byte stream to
-    /// carry a `[3J`).
-    private func finishRenderedWindowRefresh(
-        windowId: WindowId,
-        state: RenderedPaneState,
-        generation: Int,
-        stage: RenderStage,
-        reason: String,
-        sizeEpoch: Int,
-        captureLines: [String],
-        historyLines: [String],
-        savedPrimaryLines: [String],
-        altScreenLines: [String]?,
-        scrubLines: [String]? = nil
-    ) {
-        guard feedTerminalWithContext != nil || feedTerminal != nil,
-              isCurrentGeneration(generation),
-              activeWindowId == windowId
-        else {
-            abortRenderRefreshIfCurrent(
-                windowId: windowId,
-                generation: generation,
-                stage: stage,
-                reason: "finish"
-            )
-            return
-        }
-        if awaitingAppForegroundRefresh {
-            clearPendingRenderRefresh(windowId: windowId, generation: generation)
-            Self.logDiagnostic(
-                "render-refresh finish-deferred-inactive window=\(windowId) generation=\(generation) stage=\(stage) reason=\(reason)"
-            )
-            return
-        }
-        // A `refresh-client -C` sent after this refresh's metadata query was
-        // FIFO-processed by tmux before the capture reply: `state` (cursor
-        // row/col) and `captureLines` describe different grids, and painting
-        // the pair shifts rows and misplaces the restored cursor. Discard the
-        // frame and re-run the whole refresh — the new metadata query queues
-        // behind the resize, so the retry snapshot is coherent.
-        if sizeEpoch != clientSizeEpoch,
-           renderSizeResyncAttempts < Self.maxClientSizeResyncAttempts {
-            renderSizeResyncAttempts += 1
-            Self.logDiagnostic(
-                "render-refresh size-resync window=\(windowId) generation=\(generation) stage=\(stage) attempt=\(renderSizeResyncAttempts) reason=\(reason)"
-            )
-            refreshRenderedWindow(
-                windowId: windowId,
-                generation: generation,
-                reason: "size-resync",
-                stage: stage
-            )
-            return
-        }
-
-        // Replay retained same-pane output in one synchronous call before the
-        // captured viewport. This keeps every byte in SwiftTerm's local history
-        // and applies any buffered alternate-screen transition before the
-        // assembler inspects the terminal, while presenting no intermediate
-        // frame between the batch and the authoritative repaint.
-        let completesForegroundOutputCoalescing = foregroundOutputRefreshGeneration == generation
-        if completesForegroundOutputCoalescing,
-           stage == .viewportOnly,
-           renderedPaneId == state.paneId {
-            let retainedOutput = takeCoalescedForegroundOutput(for: state.paneId)
-            if !retainedOutput.bytes.isEmpty {
-                deliverToSharedTerminal(
-                    ArraySlice(retainedOutput.bytes),
-                    context: TerminalFeedContext(
-                        source: .foregroundReplay,
-                        paneId: state.paneId,
-                        windowId: windowId,
-                        generation: generation,
-                        reason: reason
-                    )
-                )
-            }
-        }
-
-        let previousRenderedWindowId = renderedWindowId ?? abortedRenderedWindowId
-        let terminalWasInAltScreen = terminalIsInAltScreen?() == true
-        let refreshesRenderedPaneInPlace = stage == .viewportOnly
-            && previousRenderedWindowId == windowId
-            && renderedPaneId == state.paneId
-            && terminalWasInAltScreen == state.paneInAltScreen
-        abortedRenderedWindowId = nil
-        if !refreshesRenderedPaneInPlace {
-            displayWillSwap?(previousRenderedWindowId, windowId, state.paneInAltScreen)
-        }
-        let bytes = RepaintAssembly.assemble(
-            state: state,
-            captureLines: captureLines,
-            historyLines: historyLines,
-            savedPrimaryLines: savedPrimaryLines,
-            altScreenLines: altScreenLines,
-            terminalIsInAltScreen: terminalWasInAltScreen,
-            clientRows: lastKnownSize?.rows,
-            preservePrimaryDuringAltRefresh: refreshesRenderedPaneInPlace && state.paneInAltScreen
-        )
-
-        // Cross-window gray-block bleed repro signal: flag when this window's
-        // capture ends with a non-default background still open. With one shared
-        // terminal across tabs, that pen would bleed into the live %output that
-        // resumes after the swap (the assembler appends a trailing reset to
-        // prevent it). Switch onto a window whose TUI paints a full-row colored
-        // input box (e.g. Codex) to trigger this.
-        let tailContentLines = state.paneInAltScreen ? (altScreenLines ?? captureLines) : captureLines
-        if RepaintAssembly.backgroundLeftOpen(in: tailContentLines) {
-            Self.logDiagnostic(
-                "repaint-bg-open window=\(windowId) from=\(previousRenderedWindowId?.description ?? "nil") stage=\(stage) paneAlt=\(state.paneInAltScreen) lines=\(tailContentLines.count) reason=\(reason)"
-            )
-        }
-
-        // Width-mismatch repro signal for the "half-width gray box" bleed: if the
-        // widest captured row is far narrower than the client column count we
-        // last pushed to tmux, the capture was taken at a stale/smaller grid and
-        // is being painted into a wider terminal, leaving the right margin to
-        // show prior-frame content. clientCols == -1 means we never sized.
-        let captureMaxCols = tailContentLines.reduce(0) { max($0, RepaintAssembly.visibleColumns(in: $1)) }
-        Self.logDiagnostic(
-            "repaint-width window=\(windowId) panes=\(window(windowId)?.paneCount ?? -1) grid=\(window(windowId)?.rendersAsPaneGrid == true) clientCols=\(lastKnownSize?.cols ?? -1) clientRows=\(lastKnownSize?.rows ?? -1) captureMaxCols=\(captureMaxCols) captureRows=\(tailContentLines.count) cursorX=\(state.cursorX) cursorY=\(state.cursorY) stage=\(stage)"
-        )
-
-        let repaintSource: TerminalFeedSource
-        switch stage {
-        case .viewport:
-            repaintSource = .viewportRepaint
-        case .viewportOnly:
-            repaintSource = .viewportRefresh
-        case .deep:
-            repaintSource = .deepRepaint
-        }
-        deliverToSharedTerminal(
-            ArraySlice(bytes),
-            context: TerminalFeedContext(
-                source: repaintSource,
-                paneId: state.paneId,
-                windowId: windowId,
-                generation: generation,
-                captureRows: captureLines.count,
-                reason: reason
-            )
-        )
-
-        // Half-width gray-box ghost scrub. The deep/history repaint feeds the
-        // full scrollback (thousands of rows) through SwiftTerm in one burst,
-        // scrolling ~all of it up into the buffer. That scroll exercises
-        // SwiftTerm's iOS scroll path, which can leave a scrolled row's RIGHT
-        // half holding the previous frame's background in the cell model — the
-        // "half-width gray box" at the screen midpoint (cols >= width/2). So
-        // after the deep scroll lands the history, re-paint just the visible
-        // screen on top of it to scrub any ghost. ESC[2J inside the repaint
-        // clears only the visible screen, so the scrolled-in scrollback is
-        // preserved.
-        //
-        // The scrub paints from `scrubLines` — a fresh viewport capture that
-        // captureDeepPrimary chains after the deep one — NEVER from a suffix
-        // slice of `captureLines`. capture-pane -e emits SGR cumulatively:
-        // an opener appears once and is inherited by every later row, so a
-        // mid-stream slice strands bg/fg/attr openers above its boundary and
-        // RepaintAssembly's fresh pen paints those rows in default colors
-        // (full-width black band over a colored panel — the artifact this
-        // used to cause when it sliced the deep capture). A viewport-only
-        // capture is self-contained: tmux re-serializes all open SGR state
-        // at row 0. When no chained capture landed (scrubLines == nil),
-        // skip the scrub outright rather than fall back to a slice.
-        // Scoped to the non-alt deep stage where the ghost was observed and
-        // only when real history scrolled (more captured rows than fit on
-        // screen); tests pass tiny captures / no size, so this stays inert
-        // there and leaves the golden deep-stage byte spec unchanged.
-        if stage == .deep,
-           !state.paneInAltScreen,
-           !terminalWasInAltScreen,
-           let scrubLines,
-           let visibleRows = lastKnownSize?.rows,
-           visibleRows > 0,
-           captureLines.count > visibleRows {
-            let scrubBytes = RepaintAssembly.assemble(
-                state: state,
-                captureLines: scrubLines,
-                historyLines: [],
-                savedPrimaryLines: [],
-                altScreenLines: nil,
-                terminalIsInAltScreen: false,
-                clientRows: visibleRows
-            )
-            deliverToSharedTerminal(
-                ArraySlice(scrubBytes),
-                context: TerminalFeedContext(
-                    source: .repaintScrub,
-                    paneId: state.paneId,
-                    windowId: windowId,
-                    generation: generation,
-                    captureRows: scrubLines.count,
-                    reason: reason
-                )
-            )
-            Self.logDiagnostic(
-                "repaint-scrub window=\(windowId) visibleRows=\(visibleRows) deepRows=\(captureLines.count) scrubRows=\(scrubLines.count) source=fresh-viewport reason=\(reason)"
-            )
-        }
-
-        markInitialRenderReady()
-        establishedRenderIsFailClosed = false
-        renderedWindowId = windowId
-        renderedPaneId = state.paneId
-        if pausedPanes.contains(state.paneId) {
-            resumePausedPane(state.paneId)
-        }
-        activePaneId = state.paneId
-        updateWindowMetadata(
-            windowId: windowId,
-            windowName: state.windowName,
-            activePaneId: state.paneId,
-            activePaneTitle: state.paneTitle,
-            activePaneTitleIsDefault: state.paneTitleIsDefault,
-            clearTitleWhenMissing: true
-        )
-        renderRetryAttemptsByGeneration[generation] = nil
-        renderSizeResyncAttempts = 0
-        if !refreshesRenderedPaneInPlace {
-            displayDidSwap?(windowId)
-        } else {
-            displayDidRefresh?(windowId)
-        }
-        clearPendingRenderRefresh(windowId: windowId, generation: generation)
-        if completesForegroundOutputCoalescing {
-            endForegroundOutputCoalescing()
-        }
-        completeGridAuthoritySharedRepaintIfNeeded(windowId: windowId)
-        if (stage == .viewport || (stage == .viewportOnly && !refreshesRenderedPaneInPlace)),
-           isCurrentGeneration(generation),
-           activeWindowId == windowId {
-            refreshRenderedWindow(
-                windowId: windowId,
-                generation: generation,
-                reason: "\(reason)-deep",
-                stage: .deep
-            )
-        }
-    }
-
-    struct RenderedPaneState {
-        let paneId: PaneId
-        let cursorX: Int
-        let cursorY: Int
-        let paneTitle: String?
-        let paneTitleIsDefault: Bool
-        let windowName: String?
-        let paneInAltScreen: Bool
-        let historySize: Int?
-        let scrollRegionUpper: Int?
-        let scrollRegionLower: Int?
-        let cursorVisible: Bool?
-        let insertMode: Bool?
-        let keypadCursor: Bool?
-        let keypadApplication: Bool?
-        let wrapMode: Bool?
-        let mouseStandard: Bool?
-        let mouseButton: Bool?
-        let mouseAll: Bool?
-        let mouseSgr: Bool?
-        let originMode: Bool?
-        let altSavedX: Int?
-        let altSavedY: Int?
-
-        var isMouseReporting: Bool {
-            mouseStandard == true || mouseButton == true || mouseAll == true
-        }
-    }
+    typealias RenderedPaneState = TmuxRenderedPaneState
 
     /// Parse the body line of the inline render metadata query.
     /// Expected format:
@@ -7787,123 +10552,15 @@ public final class TmuxController {
     /// `alternate_on` must stay at index 6; capping maxSplits would merge
     /// all appended fields into it and make alt-screen detection fail.
     static func parseRenderedPaneState(_ line: String) -> RenderedPaneState? {
-        let parts = line.split(
-            separator: "\t",
-            omittingEmptySubsequences: false
-        )
-        if let state = parseRenderedPaneState(fields: parts) {
-            return state
-        }
-        return parseSeparatorMangledPaneState(line)
-    }
-
-    /// Fallback for hosts whose tmux returns the reply with every tab in our
-    /// format replaced by one other character (2026-08-17 field report:
-    /// `fields=1 len=78`, all 22 values intact, single-character separators).
-    /// The separator is inferred as the first non-digit character after the
-    /// leading `%<pane-id>` anchor and trusted only when the last sixteen
-    /// fields are all numeric — the strongest shape anchor the format offers.
-    /// When a string field contained the separator itself the token count
-    /// exceeds 22 and the three string fields (title/window/host) are dropped
-    /// as unattributable; the numeric state that rendering needs survives.
-    /// Only the full 22-field modern format is recovered — a mangled line
-    /// short of that has no anchor worth trusting.
-    static func parseSeparatorMangledPaneState(_ line: String) -> RenderedPaneState? {
-        guard line.hasPrefix("%") else { return nil }
-        let afterAnchor = line.dropFirst().drop(while: { ("0"..."9").contains($0) })
-        guard let separator = afterAnchor.first,
-              separator != "\t",
-              afterAnchor.startIndex != line.index(after: line.startIndex)
-        else { return nil }
-        let parts = line.split(separator: separator, omittingEmptySubsequences: false)
-        guard parts.count >= 22 else { return nil }
-        let tail = Array(parts.suffix(16))
-        guard tail.allSatisfy({ Int($0) != nil }) else { return nil }
-        var fields = Array(parts.prefix(3))
-        if parts.count == 22 {
-            // Each string field contributed exactly one token — the mapping
-            // is unambiguous (a separator inside a title would inflate the
-            // count past 22; a missing field cannot happen, the format
-            // always expands all 22).
-            fields.append(contentsOf: parts[3..<6])
-        } else {
-            fields.append(contentsOf: [Substring(), Substring(), Substring()])
-        }
-        fields.append(contentsOf: tail)
-        guard let state = parseRenderedPaneState(fields: fields) else { return nil }
-        let sepHex = String(format: "%02x", separator.unicodeScalars.first?.value ?? 0)
-        logDiagnostic(
-            "metadata-parse fallback engaged sepHex=\(sepHex) fields=\(parts.count) len=\(line.count)"
-        )
-        return state
-    }
-
-    private static func parseRenderedPaneState(fields parts: [Substring]) -> RenderedPaneState? {
-        guard parts.count >= 3,
-              let paneId = parsePaneIdString(String(parts[0])),
-              let cursorX = Int(parts[1]),
-              let cursorY = Int(parts[2])
-        else { return nil }
-        let title = parts.count >= 4 ? nonEmpty(String(parts[3])) : nil
-        let host = parts.count >= 6 ? nonEmpty(String(parts[5])) : nil
-        return RenderedPaneState(
-            paneId: paneId,
-            cursorX: cursorX,
-            cursorY: cursorY,
-            paneTitle: title,
-            paneTitleIsDefault: isDefaultPaneTitle(title, host: host),
-            windowName: parts.count >= 5 ? nonEmpty(String(parts[4])) : nil,
-            // Known transient: alternate_on is sampled at metadata time;
-            // a pane flipping 1049 between this query and the captures
-            // can mis-branch one repaint. Self-heals on the pane's next
-            // output or swap — same exposure class as the resize race.
-            paneInAltScreen: optionalFlag(parts, 6) ?? false,
-            historySize: optionalInt(parts, 7),
-            scrollRegionUpper: optionalInt(parts, 8),
-            scrollRegionLower: optionalInt(parts, 9),
-            cursorVisible: optionalFlag(parts, 10),
-            insertMode: optionalFlag(parts, 11),
-            keypadCursor: optionalFlag(parts, 12),
-            keypadApplication: optionalFlag(parts, 13),
-            wrapMode: optionalFlag(parts, 14),
-            mouseStandard: optionalFlag(parts, 15),
-            mouseButton: optionalFlag(parts, 16),
-            mouseAll: optionalFlag(parts, 17),
-            mouseSgr: optionalFlag(parts, 18),
-            originMode: optionalFlag(parts, 19),
-            altSavedX: optionalCoordinate(parts, 20),
-            altSavedY: optionalCoordinate(parts, 21)
-        )
-    }
-
-    private static func optionalInt(_ parts: [Substring], _ index: Int) -> Int? {
-        guard parts.indices.contains(index) else { return nil }
-        let value = String(parts[index])
-        guard !value.isEmpty else { return nil }
-        return Int(value)
-    }
-
-    /// tmux expands `alternate_saved_x/y` as u_int, so "no saved
-    /// cursor" arrives as 4294967295 (UINT_MAX), not an empty string.
-    /// Anything beyond tmux's SHRT_MAX coordinate range is a sentinel.
-    private static func optionalCoordinate(_ parts: [Substring], _ index: Int) -> Int? {
-        guard let value = optionalInt(parts, index), value >= 0, value <= 32767 else {
-            return nil
-        }
-        return value
-    }
-
-    private static func optionalFlag(_ parts: [Substring], _ index: Int) -> Bool? {
-        guard let value = optionalInt(parts, index) else { return nil }
-        return value != 0
+        TmuxRenderedPaneStateParser.parse(line)
     }
 
     /// Parse a tmux `%<id>` pane-id string into a `PaneId`.
     /// Returns nil for malformed input.
-    private static func parsePaneIdString(_ s: String) -> PaneId? {
-        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasPrefix("%"), let n = Int(trimmed.dropFirst()) else { return nil }
-        return PaneId(n)
+    private static func parsePaneIdString(_ string: String) -> PaneId? {
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("%"), let raw = Int(trimmed.dropFirst()) else { return nil }
+        return PaneId(raw)
     }
 
     private static func logDiagnostic(_ message: @autoclosure () -> String) {
@@ -7978,5 +10635,12 @@ public final class TmuxController {
         default:
             return "other"
         }
+    }
+}
+
+private extension TmuxGridAuthoritySnapshot {
+    var isMine: Bool {
+        if case .mine = self { return true }
+        return false
     }
 }

@@ -1,0 +1,49 @@
+{
+  "limits": {
+    "maximumLifetimeSeconds": 60,
+    "maximumEncodedBytes": 4096,
+    "maximumHostBytes": 255,
+    "maximumFingerprintBytes": 256,
+    "maximumHintBytes": 1024,
+    "maximumCodeBytes": 64
+  },
+  "validOwnerAuthorization": {
+    "challengeID": "11111111-1111-1111-1111-111111111111",
+    "sessionID": "22222222-2222-2222-2222-222222222222",
+    "attemptID": "33333333-3333-3333-3333-333333333333",
+    "policyGeneration": 7,
+    "now": 100,
+    "expiresAt": 160,
+    "reasonCode": "install_key"
+  },
+  "rejections": [
+    {
+      "case": "zeroLifetime",
+      "expiresAt": 100,
+      "expectedError": "invalidLifetime"
+    },
+    {
+      "case": "overlongLifetime",
+      "expiresAt": 161,
+      "expectedError": "invalidLifetime"
+    },
+    {
+      "case": "controlCharacter",
+      "reasonCode": "install\nkey",
+      "expectedError": "invalidDisplayMetadata"
+    },
+    {
+      "case": "staleSessionChallenge",
+      "expectedError": "staleSession"
+    },
+    {
+      "case": "stalePolicyResponse",
+      "responsePolicyGeneration": 8,
+      "expectedError": "stalePolicy"
+    },
+    {
+      "case": "secondConsumption",
+      "expectedError": "alreadyConsumed"
+    }
+  ]
+}

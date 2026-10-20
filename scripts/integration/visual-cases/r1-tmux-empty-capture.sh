@@ -27,7 +27,7 @@ launch_pid="${launch_output##*: }"
 # interval the established first-window pixels must remain visible.
 sleep 3
 xcrun simctl io "$UDID" screenshot "$CASE_DIR/preserved.raw.png" >/dev/null
-sips -r 270 "$CASE_DIR/preserved.raw.png" --out "$CASE_DIR/preserved.png" >/dev/null
+"$HERE/normalize-landscape-screenshot.sh" "$CASE_DIR/preserved.raw.png" "$CASE_DIR/preserved.png" >/dev/null
 rm "$CASE_DIR/preserved.raw.png"
 
 # The harness then satisfies the production controller's scheduled retry with
@@ -36,18 +36,19 @@ rm "$CASE_DIR/preserved.raw.png"
 # interval before asking simctl for the Metal-aware frame.
 sleep 6
 xcrun simctl io "$UDID" screenshot "$CASE_DIR/recovered.raw.png" >/dev/null
-sips -r 270 "$CASE_DIR/recovered.raw.png" --out "$CASE_DIR/recovered.png" >/dev/null
+"$HERE/normalize-landscape-screenshot.sh" "$CASE_DIR/recovered.raw.png" "$CASE_DIR/recovered.png" >/dev/null
 rm "$CASE_DIR/recovered.raw.png"
-if cmp -s "$CASE_DIR/preserved.png" "$CASE_DIR/recovered.png"; then
-  echo "R1 recovery frame never advanced from the preserved viewport" >&2
-  exit 1
-fi
 
 xcrun simctl spawn "$UDID" log show --last 30s --style compact \
   --predicate "processIdentifier == $launch_pid AND eventMessage CONTAINS \"TmuxEmptyCaptureHarness\"" \
   >"$CASE_DIR/harness.log"
 preserved_verdict="$(grep 'phase=preserved' "$CASE_DIR/harness.log" | tail -1)"
 latest_verdict="$(grep 'verdict=' "$CASE_DIR/harness.log" | tail -1)"
+if cmp -s "$CASE_DIR/preserved.png" "$CASE_DIR/recovered.png"; then
+  echo "R1 recovery frame never advanced from the preserved viewport" >&2
+  cat "$CASE_DIR/harness.log" >&2
+  exit 1
+fi
 [[ "$preserved_verdict" == *"token=$run_token ok=true"* ]]
 [[ "$latest_verdict" == *"verdict=recovered token=$run_token"* ]]
 
@@ -61,7 +62,7 @@ cat >"$CASE_DIR/case.json" <<'JSON'
     "recovered.png shows the complete green RECOVERED WINDOW TWO viewport after the authoritative retry, without stale blue rows, black regions, half-width tails, or geometry drift.",
     "Both frames fill the landscape terminal canvas edge-to-edge and keep every numbered row coherent at the surface's measured runtime geometry."
   ],
-  "capture_notes": "DEBUG host-free harness using the production inline TmuxController and production SwiftTerm terminal surface. It measures the live terminal geometry, seeds one rendered window, switches to a second window, injects the July 19 impossible successful zero-row capture, and later satisfies the controller retry with a full recognizable grid. No host connection or user data. preserved.png is captured during the rejected-capture interval; recovered.png is captured after retry. Screenshot pixels were rotated counter-clockwise to normalize simctl's fixed portrait framebuffer into landscape.",
+  "capture_notes": "DEBUG host-free harness using the production inline TmuxController and production SwiftTerm terminal surface. It measures the live terminal geometry, seeds one rendered window, switches to a second window, injects the July 19 impossible successful zero-row capture, and later satisfies the controller retry with a full recognizable grid. No host connection or user data. preserved.png is captured during the rejected-capture interval; recovered.png is captured after retry. Frames are normalized to upright landscape whichever shape simctl returns.",
   "deterministic_precheck": {"verdict": "pass", "details": "The launch-PID- and run-token-scoped host-free production controller logged phase=preserved with no swap/feed caused by the invalid response, then verdict=recovered only after the requested window and pane became authoritative with exactly one swap and one replacement feed. Package tests separately cover the shared terminal, split-pane grid, mosh+tmux side channel, optional alternate history and saved-primary captures, and bounded FIFO recovery."}
 }
 JSON

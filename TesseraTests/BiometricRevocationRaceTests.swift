@@ -40,6 +40,92 @@ struct BiometricRevocationRaceTests {
         #expect(!selection.locksWhenBackgrounded)
     }
 
+    @Test("app-switcher cover follows its opt-in and is forced on by app lock")
+    func appSwitcherCoverPolicy() {
+        #expect(!AppSwitcherPrivacyPolicy.hidesContent(preference: false, requiresOwnerAuthentication: false))
+        #expect(AppSwitcherPrivacyPolicy.hidesContent(preference: true, requiresOwnerAuthentication: false))
+        #expect(AppSwitcherPrivacyPolicy.hidesContent(preference: false, requiresOwnerAuthentication: true))
+        #expect(AppSwitcherPrivacyPolicy.hidesContent(preference: true, requiresOwnerAuthentication: true))
+    }
+
+    /// Runs `body` with the app-switcher and app-lock keys absent, then puts
+    /// the host app's stored values back.
+    @MainActor
+    private func withUntouchedAppSwitcherDefaults(_ body: () async throws -> Void) async rethrows {
+        let defaults = UserDefaults.standard
+        let keys = ["tessera.pref.hideContentInAppSwitcher", "tessera.pref.requireFaceIDToUnlock"]
+        let saved = keys.map { defaults.object(forKey: $0) }
+        defer {
+            for (key, value) in zip(keys, saved) {
+                if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+            }
+        }
+        keys.forEach(defaults.removeObject(forKey:))
+        try await body()
+    }
+
+    @Test("untouched installs leave app-switcher content visible")
+    @MainActor
+    func appSwitcherCoverDefaultsOff() async {
+        await withUntouchedAppSwitcherDefaults {
+            let fresh = AppearancePreferences()
+            #expect(!fresh.hideContentInAppSwitcher)
+            #expect(!fresh.effectiveHideContentInAppSwitcher)
+
+            fresh.hideContentInAppSwitcher = true
+            #expect(AppearancePreferences().hideContentInAppSwitcher, "the opt-in persists")
+
+            fresh.hideContentInAppSwitcher = false
+            fresh.requireFaceIDToUnlock = true
+            #expect(fresh.effectiveHideContentInAppSwitcher)
+            #expect(!AppearancePreferences().hideContentInAppSwitcher, "app lock must not rewrite the stored opt-in")
+        }
+    }
+
+    @Test("app-switcher cover anchor follows the preference and app lock live")
+    @MainActor
+    func appSwitcherCoverAppliesLive() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        )
+        try await withUntouchedAppSwitcherDefaults {
+            let appearance = AppearancePreferences()
+            let host = UIHostingController(rootView: AppSwitcherPrivacyGate(appearance: appearance))
+            let window = UIWindow(windowScene: scene)
+            window.rootViewController = host
+            window.isHidden = false
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            func installedAnchors() async throws -> Int {
+                try await Task.sleep(nanoseconds: 150_000_000)
+                host.view.layoutIfNeeded()
+                func count(_ view: UIView) -> Int {
+                    (view is AppSwitcherPrivacyCover.Anchor ? 1 : 0)
+                        + view.subviews.reduce(0) { $0 + count($1) }
+                }
+                return count(host.view)
+            }
+
+            let untouched = try await installedAnchors()
+            #expect(untouched == 0, "default off installs no cover")
+            appearance.hideContentInAppSwitcher = true
+            let optedIn = try await installedAnchors()
+            #expect(optedIn == 1, "opting in installs the cover without relaunch")
+            appearance.hideContentInAppSwitcher = false
+            let optedOut = try await installedAnchors()
+            #expect(optedOut == 0, "opting out removes it without relaunch")
+            appearance.requireFaceIDToUnlock = true
+            let locked = try await installedAnchors()
+            #expect(locked == 1, "app lock forces the cover on")
+            appearance.requireFaceIDToUnlock = false
+            let unlocked = try await installedAnchors()
+            #expect(unlocked == 0)
+        }
+    }
+
     @Test("app-lock off never locks when backgrounded")
     @MainActor
     func appLockOffRespectsPreferenceOnBackground() {

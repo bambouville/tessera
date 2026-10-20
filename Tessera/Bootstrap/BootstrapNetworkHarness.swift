@@ -87,7 +87,7 @@ final class BootstrapNetworkHarness {
             service: NearbyTransferService(),
             firstOpenStore: BootstrapFirstOpenStore(defaults: defaults),
             biometricAuthorizer: { _ in .authenticated },
-            manifestExporter: { manifest },
+            manifestExporter: { _ in manifest },
             manifestImporter: { received, peerName in
                 try await BootstrapManifestAdapter.apply(
                     received,
@@ -369,7 +369,7 @@ final class BootstrapNetworkHarness {
         )
     }()
 
-    private static let fixtureManifest = BootstrapManifest(
+    static let fixtureManifest = BootstrapManifest(
         hosts: [
             BootstrapHostDescriptor(
                 id: fixtureHostID,
@@ -388,7 +388,7 @@ final class BootstrapNetworkHarness {
             colorScheme: "dark",
             accent: "blue",
             customAccentRGB: 0x0A84FF,
-            monospacedFontName: "JetBrainsMono-Regular",
+            monospacedFontName: "jetbrains_mono",
             terminalFontSize: 14,
             chromeMaterial: "frosted",
             cursorStyle: "block",

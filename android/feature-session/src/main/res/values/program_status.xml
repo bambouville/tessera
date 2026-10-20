@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="program_status_needs_input">needs input</string>
+    <string name="program_status_needs_approval">needs approval</string>
+    <string name="program_status_needs_answer">needs an answer</string>
+    <string name="program_status_sign_in_needed">sign-in needed</string>
+    <string name="program_status_failed">failed</string>
+    <string name="program_status_finished">finished</string>
+    <string name="program_status_working">working</string>
+    <string name="program_status_ready">ready</string>
+    <string name="program_status_unavailable">status unavailable</string>
+    <string name="program_status_program">program</string>
+    <string name="program_status_programs">programs</string>
+    <string name="program_status_needs_attention">needs attention</string>
+    <string name="program_status_visit_checks">visiting a pane marks it checked</string>
+    <string name="program_status_open_pane">open pane</string>
+    <plurals name="program_status_count_need_input">
+        <item quantity="one">%d needs input</item>
+        <item quantity="other">%d need input</item>
+    </plurals>
+    <plurals name="program_status_count_need_approval">
+        <item quantity="one">%d needs approval</item>
+        <item quantity="other">%d need approval</item>
+    </plurals>
+    <plurals name="program_status_count_need_answer">
+        <item quantity="one">%d needs an answer</item>
+        <item quantity="other">%d need answers</item>
+    </plurals>
+    <plurals name="program_status_count_need_sign_in">
+        <item quantity="one">%d needs sign-in</item>
+        <item quantity="other">%d need sign-in</item>
+    </plurals>
+    <plurals name="program_status_count_failed">
+        <item quantity="one">%d failed</item>
+        <item quantity="other">%d failed</item>
+    </plurals>
+    <plurals name="program_status_count_finished">
+        <item quantity="one">%d finished</item>
+        <item quantity="other">%d finished</item>
+    </plurals>
+    <string name="program_status_open_agent_center">open agent center</string>
+    <string name="program_status_raw_session">raw session</string>
+    <string name="program_status_window">window %1$d</string>
+    <string name="program_status_named_window">window %1$d “%2$s”</string>
+    <string name="program_status_pane">pane %1$s</string>
+    <string name="program_status_pane_unavailable">pane unavailable</string>
+    <string name="program_status_all_caught_up">all caught up</string>
+
+    <plurals name="program_status_pane_count">
+        <item quantity="one">%d pane</item>
+        <item quantity="other">%d panes</item>
+    </plurals>
+</resources>

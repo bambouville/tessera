@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="agent_notification_channel_name">エージェントの通知</string>
+    <string name="agent_notification_channel_description">エージェントセンターの要求と完了</string>
+    <string name="agent_notification_needs_input">エージェントが入力待ち</string>
+    <string name="agent_notification_finished">エージェントが完了</string>
+    <string name="agent_notification_body">Tessera を開いて確認してください。</string>
+    <string name="agent_notification_review">確認</string>
+</resources>

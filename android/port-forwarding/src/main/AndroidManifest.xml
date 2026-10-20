@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  This module opens sockets of its own — the forwarding listeners, and the
+  tunnel browser's WebView — so it declares what it needs rather than
+  inheriting it from whichever app happens to embed it. The app module
+  declares the same permission; the merger folds them together.
+
+  The cleartext exemption lives here for the same reason: the tunnel browser is
+  this module's, and declaring it here also covers this module's own
+  instrumented tests, which reach a loopback server through the same WebView
+  path the app does. Without INTERNET even a loopback bind fails with EPERM,
+  which is what the test APK hit before this file declared it.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application android:networkSecurityConfig="@xml/network_security_config" />
+</manifest>

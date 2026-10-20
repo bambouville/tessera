@@ -87,14 +87,6 @@
     "zh-Hans": "配对被拒绝",
     "zh-Hant": "配對遭拒絕"
   },
-  "Sending to %@. Its displayed name is never used as a security decision.": {
-    "de": "Wird an %@ gesendet. Der angezeigte Name ist nie die Grundlage einer Sicherheitsentscheidung.",
-    "es": "Enviando a %@. Su nombre visible nunca se usa como decisión de seguridad.",
-    "fr": "Envoi vers %@. Son nom affiché ne sert jamais de décision de sécurité.",
-    "ja": "%@ に送信します。表示名がセキュリティ上の判断に使われることはありません。",
-    "zh-Hans": "正在发送到 %@。其显示名称绝不会作为安全判断依据。",
-    "zh-Hant": "正在傳送到 %@。其顯示名稱絕不會作為安全判斷依據。"
-  },
   "Setup inherited": {
     "de": "Konfiguration übernommen",
     "es": "Configuración heredada",
@@ -159,14 +151,6 @@
     "zh-Hans": "在来源设备批准传输之前，你需要在两台设备上比对一个六位数代码。",
     "zh-Hant": "在來源裝置核准傳輸之前，你需要在兩台裝置上比對一個六位數代碼。"
   },
-  "approve selected batch": {
-    "de": "Ausgewählte Auswahl freigeben",
-    "es": "aprobar el lote seleccionado",
-    "fr": "approuver la sélection",
-    "ja": "選択した一括処理を承認",
-    "zh-Hans": "批准所选批次",
-    "zh-Hant": "核准所選批次"
-  },
   "cancel": {
     "de": "Abbrechen",
     "es": "cancelar",
@@ -182,14 +166,6 @@
     "ja": "閉じる",
     "zh-Hans": "关闭",
     "zh-Hant": "關閉"
-  },
-  "codes don’t match": {
-    "de": "Codes stimmen nicht überein",
-    "es": "los códigos no coinciden",
-    "fr": "les codes ne correspondent pas",
-    "ja": "コードが一致しません",
-    "zh-Hans": "代码不匹配",
-    "zh-Hant": "代碼不相符"
   },
   "codes match": {
     "de": "Codes stimmen überein",

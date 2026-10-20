@@ -122,6 +122,10 @@ private final class BiometricEvaluation: @unchecked Sendable {
             }
             return .authenticated(BiometricAuthorization(context: context))
         } catch {
+            let nsError = error as NSError
+            if nsError.domain == LAErrorDomain, nsError.code == LAError.Code.systemCancel.rawValue {
+                SSHPromptAttribution.current?.noteInterruptedBySystem()
+            }
             return BiometricGate.map(
                 error: error,
                 fallback: .failed(reason: String(localized: "Authentication failed."))

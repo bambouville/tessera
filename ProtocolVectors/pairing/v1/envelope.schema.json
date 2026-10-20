@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tessera://protocol-vectors/pairing/v1/envelope.schema.json",
+  "title": "Tessera Pairing Generic Envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "payload"],
+  "properties": {
+    "kind": { "enum": ["peerDecision", "transactionMessage", "abort", "completion"] },
+    "payload": { "type": "string", "contentEncoding": "base64" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "peerDecision" } } },
+      "then": { "properties": { "payload": { "enum": ["AA==", "AQ=="] } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "transactionMessage" } } },
+      "then": { "properties": { "payload": { "maxLength": 43692 } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "abort" } } },
+      "then": { "properties": { "payload": { "maxLength": 1368 } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "completion" } } },
+      "then": { "properties": { "payload": { "maxLength": 5464 } } }
+    }
+  ],
+  "x-maximumEncodedEnvelopeBytes": 49152,
+  "x-maximumDecodedPayloadBytesByKind": {
+    "peerDecision": 1,
+    "transactionMessage": 32768,
+    "abort": 1024,
+    "completion": 4096
+  }
+}

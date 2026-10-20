@@ -1,25 +1,12 @@
 import Foundation
 import Observation
+import TesseraEnrollmentCore
+import TesseraSessionCore
 
-/// Peer authentication supplied by the byte transport. Device names are never
-/// trust inputs; enrollment accepts either Apple's same-account continuation
-/// stream binding or a separately verified SAS transcript.
-enum EnrollmentPeerBinding: Equatable, Sendable {
-    case appleAccountContinuationStream
-    case sasBound(transcriptHash: Data)
-    case unbound
-
-    var allowsEnrollment: Bool {
-        switch self {
-        case .appleAccountContinuationStream:
-            return true
-        case .sasBound(let transcriptHash):
-            return !transcriptHash.isEmpty
-        case .unbound:
-            return false
-        }
-    }
-}
+/// Keep the released app name while sharing the actual peer-authentication
+/// claim with the platform-neutral enrollment state machine and Apple stream
+/// adapter. Device names never contribute to this binding.
+typealias EnrollmentPeerBinding = PeerBinding
 
 @MainActor
 protocol EnrollmentMessageTransport: AnyObject {
@@ -44,6 +31,41 @@ protocol EnrollmentBiometricAuthorizing {
     /// cached unlock or previously successful context does not satisfy this API.
     func authorizeFreshBiometrics(reason: String) async throws
         -> EnrollmentFreshBiometricAuthorization
+}
+
+/// Bridges the released LocalAuthentication boundary into the platform-neutral
+/// owner-authorization protocol. The shared machine remains the sole owner of
+/// freshness, attempt, scope, and policy validation; the Apple adapter only
+/// performs the system biometric evaluation and returns its timestamp.
+private final class EnrollmentOwnerAuthorizerAdapter: FreshOwnerAuthorizing,
+    @unchecked Sendable {
+    private let authorizer: EnrollmentBiometricAuthorizing
+    private let lock = NSLock()
+    private var authorizationReason = String(localized: "Authorize this device on this host")
+
+    init(authorizer: EnrollmentBiometricAuthorizing) {
+        self.authorizer = authorizer
+    }
+
+    func setAuthorizationReason(_ reason: String) {
+        lock.withLock { authorizationReason = reason }
+    }
+
+    func authorize(
+        _ request: OwnerAuthorizationRequest
+    ) async throws -> FreshOwnerAuthorization {
+        let reason = lock.withLock { authorizationReason }
+        let evaluated = try await authorizer.authorizeFreshBiometrics(
+            reason: reason
+        )
+        return FreshOwnerAuthorization(
+            attemptID: request.attemptID,
+            policyGeneration: request.policyGeneration,
+            scope: request.scope,
+            issuedAt: evaluated.evaluatedAt,
+            expiresAt: request.expiresAt
+        )
+    }
 }
 
 /// The single mutation boundary for sync-originated device-access grants.
@@ -105,6 +127,9 @@ final class SyncDeviceAccessGrantEngine {
         /// and revision semantics are bound.
         let route: [RouteNode]
         let jumpChainBrokenReason: String?
+        /// Canonical route identity frozen with the rest of the authorization
+        /// snapshot. This is also the exact scope consumed by the shared grant.
+        let routeIdentity: String
 
         /// Compares only the immutable, non-secret Host authorization facts.
         /// The public key, peer, flow, rendered endpoint, and host label remain
@@ -115,6 +140,7 @@ final class SyncDeviceAccessGrantEngine {
             hostID == host.id
                 && route == (host.jumpChain + [host]).map(RouteNode.init(host:))
                 && jumpChainBrokenReason == host.jumpChainBrokenReason
+                && routeIdentity == RemoteAccessRouteIdentity.value(for: host)
         }
     }
 
@@ -139,7 +165,8 @@ final class SyncDeviceAccessGrantEngine {
                 flow: flow,
                 publicKey: publicKey,
                 route: (host.jumpChain + [host]).map(GrantSnapshot.RouteNode.init(host:)),
-                jumpChainBrokenReason: host.jumpChainBrokenReason
+                jumpChainBrokenReason: host.jumpChainBrokenReason,
+                routeIdentity: routeIdentity
             )
         }
     }
@@ -334,6 +361,7 @@ final class EnrollmentLoopbackTransport: EnrollmentMessageTransport {
     var onClose: (() -> Void)?
     private weak var peer: EnrollmentLoopbackTransport?
     private(set) var isClosed = false
+    private var nextSendError: TransportError?
 
     private init(peerBinding: EnrollmentPeerBinding) {
         self.peerBinding = peerBinding
@@ -350,9 +378,18 @@ final class EnrollmentLoopbackTransport: EnrollmentMessageTransport {
     }
 
     func send(_ bytes: Data) throws {
+        if let nextSendError {
+            self.nextSendError = nil
+            throw nextSendError
+        }
         guard !isClosed else { throw TransportError.closed }
         guard let peer, !peer.isClosed else { throw TransportError.peerUnavailable }
         peer.onBytes?(bytes)
+    }
+
+    /// Deterministic transport-failure seam for the in-process test transport.
+    func failNextSend(with error: TransportError = .peerUnavailable) {
+        nextSendError = error
     }
 
     func close() {
@@ -368,6 +405,37 @@ final class EnrollmentLoopbackTransport: EnrollmentMessageTransport {
         isClosed = true
         peer = nil
         onClose?()
+    }
+}
+
+private struct EnrollmentCoreOperationResult<Value: Sendable>: Sendable {
+    let value: Value
+    let state: EnrollmentState
+}
+
+/// The Apple continuation-stream transport is deliberately synchronous: a
+/// write can immediately deliver a peer frame and existing UI/tests observe
+/// the resulting state before `send` returns. Shared non-suspending protocol
+/// transitions run on their actor and rendezvous here, preserving that released
+/// ordering without moving any UI or LocalAuthentication work off MainActor.
+private final class EnrollmentCoreBlockingResult<Value: Sendable>:
+    @unchecked Sendable {
+    private let condition = NSCondition()
+    private var result: Result<Value, Error>?
+
+    func resolve(_ result: Result<Value, Error>) {
+        condition.lock()
+        self.result = result
+        condition.broadcast()
+        condition.unlock()
+    }
+
+    func wait() throws -> Value {
+        condition.lock()
+        while result == nil { condition.wait() }
+        let result = self.result!
+        condition.unlock()
+        return try result.get()
     }
 }
 
@@ -458,30 +526,43 @@ final class EnrollmentService {
     }
 
     private(set) var state: State = .idle
+    /// Observable snapshot of the transport-neutral authority. Apple-specific
+    /// presentation continues to use `state`, but every transition is accepted
+    /// by this shared machine before that presentation state changes.
+    private(set) var sharedState: EnrollmentState = .idle
     var onGrantReady: ((EnrollmentGrantRequest) -> Void)?
 
     private let transport: EnrollmentMessageTransport
-    private let authorizer: EnrollmentBiometricAuthorizing
     private let grantEngine: SyncDeviceAccessGrantEngine
-    private let now: () -> Date
+    private let ownerAuthorizerAdapter: EnrollmentOwnerAuthorizerAdapter
+    private let core: EnrollmentStateMachine
+    private let now: @Sendable () -> Date
     private var decoder = EnrollmentFrameDecoder()
+    private var policyGeneration: UInt64 = 1
+    private var approvalScope: OwnerAuthorizationScope?
 
     init(
         transport: EnrollmentMessageTransport,
         authorizer: EnrollmentBiometricAuthorizing,
         grantEngine: SyncDeviceAccessGrantEngine? = nil,
-        now: @escaping () -> Date = Date.init
+        now: @escaping @Sendable () -> Date = { Date() }
     ) throws {
-        // LOAD-BEARING: NSUserActivity continuation streams are bound by
-        // Apple's same-account identity service. If enrollment moves to any
-        // other transport, that transport must first prove a verified SAS.
-        guard transport.peerBinding.allowsEnrollment else {
+        let peerBinding = transport.peerBinding
+        guard peerBinding.allowsEnrollment else {
             throw ServiceError.peerBindingRequired
         }
         self.transport = transport
-        self.authorizer = authorizer
         self.grantEngine = grantEngine ?? SyncDeviceAccessGrantEngine()
         self.now = now
+        let ownerAuthorizerAdapter = EnrollmentOwnerAuthorizerAdapter(
+            authorizer: authorizer
+        )
+        self.ownerAuthorizerAdapter = ownerAuthorizerAdapter
+        core = try EnrollmentStateMachine(
+            peerBinding: peerBinding,
+            authorizer: ownerAuthorizerAdapter,
+            now: { now() }
+        )
         transport.onBytes = { [weak self] bytes in
             self?.receive(bytes)
         }
@@ -491,17 +572,19 @@ final class EnrollmentService {
     }
 
     func request(_ request: EnrollmentRequest) throws {
-        guard state == .idle else { throw ServiceError.invalidTransition }
         do {
-            try request.validate()
-        } catch {
+            let message = try performCore { core in
+                try await core.request(request.core)
+            }
+            state = .requesting(request)
+            try send(EnrollmentMessage(core: message))
+        } catch EnrollmentStateMachineError.invalidRequest {
             state = .failed(request.id, .invalidRequest)
             throw ServiceError.invalidRequest
-        }
-
-        state = .requesting(request)
-        do {
-            try send(.request(request))
+        } catch EnrollmentStateMachineError.invalidTransition {
+            throw ServiceError.invalidTransition
+        } catch ServiceError.transportFailure {
+            throw ServiceError.transportFailure
         } catch {
             state = .failed(request.id, .transportFailure)
             transport.close()
@@ -518,42 +601,19 @@ final class EnrollmentService {
         guard case .awaitingApproval(let request) = state else {
             throw ServiceError.invalidTransition
         }
-        state = .authorizing(request)
-
-        let grantAuthorization: SyncDeviceAccessGrantEngine.Authorization
-        do {
-            let safeHostName = EnrollmentDisplayMetadata.isSafe(authorizationHostName)
-                && !authorizationHostName.isEmpty
-                ? authorizationHostName
-                : String(localized: "this host")
-            guard grantSnapshot.hostID == request.hostID,
-                  grantSnapshot.hostLabel == safeHostName,
-                  grantSnapshot.peerDeviceName == request.requestingDeviceName,
-                  grantSnapshot.flow == .enrollment,
-                  grantSnapshot.publicKey == request.publicKey,
-                  grantSnapshot.route.last?.id == request.hostID else {
-                throw ServiceError.invalidRequest
-            }
-            grantAuthorization = try await grantEngine.authorize(
-                snapshots: [grantSnapshot]
-            ) {
-                let evaluatedAuthorization = try await authorizer.authorizeFreshBiometrics(
-                    reason: "Authorize \(request.requestingDeviceName) on \(safeHostName)"
-                )
-                guard state == .authorizing(request) else {
-                    throw ServiceError.invalidTransition
-                }
-                let age = now().timeIntervalSince(evaluatedAuthorization.evaluatedAt)
-                guard age >= -Self.maximumAuthorizationFutureSkew,
-                      age <= Self.maximumAuthorizationAge else {
-                    throw ServiceError.staleAuthorization
-                }
-            }
-        } catch ServiceError.invalidTransition {
-            throw ServiceError.invalidTransition
-        } catch ServiceError.invalidRequest {
-            guard state == .authorizing(request) else {
-                throw ServiceError.invalidTransition
+        let safeHostName = EnrollmentDisplayMetadata.isSafe(authorizationHostName)
+            && !authorizationHostName.isEmpty
+            ? authorizationHostName
+            : String(localized: "this host")
+        guard grantSnapshot.hostID == request.hostID,
+              grantSnapshot.hostLabel == safeHostName,
+              grantSnapshot.peerDeviceName == request.requestingDeviceName,
+              grantSnapshot.flow == .enrollment,
+              grantSnapshot.publicKey == request.publicKey,
+              grantSnapshot.route.last?.id == request.hostID,
+              !grantSnapshot.routeIdentity.isEmpty else {
+            _ = try? performCore { core in
+                await core.adapterValidationFailed()
             }
             failLocally(
                 enrollmentID: request.id,
@@ -561,19 +621,88 @@ final class EnrollmentService {
                 remoteFailure: .protocolViolation
             )
             throw ServiceError.invalidRequest
-        } catch ServiceError.staleAuthorization {
+        }
+
+        let scope = OwnerAuthorizationScope(
+            routeIdentity: grantSnapshot.routeIdentity,
+            hostID: request.hostID,
+            publicKeyFingerprint: request.publicKey.fingerprint
+        )
+        let reason = "Authorize \(request.requestingDeviceName) on \(safeHostName)"
+        ownerAuthorizerAdapter.setAuthorizationReason(reason)
+        state = .authorizing(request)
+        sharedState = .authorizing(request.core)
+
+        do {
+            _ = try await core.approve(
+                scope: scope,
+                policyGeneration: policyGeneration,
+                expiresAt: now().addingTimeInterval(Self.maximumAuthorizationAge)
+            )
+            sharedState = await core.state
             guard state == .authorizing(request) else {
+                _ = await core.securityPolicyChanged()
+                sharedState = await core.state
                 throw ServiceError.invalidTransition
             }
+            _ = try await core.beginInstallation(
+                policyGeneration: policyGeneration,
+                scope: scope
+            )
+            sharedState = await core.state
+
+            // The shared machine has already performed fresh owner
+            // authorization and consumed its one-shot capability. Mint the
+            // legacy Apple installer capability without a second biometric;
+            // it remains bound to the exact frozen snapshot and can be used
+            // only once by the existing SwiftData/SSH audit boundary.
+            let grantAuthorization = try await grantEngine.authorize(
+                snapshots: [grantSnapshot],
+                authenticating: {}
+            )
+            guard state == .authorizing(request) else {
+                grantEngine.invalidate(grantAuthorization)
+                _ = await core.securityPolicyChanged()
+                sharedState = await core.state
+                throw ServiceError.invalidTransition
+            }
+            approvalScope = scope
+            let grant = EnrollmentGrantRequest(
+                request: request,
+                accessAuthorization: grantAuthorization
+            )
+            state = .awaitingInstallation(grant)
+            onGrantReady?(grant)
+            return grant
+        } catch EnrollmentStateMachineError.invalidTransition {
+            sharedState = await core.state
+            throw ServiceError.invalidTransition
+        } catch EnrollmentStateMachineError.staleAuthorization {
+            sharedState = await core.state
             failLocally(
                 enrollmentID: request.id,
                 failure: .staleAuthorization,
                 remoteFailure: .authorizationFailed
             )
             throw ServiceError.staleAuthorization
+        } catch EnrollmentStateMachineError.invalidRequest {
+            sharedState = await core.state
+            failLocally(
+                enrollmentID: request.id,
+                failure: .invalidRequest,
+                remoteFailure: .protocolViolation
+            )
+            throw ServiceError.invalidRequest
+        } catch ServiceError.invalidTransition {
+            throw ServiceError.invalidTransition
         } catch {
+            sharedState = await core.state
             guard state == .authorizing(request) else {
                 throw ServiceError.invalidTransition
+            }
+            if case .installing = sharedState {
+                _ = await core.installationFailed()
+                sharedState = await core.state
             }
             failLocally(
                 enrollmentID: request.id,
@@ -582,31 +711,33 @@ final class EnrollmentService {
             )
             throw ServiceError.authorizationFailed
         }
-
-        guard state == .authorizing(request) else {
-            grantEngine.invalidate(grantAuthorization)
-            throw ServiceError.invalidTransition
-        }
-
-        let grant = EnrollmentGrantRequest(
-            request: request,
-            accessAuthorization: grantAuthorization
-        )
-        state = .awaitingInstallation(grant)
-        onGrantReady?(grant)
-        return grant
     }
 
     func installationSucceeded() throws {
         guard case .awaitingInstallation(let grant) = state else {
             throw ServiceError.invalidTransition
         }
+        guard let scope = approvalScope else {
+            throw ServiceError.invalidTransition
+        }
         if let authorization = grant.accessAuthorization {
             grantEngine.invalidate(authorization)
         }
-        state = .awaitingRequesterRecord(grant)
         do {
-            try send(.installed(enrollmentID: grant.enrollmentID))
+            let message = try performCore { core in
+                try await core.installationDurablyVerified(
+                    DurableEnrollmentInstallReceipt(
+                        enrollmentID: grant.enrollmentID,
+                        publicKeyFingerprint: grant.publicKey.fingerprint,
+                        routeIdentity: scope.routeIdentity,
+                        recordedAt: Date()
+                    )
+                )
+            }
+            state = .awaitingRequesterRecord(grant)
+            try send(EnrollmentMessage(core: message))
+        } catch EnrollmentStateMachineError.invalidTransition {
+            throw ServiceError.invalidTransition
         } catch {
             state = .failed(grant.enrollmentID, .transportFailure)
             transport.close()
@@ -621,12 +752,14 @@ final class EnrollmentService {
         if let authorization = grant.accessAuthorization {
             grantEngine.invalidate(authorization)
         }
-        state = .failed(grant.enrollmentID, .installationFailed)
         do {
-            try send(.failed(
-                enrollmentID: grant.enrollmentID,
-                failure: .installationFailed
-            ))
+            guard let message = try performCore({ core in
+                await core.installationFailed()
+            }) else { throw ServiceError.invalidTransition }
+            state = .failed(grant.enrollmentID, .installationFailed)
+            try send(EnrollmentMessage(core: message))
+        } catch ServiceError.invalidTransition {
+            throw ServiceError.invalidTransition
         } catch {
             state = .failed(grant.enrollmentID, .transportFailure)
             transport.close()
@@ -642,9 +775,20 @@ final class EnrollmentService {
         guard case .recordingRequester(let request) = state else {
             throw ServiceError.invalidTransition
         }
-        state = .awaitingOriginCompletion(request)
         do {
-            try send(.recorded(enrollmentID: request.id))
+            let message = try performCore { core in
+                try await core.requesterRecordDurablyCommitted(
+                    DurableEnrollmentRecordReceipt(
+                        enrollmentID: request.id,
+                        publicKeyFingerprint: request.publicKey.fingerprint,
+                        recordedAt: Date()
+                    )
+                )
+            }
+            state = .awaitingOriginCompletion(request)
+            try send(EnrollmentMessage(core: message))
+        } catch EnrollmentStateMachineError.invalidTransition {
+            throw ServiceError.invalidTransition
         } catch {
             state = .failed(request.id, .transportFailure)
             transport.close()
@@ -656,12 +800,14 @@ final class EnrollmentService {
         guard case .recordingRequester(let request) = state else {
             throw ServiceError.invalidTransition
         }
-        state = .failed(request.id, .persistenceFailed)
         do {
-            try send(.failed(
-                enrollmentID: request.id,
-                failure: .persistenceFailed
-            ))
+            guard let message = try performCore({ core in
+                await core.requesterPersistenceFailed()
+            }) else { throw ServiceError.invalidTransition }
+            state = .failed(request.id, .persistenceFailed)
+            try send(EnrollmentMessage(core: message))
+        } catch ServiceError.invalidTransition {
+            throw ServiceError.invalidTransition
         } catch {
             state = .failed(request.id, .transportFailure)
             transport.close()
@@ -674,9 +820,14 @@ final class EnrollmentService {
         guard case .awaitingApproval(let request) = state else {
             throw ServiceError.invalidTransition
         }
-        state = .rejected(request.id)
         do {
-            try send(.rejected(enrollmentID: request.id))
+            let message = try performCore { core in
+                try await core.reject()
+            }
+            state = .rejected(request.id)
+            try send(EnrollmentMessage(core: message))
+        } catch EnrollmentStateMachineError.invalidTransition {
+            throw ServiceError.invalidTransition
         } catch {
             state = .failed(request.id, .transportFailure)
             transport.close()
@@ -690,9 +841,14 @@ final class EnrollmentService {
               let id = state.enrollmentID
         else { throw ServiceError.invalidTransition }
         invalidatePendingGrantAuthorization()
-        state = .cancelled(id)
         do {
-            try send(.cancelled(enrollmentID: id))
+            let message = try performCore { core in
+                try await core.cancel()
+            }
+            state = .cancelled(id)
+            try send(EnrollmentMessage(core: message))
+        } catch EnrollmentStateMachineError.invalidTransition {
+            throw ServiceError.invalidTransition
         } catch {
             state = .failed(id, .transportFailure)
             transport.close()
@@ -701,78 +857,159 @@ final class EnrollmentService {
         transport.close()
     }
 
+    /// App lock always revokes the shared one-shot authorization. The Apple UI
+    /// retains its released cancellation presentation and wire message while
+    /// the shared authority records the stronger policy-invalidated terminal
+    /// state.
+    func applicationDidLock() {
+        guard !state.isTerminal, state != .idle,
+              let id = state.enrollmentID else { return }
+        invalidatePendingGrantAuthorization()
+        _ = try? performCore { core in
+            await core.applicationDidLock()
+        }
+        state = .cancelled(id)
+        try? send(.cancelled(enrollmentID: id))
+        transport.close()
+    }
+
+    func securityPolicyChanged() {
+        guard !state.isTerminal, state != .idle else { return }
+        policyGeneration &+= 1
+        if policyGeneration == 0 { policyGeneration = 1 }
+        invalidatePendingGrantAuthorization()
+        do {
+            let response = try performCore { core in
+                await core.securityPolicyChanged()
+            }
+            projectSharedState(preserving: state)
+            if let response { try send(EnrollmentMessage(core: response)) }
+        } catch {
+            state = .failed(state.enrollmentID, .transportFailure)
+        }
+        transport.close()
+    }
+
     private func receive(_ bytes: Data) {
         guard !state.isTerminal else { return }
         do {
             for message in try decoder.append(bytes) {
-                handle(message)
+                handleThroughCore(message)
                 if state.isTerminal { break }
             }
         } catch {
+            _ = try? performCore { core in
+                await core.adapterValidationFailed()
+            }
             state = .failed(state.enrollmentID, .protocolViolation)
             transport.close()
         }
     }
 
-    private func handle(_ message: EnrollmentMessage) {
-        switch (state, message) {
-        case (.idle, .request(let request)):
-            do {
-                try request.validate()
-                state = .awaitingApproval(request)
-            } catch {
-                failLocally(
-                    enrollmentID: request.id,
-                    failure: .invalidRequest,
-                    remoteFailure: .protocolViolation
-                )
+    private func handleThroughCore(_ message: EnrollmentMessage) {
+        let priorState = state
+        do {
+            let response = try performCore { core in
+                await core.receive(message.core)
             }
-
-        case (.requesting(let request), .installed(let id)) where request.id == id:
-            state = .recordingRequester(request)
-
-        case (.awaitingRequesterRecord(let grant), .recorded(let id))
-            where grant.enrollmentID == id:
-            state = .completed(id)
-            do {
-                try send(.completed(enrollmentID: id))
-            } catch {
-                state = .failed(id, .transportFailure)
+            projectSharedState(preserving: priorState)
+            if let response {
+                try send(EnrollmentMessage(core: response))
             }
-            transport.close()
-
-        case (.awaitingOriginCompletion(let request), .completed(let id))
-            where request.id == id:
-            state = .completed(id)
-            transport.close()
-
-        case (.requesting(let request), .rejected(let id)) where request.id == id:
-            state = .rejected(id)
-            transport.close()
-
-        case (.requesting(let request), .cancelled(let id)) where request.id == id:
-            state = .cancelled(id)
-            transport.close()
-
-        case (_, .failed(let id, let failure)) where state.enrollmentID == id:
+            if state.isTerminal { transport.close() }
+        } catch ServiceError.transportFailure {
+            // `send` has already reconciled both authorities and closed the
+            // transport. Preserve transport failure rather than reclassifying
+            // it as a peer protocol violation.
+        } catch {
             invalidatePendingGrantAuthorization()
-            state = .failed(id, .remote(failure))
-            transport.close()
-
-        case (_, .cancelled(let id)) where state.enrollmentID == id:
-            invalidatePendingGrantAuthorization()
-            state = .cancelled(id)
-            transport.close()
-
-        default:
-            invalidatePendingGrantAuthorization()
-            state = .failed(state.enrollmentID ?? message.enrollmentID, .protocolViolation)
+            state = .failed(
+                priorState.enrollmentID ?? message.enrollmentID,
+                .protocolViolation
+            )
             transport.close()
         }
     }
 
+    private func projectSharedState(preserving prior: State) {
+        switch sharedState {
+        case .idle:
+            state = .idle
+        case .requesting(let request):
+            state = .requesting(EnrollmentRequest(core: request))
+        case .awaitingApproval(let request):
+            state = .awaitingApproval(EnrollmentRequest(core: request))
+        case .authorizing(let request):
+            state = .authorizing(EnrollmentRequest(core: request))
+        case .awaitingInstallation(let sharedGrant), .installing(let sharedGrant):
+            if case .awaitingInstallation(let appleGrant) = prior,
+               appleGrant.enrollmentID == sharedGrant.enrollmentID {
+                state = .awaitingInstallation(appleGrant)
+            } else {
+                state = .awaitingInstallation(EnrollmentGrantRequest(
+                    request: EnrollmentRequest(core: sharedGrant.request)
+                ))
+            }
+        case .awaitingRequesterRecord(let sharedGrant, _):
+            if case .awaitingRequesterRecord(let appleGrant) = prior,
+               appleGrant.enrollmentID == sharedGrant.enrollmentID {
+                state = .awaitingRequesterRecord(appleGrant)
+            } else {
+                state = .awaitingRequesterRecord(EnrollmentGrantRequest(
+                    request: EnrollmentRequest(core: sharedGrant.request)
+                ))
+            }
+        case .recordingRequester(let request):
+            state = .recordingRequester(EnrollmentRequest(core: request))
+        case .awaitingOriginCompletion(let request, _):
+            state = .awaitingOriginCompletion(EnrollmentRequest(core: request))
+        case .completed(let receipt):
+            state = .completed(receipt.enrollmentID)
+        case .rejected(let id):
+            state = .rejected(id)
+        case .cancelled(let id):
+            state = .cancelled(id)
+        case .failed(let id, let failure):
+            state = .failed(id, appleFailure(for: failure))
+        }
+    }
+
+    private func appleFailure(for failure: EnrollmentFailure) -> Failure {
+        switch failure {
+        case .peerBindingRequired: return .peerBindingRequired
+        case .invalidRequest: return .invalidRequest
+        case .protocolViolation: return .protocolViolation
+        case .authorizationFailed: return .authorizationFailed
+        case .staleAuthorization: return .staleAuthorization
+        case .installationFailed: return .installationFailed
+        case .persistenceFailed: return .persistenceFailed
+        case .transportFailure: return .transportFailure
+        case .policyInvalidated: return .authorizationFailed
+        case .remote(let failure):
+            return .remote(EnrollmentRemoteFailure(rawValue: failure.rawValue)!)
+        }
+    }
+
     private func send(_ message: EnrollmentMessage) throws {
-        try transport.send(EnrollmentFrameCodec.encode(message))
+        do {
+            try transport.send(EnrollmentFrameCodec.encode(message))
+        } catch {
+            reconcileOutboundSendFailure()
+            throw ServiceError.transportFailure
+        }
+    }
+
+    /// Makes the shared machine the terminal authority for every failed write,
+    /// including writes whose logical transition was already terminal (reject,
+    /// cancel, failure, or final completion acknowledgement).
+    private func reconcileOutboundSendFailure() {
+        let enrollmentID = state.enrollmentID
+        invalidatePendingGrantAuthorization()
+        _ = try? performCore { core in
+            await core.outboundSendFailed()
+        }
+        state = .failed(enrollmentID, .transportFailure)
+        transport.close()
     }
 
     private func failLocally(
@@ -788,6 +1025,9 @@ final class EnrollmentService {
     private func transportDidClose() {
         guard !state.isTerminal else { return }
         invalidatePendingGrantAuthorization()
+        _ = try? performCore { core in
+            await core.transportFailed()
+        }
         state = .failed(state.enrollmentID, .transportFailure)
     }
 
@@ -795,5 +1035,42 @@ final class EnrollmentService {
         guard case .awaitingInstallation(let grant) = state,
               let authorization = grant.accessAuthorization else { return }
         grantEngine.invalidate(authorization)
+    }
+
+    private func performCore<Value: Sendable>(
+        _ operation: @escaping @Sendable (EnrollmentStateMachine) async throws -> Value
+    ) throws -> Value {
+        let core = self.core
+        let result = EnrollmentCoreBlockingResult<
+            EnrollmentCoreOperationResult<Value>
+        >()
+        Task.detached {
+            do {
+                let value = try await operation(core)
+                result.resolve(.success(EnrollmentCoreOperationResult(
+                    value: value,
+                    state: await core.state
+                )))
+            } catch {
+                result.resolve(.failure(error))
+            }
+        }
+        do {
+            let completed = try result.wait()
+            sharedState = completed.state
+            return completed.value
+        } catch {
+            sharedState = readCoreState()
+            throw error
+        }
+    }
+
+    private func readCoreState() -> EnrollmentState {
+        let core = self.core
+        let result = EnrollmentCoreBlockingResult<EnrollmentState>()
+        Task.detached {
+            result.resolve(.success(await core.state))
+        }
+        return (try? result.wait()) ?? sharedState
     }
 }

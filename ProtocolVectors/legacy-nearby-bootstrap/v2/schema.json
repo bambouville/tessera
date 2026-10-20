@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tessera://protocol-vectors/legacy-nearby-bootstrap/v2/schema.json",
+  "title": "Tessera released Apple nearby-bootstrap v2 canonical vector",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocolVersion",
+    "releasedAppVersion",
+    "origin",
+    "recipient",
+    "commitment",
+    "transcriptHex",
+    "transcriptHashHex",
+    "sasBytesHex",
+    "sasDigits",
+    "directionalMaterial",
+    "fullTransfer",
+    "frames"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "protocolVersion": { "type": "integer", "const": 2 },
+    "releasedAppVersion": { "type": "string", "const": "0.3.6" },
+    "origin": { "$ref": "#/$defs/participant" },
+    "recipient": { "$ref": "#/$defs/participant" },
+    "commitment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canonicalProjectionJSON", "helloDigestHex", "canonicalJSON"],
+      "properties": {
+        "canonicalProjectionJSON": { "type": "string" },
+        "helloDigestHex": { "$ref": "#/$defs/hex32" },
+        "canonicalJSON": { "type": "string" }
+      }
+    },
+    "transcriptHex": { "type": "string", "pattern": "^[0-9a-f]+$" },
+    "transcriptHashHex": { "$ref": "#/$defs/hex32" },
+    "sasBytesHex": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+    "sasDigits": { "type": "string", "pattern": "^[0-9]{6}$" },
+    "directionalMaterial": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "originToRecipientKeyHex", "recipientToOriginKeyHex",
+        "originToRecipientNonceHex", "recipientToOriginNonceHex"
+      ],
+      "properties": {
+        "originToRecipientKeyHex": { "$ref": "#/$defs/hex32" },
+        "recipientToOriginKeyHex": { "$ref": "#/$defs/hex32" },
+        "originToRecipientNonceHex": { "$ref": "#/$defs/hex12" },
+        "recipientToOriginNonceHex": { "$ref": "#/$defs/hex12" }
+      }
+    },
+    "fullTransfer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recipientPublicKeyCanonicalJSON", "manifestCanonicalJSON",
+        "importAcceptanceCanonicalJSON", "grantReceiptCanonicalJSON",
+        "completionAcknowledgementCanonicalJSON", "frames"
+      ],
+      "properties": {
+        "recipientPublicKeyCanonicalJSON": { "type": "string" },
+        "manifestCanonicalJSON": { "type": "string" },
+        "importAcceptanceCanonicalJSON": { "type": "string" },
+        "grantReceiptCanonicalJSON": { "type": "string" },
+        "completionAcknowledgementCanonicalJSON": { "type": "string" },
+        "frames": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": { "$ref": "#/$defs/fullTransferFrame" }
+        }
+      }
+    },
+    "frames": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "direction",
+          "directionByte",
+          "sequence",
+          "frameVersion",
+          "frameHex",
+          "alternateFrameHex"
+        ],
+        "properties": {
+          "name": { "type": "string" },
+          "direction": {
+            "type": "string",
+            "enum": ["originToRecipient", "recipientToOrigin"]
+          },
+          "directionByte": { "type": "integer", "enum": [1, 2] },
+          "sequence": { "type": "integer", "minimum": 0, "maximum": 1 },
+          "frameVersion": { "type": "integer", "const": 1 },
+          "frameHex": { "type": "string", "pattern": "^54424348[0-9a-f]+$" },
+          "alternateFrameHex": { "type": "string", "pattern": "^54424348[0-9a-f]+$" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "hex32": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "hex12": { "type": "string", "pattern": "^[0-9a-f]{24}$" },
+    "fullTransferFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name", "kind", "direction", "directionByte", "sequence",
+        "frameVersion", "frameHex", "alternateFrameHex"
+      ],
+      "properties": {
+        "name": {
+          "enum": [
+            "recipient-public-key", "origin-authorization-proof",
+            "origin-manifest", "recipient-import-acceptance",
+            "origin-grant-receipt", "recipient-completion-acknowledgement"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "recipientPublicKey", "originAuthorization", "manifest",
+            "importAcceptance", "grantReceipt", "completionAcknowledgement"
+          ]
+        },
+        "direction": {
+          "enum": ["originToRecipient", "recipientToOrigin"]
+        },
+        "directionByte": { "type": "integer", "enum": [1, 2] },
+        "sequence": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "frameVersion": { "type": "integer", "const": 1 },
+        "frameHex": { "type": "string", "pattern": "^54424348[0-9a-f]+$" },
+        "alternateFrameHex": { "type": "string", "pattern": "^54424348[0-9a-f]+$" }
+      }
+    },
+    "participant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["privateKeySeedHex", "publicKeyHex", "canonicalHelloJSON"],
+      "properties": {
+        "privateKeySeedHex": { "$ref": "#/$defs/hex32" },
+        "publicKeyHex": { "$ref": "#/$defs/hex32" },
+        "canonicalHelloJSON": { "type": "string" }
+      }
+    }
+  }
+}

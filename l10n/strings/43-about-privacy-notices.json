@@ -1,0 +1,34 @@
+{
+  "Agent Host licenses & notices": {
+    "de": "Lizenzen und Hinweise für Agent Host",
+    "es": "licencias y avisos de Agent Host",
+    "fr": "licences et mentions d'Agent Host",
+    "ja": "Agent Host のライセンスと表示",
+    "zh-Hans": "Agent Host 许可证与声明",
+    "zh-Hant": "Agent Host 授權條款與聲明"
+  },
+  "privacy policy": {
+    "de": "Datenschutzrichtlinie",
+    "es": "política de privacidad",
+    "fr": "politique de confidentialité",
+    "ja": "プライバシーポリシー",
+    "zh-Hans": "隐私政策",
+    "zh-Hant": "隱私權政策"
+  },
+  "public domain": {
+    "de": "gemeinfrei",
+    "es": "dominio público",
+    "fr": "domaine public",
+    "ja": "パブリックドメイン",
+    "zh-Hans": "公有领域",
+    "zh-Hant": "公有領域"
+  },
+  "view Agent Host licenses & notices": {
+    "de": "Lizenzen & Hinweise für Agent Host ansehen",
+    "es": "ver licencias y avisos de Agent Host",
+    "fr": "voir les licences et mentions d'Agent Host",
+    "ja": "Agent Host のライセンスと表示を見る",
+    "zh-Hans": "查看 Agent Host 许可证与声明",
+    "zh-Hant": "檢視 Agent Host 授權條款與聲明"
+  }
+}

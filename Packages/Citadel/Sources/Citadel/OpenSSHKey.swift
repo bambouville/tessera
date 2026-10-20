@@ -1,5 +1,4 @@
 import CCryptoBoringSSL
-import BigInt
 import Foundation
 import NIO
 import Crypto
@@ -20,37 +19,6 @@ protocol OpenSSHPrivateKey: ByteBufferConvertible {
     static var keyType: OpenSSH.KeyType { get }
 
     associatedtype PublicKey: ByteBufferConvertible
-}
-
-extension Insecure.RSA.PrivateKey: ByteBufferConvertible {
-    static func read(consuming buffer: inout ByteBuffer) throws -> Self {
-        guard
-            let nBytesLength = buffer.readInteger(as: UInt32.self),
-            let nBytes = buffer.readBytes(length: Int(nBytesLength)),
-            let eBytesLength = buffer.readInteger(as: UInt32.self),
-            let eBytes = buffer.readBytes(length: Int(eBytesLength)),
-            let dLength = buffer.readInteger(as: UInt32.self),
-            let dBytes = buffer.readBytes(length: Int(dLength)),
-            let iqmpLength = buffer.readInteger(as: UInt32.self),
-            let _ = buffer.readData(length: Int(iqmpLength)),
-            let pLength = buffer.readInteger(as: UInt32.self),
-            let _ = buffer.readData(length: Int(pLength)),
-            let qLength = buffer.readInteger(as: UInt32.self),
-            let _ = buffer.readData(length: Int(qLength))
-        else {
-            throw InvalidOpenSSHKey.invalidLayout
-        }
-
-        let privateExponent = CCryptoBoringSSL_BN_bin2bn(dBytes, dBytes.count, nil)!
-        let publicExponent = CCryptoBoringSSL_BN_bin2bn(eBytes, eBytes.count, nil)!
-        let modulus = CCryptoBoringSSL_BN_bin2bn(nBytes, nBytes.count, nil)!
-
-        return self.init(privateExponent: privateExponent, publicExponent: publicExponent, modulus: modulus)
-    }
-
-    func write(to buffer: inout ByteBuffer) -> Int {
-        0
-    }
 }
 
 extension Curve25519.Signing.PrivateKey: ByteBufferConvertible {

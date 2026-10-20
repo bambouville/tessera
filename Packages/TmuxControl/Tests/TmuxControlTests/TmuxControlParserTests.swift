@@ -146,6 +146,33 @@ final class TmuxControlParserTests: XCTestCase {
         ])
     }
 
+    func test_sessionSubscriptionChanged_isParsedFromLiveTmuxHeader() {
+        var parser = TmuxControlParser()
+        let wire = "%subscription-changed tessera-window-order $0 - - - : 0=@1* 1=@0 \n"
+        let msgs = parser.feed(Array(wire.utf8))
+        XCTAssertEqual(msgs, [
+            .sessionSubscriptionChanged(
+                name: "tessera-window-order",
+                sessionId: SessionId(0),
+                value: "0=@1* 1=@0 "
+            ),
+        ])
+    }
+
+    func test_windowSubscriptionChanged_isParsedFromLiveTmuxHeader() {
+        var parser = TmuxControlParser()
+        let wire = "%subscription-changed tessera-authority $3 @12 4 - : v1 PEER 2 Mac\n"
+        XCTAssertEqual(parser.feed(Array(wire.utf8)), [
+            .windowSubscriptionChanged(
+                name: "tessera-authority",
+                sessionId: SessionId(3),
+                windowId: WindowId(12),
+                windowIndex: 4,
+                value: "v1 PEER 2 Mac"
+            ),
+        ])
+    }
+
     // MARK: - Output decoding
 
     func test_output_plainAscii() {
@@ -457,8 +484,8 @@ final class TmuxControlParserTests: XCTestCase {
         var parser = TmuxControlParser()
         let msgs = parser.feed(Array("%begin\n%end\n".utf8))
         XCTAssertEqual(msgs, [
-            .begin(time: 0, commandNumber: 0, flags: 0),
-            .end(time: 0, commandNumber: 0, flags: 0),
+            .begin(time: -1, commandNumber: -1, flags: -1),
+            .end(time: -1, commandNumber: -1, flags: -1),
         ])
     }
 

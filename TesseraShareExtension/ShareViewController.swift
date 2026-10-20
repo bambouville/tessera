@@ -1,4 +1,5 @@
 import UIKit
+import SwiftUI
 import UniformTypeIdentifiers
 
 private enum ShareInbox {
@@ -37,93 +38,43 @@ private enum ShareInboxError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .noAppGroupContainer:
-            return "Shared container is unavailable."
+            return String(localized: "Shared container is unavailable.")
         case .noSupportedItem:
             return String(localized: "No supported photo, video, or file was found.")
         case .couldNotEncodeImage:
-            return "The image could not be prepared."
+            return String(localized: "The image could not be prepared.")
         }
     }
 }
 
 final class ShareViewController: UIViewController {
-    private let rootStack = UIStackView()
-    private let statusLabel = UILabel()
-    private let fileLabel = UILabel()
-    private let targetsStack = UIStackView()
-    private let queueButton = UIButton(type: .system)
-    private let saveButton = UIButton(type: .system)
-    private let discardButton = UIButton(type: .system)
+    private let model = ShareSheetModel()
     private var didBeginProcessing = false
     private var preparedInboxURL: URL?
     private var preparedFileURLs: [URL] = []
-    private var targets: [UploadTarget] = []
-    private var selectedTargetID: UUID?
-    private var targetButtons: [UUID: UIButton] = [:]
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        registerEmbeddedFonts()
 
-        rootStack.translatesAutoresizingMaskIntoConstraints = false
-        rootStack.axis = .vertical
-        rootStack.alignment = .fill
-        rootStack.spacing = 14
-        view.addSubview(rootStack)
-
-        statusLabel.text = "Preparing for Tessera..."
-        statusLabel.textAlignment = .left
-        statusLabel.textColor = .label
-        statusLabel.font = .preferredFont(forTextStyle: .headline)
-        statusLabel.numberOfLines = 0
-        rootStack.addArrangedSubview(statusLabel)
-
-        fileLabel.textColor = .secondaryLabel
-        fileLabel.font = .preferredFont(forTextStyle: .subheadline)
-        fileLabel.numberOfLines = 1
-        fileLabel.lineBreakMode = .byTruncatingMiddle
-        fileLabel.isHidden = true
-        rootStack.addArrangedSubview(fileLabel)
-
-        targetsStack.axis = .vertical
-        targetsStack.alignment = .fill
-        targetsStack.spacing = 8
-        targetsStack.isHidden = true
-        rootStack.addArrangedSubview(targetsStack)
-
-        let actionsStack = UIStackView()
-        actionsStack.axis = .horizontal
-        actionsStack.alignment = .center
-        actionsStack.distribution = .fill
-        actionsStack.spacing = 12
-        rootStack.addArrangedSubview(actionsStack)
-
-        queueButton.setTitle("Queue upload", for: .normal)
-        queueButton.titleLabel?.font = .preferredFont(forTextStyle: .headline)
-        queueButton.isHidden = true
-        queueButton.addTarget(self, action: #selector(queueTapped), for: .touchUpInside)
-
-        saveButton.setTitle("Save for later", for: .normal)
-        saveButton.titleLabel?.font = .preferredFont(forTextStyle: .body)
-        saveButton.isHidden = true
-        saveButton.addTarget(self, action: #selector(saveTapped), for: .touchUpInside)
-
-        discardButton.setTitle("Discard", for: .normal)
-        discardButton.titleLabel?.font = .preferredFont(forTextStyle: .body)
-        discardButton.isHidden = true
-        discardButton.addTarget(self, action: #selector(discardTapped), for: .touchUpInside)
-
-        actionsStack.addArrangedSubview(saveButton)
-        actionsStack.addArrangedSubview(discardButton)
-        actionsStack.addArrangedSubview(UIView())
-        actionsStack.addArrangedSubview(queueButton)
-
+        let sheet = ShareSheetRoot(
+            model: model,
+            statusText: Self.statusText,
+            queue: { [weak self] in self?.queueTapped() },
+            save: { [weak self] in self?.saveTapped() },
+            discard: { [weak self] in self?.discardTapped() }
+        )
+        let hostingController = UIHostingController(rootView: sheet)
+        addChild(hostingController)
+        hostingController.view.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(hostingController.view)
         NSLayoutConstraint.activate([
-            rootStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
-            rootStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
-            rootStack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 24),
-            rootStack.bottomAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -24)
+            hostingController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            hostingController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            hostingController.view.topAnchor.constraint(equalTo: view.topAnchor),
+            hostingController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
+        hostingController.didMove(toParent: self)
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -140,13 +91,12 @@ final class ShareViewController: UIViewController {
                     preparedInboxURL = inboxDirectory
                     preparedFileURLs = copied
                     renderPreparedState(fileURLs: copied)
-                    discardButton.isHidden = false
                 }
             } catch {
                 #if DEBUG
                 NSLog("[TesseraShareExtension] failed: %@", error.localizedDescription)
                 #endif
-                statusLabel.text = error.localizedDescription
+                model.phase = .failed(error.localizedDescription)
             }
         }
     }
@@ -352,27 +302,15 @@ final class ShareViewController: UIViewController {
 
     @MainActor
     private func renderPreparedState(fileURLs: [URL]) {
+        model.isSingleFile = fileURLs.count == 1
         if fileURLs.count == 1 {
-            fileLabel.text = fileURLs[0].lastPathComponent
+            model.fileLabel = fileURLs[0].lastPathComponent
         } else {
-            fileLabel.text = "\(fileURLs.count) items"
+            model.fileLabel = String(localized: "\(fileURLs.count) items")
         }
-        fileLabel.isHidden = false
-
-        targets = loadTargets()
-        selectedTargetID = targets.first?.id
-        renderTargets()
-
-        if targets.isEmpty {
-            statusLabel.text = "Open Tessera once to refresh the host list."
-            queueButton.isHidden = true
-            saveButton.setTitle("Done", for: .normal)
-            saveButton.isHidden = false
-        } else {
-            statusLabel.text = "Choose the Tessera host for this upload."
-            queueButton.isHidden = false
-            saveButton.isHidden = true
-        }
+        model.targets = loadTargets()
+        model.selectedTargetID = model.targets.first?.id
+        model.phase = .prepared
     }
 
     private func loadTargets() -> [UploadTarget] {
@@ -402,69 +340,19 @@ final class ShareViewController: UIViewController {
         }
     }
 
-    @MainActor
-    private func renderTargets() {
-        targetsStack.arrangedSubviews.forEach { view in
-            targetsStack.removeArrangedSubview(view)
-            view.removeFromSuperview()
-        }
-        targetButtons.removeAll()
-
-        for target in targets {
-            let button = UIButton(type: .system)
-            button.contentHorizontalAlignment = .leading
-            button.titleLabel?.numberOfLines = 2
-            button.titleLabel?.font = .preferredFont(forTextStyle: .body)
-            button.layer.cornerRadius = 8
-            button.layer.borderWidth = 1
-            button.contentEdgeInsets = UIEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
-            button.setTitle("\(target.label)\n\(statusText(for: target))", for: .normal)
-            button.tag = targets.firstIndex(where: { $0.id == target.id }) ?? 0
-            button.addTarget(self, action: #selector(targetTapped(_:)), for: .touchUpInside)
-            targetButtons[target.id] = button
-            targetsStack.addArrangedSubview(button)
-        }
-
-        targetsStack.isHidden = targets.isEmpty
-        updateTargetSelection()
+    private static func statusText(for target: UploadTarget) -> String {
+        if target.isActiveSession { return String(localized: "active session") }
+        if target.isConnected { return String(localized: "connected") }
+        if target.isConnecting { return String(localized: "connecting") }
+        if target.isFailed { return String(localized: "reconnect failed") }
+        return String(localized: "saved host")
     }
 
-    private func statusText(for target: UploadTarget) -> String {
-        if target.isActiveSession { return "active session" }
-        if target.isConnected { return "connected" }
-        if target.isConnecting { return "connecting" }
-        if target.isFailed { return "reconnect failed" }
-        return "saved host"
-    }
-
-    @objc
-    @MainActor
-    private func targetTapped(_ sender: UIButton) {
-        guard targets.indices.contains(sender.tag) else { return }
-        selectedTargetID = targets[sender.tag].id
-        updateTargetSelection()
-    }
-
-    @MainActor
-    private func updateTargetSelection() {
-        for (id, button) in targetButtons {
-            let selected = id == selectedTargetID
-            button.layer.borderColor = selected
-                ? view.tintColor.cgColor
-                : UIColor.separator.cgColor
-            button.backgroundColor = selected
-                ? view.tintColor.withAlphaComponent(0.12)
-                : UIColor.clear
-        }
-        queueButton.isEnabled = selectedTargetID != nil
-    }
-
-    @objc
     @MainActor
     private func queueTapped() {
         guard
             let preparedInboxURL,
-            let target = targets.first(where: { $0.id == selectedTargetID })
+            let target = model.targets.first(where: { $0.id == model.selectedTargetID })
         else {
             saveTapped()
             return
@@ -483,25 +371,275 @@ final class ShareViewController: UIViewController {
             #endif
             extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
         } catch {
-            statusLabel.text = "Could not queue upload: \(error.localizedDescription)"
+            model.phase = .failed(String(localized: "Could not queue upload: \(error.localizedDescription)"))
         }
     }
 
-    @objc
     @MainActor
     private func saveTapped() {
-        if targets.isEmpty, let preparedInboxURL {
+        if model.targets.isEmpty, let preparedInboxURL {
             try? FileManager.default.removeItem(at: preparedInboxURL)
         }
         extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
     }
 
-    @objc
     @MainActor
     private func discardTapped() {
         if let preparedInboxURL {
             try? FileManager.default.removeItem(at: preparedInboxURL)
         }
         extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
+    }
+}
+
+/// Presentation state only. Inbox ownership and extension completion stay in
+/// ShareViewController, including its existing empty-host cleanup semantics.
+@MainActor
+private final class ShareSheetModel: ObservableObject {
+    enum Phase {
+        case preparing
+        case prepared
+        case failed(String)
+    }
+
+    @Published var phase: Phase = .preparing
+    @Published var fileLabel: String?
+    @Published var isSingleFile = true
+    @Published var targets: [UploadTarget] = []
+    @Published var selectedTargetID: UUID?
+}
+
+private struct ShareSheetRoot: View {
+    let model: ShareSheetModel
+    let statusText: (UploadTarget) -> String
+    let queue: () -> Void
+    let save: () -> Void
+    let discard: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        ShareSheetView(model: model, statusText: statusText, queue: queue, save: save, discard: discard)
+            // The environment's default is dark/blue. Match the system scheme
+            // using the same factory, without reading app-only preferences.
+            .environment(\.designTokens, DesignTokens.make(
+                mode: colorScheme == .light ? .light : .dark, accent: .blue
+            ))
+    }
+}
+
+private struct ShareSheetView: View {
+    @ObservedObject var model: ShareSheetModel
+    let statusText: (UploadTarget) -> String
+    let queue: () -> Void
+    let save: () -> Void
+    let discard: () -> Void
+    @Environment(\.designTokens) private var T
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("upload to host")
+                        .font(Typography.sheetTitle)
+                        .foregroundStyle(T.fg)
+                        .accessibilityAddTraits(.isHeader)
+
+                    if let fileLabel = model.fileLabel {
+                        fileRow(fileLabel, isSingleFile: model.isSingleFile)
+                    }
+
+                    if !model.targets.isEmpty {
+                        Text("Host")
+                            .font(Typography.tesseraMono(size: 11, weight: .medium))
+                            .foregroundStyle(T.fgDim)
+                            .padding(.top, 2)
+                            .accessibilityAddTraits(.isHeader)
+                        VStack(spacing: 6) {
+                            ForEach(Array(model.targets.enumerated()), id: \.offset) { index, target in
+                                hostRow(target, index: index)
+                            }
+                        }
+                    }
+
+                    statusLine
+                        .font(Typography.tesseraMono(size: 11))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("share.status")
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+
+            // Originally these actions appeared only after copying succeeded.
+            // With no targets, Done uses saveTapped (which deletes the inbox);
+            // with targets, only Discard and Queue upload are visible.
+            if case .failed = model.phase, model.fileLabel == nil {
+                // Nothing was prepared, so there is nothing to keep or queue.
+                HStack(spacing: 10) {
+                    Spacer(minLength: 0)
+                    Btn(style: .default, action: discard) {
+                        Text("Done").frame(minHeight: 24)
+                    }
+                    .accessibilityIdentifier("share.done")
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 16)
+                .background(T.presentationBg)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(T.border).frame(height: 0.5)
+                }
+            } else if model.fileLabel != nil {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) {
+                        Spacer(minLength: 0)
+                        actions(full: false)
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    VStack(spacing: 10) {
+                        actions(full: true)
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 16)
+                .background(T.presentationBg)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(T.border).frame(height: 0.5)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(T.presentationBg)
+    }
+
+    private func fileRow(_ label: String, isSingleFile: Bool) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: isSingleFile ? "doc" : "doc.on.doc")
+                .font(.system(size: 16, weight: .light))
+                .foregroundStyle(T.fgMuted)
+                .frame(width: 34, height: 34)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(T.border, lineWidth: 0.5))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: label)
+                    .font(Typography.tesseraMono(size: 13))
+                    .foregroundStyle(T.fg)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if isSingleFile {
+                    Text("file")
+                        .font(Typography.tesseraMono(size: 11))
+                        .foregroundStyle(T.fgMuted)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(T.border, lineWidth: 0.5))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func hostRow(_ target: UploadTarget, index: Int) -> some View {
+        let selected = target.id == model.selectedTargetID
+        return Button {
+            model.selectedTargetID = target.id
+        } label: {
+            HStack(spacing: 8) {
+                // StatusDot also imports the app's ContinuousMotion policy.
+                // This static dot keeps its visual language without pulling
+                // app-global motion settings into the extension.
+                Circle()
+                    .fill(target.isConnected ? T.green : target.isConnecting ? T.amber
+                          : target.isFailed ? T.red : T.fgFaint)
+                    .frame(width: 6, height: 6)
+                    .accessibilityHidden(true)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        hostLabel(target)
+                        Spacer(minLength: 8)
+                        hostStatus(target)
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 4) {
+                        hostLabel(target)
+                        hostStatus(target)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .frame(minHeight: 44)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(selected ? T.accent : T.border, lineWidth: selected ? 1 : 0.5)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier("share.host.\(index)")
+    }
+
+    private func hostLabel(_ target: UploadTarget) -> some View {
+        Text(verbatim: target.label)
+            .font(Typography.tesseraMono(size: 13))
+            .foregroundStyle(T.fg)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func hostStatus(_ target: UploadTarget) -> some View {
+        Text(verbatim: statusText(target))
+            .font(Typography.tesseraMono(size: 11))
+            .foregroundStyle(T.fgDim)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private var statusLine: some View {
+        switch model.phase {
+        case .preparing:
+            HStack(spacing: 8) {
+                ProgressView().tint(T.fgMuted)
+                Text("Preparing for Tessera...")
+            }
+            .foregroundStyle(T.fgMuted)
+        case .prepared:
+            if model.targets.isEmpty {
+                Text("Open Tessera once to refresh the host list.")
+                    .foregroundStyle(T.fgMuted)
+            } else {
+                Text("Choose the Tessera host for this upload.")
+                    .foregroundStyle(T.fgMuted)
+            }
+        case .failed(let message):
+            Text(verbatim: message).foregroundStyle(T.red)
+        }
+    }
+
+    @ViewBuilder
+    private func actions(full: Bool) -> some View {
+        Btn(style: .default, full: full, action: discard) {
+            Text("Discard").frame(minHeight: 24)
+        }
+        .accessibilityIdentifier("share.discard")
+
+        if model.targets.isEmpty {
+            Btn(style: .default, full: full, action: save) {
+                Text("Done").frame(minHeight: 24)
+            }
+            .accessibilityIdentifier("share.save")
+        } else {
+            Btn(style: .primary, full: full, action: queue) {
+                Text("Queue upload")
+                    .font(Typography.tesseraMono(size: 13, weight: .semibold))
+                    .frame(minHeight: 24)
+            }
+            .disabled(model.selectedTargetID == nil)
+            .opacity(model.selectedTargetID == nil ? 0.4 : 1)
+            .accessibilityIdentifier("share.queue")
+        }
     }
 }

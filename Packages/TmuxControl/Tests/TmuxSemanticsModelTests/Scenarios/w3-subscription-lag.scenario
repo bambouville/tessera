@@ -1,0 +1,17 @@
+scenario w3-subscription-lag
+# W3: %layout-change is written when the notification queue runs, but
+# %subscription-changed waits for the subscriber's one-second timer.
+session O 80x24 w0
+control device O
+control peer O
+send peer refresh-client -B 'geo:@*:#{window_width}x#{window_height}'
+advance 1
+expect peer %subscription-changed geo {O} {w0} 0 - : 80x24
+advance 0.5
+send device refresh-client -C 120,40
+expect peer %layout-change {w0} *,120x40,0,0,*
+expect-not peer %subscription-changed *
+advance 1
+expect peer %subscription-changed geo {O} {w0} 0 - : 120x40
+advance 1.5
+expect-not peer %subscription-changed *

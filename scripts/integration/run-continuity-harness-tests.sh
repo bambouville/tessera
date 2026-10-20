@@ -17,26 +17,30 @@ fi
 
 ipad_udid=''
 iphone_udid=''
-derived_data="${TESSERA_INTEGRATION_DERIVED_DATA:-$FIXTURE_STATE/DerivedData}"
+capture_pid=''
+derived_data="$(integration_derived_data)"
 result_dir="$RUN_DIR/programmatic"
 mkdir -p "$derived_data" "$result_dir"
 
 cleanup() {
   local udid udid_file
+  if [[ -n "$capture_pid" ]]; then
+    kill -INT "$capture_pid" 2>/dev/null || true
+    wait "$capture_pid" 2>/dev/null || true
+  fi
   for udid in "$ipad_udid" "$iphone_udid"; do
     [[ -n "$udid" ]] || continue
     xcrun simctl spawn "$udid" launchctl unsetenv TESSERA_CONTINUITY_CAPTURE \
       >/dev/null 2>&1 || true
   done
+  # The iPhone is private to this lane and always goes; only the shared
+  # iPad may outlive the lane when the parent runner keeps it booted.
+  delete_owned_test_simulator "$SIMULATOR_STATE/continuity_iphone_simulator_udid" || true
   if [[ "${TESSERA_KEEP_TEST_SIM_BOOTED:-0}" != 1 ]]; then
-    for udid_file in \
-      "$SIMULATOR_STATE/simulator_udid" \
-      "$SIMULATOR_STATE/continuity_iphone_simulator_udid"; do
-      delete_owned_test_simulator "$udid_file" || true
-    done
+    delete_owned_test_simulator "$SIMULATOR_STATE/simulator_udid" || true
   fi
 }
-trap cleanup EXIT
+trap 'fail_closed_trap cleanup' EXIT
 
 ipad_udid="$($HERE/ensure-test-simulator.sh | tail -n 1)"
 iphone_udid="$(
@@ -67,7 +71,21 @@ run_harness() {
   rm -rf "$result_bundle"
 
   note "running Handoff receiver UI on $idiom simulator"
-  xcodebuild "$action" \
+  local test_filters=(-only-testing:TesseraUITests/ContinuityHarnessTests)
+  if [[ "${TESSERA_CONTINUITY_QR_ONLY:-0}" == 1 ]]; then
+    test_filters=(
+      -only-testing:TesseraUITests/ContinuityHarnessTests/testQRManualEntryRemainsUsableWithSoftwareKeyboard
+      -only-testing:TesseraUITests/ContinuityHarnessTests/testQROfferKeepsGuidanceAndCancelReachable
+    )
+  fi
+  if [[ "${TESSERA_CONTINUITY_RECORD_VIDEO:-0}" == 1 ]]; then
+    mkdir -p "$RUN_DIR/visual"
+    xcrun simctl io "$udid" recordVideo --codec=h264 \
+      "$RUN_DIR/visual/continuity-$idiom.mp4" \
+      >"$RUN_DIR/visual/continuity-$idiom-recording.log" 2>&1 &
+    capture_pid=$!
+  fi
+  integration_xcodebuild "$action" \
     -project "$REPO_ROOT/Tessera.xcodeproj" \
     -scheme Tessera \
     -configuration Debug \
@@ -75,10 +93,16 @@ run_harness() {
     -derivedDataPath "$derived_data" \
     -resultBundlePath "$result_bundle" \
     -parallel-testing-enabled NO \
-    -only-testing:TesseraUITests/ContinuityHarnessTests
+    "${test_filters[@]}"
+  if [[ -n "$capture_pid" ]]; then
+    kill -INT "$capture_pid" 2>/dev/null || true
+    wait "$capture_pid" 2>/dev/null || true
+    capture_pid=''
+  fi
 }
 
 prime_simulator "$ipad_udid"
 prime_simulator "$iphone_udid"
 run_harness ipad "$ipad_udid" "$BUILD_ACTION"
 run_harness iphone "$iphone_udid" test-without-building
+script_completed=1

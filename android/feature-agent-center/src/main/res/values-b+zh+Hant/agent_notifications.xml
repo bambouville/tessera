@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="agent_notification_channel_name">智慧體提醒</string>
+    <string name="agent_notification_channel_description">智慧體中心的請求與完成通知</string>
+    <string name="agent_notification_needs_input">智慧體等待輸入</string>
+    <string name="agent_notification_finished">智慧體已完成</string>
+    <string name="agent_notification_body">打開 Tessera 查看。</string>
+    <string name="agent_notification_review">查看</string>
+</resources>

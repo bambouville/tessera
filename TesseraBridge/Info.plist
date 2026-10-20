@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Tessera Bridge uses iTerm2 to open the exact local tmux session you choose to continue.</string>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>com.bambouville.tessera.session</string>
+	</array>
+</dict>
+</plist>

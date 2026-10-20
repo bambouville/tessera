@@ -18,6 +18,7 @@
     "zh-Hant": { "other": "共 %lld 個智慧體" }
   },
   "%lld of 1 saved": {
+    "en": { "one": "%lld of 1 saved", "other": "%lld of 1 saved" },
     "de": { "one": "%lld von 1 gespeichert", "other": "%lld von 1 gespeichert" },
     "es": { "one": "%lld de 1 guardado", "other": "%lld de 1 guardados" },
     "fr": { "one": "%lld sur 1 enregistré", "other": "%lld sur 1 enregistrés" },
@@ -53,6 +54,7 @@
     "zh-Hant": { "other": "跳板鏈超過 %lld 跳。" }
   },
   "temp · auto-cleans after %lld d": {
+    "en": { "one": "temp · auto-cleans after %lld d", "other": "temp · auto-cleans after %lld d" },
     "de": { "one": "temporär · wird nach %lld Tag automatisch aufgeräumt", "other": "temporär · wird nach %lld Tagen automatisch aufgeräumt" },
     "es": { "one": "temporal · se limpia solo tras %lld día", "other": "temporal · se limpia solo tras %lld días" },
     "fr": { "one": "temporaire · nettoyé automatiquement après %lld jour", "other": "temporaire · nettoyé automatiquement après %lld jours" },

@@ -315,6 +315,11 @@ enum RemoteFilesConstants {
     static let defaultReaperDays = 7
     /// UserDefaults: "cwd" | "temp" — default Upload-sheet destination.
     static let defaultDestinationKey = "tessera.files.defaultDestination"
+    /// UserDefaults, per-host: last explicit paste-path toggle choice.
+    static func lastPastePathKey(hostID: UUID) -> String {
+        "tessera.files.lastPastePath.\(hostID.uuidString)"
+    }
+
     /// UserDefaults, per-host: last Upload-sheet destination choice.
     static func lastDestinationKey(hostID: UUID) -> String {
         "tessera.files.lastDest.\(hostID.uuidString)"
@@ -341,6 +346,9 @@ final class MockFileBridge: FileBridging {
     /// Optional deterministic upload progress granularity for UI harnesses.
     /// Production never uses MockFileBridge; ordinary tests keep one step.
     var uploadProgressSteps = 1
+    /// Optional exact remote bytes for preview fixtures. Unknown paths fail.
+    var downloadContents: [String: Data]?
+    private(set) var downloadedPaths: [String] = []
 
     init(key: FileBridgeKey = FileBridgeKey(user: "mock", address: "mock.local", port: 22),
          tree: [String: [RemoteFileEntry]]? = nil) {
@@ -444,10 +452,19 @@ final class MockFileBridge: FileBridging {
 
     func download(remotePath: String, to localURL: URL, progress: TransferProgressHandler?) async throws {
         guard state == .connected else { throw FileBridgeError.notConnected }
-        progress?(0, 100)
-        if latencyNanos > 0 { try? await Task.sleep(nanoseconds: latencyNanos) }
-        try Data("mock contents of \(remotePath)\n".utf8).write(to: localURL)
-        progress?(100, 100)
+        downloadedPaths.append(remotePath)
+        let data: Data
+        if let downloadContents {
+            guard let contents = downloadContents[remotePath] else {
+                throw FileBridgeError.remoteOperationFailed("No such file: \(remotePath)")
+            }
+            data = contents
+        } else { data = Data("mock contents of \(remotePath)\n".utf8) }
+        progress?(0, Int64(data.count))
+        if latencyNanos > 0 { try await Task.sleep(nanoseconds: latencyNanos) }
+        try Task.checkCancellation()
+        try data.write(to: localURL)
+        progress?(Int64(data.count), Int64(data.count))
     }
 
     func upload(localURL: URL, to remotePath: String, progress: TransferProgressHandler?) async throws {

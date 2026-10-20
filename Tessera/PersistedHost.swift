@@ -94,7 +94,10 @@ final class PersistedHost {
     /// `[A-Za-z_][A-Za-z0-9_]*` key regex are skipped silently.
     var envVars: String = ""
     var startupSnippet: String = ""
-    /// Codable-encoded `[PortForwardRule]` from the `PortForwarding` package.
+    /// Codable-encoded `[PortForwardRule]` written by `PortForwarding.RuleCodec`.
+    /// The rule type itself is the shared `TesseraDomainCore.PortForwardRule`;
+    /// blobs written before it gained a direction and bind/target endpoints are
+    /// migrated on read by that codec, so nothing stored here is ever lost.
     /// Stored as a single `Data?` blob (not as a `[PortForwardRule]` array) to
     /// sidestep the SwiftData iOS 26 array-migration bug — adding any new
     /// column to a @Model with an array-of-Codable property crashes lightweight

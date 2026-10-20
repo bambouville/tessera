@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Direct-share targets. The dynamic shortcuts ShareTargetPublisher pushes carry
+  the category below, which is what lets the system share sheet offer a
+  particular host in its top row. `*/*` matches the activity's own SEND filter
+  so a shortcut can carry any payload the app already accepts; `text/plain` is
+  listed separately because a text share never arrives with a stream.
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <share-target android:targetClass="com.bambouville.tessera.MainActivity">
+        <data android:mimeType="*/*" />
+        <category android:name="com.bambouville.tessera.category.SHARE_TARGET" />
+    </share-target>
+    <share-target android:targetClass="com.bambouville.tessera.MainActivity">
+        <data android:mimeType="text/plain" />
+        <category android:name="com.bambouville.tessera.category.SHARE_TARGET" />
+    </share-target>
+</shortcuts>

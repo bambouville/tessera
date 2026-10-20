@@ -1,5 +1,6 @@
 // Tessera/Purchases/SavedHostAdmissionPolicy.swift
 import Foundation
+import TesseraContinuityCore
 
 /// Why a customer has unlimited hosts. The Settings detail names the source
 /// honestly (`included with your original Tessera purchase` vs
@@ -38,20 +39,28 @@ enum SavedHostAdmissionPolicy {
         newRowCount: Int,
         access: HostAccessState
     ) -> SavedHostAdmission {
-        // Admission below the free ceiling is entitlement-independent. This
-        // lets a brand-new customer save the included first host even when
-        // StoreKit is slow/offline. Zero-row edits and exact-match Handoffs
-        // likewise remain allowed for an over-limit refunded customer.
-        if newRowCount == 0
-            || existingHostCount + newRowCount <= freeHostLimit {
-            return .allow
-        }
+        let sharedAccess: ContinuationHostAccess
         switch access {
-        case .unlimited:
-            return .allow
         case .checking:
-            return .checkingEntitlement
+            sharedAccess = .checking(
+                includedMaximumSavedHosts: freeHostLimit
+            )
         case .free:
+            sharedAccess = .limited(maximumSavedHosts: freeHostLimit)
+        case .unlimited:
+            sharedAccess = .unlimited
+        }
+
+        switch ContinuationAdmissionPolicy.decision(
+            existingHostCount: existingHostCount,
+            newRowCount: newRowCount,
+            access: sharedAccess
+        ) {
+        case .allow:
+            return .allow
+        case .checkingEntitlement:
+            return .checkingEntitlement
+        case .requiresUpgrade:
             return .requiresPurchase
         }
     }

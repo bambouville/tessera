@@ -10,13 +10,14 @@ import Citadel
 import Foundation
 import NIOCore
 import Observation
+import os
+import TesseraCore
 
 @MainActor
 @Observable
 final class FileBridge: FileBridging {
     private static let idleTimeoutSeconds: TimeInterval = 10 * 60
     private static let idleTimeoutNanoseconds: UInt64 = 10 * 60 * 1_000_000_000
-    private static let transferChunkSize = 128 * 1024
     private static let execMaxResponseSize = 1024 * 1024
 
     let key: FileBridgeKey
@@ -46,6 +47,9 @@ final class FileBridge: FileBridging {
     /// topology edits.
     private var connectedRouteIdentity: String?
     private var sftp: SFTPClient?
+    /// Shared by every transfer on this connection, one per direction.
+    private var uploadWindow = SFTPPipelineWindow.uploads()
+    private var downloadWindow = SFTPPipelineWindow.downloads()
     private var connectTask: Task<Void, Error>?
     private var connectionGeneration = 0
     private var idleTask: Task<Void, Never>?
@@ -193,32 +197,25 @@ final class FileBridge: FileBridging {
             let remoteFile = try await sftp.openFile(filePath: remotePath, flags: .read)
             do {
                 let attributes = try? await remoteFile.readAttributes()
-                let total = attributes?.size.map(Int64.init)
+                let total = Self.byteCount(attributes?.size)
                 _ = FileManager.default.createFile(atPath: localURL.path, contents: nil)
                 let localFile = try FileHandle(forWritingTo: localURL)
                 defer { try? localFile.close() }
                 try localFile.truncate(atOffset: 0)
 
-                var offset: UInt64 = 0
-                var transferred: Int64 = 0
                 progress?(0, total)
-
-                while true {
-                    try Task.checkCancellation()
-                    var chunk = try await remoteFile.read(
-                        from: offset,
-                        length: UInt32(Self.transferChunkSize)
-                    )
-                    let byteCount = chunk.readableBytes
-                    guard byteCount > 0 else { break }
-
-                    let bytes = chunk.readBytes(length: byteCount) ?? []
-                    try localFile.write(contentsOf: Data(bytes))
-                    offset += UInt64(byteCount)
-                    transferred += Int64(byteCount)
-                    self.recordActivity()
-                    progress?(transferred, total)
-                }
+                try await SFTPTransferPipeline.download(
+                    from: remoteFile,
+                    window: downloadWindow,
+                    sizeHint: total,
+                    write: { chunk in
+                        try chunk.withUnsafeReadableBytes { try localFile.write(contentsOf: $0) }
+                    },
+                    progress: { transferred in
+                        self.recordActivity()
+                        progress?(transferred, total)
+                    }
+                )
 
                 try? await remoteFile.close()
             } catch {
@@ -244,25 +241,16 @@ final class FileBridge: FileBridging {
                 flags: [.write, .create, .truncate]
             )
             do {
-                var offset: UInt64 = 0
                 progress?(0, total)
-
-                while true {
-                    try Task.checkCancellation()
-                    guard let data = try localFile.read(upToCount: Self.transferChunkSize),
-                          !data.isEmpty
-                    else {
-                        break
+                try await SFTPTransferPipeline.upload(
+                    to: remoteFile,
+                    window: uploadWindow,
+                    nextChunk: { try localFile.read(upToCount: $0) },
+                    acknowledged: { transferred in
+                        self.recordActivity()
+                        progress?(transferred, total)
                     }
-
-                    var buffer = ByteBuffer()
-                    buffer.writeBytes(data)
-                    try await remoteFile.write(buffer, at: offset)
-
-                    offset += UInt64(data.count)
-                    self.recordActivity()
-                    progress?(Int64(offset), total)
-                }
+                )
 
                 try? await remoteFile.close()
             } catch {
@@ -283,6 +271,12 @@ final class FileBridge: FileBridging {
             )
             let bytes = output.readBytes(length: output.readableBytes) ?? []
             return String(decoding: bytes, as: UTF8.self)
+        }
+    }
+
+    func executeAgentInstallationCommand(_ command: String) async throws -> String {
+        try await withSSHOperation { client in
+            try await AppleAgentInstallationExec.run(client: client, command: command)
         }
     }
 
@@ -323,6 +317,13 @@ final class FileBridge: FileBridging {
             modified: mtime,
             permissions: rawMode.map { UInt16($0 & 0o7777) }
         )
+    }
+
+    /// SFTP sizes are uint64. One beyond Int64.max, from a hostile or buggy
+    /// server, is an unknown size rather than a trap in Int64 progress and
+    /// byte-count formatting.
+    nonisolated static func byteCount(_ size: UInt64?) -> Int64? {
+        size.flatMap { Int64(exactly: $0) }
     }
 
     nonisolated static func sortedEntries(_ entries: [RemoteFileEntry]) -> [RemoteFileEntry] {
@@ -392,6 +393,8 @@ final class FileBridge: FileBridging {
             self.connectedRouteIdentity = connectedChain.resolvedHost
                 .sshConnectionRouteIdentity
             self.sftp = sftp
+            self.uploadWindow = .uploads()
+            self.downloadWindow = .downloads()
             self.homeDirectory = home
             self.state = .connected
             self.recordActivity()
@@ -476,6 +479,48 @@ final class FileBridge: FileBridging {
         return try await runOperation {
             try await body(client)
         }
+    }
+
+    /// Reuses this already-authenticated same-host route for a projector child
+    /// exec channel. It never calls `connect()` and therefore never prompts for
+    /// credentials/biometrics merely because Agent Center opened. The legacy
+    /// `exec` method remains deliberately unsuitable because it buffers and
+    /// merges output.
+    func agentProjectorExecAvailability(
+        binding: AgentTerminalBinding,
+        isBindingCurrent: @escaping @MainActor @Sendable (AgentTerminalBinding) -> Bool
+    ) -> AppleAgentExecAvailability {
+        guard binding.transport == .mosh,
+              state == .connected,
+              let client
+        else { return .unavailable(.hostAccessRequired) }
+
+        let expectedConnectionGeneration = connectionGeneration
+        return .available(AppleAgentStreamingExecFactory { [weak self, client] request in
+            guard request.binding == binding else {
+                throw AppleAgentPlatformError.staleBinding
+            }
+            let retainedRoute = await MainActor.run { [weak self] in
+                guard let self,
+                      self.state == .connected,
+                      self.client === client,
+                      self.connectionGeneration == expectedConnectionGeneration,
+                      isBindingCurrent(request.binding)
+                else { return false }
+                // Keep this already-connected Files/scrollback route alive
+                // until the projector child finishes; do not reconnect it.
+                self.activeOperationCount += 1
+                self.recordActivity()
+                return true
+            }
+            guard retainedRoute else { throw AppleAgentPlatformError.staleBinding }
+            return try await AppleCitadelAgentExecHandle.open(
+                client: client,
+                request: request,
+                isBindingCurrent: isBindingCurrent,
+                onFinish: { [weak self] in self?.finishOperation() }
+            )
+        })
     }
 
     private func runOperation<T>(_ body: () async throws -> T) async throws -> T {
@@ -701,5 +746,285 @@ final class FileBridge: FileBridging {
             return filename
         }
         return "\(directory)/\(filename)"
+    }
+}
+
+/// The two requests a pipelined transfer sends. `SFTPFile` conforms;
+/// FileBridgeTests substitutes a scripted server.
+protocol PipelinedSFTPFile: AnyObject {
+    func writeFuture(_ data: ByteBuffer, at offset: UInt64) -> EventLoopFuture<Void>
+    func readFuture(from offset: UInt64, length: UInt32) -> EventLoopFuture<ByteBuffer>
+}
+
+extension SFTPFile: PipelinedSFTPFile {}
+
+/// SFTP answers every read and write request separately. Awaiting each reply
+/// before sending the next request caps a transfer at one request per round
+/// trip — for 32 KB writes, 1.6 MB/s at 20 ms and 320 KB/s at 100 ms — however
+/// fast the link is. So requests are pipelined, with up to about 2 MB
+/// outstanding like OpenSSH's sftp client (the channel window OpenSSH's server
+/// grants a session). Every other request on the connection — browsing, the
+/// close that ends a cancelled transfer — waits behind what transfers have
+/// queued, so a per-connection `SFTPPipelineWindow` holds the outstanding
+/// bytes to what the measured rate needs. Requests travel in batches so the
+/// main actor resumes once per batch rather than once per request.
+@MainActor
+enum SFTPTransferPipeline {
+    nonisolated static let writeRequestLength = SFTPFile.maximumWriteRequestLength
+    nonisolated static let writeRequestsPerBatch = 8
+    /// Every OpenSSH release answers 64 KiB reads in full.
+    nonisolated static let readRequestLength: UInt32 = 64 * 1024
+    /// Reads shrink to a server's cap, but never below this.
+    nonisolated static let minimumReadRequestLength: UInt32 = 4 * 1024
+    nonisolated static let readRequestsPerBatch = 4
+
+    nonisolated static func uptimeNanoseconds() -> UInt64 {
+        DispatchTime.now().uptimeNanoseconds
+    }
+
+    /// Writes each `nextChunk(maximumByteCount)` result (nil or empty at end
+    /// of input) at consecutive offsets, reporting the cumulative bytes the
+    /// server has acknowledged — never bytes merely queued.
+    static func upload(
+        to file: PipelinedSFTPFile,
+        window: SFTPPipelineWindow,
+        nextChunk: (Int) throws -> Data?,
+        acknowledged: (Int64) -> Void,
+        clock: @escaping @Sendable () -> UInt64 = uptimeNanoseconds
+    ) async throws {
+        var inFlight: [(end: Int64, acknowledgement: EventLoopFuture<Void>)] = []
+        var submitted: Int64 = 0
+        func batchBytes() -> Int {
+            window.requestsPerBatch(requestLength: writeRequestLength, maximum: writeRequestsPerBatch)
+                * writeRequestLength
+        }
+        while true {
+            try Task.checkCancellation()
+            while let oldest = inFlight.first, window.outstandingBytes + batchBytes() > window.limitBytes {
+                inFlight.removeFirst()
+                try await oldest.acknowledgement.get()
+                acknowledged(oldest.end)
+                try Task.checkCancellation()
+            }
+            guard let chunk = try nextChunk(batchBytes()), !chunk.isEmpty else { break }
+            var buffer = ByteBufferAllocator().buffer(capacity: chunk.count)
+            buffer.writeBytes(chunk)
+            let ticket = window.send(bytes: chunk.count, at: clock())
+            let acknowledgement = file.writeFuture(buffer, at: UInt64(submitted))
+            // On the event loop as the reply arrives, before any awaiting
+            // task resumes.
+            acknowledgement.whenComplete { result in
+                window.answer(ticket, at: clock(), succeeded: (try? result.get()) != nil)
+            }
+            submitted += Int64(chunk.count)
+            inFlight.append((submitted, acknowledgement))
+        }
+        for batch in inFlight {
+            try await batch.acknowledgement.get()
+            acknowledged(batch.end)
+        }
+    }
+
+    /// Reads from offset 0 to end of file, passing bytes to `write` strictly
+    /// in order and reporting the cumulative count. `sizeHint`, the size when
+    /// the file was opened, bounds read-ahead; beyond it one request at a time
+    /// probes for end of file, until a full reply shows the file grew.
+    static func download(
+        from file: PipelinedSFTPFile,
+        window: SFTPPipelineWindow,
+        sizeHint: Int64?,
+        write: (ByteBuffer) throws -> Void,
+        progress: (Int64) -> Void,
+        clock: @escaping @Sendable () -> UInt64 = uptimeNanoseconds
+    ) async throws {
+        typealias Request = (offset: UInt64, length: UInt32, reply: EventLoopFuture<ByteBuffer>)
+        typealias Batch = (requests: [Request], replies: EventLoopFuture<[Result<ByteBuffer, Error>]>)
+        let sizeAtOpen = sizeHint.map { UInt64(max(0, $0)) }
+        var readAheadLimit = sizeAtOpen ?? .max
+        var requestLength = readRequestLength
+        var lastShortReply: Int?
+        var nextRequestOffset: UInt64 = 0
+        var delivered: UInt64 = 0
+        var inFlight: [Batch] = []
+
+        while true {
+            try Task.checkCancellation()
+            while true {
+                let requestsPerBatch = window.requestsPerBatch(
+                    requestLength: Int(requestLength),
+                    maximum: readRequestsPerBatch
+                )
+                guard inFlight.isEmpty
+                    || (nextRequestOffset < readAheadLimit
+                        && window.outstandingBytes + requestsPerBatch * Int(requestLength) <= window.limitBytes)
+                else { break }
+                let sentAt = clock()
+                var requests: [Request] = []
+                repeat {
+                    let reply = file.readFuture(from: nextRequestOffset, length: requestLength)
+                    requests.append((nextRequestOffset, requestLength, reply))
+                    nextRequestOffset += UInt64(requestLength)
+                } while requests.count < requestsPerBatch && nextRequestOffset < readAheadLimit
+                let ticket = window.send(bytes: requests.count * Int(requestLength), at: sentAt)
+                let replies = EventLoopFuture.whenAllComplete(
+                    requests.map(\.reply),
+                    on: requests[0].reply.eventLoop
+                )
+                // On the event loop as the last reply arrives — also for
+                // batches dropped below, whose replies still cross the link.
+                replies.whenSuccess { results in
+                    window.answer(
+                        ticket,
+                        at: clock(),
+                        succeeded: results.allSatisfy { (try? $0.get()) != nil }
+                    )
+                }
+                inFlight.append((requests, replies))
+            }
+
+            let batch = inFlight.removeFirst()
+            let replies = try await batch.replies.get()
+            var resumeOffset: UInt64?
+            for (request, reply) in zip(batch.requests, replies) {
+                let chunk = try reply.get()
+                let count = chunk.readableBytes
+                guard count > 0 else {
+                    progress(Int64(delivered))
+                    return
+                }
+                guard count <= Int(request.length) else { throw SFTPError.invalidResponse }
+                try write(chunk)
+                delivered += UInt64(count)
+                if count < Int(request.length) {
+                    // A short reply leaves a gap before the requests after
+                    // it: drop those and resume at the gap. Two in a row of
+                    // one length mean the server caps reads; one alone — the
+                    // end of a growing file, an odd filesystem — changes
+                    // nothing.
+                    if lastShortReply == count {
+                        requestLength = max(UInt32(count), minimumReadRequestLength)
+                    }
+                    lastShortReply = count
+                    resumeOffset = delivered
+                    break
+                }
+                lastShortReply = nil
+                if let sizeAtOpen, request.offset + UInt64(request.length) > sizeAtOpen {
+                    // A full reply past the size at open: the file grew.
+                    readAheadLimit = .max
+                }
+            }
+            progress(Int64(delivered))
+            if let resumeOffset {
+                inFlight.removeAll()
+                nextRequestOffset = resumeOffset
+            }
+        }
+    }
+}
+
+/// How many bytes pipelined transfers may leave unanswered on one connection
+/// in one direction — shared by every transfer that way, because the queue
+/// they build is the one every other request on the connection waits behind.
+///
+/// The limit is the fastest rate measured in the last two seconds times the
+/// quickest round trip plus a quarter second: enough to keep the link busy
+/// with about the budget queued. On a fast link that is the whole ceiling;
+/// at 10 Mbit/s it is about 400 KB rather than 2 MB, so browsing during an
+/// upload stays responsive. Samples taken behind a queue never raise the
+/// quickest round trip, or transfers would ratchet it up; a near-empty
+/// sample replaces it once it is ten seconds old, so a path that got slower
+/// — another app's upload, a VPN relay — doesn't pin the window at the
+/// floor. Android's `SftpPipelineWindow` is the same controller.
+final class SFTPPipelineWindow: @unchecked Sendable {
+    static let queueBudgetNanoseconds: UInt64 = 250_000_000
+    static let rateWindowNanoseconds: UInt64 = 2_000_000_000
+    static let minimumLatencyLifetimeNanoseconds: UInt64 = 10_000_000_000
+
+    /// One request's worth at the floor: on a link that slow, nothing waits
+    /// behind more than it did when transfers were stop-and-wait.
+    static func uploads() -> SFTPPipelineWindow {
+        let request = SFTPTransferPipeline.writeRequestLength
+        return SFTPPipelineWindow(floorBytes: request, ceilingBytes: 64 * request, initialBytes: 4 * request)
+    }
+
+    static func downloads() -> SFTPPipelineWindow {
+        let request = Int(SFTPTransferPipeline.readRequestLength)
+        return SFTPPipelineWindow(floorBytes: request, ceilingBytes: 32 * request, initialBytes: 4 * request)
+    }
+
+    struct Ticket: Sendable {
+        let bytes: Int
+        /// Unanswered bytes once this request left, its own included.
+        let outstandingAtSend: Int
+        let sentAt: UInt64
+    }
+
+    private struct State {
+        var limitBytes: Int
+        var outstandingBytes = 0
+        var minimumLatency = UInt64.max
+        var minimumLatencyMeasuredAt: UInt64 = 0
+        var rates: [(answeredAt: UInt64, bytesPerNanosecond: Double)] = []
+        var lastActivity: UInt64?
+    }
+
+    let floorBytes: Int
+    let ceilingBytes: Int
+    let initialBytes: Int
+    private let state: OSAllocatedUnfairLock<State>
+
+    init(floorBytes: Int, ceilingBytes: Int, initialBytes: Int) {
+        self.floorBytes = floorBytes
+        self.ceilingBytes = ceilingBytes
+        self.initialBytes = min(max(initialBytes, floorBytes), ceilingBytes)
+        state = OSAllocatedUnfairLock(initialState: State(limitBytes: self.initialBytes))
+    }
+
+    var limitBytes: Int { state.withLock { $0.limitBytes } }
+    var outstandingBytes: Int { state.withLock { $0.outstandingBytes } }
+
+    /// About a quarter of the window in whole requests, so several batches
+    /// are in flight.
+    func requestsPerBatch(requestLength: Int, maximum: Int) -> Int {
+        min(max(limitBytes / 4 / requestLength, 1), maximum)
+    }
+
+    func send(bytes: Int, at now: UInt64) -> Ticket {
+        state.withLock { state in
+            // A connection idle this long may be on another path by now.
+            if state.outstandingBytes == 0, let last = state.lastActivity,
+               now >= last, now - last >= Self.minimumLatencyLifetimeNanoseconds {
+                state = State(limitBytes: initialBytes)
+            }
+            state.outstandingBytes += bytes
+            state.lastActivity = now
+            return Ticket(bytes: bytes, outstandingAtSend: state.outstandingBytes, sentAt: now)
+        }
+    }
+
+    /// The server answered — or will never answer — `ticket`'s requests.
+    /// It answers in order, so every byte outstanding when they left crossed
+    /// in the meantime; failures return their bytes without a sample.
+    func answer(_ ticket: Ticket, at now: UInt64, succeeded: Bool) {
+        state.withLock { state in
+            state.outstandingBytes = max(state.outstandingBytes - ticket.bytes, 0)
+            state.lastActivity = max(state.lastActivity ?? now, now)
+            guard succeeded else { return }
+            let latency = now > ticket.sentAt ? now - ticket.sentAt : 1
+            if latency < state.minimumLatency
+                || (ticket.outstandingAtSend <= floorBytes
+                    && now >= state.minimumLatencyMeasuredAt
+                    && now - state.minimumLatencyMeasuredAt >= Self.minimumLatencyLifetimeNanoseconds) {
+                state.minimumLatency = latency
+                state.minimumLatencyMeasuredAt = now
+            }
+            state.rates.append((now, Double(ticket.outstandingAtSend) / Double(latency)))
+            let horizonStart = now > Self.rateWindowNanoseconds ? now - Self.rateWindowNanoseconds : 0
+            state.rates.removeAll { $0.answeredAt < horizonStart && $0.answeredAt != now }
+            let fastest = state.rates.map(\.bytesPerNanosecond).max() ?? 0
+            let target = fastest * (Double(state.minimumLatency) + Double(Self.queueBudgetNanoseconds))
+            state.limitBytes = Int(min(max(target, Double(floorBytes)), Double(ceilingBytes)))
+        }
     }
 }

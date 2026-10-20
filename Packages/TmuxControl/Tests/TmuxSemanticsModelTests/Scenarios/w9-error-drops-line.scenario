@@ -1,0 +1,15 @@
+scenario w9-error-drops-line
+# W9: a failing command drops the rest of its line (cmdq_remove_group), and a
+# parse error rejects the whole line before anything runs.
+session O 80x24 w0
+control device O
+send device display-message -p first ; select-window -t @9 ; set-option @dropped 1
+expect device first
+expect device can't find window: @9
+expect device %error 1
+send device display-message -p 'dropped=#{@dropped}'
+expect device dropped=
+send device set-option @early 1 ; bogus-command
+expect device parse error: unknown command: bogus-command
+send device show-options -qv @early
+expect-not device 1

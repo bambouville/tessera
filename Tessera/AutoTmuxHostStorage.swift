@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import TmuxControl
+import TesseraProtocolCore
 
 /// Device-local, non-secret history for truthful host recency and key-use UI.
 ///
@@ -302,7 +303,7 @@ enum HostRuntimeStateStore {
         if let saved = load(for: host).tmuxSessionName, !saved.isEmpty {
             return saved
         }
-        return AutoTmuxScript.defaultSessionName(forHostKey: key(for: host))
+        return AutomaticTmuxTarget.sessionName(forHostKey: key(for: host))
     }
 
     /// Persist the resolved session name as soon as we observe a

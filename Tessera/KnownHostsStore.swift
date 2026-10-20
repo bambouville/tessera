@@ -2,6 +2,7 @@ import Foundation
 import Crypto
 import NIOSSH
 import NIOCore
+import TesseraTrustCore
 
 /// Persistent trust store for SSH host keys. Implements TOFU
 /// (trust on first use): first connection to a new host prompts;
@@ -131,12 +132,31 @@ actor KnownHostsStore {
     func check(_ key: NIOSSHPublicKey, for endpoint: String) -> VerificationResult {
         let fingerprint = Self.fingerprint(of: key)
         let keyString = String(openSSHPublicKey: key)
-
-        guard var record = records[endpoint] else {
-            return .unknown(fingerprint: fingerprint, keyString: keyString)
+        guard let presented = try? Self.sharedKey(
+            keyString: keyString,
+            fingerprint: fingerprint
+        ) else {
+            return .changed(
+                oldFingerprint: records[endpoint]?.fingerprint ?? "invalid",
+                newFingerprint: fingerprint,
+                keyString: keyString
+            )
+        }
+        let trusted = records[endpoint].flatMap {
+            Self.sharedRecord(endpoint: endpoint, record: $0)
         }
 
-        if record.fingerprint == fingerprint {
+        switch KnownHostTrustPolicy.check(
+            endpoint: KnownHostEndpoint(host: endpoint),
+            presented: presented,
+            trusted: trusted
+        ) {
+        case .unknown:
+            return .unknown(fingerprint: fingerprint, keyString: keyString)
+        case .trusted:
+            guard var record = records[endpoint] else {
+                return .unknown(fingerprint: fingerprint, keyString: keyString)
+            }
             if record.pendingFingerprint != nil || record.pendingKeyString != nil {
                 record.pendingFingerprint = nil
                 record.pendingKeyString = nil
@@ -144,18 +164,25 @@ actor KnownHostsStore {
                 saveToDisk()
             }
             return .trusted
+        // `.revertedToPrevious` is unreachable here: this call passes no
+        // `previous` key (iOS keeps rotation history for display only, and has
+        // never treated "went back to the key you replaced" as anything other
+        // than a mismatch). Handling it alongside `.changed` keeps that
+        // conservative reading if the parameter is ever wired up.
+        case .changed, .revertedToPrevious:
+            guard var record = records[endpoint] else {
+                return .unknown(fingerprint: fingerprint, keyString: keyString)
+            }
+            record.pendingFingerprint = fingerprint
+            record.pendingKeyString = keyString
+            records[endpoint] = record
+            saveToDisk()
+            return .changed(
+                oldFingerprint: record.fingerprint,
+                newFingerprint: fingerprint,
+                keyString: keyString
+            )
         }
-
-        record.pendingFingerprint = fingerprint
-        record.pendingKeyString = keyString
-        records[endpoint] = record
-        saveToDisk()
-
-        return .changed(
-            oldFingerprint: record.fingerprint,
-            newFingerprint: fingerprint,
-            keyString: keyString
-        )
     }
 
     /// Trust a host key (first-time accept or override after change).
@@ -249,10 +276,25 @@ actor KnownHostsStore {
         guard Self.fingerprint(of: key) == snapshot.fingerprint else {
             throw ImportError.fingerprintMismatch
         }
+        guard let importedKey = try? Self.sharedKey(
+            keyString: String(openSSHPublicKey: key),
+            fingerprint: snapshot.fingerprint
+        ) else { throw ImportError.invalidKey }
+        let imported = TrustedHostRecord(
+            endpoint: KnownHostEndpoint(host: endpoint),
+            key: importedKey,
+            trustedAt: snapshot.firstSeen
+        )
+        let local = records[endpoint].flatMap {
+            Self.sharedRecord(endpoint: endpoint, record: $0)
+        }
 
-        if var existing = records[endpoint] {
-            guard existing.fingerprint != snapshot.fingerprint else {
-                return .unchanged
+        switch KnownHostTrustPolicy.importRecord(imported, local: local) {
+        case .unchanged:
+            return .unchanged
+        case .conflict:
+            guard var existing = records[endpoint] else {
+                throw ImportError.invalidKey
             }
             // Keep the local trust decision authoritative, but retain the
             // peer-reported key as a pending mismatch so Known Hosts can show
@@ -262,20 +304,50 @@ actor KnownHostsStore {
             records[endpoint] = existing
             saveToDisk()
             return .conflict
+        case .inserted:
+            records[endpoint] = HostRecord(
+                fingerprint: snapshot.fingerprint,
+                keyString: String(openSSHPublicKey: key),
+                firstSeen: snapshot.firstSeen,
+                lastSeen: snapshot.lastSeen,
+                pendingFingerprint: nil,
+                pendingKeyString: nil,
+                previousFingerprint: nil,
+                matchedPeerLabel: "Imported from \(peerDeviceName)"
+            )
+            saveToDisk()
+            return .inserted
         }
+    }
 
-        records[endpoint] = HostRecord(
-            fingerprint: snapshot.fingerprint,
-            keyString: String(openSSHPublicKey: key),
-            firstSeen: snapshot.firstSeen,
-            lastSeen: snapshot.lastSeen,
-            pendingFingerprint: nil,
-            pendingKeyString: nil,
-            previousFingerprint: nil,
-            matchedPeerLabel: "Imported from \(peerDeviceName)"
+    private static func sharedKey(
+        keyString: String,
+        fingerprint: String
+    ) throws -> SSHHostPublicKey {
+        let fields = keyString.split(separator: " ", maxSplits: 1).map(String.init)
+        guard fields.count == 2, let blob = Data(base64Encoded: fields[1]) else {
+            throw ImportError.invalidKey
+        }
+        return try SSHHostPublicKey(
+            algorithm: fields[0],
+            blob: blob,
+            fingerprint: fingerprint
         )
-        saveToDisk()
-        return .inserted
+    }
+
+    private static func sharedRecord(
+        endpoint: String,
+        record: HostRecord
+    ) -> TrustedHostRecord? {
+        guard let key = try? sharedKey(
+            keyString: record.keyString,
+            fingerprint: record.fingerprint
+        ) else { return nil }
+        return TrustedHostRecord(
+            endpoint: KnownHostEndpoint(host: endpoint),
+            key: key,
+            trustedAt: record.firstSeen
+        )
     }
 
     /// Snapshot of the store as display rows for the Known Hosts
@@ -314,16 +386,14 @@ actor KnownHostsStore {
     /// Interoperable OpenSSH known_hosts text. Host fingerprints are public;
     /// this export never reads or includes authentication key material.
     func openSSHExportText() -> String {
-        records
-            .map { endpoint, record in
-                KnownHostsOpenSSHCodec.exportLine(
-                    endpoint: endpoint,
+        OpenSSHKnownHostsCodec.exportText(
+            records: records.map { endpoint, record in
+                KnownHostsExportRecord(
+                    endpointKey: endpoint,
                     keyString: record.keyString
                 )
             }
-            .sorted()
-            .joined(separator: "\n")
-            .appending(records.isEmpty ? "" : "\n")
+        )
     }
 
     /// Applies a plan that the user has already reviewed and confirmed. New
@@ -398,14 +468,21 @@ actor KnownHostsStore {
 
     /// SHA-256 fingerprint of the key's SSH wire format, matching
     /// OpenSSH's `SHA256:...` display.
+    ///
+    /// Padded base64: this exact string is what `known_hosts.json` has
+    /// persisted since the store shipped, and `check()` compares the stored
+    /// string against a freshly computed one. Switching to the unpadded form
+    /// the rest of the codebase renders would make every already-pinned host
+    /// report a key MISMATCH on its next connection, so the divergence is
+    /// declared at the call site and the digest itself comes from the one
+    /// shared implementation.
     static func fingerprint(of key: NIOSSHPublicKey) -> String {
         // String(openSSHPublicKey:) returns "algo base64data"
         let parts = String(openSSHPublicKey: key).split(separator: " ", maxSplits: 1)
         guard parts.count >= 2, let wireData = Data(base64Encoded: String(parts[1])) else {
             return "unknown"
         }
-        let hash = SHA256.hash(data: wireData)
-        return "SHA256:" + Data(hash).base64EncodedString()
+        return SSHHostPublicKey.sha256Fingerprint(of: wireData, padding: .padded)
     }
 
     /// Short display form: "SHA256:abc...xyz"
@@ -498,189 +575,122 @@ struct KnownHostsOpenSSHImportPlan: Equatable, Sendable {
     var unchangedCount: Int { entries.count { $0.action == .unchanged } }
 }
 
+/// iOS adapter over the shared `OpenSSHKnownHostsCodec` in `TesseraTrustCore`.
+///
+/// Parsing, host-token mapping, deduplication, ambiguity detection and the
+/// add/replace/unchanged classification all live in core so Android reaches the
+/// same verdicts. Two things stay here:
+///
+///  * **Key enrichment.** Core validates a key structurally (algorithm token,
+///    canonical base64, blob's own algorithm name agreeing). iOS additionally
+///    parses it with `NIOSSHPublicKey`, so the review sheet only ever offers
+///    keys the SSH stack will actually accept, and pins the stack's canonical
+///    rendering rather than whatever spacing the file used.
+///  * **Localization.** Core reports a rejection *reason*; the user-facing
+///    sentence is rendered here.
 enum KnownHostsOpenSSHCodec {
-    private struct ParsedEntry {
-        let lineNumber: Int
-        let endpoint: String
-        let keyString: String
-        let fingerprint: String
-    }
-
+    /// Builds a reviewable plan. Nothing is written until
+    /// `applyConfirmedOpenSSHImport` runs over the entries the user confirmed.
     static func importPlan(
         text: String,
         currentRows: [KnownHostsStore.DisplayRow]
     ) -> KnownHostsOpenSSHImportPlan {
-        let currentFingerprints = Dictionary(
-            uniqueKeysWithValues: currentRows.map { ($0.id, $0.fingerprint) }
+        let plan = OpenSSHKnownHostsCodec.importPlan(
+            text: text,
+            existingFingerprints: Dictionary(
+                currentRows.map { ($0.id, $0.fingerprint) },
+                uniquingKeysWith: { first, _ in first }
+            ),
+            validateKey: niosshKeyValidation
         )
-        var candidates: [ParsedEntry] = []
-        var rejections: [KnownHostsOpenSSHImportPlan.Rejection] = []
-        var warnings: [String] = []
-
-        for (offset, rawLine) in text.components(separatedBy: .newlines).enumerated() {
-            let lineNumber = offset + 1
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !line.isEmpty, !line.hasPrefix("#") else { continue }
-
-            let fields = line.split(whereSeparator: { $0.isWhitespace })
-            guard fields.count >= 3 else {
-                rejections.append(.init(
-                    lineNumber: lineNumber,
-                    source: line,
-                    reason: String(localized: "expected host, key type, and public key")
-                ))
-                continue
-            }
-            guard !fields[0].hasPrefix("@") else {
-                rejections.append(.init(
-                    lineNumber: lineNumber,
-                    source: line,
-                    reason: String(localized: "OpenSSH marker entries are not supported")
-                ))
-                continue
-            }
-
-            let hostField = String(fields[0])
-            let keyString = "\(fields[1]) \(fields[2])"
-            let key: NIOSSHPublicKey
-            do {
-                key = try NIOSSHPublicKey(openSSHPublicKey: keyString)
-            } catch {
-                rejections.append(.init(
-                    lineNumber: lineNumber,
-                    source: line,
-                    reason: String(localized: "invalid or unsupported OpenSSH public key")
-                ))
-                continue
-            }
-            let canonicalKey = String(openSSHPublicKey: key)
-            let fingerprint = KnownHostsStore.fingerprint(of: key)
-
-            for hostToken in hostField.split(separator: ",", omittingEmptySubsequences: false) {
-                let token = String(hostToken)
-                let endpoint: String
-                do {
-                    endpoint = try parseEndpoint(fromKnownHostsHost: token)
-                } catch let error as HostParseError {
-                    rejections.append(.init(
-                        lineNumber: lineNumber,
-                        source: token,
-                        reason: error.reason
-                    ))
-                    continue
-                } catch {
-                    rejections.append(.init(
-                        lineNumber: lineNumber,
-                        source: token,
-                        reason: String(localized: "invalid host field")
-                    ))
-                    continue
-                }
-
-                candidates.append(ParsedEntry(
-                    lineNumber: lineNumber,
-                    endpoint: endpoint,
-                    keyString: canonicalKey,
-                    fingerprint: fingerprint
-                ))
-            }
-        }
-
-        var parsed: [ParsedEntry] = []
-        for (endpoint, endpointCandidates) in Dictionary(grouping: candidates, by: \.endpoint) {
-            let fingerprints = Set(endpointCandidates.map(\.fingerprint))
-            guard fingerprints.count == 1 else {
-                for candidate in endpointCandidates {
-                    rejections.append(.init(
-                        lineNumber: candidate.lineNumber,
-                        source: endpoint,
-                        reason: String(localized: "ambiguous: multiple different keys were supplied for this endpoint")
-                    ))
-                }
-                continue
-            }
-            if endpointCandidates.count > 1 {
-                for duplicate in endpointCandidates.dropFirst() {
-                    warnings.append(
-                        "Line \(duplicate.lineNumber): duplicate pin for \(endpoint) ignored"
-                    )
-                }
-            }
-            if let first = endpointCandidates.first {
-                parsed.append(first)
-            }
-        }
-        parsed.sort { lhs, rhs in
-            lhs.lineNumber == rhs.lineNumber
-                ? lhs.endpoint < rhs.endpoint
-                : lhs.lineNumber < rhs.lineNumber
-        }
-
-        let entries = parsed.map { parsedEntry in
-            let action: KnownHostsOpenSSHImportPlan.Action
-            if let current = currentFingerprints[parsedEntry.endpoint] {
-                action = current == parsedEntry.fingerprint ? .unchanged : .replace
-            } else {
-                action = .add
-            }
-            return KnownHostsOpenSSHImportPlan.Entry(
-                lineNumber: parsedEntry.lineNumber,
-                endpoint: parsedEntry.endpoint,
-                keyString: parsedEntry.keyString,
-                fingerprint: parsedEntry.fingerprint,
-                action: action,
-                expectedPriorFingerprint: currentFingerprints[parsedEntry.endpoint]
-            )
-        }
         return KnownHostsOpenSSHImportPlan(
-            entries: entries,
-            rejections: rejections,
-            warnings: warnings
+            entries: plan.candidates.map { candidate in
+                KnownHostsOpenSSHImportPlan.Entry(
+                    lineNumber: candidate.lineNumber,
+                    endpoint: candidate.endpointKey,
+                    keyString: candidate.keyString,
+                    fingerprint: candidate.fingerprint,
+                    action: KnownHostsOpenSSHImportPlan.Action(candidate.action),
+                    expectedPriorFingerprint: candidate.expectedPriorFingerprint
+                )
+            },
+            rejections: plan.rejections.map { rejection in
+                KnownHostsOpenSSHImportPlan.Rejection(
+                    lineNumber: rejection.lineNumber,
+                    source: rejection.source,
+                    reason: localizedReason(rejection.reason)
+                )
+            },
+            warnings: plan.warnings.map(localizedWarning)
         )
     }
 
     static func exportLine(endpoint: String, keyString: String) -> String {
-        "\(knownHostsHost(fromEndpoint: endpoint)) \(keyString)"
+        OpenSSHKnownHostsCodec.exportLine(endpointKey: endpoint, keyString: keyString)
     }
 
     static func knownHostsHost(fromEndpoint endpoint: String) -> String {
-        guard let separator = endpoint.lastIndex(of: ":") else { return endpoint }
-        let host = String(endpoint[..<separator])
-        let port = String(endpoint[endpoint.index(after: separator)...])
-        guard Int(port) != nil else { return endpoint }
-        return port == "22" ? host : "[\(host)]:\(port)"
+        OpenSSHKnownHostsCodec.knownHostsHostField(fromEndpointKey: endpoint)
     }
 
-    private struct HostParseError: Error {
-        let reason: String
+    /// iOS key enrichment: a key must parse as an `NIOSSHPublicKey` before it
+    /// can be offered as a pin, and the plan carries NIOSSH's canonical
+    /// rendering plus the store's (padded) fingerprint form.
+    private static let niosshKeyValidation: KnownHostsImportKeyValidator = { keyString in
+        guard let key = try? NIOSSHPublicKey(openSSHPublicKey: keyString) else {
+            return .rejected
+        }
+        return .accepted(
+            canonicalKeyString: String(openSSHPublicKey: key),
+            fingerprint: KnownHostsStore.fingerprint(of: key)
+        )
     }
 
-    private static func parseEndpoint(fromKnownHostsHost token: String) throws -> String {
-        guard !token.isEmpty else {
-            throw HostParseError(reason: String(localized: "empty host field"))
+    private static func localizedReason(
+        _ reason: KnownHostsImportRejectionReason
+    ) -> String {
+        switch reason {
+        case .missingFields:
+            String(localized: "expected host, key type, and public key")
+        case .unsupportedMarker:
+            String(localized: "OpenSSH marker entries are not supported")
+        case .invalidPublicKey:
+            String(localized: "invalid or unsupported OpenSSH public key")
+        case .emptyHostField:
+            String(localized: "empty host field")
+        case .hashedHost:
+            String(localized: "hashed hosts cannot be mapped to a Tessera endpoint")
+        case .wildcardOrNegatedHost:
+            String(localized: "wildcard and negated hosts are not supported")
+        case .invalidBracketedHostPort:
+            String(localized: "invalid bracketed host and port")
+        case .invalidHostOrPort:
+            String(localized: "invalid host or port")
+        // `.unnormalizableHost` cannot arrive here: this store is keyed by the
+        // address as the user typed it, so it imports `.verbatim` and never
+        // asks the codec to normalize. It shares the wording rather than
+        // introducing a string for a branch iOS cannot reach.
+        case .invalidHostField, .unnormalizableHost:
+            String(localized: "invalid host field")
+        case .ambiguousEndpoint:
+            String(localized: "ambiguous: multiple different keys were supplied for this endpoint")
         }
-        guard !token.hasPrefix("|") else {
-            throw HostParseError(reason: String(localized: "hashed hosts cannot be mapped to a Tessera endpoint"))
+    }
+
+    private static func localizedWarning(_ warning: KnownHostsImportWarning) -> String {
+        switch warning {
+        case let .duplicatePinIgnored(lineNumber, endpointKey):
+            "Line \(lineNumber): duplicate pin for \(endpointKey) ignored"
         }
-        guard !token.contains("*") && !token.contains("?") && !token.hasPrefix("!") else {
-            throw HostParseError(reason: String(localized: "wildcard and negated hosts are not supported"))
+    }
+}
+
+private extension KnownHostsOpenSSHImportPlan.Action {
+    init(_ action: KnownHostsImportAction) {
+        switch action {
+        case .add: self = .add
+        case .replace: self = .replace
+        case .unchanged: self = .unchanged
         }
-        if token.hasPrefix("[") {
-            guard let close = token.firstIndex(of: "]"),
-                  token.index(after: close) < token.endIndex,
-                  token[token.index(after: close)] == ":" else {
-                throw HostParseError(reason: String(localized: "invalid bracketed host and port"))
-            }
-            let host = String(token[token.index(after: token.startIndex)..<close])
-            let portStart = token.index(close, offsetBy: 2)
-            let port = String(token[portStart...])
-            guard !host.isEmpty,
-                  let portNumber = Int(port),
-                  (1...65535).contains(portNumber) else {
-                throw HostParseError(reason: String(localized: "invalid host or port"))
-            }
-            return "\(host):\(portNumber)"
-        }
-        return "\(token):22"
     }
 }

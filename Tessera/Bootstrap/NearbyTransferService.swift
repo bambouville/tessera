@@ -92,7 +92,7 @@ public protocol NearbyTransferNetworking: AnyObject {
 /// forbidden so UI lifecycle errors are visible in tests.
 @MainActor
 public final class NearbyTransferService {
-    public static let bonjourServiceType = "_tessera-bootstrap._tcp"
+    public static let bonjourServiceType = NearbyBootstrapProtocol.serviceType
 
     public private(set) var mode: NearbyTransferServiceMode = .stopped
     public private(set) var discoveredPeers: [NearbyDiscoveredPeer] = []

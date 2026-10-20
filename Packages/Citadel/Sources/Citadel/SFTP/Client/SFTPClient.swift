@@ -37,7 +37,7 @@ public final class SFTPClient: Sendable {
         try await self.channel.close()
     }
 
-    fileprivate static func setupChannelHanders(channel: Channel, logger: Logger) -> EventLoopFuture<SFTPClient> {
+    internal static func setupChannelHanders(channel: Channel, logger: Logger) -> EventLoopFuture<SFTPClient> {
         let responses = SFTPResponses(sftpVersion: channel.eventLoop.makePromise())
 
         let deserializeHandler = ByteToMessageHandler(SFTPMessageParser())
@@ -85,7 +85,14 @@ public final class SFTPClient: Sendable {
     ///   ID is in flight at any given time; multiple reponses to the same ID are likely to cause
     ///   unpredictable behavior.
     internal func sendRequest(_ request: SFTPRequest) async throws -> SFTPResponse {
-        try await self.eventLoop.flatSubmit {
+        try await self.sendRequestFuture(request).get()
+    }
+
+    /// Tessera: queues `request` on the channel and returns its response
+    /// without suspending, so callers can keep several requests in flight.
+    /// Requests leave in the order this method is called.
+    internal func sendRequestFuture(_ request: SFTPRequest) -> EventLoopFuture<SFTPResponse> {
+        self.eventLoop.flatSubmit {
             let requestId = request.requestId
             let promise = self.channel.eventLoop.makePromise(of: SFTPResponse.self)
 
@@ -98,10 +105,10 @@ public final class SFTPClient: Sendable {
             //logger.trace("SFTP OUT: \(message.debugRawBytesRepresentation)")
 
             self.responses.responses[requestId] = promise
-            return self.channel.writeAndFlush(request.makeMessage()).flatMap {
+            return self.channel.writeAndFlush(message).flatMap {
                 promise.futureResult
             }
-        }.get()
+        }
     }
 
     /// Set the attributes of a file on the SFTP server.

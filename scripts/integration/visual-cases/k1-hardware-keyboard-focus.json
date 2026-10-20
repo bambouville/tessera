@@ -1,0 +1,12 @@
+{
+  "id": "K1-hardware-keyboard-focus",
+  "title": "Hardware typing survives terminal cleanup, focus taps, and foreground recovery",
+  "matrix_ids": ["K1"],
+  "invariants": [
+    "On iPad and iPhone landscape, background-cleanup evidence shows sent byte 71 (q) and local field xy.",
+    "Mouse-focus evidence shows byte 7A (z) and an SGR press/release pair after a second tap. The first focus-only tap sends no mouse event, verified by XCTest.",
+    "Foreground evidence shows 65, 68, 69 after three Home/activate cycles, final 67 after returning from local field input, and local field fj. Earlier keys may be below the visible log on iPhone; XCTest verifies the complete sequence."
+  ],
+  "capture_notes": "Host-free production TerminalSurfaceBound with real XCUITest hardware key events and a second mounted background terminal. Simulator screenshots captured at settled test milestones; continuous movies and xcresults are archived in keyboard-ipad and keyboard-iphone. UIKit focus and key bytes are the oracle, not cosmetic harness layout. This does not simulate physical cover attachment, long suspension, or OS process eviction.",
+  "deterministic_precheck": {"verdict": "pass", "details": "Both device runs must pass native responder isolation, real keyboard cleanup, focus-only mouse tap, three foreground cycles, local field ownership, live locked-input permission, and modifier tests before this manifest is emitted."}
+}

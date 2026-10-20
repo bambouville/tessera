@@ -38,7 +38,7 @@ final class AutoTmuxSessionViewLaunchTests: XCTestCase {
     /// reports as working ("solved for that host").
     func test_liveSessionViewAutoTmuxOnRepeatConnect() async throws {
         let config = try Config.load()
-        try await runMountedLaunch(config: config, label: "sessionview-repeat-1")
+        try await runMountedLaunch(config: config, label: "sessionview-repeat-1", keepSession: true)
         try await runMountedLaunch(config: config, label: "sessionview-repeat-2")
     }
 
@@ -72,7 +72,8 @@ final class AutoTmuxSessionViewLaunchTests: XCTestCase {
         config: Config,
         label: String,
         user: String? = nil,
-        expectsControlMode: Bool = true
+        expectsControlMode: Bool = true,
+        keepSession: Bool = false
     ) async throws {
         let host = Host(
             name: "SessionView \(label)",
@@ -114,7 +115,8 @@ final class AutoTmuxSessionViewLaunchTests: XCTestCase {
         .environment(SpeechDictationController(appearance: appearance))
         .environment(sessionRegistry)
         .environment(CommandPalette())
-        .environment(AgentCenter())
+        .environment(AgentCenterV2Coordinator())
+        .environment(ProgramStatusCenter())
         .environment(appPhase)
         .environment(FileBridgeRegistry())
         .environment(HostTerminalBackgroundStore())
@@ -163,6 +165,14 @@ final class AutoTmuxSessionViewLaunchTests: XCTestCase {
                 session.state,
                 .connected,
                 "degrading must keep the shell session alive — \(report)"
+            )
+        }
+        // The launch created the host's automatic session on the shared
+        // fixture: remove it by exact name so the next run starts from a
+        // fresh host again.
+        if expectsControlMode, !keepSession {
+            _ = try? await session.executeConnectedCommand(
+                "tmux kill-session -t '=\(HostRuntimeStateStore.sessionName(for: host))' >/dev/null 2>&1 || true"
             )
         }
     }

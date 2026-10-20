@@ -63,6 +63,14 @@
     "zh-Hans": "Shift 键",
     "zh-Hant": "Shift 鍵"
   },
+  "Return": {
+    "de": "Eingabetaste",
+    "es": "Retorno",
+    "fr": "Retour",
+    "ja": "リターン",
+    "zh-Hans": "Return 键",
+    "zh-Hant": "Return 鍵"
+  },
   "Escape": {
     "de": "Esc-Taste",
     "es": "Escape",
@@ -142,6 +150,14 @@
     "ja": "コントロール-J",
     "zh-Hans": "Control-J",
     "zh-Hant": "Control-J"
+  },
+  "Control-L": {
+    "de": "Control-L",
+    "es": "Control-L",
+    "fr": "Contrôle-L",
+    "ja": "コントロール-L",
+    "zh-Hans": "Control-L",
+    "zh-Hant": "Control-L"
   },
   "Enter Full Screen": {
     "de": "Vollbild aktivieren",
@@ -286,14 +302,6 @@
     "ja": "ターミナルが受け取ります — だからアプリのショートカットには ⌘ が必要です",
     "zh-Hans": "它们归终端所有 —— 所以应用快捷键必须带 ⌘",
     "zh-Hant": "它們歸終端機所有 —— 所以 App 快捷鍵必須帶 ⌘"
-  },
-  "without it the terminal loses this key — ^E is end-of-line in every shell.": {
-    "de": "Ohne ⌘ verliert das Terminal diese Taste — ^E ist in jeder Shell das Zeilenende.",
-    "es": "sin él, el terminal pierde esta tecla — ^E es el fin de línea en cualquier shell.",
-    "fr": "sans lui, le terminal perd cette touche — ^E correspond à la fin de ligne dans tous les shells.",
-    "ja": "これがないとターミナルはこのキーを失います — ^E はどのシェルでも行末への移動です。",
-    "zh-Hans": "少了它，终端就会失去这个键 —— ^E 在任何 shell 中都是行尾。",
-    "zh-Hant": "少了它，終端機就會失去這個鍵 —— ^E 在任何 shell 中都是行尾。"
   },
   "press the keys you want.\nthey won't reach the terminal while recording.": {
     "de": "Drücke die gewünschten Tasten.\nWährend der Aufnahme erreichen sie das Terminal nicht.",

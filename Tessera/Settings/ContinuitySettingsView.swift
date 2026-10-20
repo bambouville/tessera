@@ -1,10 +1,13 @@
 import SwiftUI
+import TesseraCore
 import UIKit
 
 struct ContinuitySettingsView: View {
     @Environment(\.designTokens) private var T
     @Environment(AppearancePreferences.self) private var appearance
     @Environment(BootstrapCoordinator.self) private var bootstrapCoordinator
+    @Environment(ActivityBroadcaster.self) private var activityBroadcaster
+    @Environment(CrossDevicePairingCoordinator.self) private var crossDevicePairingCoordinator
 
     var body: some View {
         @Bindable var appearance = appearance
@@ -66,6 +69,47 @@ struct ContinuitySettingsView: View {
                 .font(Typography.tesseraMono(size: 10.5))
                 .foregroundStyle(T.fgDim)
                 .fixedSize(horizontal: false, vertical: true)
+
+            Text("pair with Android or another Apple Account")
+                .font(Typography.kicker)
+                .tracking(0.6)
+                .foregroundStyle(T.fgDim)
+                .textCase(.uppercase)
+                .padding(.top, 30)
+                .padding(.bottom, 12)
+
+            if let descriptor = activityBroadcaster.currentDescriptor {
+                Btn("continue focused session with QR", full: true) {
+                    crossDevicePairingCoordinator.beginOrigin(
+                        purpose: .continueSession,
+                        descriptor: descriptor.core
+                    )
+                }
+                .padding(.bottom, 8)
+
+                Btn("send setup and continue focused session", full: true) {
+                    crossDevicePairingCoordinator.beginOrigin(
+                        purpose: .setUpAndContinue,
+                        descriptor: descriptor.core
+                    )
+                }
+                .padding(.bottom, 8)
+            }
+
+            Btn("send setup with QR", full: true) {
+                crossDevicePairingCoordinator.beginOrigin(purpose: .bootstrap)
+            }
+            .padding(.bottom, 8)
+
+            Btn("scan pairing code", full: true) {
+                crossDevicePairingCoordinator.beginScanning()
+            }
+
+            Text("QR pairing works only while this foreground screen remains open. It uses local Wi-Fi addresses, compares a six-digit code, and never transfers passwords or private keys.")
+                .font(Typography.tesseraMono(size: 10.5))
+                .foregroundStyle(T.fgDim)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 12)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

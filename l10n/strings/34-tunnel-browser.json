@@ -1,0 +1,74 @@
+{
+  "↗ open in browser": {
+    "de": "↗ im Browser öffnen",
+    "es": "↗ abrir en el navegador",
+    "fr": "↗ ouvrir dans le navigateur",
+    "ja": "↗ ブラウザで開く",
+    "zh-Hans": "↗ 在浏览器中打开",
+    "zh-Hant": "↗ 在瀏覽器中打開"
+  },
+  "safari": {
+    "de": "Safari",
+    "es": "safari",
+    "fr": "safari",
+    "ja": "safari",
+    "zh-Hans": "safari",
+    "zh-Hant": "safari"
+  },
+  "open in safari": {
+    "de": "In Safari öffnen",
+    "es": "abrir en safari",
+    "fr": "ouvrir dans safari",
+    "ja": "safari で開く",
+    "zh-Hans": "在 safari 中打开",
+    "zh-Hant": "在 safari 中打開"
+  },
+  "forward": {
+    "de": "Vorwärts",
+    "es": "adelante",
+    "fr": "suivant",
+    "ja": "進む",
+    "zh-Hans": "前进",
+    "zh-Hant": "前進"
+  },
+  "reload": {
+    "de": "Neu laden",
+    "es": "recargar",
+    "fr": "recharger",
+    "ja": "再読み込み",
+    "zh-Hans": "重新加载",
+    "zh-Hant": "重新載入"
+  },
+  "stop": {
+    "de": "Stopp",
+    "es": "detener",
+    "fr": "arrêter",
+    "ja": "停止",
+    "zh-Hans": "停止",
+    "zh-Hant": "停止"
+  },
+  "this tunnel did not answer": {
+    "de": "Dieser Tunnel hat nicht geantwortet",
+    "es": "este túnel no respondió",
+    "fr": "ce tunnel n'a pas répondu",
+    "ja": "このトンネルは応答しませんでした",
+    "zh-Hans": "该隧道没有响应",
+    "zh-Hant": "這個通道沒有回應"
+  },
+  "check that the rule is listening and that the remote service is up.": {
+    "de": "Prüfe, ob die Regel lauscht und ob der entfernte Dienst läuft.",
+    "es": "comprueba que la regla esté escuchando y que el servicio remoto esté activo.",
+    "fr": "vérifiez que la règle écoute et que le service distant fonctionne.",
+    "ja": "ルールがリッスンしていること、リモートのサービスが起動していることを確認してください。",
+    "zh-Hans": "请确认该规则正在监听，且远程服务已启动。",
+    "zh-Hant": "請確認該規則正在聆聽，且遠端服務已啟動。"
+  },
+  "create and edit forwarding rules on the host's tunnels page.": {
+    "de": "Weiterleitungsregeln lassen sich auf der Tunnel-Seite des Hosts anlegen und bearbeiten.",
+    "es": "crea y edita reglas de reenvío en la página de túneles del host.",
+    "fr": "créez et modifiez les règles de redirection depuis la page des tunnels de l'hôte.",
+    "ja": "転送ルールの作成と編集はホストのトンネルページで行えます。",
+    "zh-Hans": "可在主机的隧道页面创建和编辑转发规则。",
+    "zh-Hant": "可在主機的通道頁面製作和編輯轉發規則。"
+  }
+}

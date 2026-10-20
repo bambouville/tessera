@@ -1,13 +1,4 @@
 {
-  "%lld agents finished": {
-    "en": { "one": "%lld agent finished", "other": "%lld agents finished" },
-    "de": { "one": "%lld Agent fertig", "other": "%lld Agenten fertig" },
-    "es": { "one": "%lld agente ha terminado", "other": "%lld agentes han terminado" },
-    "fr": { "one": "%lld agent a terminé", "other": "%lld agents ont terminé" },
-    "ja": { "other": "%lld 個のエージェントが完了" },
-    "zh-Hans": { "other": "%lld 个智能体已完成" },
-    "zh-Hant": { "other": "%lld 個智慧體已完成" }
-  },
   "%lld agents need input": {
     "en": { "one": "%lld agent needs input", "other": "%lld agents need input" },
     "de": { "one": "%lld Agent braucht Eingabe", "other": "%lld Agenten brauchen Eingabe" },
@@ -54,6 +45,7 @@
     "zh-Hant": { "other": "篩選隱藏了 %lld 列" }
   },
   "%lld changed from default": {
+    "en": { "one": "%lld changed from default", "other": "%lld changed from default" },
     "de": { "one": "%lld vom Standard abweichend", "other": "%lld vom Standard abweichend" },
     "es": { "one": "%lld distinto del valor por omisión", "other": "%lld distintos del valor por omisión" },
     "fr": { "one": "%lld modifié par rapport au réglage par défaut", "other": "%lld modifiés par rapport au réglage par défaut" },
@@ -62,6 +54,7 @@
     "zh-Hant": { "other": "%lld 項已不同於預設值" }
   },
   "restore %lld changed": {
+    "en": { "one": "restore %lld changed", "other": "restore %lld changed" },
     "de": { "one": "%lld geänderte Einstellung zurücksetzen", "other": "%lld geänderte Einstellungen zurücksetzen" },
     "es": { "one": "restaurar %lld cambio", "other": "restaurar %lld cambios" },
     "fr": { "one": "restaurer %lld modification", "other": "restaurer %lld modifications" },
@@ -160,6 +153,7 @@
     "zh-Hant": { "other": "繼續路由包含 %lld 台跳板主機。" }
   },
   "Show all options, %lld more": {
+    "en": { "one": "Show all options, %lld more", "other": "Show all options, %lld more" },
     "de": { "one": "Alle Optionen anzeigen, %lld weitere", "other": "Alle Optionen anzeigen, %lld weitere" },
     "es": { "one": "Mostrar todas las opciones, %lld más", "other": "Mostrar todas las opciones, %lld más" },
     "fr": { "one": "Afficher toutes les options, %lld de plus", "other": "Afficher toutes les options, %lld de plus" },
@@ -222,6 +216,7 @@
     "zh-Hant": { "other": "使用代碼 %2$@ 核准設定和 %1$lld 項主機金鑰授權" }
   },
   "free tessera remembers one host. this nearby setup offered %lld hosts — choose one route to keep within the free limit, or unlock unlimited hosts to keep everything.": {
+    "en": { "one": "free tessera remembers one host. this nearby setup offered %lld host — choose one route to keep within the free limit, or unlock unlimited hosts to keep everything.", "other": "free tessera remembers one host. this nearby setup offered %lld hosts — choose one route to keep within the free limit, or unlock unlimited hosts to keep everything." },
     "de": { "one": "Das kostenlose Tessera merkt sich einen Host. Diese Übertragung bietet %lld Host an — wähle eine Route, um im kostenlosen Rahmen zu bleiben, oder schalte unbegrenzte Hosts frei, um alles zu behalten.", "other": "Das kostenlose Tessera merkt sich einen Host. Diese Übertragung bietet %lld Hosts an — wähle eine Route, um im kostenlosen Rahmen zu bleiben, oder schalte unbegrenzte Hosts frei, um alles zu behalten." },
     "es": { "one": "tessera gratis recuerda un host. esta configuración cercana ofreció %lld host: elige una ruta para no superar el límite gratuito, o desbloquea hosts ilimitados para conservarlo todo.", "other": "tessera gratis recuerda un host. esta configuración cercana ofreció %lld hosts: elige una ruta para no superar el límite gratuito, o desbloquea hosts ilimitados para conservarlo todo." },
     "fr": { "one": "tessera gratuit retient un hôte. cette configuration à proximité en proposait %lld — choisissez une route pour rester dans la limite gratuite, ou débloquez les hôtes illimités pour tout conserver.", "other": "tessera gratuit retient un hôte. cette configuration à proximité en proposait %lld — choisissez une route pour rester dans la limite gratuite, ou débloquez les hôtes illimités pour tout conserver." },
@@ -230,6 +225,7 @@
     "zh-Hant": { "other": "免費版 tessera 只記住一台主機。此次鄰近設定提供了 %lld 台 —— 請選擇一條路由以符合免費上限，或解鎖無限主機以保留全部。" }
   },
   "Bootstrap manifest contains too many hosts (%lld).": {
+    "en": { "one": "Bootstrap manifest contains too many hosts (%lld).", "other": "Bootstrap manifest contains too many hosts (%lld)." },
     "de": { "one": "Das Bootstrap-Manifest enthält zu viele Hosts (%lld).", "other": "Das Bootstrap-Manifest enthält zu viele Hosts (%lld)." },
     "es": { "one": "El manifiesto del bootstrap contiene demasiados hosts (%lld).", "other": "El manifiesto del bootstrap contiene demasiados hosts (%lld)." },
     "fr": { "one": "Le manifeste du bootstrap contient trop d'hôtes (%lld).", "other": "Le manifeste du bootstrap contient trop d'hôtes (%lld)." },
@@ -238,6 +234,7 @@
     "zh-Hant": { "other": "啟動清單包含的主機過多（%lld 台）。" }
   },
   "Bootstrap manifest contains too many identities (%lld).": {
+    "en": { "one": "Bootstrap manifest contains too many identities (%lld).", "other": "Bootstrap manifest contains too many identities (%lld)." },
     "de": { "one": "Das Bootstrap-Manifest enthält zu viele Identitäten (%lld).", "other": "Das Bootstrap-Manifest enthält zu viele Identitäten (%lld)." },
     "es": { "one": "El manifiesto del bootstrap contiene demasiadas identidades (%lld).", "other": "El manifiesto del bootstrap contiene demasiadas identidades (%lld)." },
     "fr": { "one": "Le manifeste du bootstrap contient trop d'identités (%lld).", "other": "Le manifeste du bootstrap contient trop d'identités (%lld)." },
@@ -246,6 +243,7 @@
     "zh-Hant": { "other": "啟動清單包含的身分過多（%lld 個）。" }
   },
   "Bootstrap manifest contains too many jump-chain links (%lld).": {
+    "en": { "one": "Bootstrap manifest contains too many jump-chain links (%lld).", "other": "Bootstrap manifest contains too many jump-chain links (%lld)." },
     "de": { "one": "Das Bootstrap-Manifest enthält zu viele Jump-Kettenglieder (%lld).", "other": "Das Bootstrap-Manifest enthält zu viele Jump-Kettenglieder (%lld)." },
     "es": { "one": "El manifiesto del bootstrap contiene demasiados enlaces de cadena de saltos (%lld).", "other": "El manifiesto del bootstrap contiene demasiados enlaces de cadena de saltos (%lld)." },
     "fr": { "one": "Le manifeste du bootstrap contient trop de maillons de chaîne de rebonds (%lld).", "other": "Le manifeste du bootstrap contient trop de maillons de chaîne de rebonds (%lld)." },
@@ -254,6 +252,7 @@
     "zh-Hant": { "other": "啟動清單包含的跳板鏈連結過多（%lld 個）。" }
   },
   "Bootstrap manifest contains too many known-host records (%lld).": {
+    "en": { "one": "Bootstrap manifest contains too many known-host records (%lld).", "other": "Bootstrap manifest contains too many known-host records (%lld)." },
     "de": { "one": "Das Bootstrap-Manifest enthält zu viele Known-Hosts-Einträge (%lld).", "other": "Das Bootstrap-Manifest enthält zu viele Known-Hosts-Einträge (%lld)." },
     "es": { "one": "El manifiesto del bootstrap contiene demasiados registros de hosts conocidos (%lld).", "other": "El manifiesto del bootstrap contiene demasiados registros de hosts conocidos (%lld)." },
     "fr": { "one": "Le manifeste du bootstrap contient trop d'enregistrements d'hôtes connus (%lld).", "other": "Le manifeste du bootstrap contient trop d'enregistrements d'hôtes connus (%lld)." },
@@ -262,6 +261,7 @@
     "zh-Hant": { "other": "啟動清單包含的已知主機記錄過多（%lld 筆）。" }
   },
   "Enrollment frame payload is too large (%lld bytes).": {
+    "en": { "one": "Enrollment frame payload is too large (%lld byte).", "other": "Enrollment frame payload is too large (%lld bytes)." },
     "de": { "one": "Die Nutzlast des Enrollment-Frames ist zu groß (%lld Byte).", "other": "Die Nutzlast des Enrollment-Frames ist zu groß (%lld Bytes)." },
     "es": { "one": "La carga de la trama de inscripción es demasiado grande (%lld byte).", "other": "La carga de la trama de inscripción es demasiado grande (%lld bytes)." },
     "fr": { "one": "La charge utile de la trame d'inscription est trop grande (%lld octet).", "other": "La charge utile de la trame d'inscription est trop grande (%lld octets)." },

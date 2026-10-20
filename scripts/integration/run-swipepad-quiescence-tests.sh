@@ -24,7 +24,7 @@ rm -rf "$result_bundle"
 cleanup() {
   delete_owned_test_simulator "$SIMULATOR_STATE/simulator_udid" || true
 }
-trap cleanup EXIT
+trap 'fail_closed_trap cleanup' EXIT
 
 udid="$("$HERE/ensure-test-simulator.sh" | tail -n 1)"
 
@@ -37,3 +37,4 @@ xcodebuild test \
   -resultBundlePath "$result_bundle" \
   -parallel-testing-enabled NO \
   -only-testing:TesseraUITests/SwipePadQuiescenceHarnessTests/testStandardTapsCompleteWithStaticRings
+script_completed=1

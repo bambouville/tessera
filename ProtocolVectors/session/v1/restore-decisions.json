@@ -1,0 +1,738 @@
+{
+  "version": 1,
+  "note": "The restore decisions, stated once. The Swift test pins these against TesseraSessionCore; the Android instrumented test pins the same rows against what comes back over JNI, which is where seconds/milliseconds, enum spelling and nullability can drift without either side noticing. Hosts are symbolic (A, B) and so are sessions (S1, S2, S3): each reader maps them to fixed, distinct identifiers.",
+  "verdict": [
+    {
+      "name": "a tab that is gone is dead",
+      "candidateHost": "A",
+      "live": null,
+      "elapsedSeconds": 10.0,
+      "aliveFloorSeconds": 5.0,
+      "expected": "dead"
+    },
+    {
+      "name": "a tab now belonging to another host is dead",
+      "candidateHost": "A",
+      "live": {
+        "host": "B",
+        "state": "connected",
+        "transportConfirmed": null
+      },
+      "elapsedSeconds": 10.0,
+      "aliveFloorSeconds": 5.0,
+      "expected": "dead"
+    },
+    {
+      "name": "disconnected is dead",
+      "candidateHost": "A",
+      "live": {
+        "host": "A",
+        "state": "disconnected",
+        "transportConfirmed": null
+      },
+      "elapsedSeconds": 0.1,
+      "aliveFloorSeconds": 5.0,
+      "expected": "dead"
+    },
+    {
+      "name": "failed is dead",
+      "candidateHost": "A",
+      "live": {
+        "host": "A",
+        "state": "failed",
+        "transportConfirmed": null
+      },
+      "elapsedSeconds": 0.1,
+      "aliveFloorSeconds": 5.0,
+      "expected": "dead"
+    },
+    {
+      "name": "connecting holds its place indefinitely",
+      "candidateHost": "A",
+      "live": {
+        "host": "A",
+        "state": "connecting",
+        "transportConfirmed": null
+      },
+      "elapsedSeconds": 600.0,
+      "aliveFloorSeconds": 5.0,
+      "expected": "pending"
+    },
+    {
+      "name": "idle holds its place",
+      "candidateHost": "A",
+      "live": {
+        "host": "A",
+        "state": "idle",
+        "transportConfirmed": null
+      },
+      "elapsedSeconds": 600.0,
+      "aliveFloorSeconds": 5.0,
+      "expected": "pending"
+    },
+    {
+      "name": "connected is not believed inside the floor",
+      "candidateHost": "A",
+      "live": {
+        "host": "A",
+        "state": "connected",
+        "transportConfirmed": null
+      },
+      "elapsedSeconds": 4.999,
+      "aliveFloorSeconds": 5.0,
+      "expected": "pending"
+    },
+    {
+      "name": "connected is believed at the floor",
+      "candidateHost": "A",
+      "live": {
+        "host": "A",
+        "state": "connected",
+        "transportConfirmed": null
+      },
+      "elapsedSeconds": 5.0,
+      "aliveFloorSeconds": 5.0,
+      "expected": "alive"
+    },
+    {
+      "name": "a mosh zombie calls itself connected and is not believed",
+      "candidateHost": "A",
+      "live": {
+        "host": "A",
+        "state": "connected",
+        "transportConfirmed": false
+      },
+      "elapsedSeconds": 600.0,
+      "aliveFloorSeconds": 5.0,
+      "expected": "pending"
+    },
+    {
+      "name": "mosh with a confirmed transport is alive at the floor",
+      "candidateHost": "A",
+      "live": {
+        "host": "A",
+        "state": "connected",
+        "transportConfirmed": true
+      },
+      "elapsedSeconds": 5.0,
+      "aliveFloorSeconds": 5.0,
+      "expected": "alive"
+    }
+  ],
+  "windowClosure": [
+    {
+      "name": "an unresolved entry keeps the window open",
+      "remainingCohortCount": 2,
+      "elapsedSeconds": 1.0,
+      "maxWindowSeconds": 60.0,
+      "hasUnansweredPrompt": false,
+      "expected": "open"
+    },
+    {
+      "name": "an empty cohort settles",
+      "remainingCohortCount": 0,
+      "elapsedSeconds": 1.0,
+      "maxWindowSeconds": 60.0,
+      "hasUnansweredPrompt": false,
+      "expected": "settled"
+    },
+    {
+      "name": "the backstop fires on an unresolved cohort",
+      "remainingCohortCount": 2,
+      "elapsedSeconds": 60.0,
+      "maxWindowSeconds": 60.0,
+      "hasUnansweredPrompt": false,
+      "expected": "backstop"
+    },
+    {
+      "name": "an unanswered prompt defers the backstop",
+      "remainingCohortCount": 2,
+      "elapsedSeconds": 600.0,
+      "maxWindowSeconds": 60.0,
+      "hasUnansweredPrompt": true,
+      "expected": "open"
+    },
+    {
+      "name": "the backstop outranks settling",
+      "remainingCohortCount": 0,
+      "elapsedSeconds": 60.0,
+      "maxWindowSeconds": 60.0,
+      "hasUnansweredPrompt": false,
+      "expected": "backstop"
+    }
+  ],
+  "chargeDelta": [
+    {
+      "name": "nothing is charged before the first charge",
+      "nowSeconds": 10.0,
+      "lastChargeAtSeconds": null,
+      "isPrompting": false,
+      "maxTickSeconds": 2.0,
+      "expected": 0.0
+    },
+    {
+      "name": "an ordinary tick charges the time it took",
+      "nowSeconds": 10.0,
+      "lastChargeAtSeconds": 9.0,
+      "isPrompting": false,
+      "maxTickSeconds": 2.0,
+      "expected": 1.0
+    },
+    {
+      "name": "a long gap means the process was frozen, not waiting",
+      "nowSeconds": 100.0,
+      "lastChargeAtSeconds": 9.0,
+      "isPrompting": false,
+      "maxTickSeconds": 2.0,
+      "expected": 2.0
+    },
+    {
+      "name": "a backwards clock charges nothing",
+      "nowSeconds": 8.0,
+      "lastChargeAtSeconds": 9.0,
+      "isPrompting": false,
+      "maxTickSeconds": 2.0,
+      "expected": 0.0
+    },
+    {
+      "name": "a prompt on screen pauses the clock",
+      "nowSeconds": 10.0,
+      "lastChargeAtSeconds": 9.0,
+      "isPrompting": true,
+      "maxTickSeconds": 2.0,
+      "expected": 0.0
+    }
+  ],
+  "persistMode": [
+    {
+      "name": "the background edge always merges",
+      "isActive": false,
+      "hasPreservedSnapshots": false,
+      "isWindowOpen": false,
+      "hasCohortEntries": false,
+      "expected": "mergeWithStored"
+    },
+    {
+      "name": "the background edge outranks an open window",
+      "isActive": false,
+      "hasPreservedSnapshots": true,
+      "isWindowOpen": true,
+      "hasCohortEntries": true,
+      "expected": "mergeWithStored"
+    },
+    {
+      "name": "latched but unopened merges rather than writing live-only",
+      "isActive": true,
+      "hasPreservedSnapshots": true,
+      "isWindowOpen": false,
+      "hasCohortEntries": false,
+      "expected": "mergeWithStored"
+    },
+    {
+      "name": "an open window keeps its cohort",
+      "isActive": true,
+      "hasPreservedSnapshots": true,
+      "isWindowOpen": true,
+      "hasCohortEntries": true,
+      "expected": "keepCohort"
+    },
+    {
+      "name": "an open window keeps its cohort even unlatched",
+      "isActive": true,
+      "hasPreservedSnapshots": false,
+      "isWindowOpen": true,
+      "hasCohortEntries": true,
+      "expected": "keepCohort"
+    },
+    {
+      "name": "an ordinary foreground write mirrors the live list",
+      "isActive": true,
+      "hasPreservedSnapshots": false,
+      "isWindowOpen": false,
+      "hasCohortEntries": false,
+      "expected": "liveOnly"
+    },
+    {
+      "name": "an open window with nothing left to hold writes live-only",
+      "isActive": true,
+      "hasPreservedSnapshots": false,
+      "isWindowOpen": true,
+      "hasCohortEntries": false,
+      "expected": "liveOnly"
+    }
+  ],
+  "startupAction": [
+    {
+      "name": "a launch before the host store answers waits, and does not spend its pass",
+      "candidates": [
+        {
+          "session": "S1",
+          "host": "A"
+        }
+      ],
+      "hasDocument": true,
+      "hostsLoaded": false,
+      "availableHosts": [],
+      "liveHosts": [],
+      "selectedSession": "S1",
+      "policy": "always",
+      "expected": {
+        "action": "wait",
+        "reason": "hostsNotLoaded"
+      }
+    },
+    {
+      "name": "an empty host list is not proof the hosts are gone",
+      "candidates": [
+        {
+          "session": "S1",
+          "host": "A"
+        }
+      ],
+      "hasDocument": true,
+      "hostsLoaded": true,
+      "availableHosts": [],
+      "liveHosts": [],
+      "selectedSession": null,
+      "policy": "always",
+      "expected": {
+        "action": "wait",
+        "reason": "hostListEmpty"
+      }
+    },
+    {
+      "name": "waiting outranks turning restore off",
+      "candidates": [
+        {
+          "session": "S1",
+          "host": "A"
+        }
+      ],
+      "hasDocument": true,
+      "hostsLoaded": true,
+      "availableHosts": [],
+      "liveHosts": [],
+      "selectedSession": null,
+      "policy": "never",
+      "expected": {
+        "action": "wait",
+        "reason": "hostListEmpty"
+      }
+    },
+    {
+      "name": "no document skips",
+      "candidates": [],
+      "hasDocument": false,
+      "hostsLoaded": true,
+      "availableHosts": [
+        "A"
+      ],
+      "liveHosts": [],
+      "selectedSession": null,
+      "policy": "always",
+      "expected": {
+        "action": "skip",
+        "reason": "noDocument"
+      }
+    },
+    {
+      "name": "a document with no entries skips",
+      "candidates": [],
+      "hasDocument": true,
+      "hostsLoaded": true,
+      "availableHosts": [
+        "A"
+      ],
+      "liveHosts": [],
+      "selectedSession": null,
+      "policy": "always",
+      "expected": {
+        "action": "skip",
+        "reason": "noDocument"
+      }
+    },
+    {
+      "name": "restore turned off skips once the facts are in",
+      "candidates": [
+        {
+          "session": "S1",
+          "host": "A"
+        }
+      ],
+      "hasDocument": true,
+      "hostsLoaded": true,
+      "availableHosts": [
+        "A"
+      ],
+      "liveHosts": [],
+      "selectedSession": null,
+      "policy": "never",
+      "expected": {
+        "action": "skip",
+        "reason": "policyNever"
+      }
+    },
+    {
+      "name": "every snapshot naming a host this device no longer has skips",
+      "candidates": [
+        {
+          "session": "S1",
+          "host": "B"
+        }
+      ],
+      "hasDocument": true,
+      "hostsLoaded": true,
+      "availableHosts": [
+        "A"
+      ],
+      "liveHosts": [],
+      "selectedSession": null,
+      "policy": "always",
+      "expected": {
+        "action": "skip",
+        "reason": "nothingRestorable"
+      }
+    },
+    {
+      "name": "always restores every entry whose host is present",
+      "candidates": [
+        {
+          "session": "S1",
+          "host": "A"
+        },
+        {
+          "session": "S2",
+          "host": "B"
+        }
+      ],
+      "hasDocument": true,
+      "hostsLoaded": true,
+      "availableHosts": [
+        "A",
+        "B"
+      ],
+      "liveHosts": [],
+      "selectedSession": "S2",
+      "policy": "always",
+      "expected": {
+        "action": "restore",
+        "sessions": [
+          "S1",
+          "S2"
+        ],
+        "selectedSession": "S2",
+        "skippedCount": 0
+      }
+    },
+    {
+      "name": "ask offers the same plan instead of reconnecting it",
+      "candidates": [
+        {
+          "session": "S1",
+          "host": "A"
+        }
+      ],
+      "hasDocument": true,
+      "hostsLoaded": true,
+      "availableHosts": [
+        "A"
+      ],
+      "liveHosts": [],
+      "selectedSession": "S1",
+      "policy": "ask",
+      "expected": {
+        "action": "offer",
+        "sessions": [
+          "S1"
+        ],
+        "selectedSession": "S1",
+        "skippedCount": 0
+      }
+    },
+    {
+      "name": "a host already on screen is skipped, not a reason to abandon the launch",
+      "candidates": [
+        {
+          "session": "S1",
+          "host": "A"
+        },
+        {
+          "session": "S2",
+          "host": "B"
+        }
+      ],
+      "hasDocument": true,
+      "hostsLoaded": true,
+      "availableHosts": [
+        "A",
+        "B"
+      ],
+      "liveHosts": [
+        "A"
+      ],
+      "selectedSession": null,
+      "policy": "always",
+      "expected": {
+        "action": "restore",
+        "sessions": [
+          "S2"
+        ],
+        "selectedSession": null,
+        "skippedCount": 1
+      }
+    },
+    {
+      "name": "a stored selection survives only if it is in the plan",
+      "candidates": [
+        {
+          "session": "S1",
+          "host": "A"
+        },
+        {
+          "session": "S2",
+          "host": "B"
+        }
+      ],
+      "hasDocument": true,
+      "hostsLoaded": true,
+      "availableHosts": [
+        "A"
+      ],
+      "liveHosts": [],
+      "selectedSession": "S2",
+      "policy": "always",
+      "expected": {
+        "action": "restore",
+        "sessions": [
+          "S1"
+        ],
+        "selectedSession": null,
+        "skippedCount": 1
+      }
+    }
+  ],
+  "effectivePolicy": [
+    {
+      "name": "the tablet shell honours ask",
+      "stored": "ask",
+      "usesCompactShell": false,
+      "expected": "ask"
+    },
+    {
+      "name": "the phone shell has no chooser, so ask behaves as always",
+      "stored": "ask",
+      "usesCompactShell": true,
+      "expected": "always"
+    },
+    {
+      "name": "always is unchanged on the phone",
+      "stored": "always",
+      "usesCompactShell": true,
+      "expected": "always"
+    },
+    {
+      "name": "never is never, on either shell",
+      "stored": "never",
+      "usesCompactShell": true,
+      "expected": "never"
+    },
+    {
+      "name": "never is never on the tablet too",
+      "stored": "never",
+      "usesCompactShell": false,
+      "expected": "never"
+    }
+  ],
+  "persistPlan": [
+    {
+      "name": "a live-only write mirrors the tab list and drops everything else",
+      "mode": "liveOnly",
+      "current": [
+        "S1",
+        "S2"
+      ],
+      "cohort": [
+        "S3"
+      ],
+      "stored": [
+        "S3"
+      ],
+      "preferredSelection": null,
+      "storedSelection": "S3",
+      "maxSnapshots": 64,
+      "expected": {
+        "entries": [
+          {
+            "session": "S1",
+            "source": "current"
+          },
+          {
+            "session": "S2",
+            "source": "current"
+          }
+        ],
+        "selectedSession": null
+      }
+    },
+    {
+      "name": "keepCohort holds an entry whose tab is already gone",
+      "mode": "keepCohort",
+      "current": [
+        "S1"
+      ],
+      "cohort": [
+        "S1",
+        "S2"
+      ],
+      "stored": [],
+      "preferredSelection": "S1",
+      "storedSelection": null,
+      "maxSnapshots": 64,
+      "expected": {
+        "entries": [
+          {
+            "session": "S1",
+            "source": "current"
+          },
+          {
+            "session": "S2",
+            "source": "cohort"
+          }
+        ],
+        "selectedSession": "S1"
+      }
+    },
+    {
+      "name": "a merge keeps stored order and lets the live copy win",
+      "mode": "mergeWithStored",
+      "current": [
+        "S2",
+        "S3"
+      ],
+      "cohort": [],
+      "stored": [
+        "S1",
+        "S2"
+      ],
+      "preferredSelection": null,
+      "storedSelection": "S1",
+      "maxSnapshots": 64,
+      "expected": {
+        "entries": [
+          {
+            "session": "S1",
+            "source": "stored"
+          },
+          {
+            "session": "S2",
+            "source": "current"
+          },
+          {
+            "session": "S3",
+            "source": "current"
+          }
+        ],
+        "selectedSession": "S1"
+      }
+    },
+    {
+      "name": "the background edge carries a session that is no longer live",
+      "mode": "mergeWithStored",
+      "current": [],
+      "cohort": [],
+      "stored": [
+        "S1"
+      ],
+      "preferredSelection": null,
+      "storedSelection": "S1",
+      "maxSnapshots": 64,
+      "expected": {
+        "entries": [
+          {
+            "session": "S1",
+            "source": "stored"
+          }
+        ],
+        "selectedSession": "S1"
+      }
+    },
+    {
+      "name": "what is on screen outranks the stored selection",
+      "mode": "mergeWithStored",
+      "current": [
+        "S2"
+      ],
+      "cohort": [],
+      "stored": [
+        "S1",
+        "S2"
+      ],
+      "preferredSelection": "S2",
+      "storedSelection": "S1",
+      "maxSnapshots": 64,
+      "expected": {
+        "entries": [
+          {
+            "session": "S1",
+            "source": "stored"
+          },
+          {
+            "session": "S2",
+            "source": "current"
+          }
+        ],
+        "selectedSession": "S2"
+      }
+    },
+    {
+      "name": "a stored selection that is not written is dropped",
+      "mode": "mergeWithStored",
+      "current": [
+        "S2"
+      ],
+      "cohort": [],
+      "stored": [
+        "S2"
+      ],
+      "preferredSelection": null,
+      "storedSelection": "S1",
+      "maxSnapshots": 64,
+      "expected": {
+        "entries": [
+          {
+            "session": "S2",
+            "source": "current"
+          }
+        ],
+        "selectedSession": null
+      }
+    },
+    {
+      "name": "the write is bounded",
+      "mode": "liveOnly",
+      "current": [
+        "S1",
+        "S2",
+        "S3"
+      ],
+      "cohort": [],
+      "stored": [],
+      "preferredSelection": "S3",
+      "storedSelection": null,
+      "maxSnapshots": 2,
+      "expected": {
+        "entries": [
+          {
+            "session": "S1",
+            "source": "current"
+          },
+          {
+            "session": "S2",
+            "source": "current"
+          }
+        ],
+        "selectedSession": null
+      }
+    }
+  ]
+}

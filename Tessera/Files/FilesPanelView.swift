@@ -10,7 +10,9 @@
 // Design reference: docs/mockups/remote-files/index.html.
 
 import SwiftUI
+import Observation
 import UIKit
+import TesseraDomainCore
 
 /// Drop-on-terminal (mockup §4): the terminal surface accepts file
 /// drops — upload to the host's temp dir, then type the quoted path
@@ -247,6 +249,40 @@ private struct FloatingCardSurface: ViewModifier {
     }
 }
 
+@MainActor
+@Observable
+final class FileSharePreparation {
+    private var items: [String: TransferItem] = [:]
+
+    func isPreparing(_ path: String) -> Bool {
+        guard let item = items[path] else { return false }
+        switch item.phase {
+        case .queued, .running, .cancelling: return true
+        case .completed, .failed, .cancelled: return false
+        }
+    }
+
+    func start(_ entry: RemoteFileEntry, controller: FilesPanelController) {
+        start(entry.path) {
+            guard let share = controller.onShareFile else { return nil }
+            let previousIDs = Set(controller.transfers?.items.map(\.id) ?? [])
+            share(entry)
+            return controller.transfers?.items.last(where: {
+                $0.remotePath == entry.path && !previousIDs.contains($0.id)
+            })
+        }
+    }
+
+    func start(_ path: String, enqueue: () -> TransferItem?) {
+        guard !isPreparing(path), let item = enqueue() else { return }
+        items[path] = item
+        Task {
+            await item.awaitFinished()
+            if items[path]?.id == item.id { items[path] = nil }
+        }
+    }
+}
+
 struct FilesPanelView: View {
     @Bindable var controller: FilesPanelController
     let T: DesignTokens
@@ -286,6 +322,7 @@ struct FilesPanelView: View {
     @State private var renameTarget: RemoteFileEntry?
     @State private var renameText = ""
     @State private var deleteTarget: RemoteFileEntry?
+    @State private var sharePreparation = FileSharePreparation()
     @State private var showingInstallConfirm = false
 
     // MARK: Files-panel improvements (§ numbers → docs/mockups/files-panel-improvements)
@@ -452,8 +489,7 @@ struct FilesPanelView: View {
         }
         .alert("New Folder", isPresented: $showingNewFolder) {
             TextField("name", text: $newFolderName)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
+                .literalTextInput()
             Button("Create") {
                 controller.createFolder(named: newFolderName)
                 newFolderName = ""
@@ -462,8 +498,7 @@ struct FilesPanelView: View {
         }
         .alert("Rename", isPresented: renameAlertBinding) {
             TextField("name", text: $renameText)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
+                .literalTextInput()
             Button("Rename") {
                 if let target = renameTarget {
                     controller.rename(target, to: renameText)
@@ -622,8 +657,7 @@ struct FilesPanelView: View {
         }
         .font(Typography.tesseraMono(size: 10.5))
         .foregroundStyle(T.fg)
-        .textInputAutocapitalization(.never)
-        .autocorrectionDisabled()
+        .literalTextInput()
         .focused($pathFieldFocused)
         .submitLabel(.go)
         .onKeyPress(.escape) {
@@ -955,8 +989,7 @@ struct FilesPanelView: View {
             TextField("filter this directory", text: $controller.searchText)
                 .font(Typography.tesseraMono(size: 10.5))
                 .foregroundStyle(T.fg)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
+                .literalTextInput()
                 .focused($searchFieldFocused)
                 .submitLabel(.done)
                 .onKeyPress(.escape) {
@@ -1188,6 +1221,7 @@ struct FilesPanelView: View {
                         rootDirectory: root,
                         isExpanded: controller.isExpanded(row.entry),
                         isLoading: controller.isLoading(row.entry),
+                        isPreparingShare: sharePreparation.isPreparing(row.entry.path),
                         // Drag-out: rows are file-promise sources — the
                         // download runs only when a drop target accepts (no
                         // pre-fetch on drag start).
@@ -1197,6 +1231,7 @@ struct FilesPanelView: View {
                         renameTarget: $renameTarget,
                         renameText: $renameText,
                         deleteTarget: $deleteTarget,
+                        onShare: { sharePreparation.start($0, controller: controller) },
                         onMenuPresence: { menuPresenceChanged(present: $0) }
                     )
                     // The whole fix: an unrelated panel pass must not
@@ -1453,8 +1488,7 @@ struct FilesPanelView: View {
             TextField(quickOpenPlaceholder, text: $quickOpenText)
                 .font(Typography.tesseraMono(size: 10.5))
                 .foregroundStyle(T.fg)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
+                .literalTextInput()
                 .focused($quickOpenFocused)
                 .submitLabel(.go)
                 .onKeyPress(.escape) {
@@ -1716,6 +1750,7 @@ private struct FileRowView: View, Equatable {
     let rootDirectory: String?
     let isExpanded: Bool
     let isLoading: Bool
+    let isPreparingShare: Bool
     let canDrag: Bool
     let capabilities: MenuCapabilities
 
@@ -1724,6 +1759,7 @@ private struct FileRowView: View, Equatable {
     @Binding var renameTarget: RemoteFileEntry?
     @Binding var renameText: String
     @Binding var deleteTarget: RemoteFileEntry?
+    let onShare: (RemoteFileEntry) -> Void
     let onMenuPresence: (Bool) -> Void
 
     /// Bindings and closures are not comparable. They stay out of `==`
@@ -1743,6 +1779,7 @@ private struct FileRowView: View, Equatable {
             && a.rootDirectory == b.rootDirectory
             && a.isExpanded == b.isExpanded
             && a.isLoading == b.isLoading
+            && a.isPreparingShare == b.isPreparingShare
             && a.canDrag == b.canDrag
             && a.capabilities == b.capabilities
             && a.controller === b.controller
@@ -1788,6 +1825,9 @@ private struct FileRowView: View, Equatable {
     /// The SwiftUI label is hidden from accessibility so the row is one
     /// element, not two — so its description has to be rebuilt here.
     private var accessibilityDescription: String {
+        if isPreparingShare {
+            return String(localized: "\(entry.name), preparing to share")
+        }
         switch entry.kind {
         case .directory:
             return String(
@@ -1843,11 +1883,11 @@ private struct FileRowView: View, Equatable {
                     controller.onDownloadFile?(entry)
                 })
             }
-            if capabilities.canShare {
+            if capabilities.canShare, !isPreparingShare {
                 primary.append(FileRowMenuAction(
                     title: "Share…", systemImage: "square.and.arrow.up"
                 ) {
-                    controller.onShareFile?(entry)
+                    onShare(entry)
                 })
             }
         }
@@ -1936,7 +1976,12 @@ private struct FileRowView: View, Equatable {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 8)
-            if filterActive, row.depth > 0 {
+            if isPreparingShare {
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(T.fgDim)
+                    .accessibilityLabel("Preparing to share")
+            } else if filterActive, row.depth > 0 {
                 // Flattened match from an expanded subfolder: show where
                 // it lives instead of size (mockup §1).
                 Text(parentTag)
@@ -2015,9 +2060,10 @@ private struct FileRowView: View, Equatable {
                 }
             }
             if capabilities.canShare {
-                Button { controller.onShareFile?(entry) } label: {
+                Button { onShare(entry) } label: {
                     Label("Share…", systemImage: "square.and.arrow.up")
                 }
+                .disabled(isPreparingShare)
             }
         }
         if capabilities.canSendPath {
@@ -2066,8 +2112,8 @@ private struct FileRowView: View, Equatable {
         case .symlink: return "link"
         case .other: return "–"
         case .file:
-            guard let size = entry.size else { return "–" }
-            return ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+            guard let size = FileBridge.byteCount(entry.size) else { return "–" }
+            return ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
         }
     }
 

@@ -1,0 +1,18 @@
+scenario w10-forced-refresh
+# W10: refresh-client -C always runs recalculate_sizes_now(1), which skips the
+# unchanged-size guard, so an unchanged size still resizes and announces every
+# sized window; a deferred pass with an unchanged size does nothing.
+session O 80x24 w0
+window O w1
+group U O
+tty laptop U 200x50
+control device O
+send device select-window ; refresh-client -C 100,30
+expect-size w0 100x30
+send device refresh-client -C 100,30
+expect device %layout-change {w0} *,100x30,0,0,*
+send device select-window
+expect-not device %layout-change *
+send device select-window -t :1 ; refresh-client -C 100,30
+expect device %layout-change {w1} *,100x30,0,0,*
+expect device %layout-change {w0} *,100x30,0,0,*

@@ -10,9 +10,15 @@ let package = Package(
     products: [
         .library(name: "PortForwarding", targets: ["PortForwarding"]),
     ],
+    dependencies: [
+        .package(path: "../TesseraCore"),
+    ],
     targets: [
         .target(
             name: "PortForwarding",
+            dependencies: [
+                .product(name: "TesseraDomainCore", package: "TesseraCore"),
+            ],
             path: "Sources/PortForwarding"
         ),
         .testTarget(

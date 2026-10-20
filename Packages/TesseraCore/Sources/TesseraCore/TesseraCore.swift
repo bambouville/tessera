@@ -1,0 +1,12 @@
+@_exported import TesseraAgentCore
+@_exported import TesseraContinuityCore
+@_exported import TesseraCoreABI
+@_exported import TesseraCrossDeviceCore
+@_exported import TesseraDomainCore
+@_exported import TesseraEnrollmentCore
+@_exported import TesseraInputCore
+@_exported import TesseraPairingCore
+@_exported import TesseraBootstrapCore
+@_exported import TesseraProtocolCore
+@_exported import TesseraSessionCore
+@_exported import TesseraTrustCore

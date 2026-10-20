@@ -250,6 +250,70 @@ public final class SFTPFile {
         self.logger.debug("SFTP finished writing \(data.readerIndex) bytes @ \(offset) to file \(self.handle.sftpHandleDebugDescription)")
     }
 
+    /// Tessera: the largest payload `writeFuture(_:at:)` puts in one write
+    /// request, so each request fits a single 32 KiB SSH channel packet — the
+    /// write size every SFTP server accepts.
+    public static let maximumWriteRequestLength = 32_000
+
+    /// Tessera: sends `data` as consecutive write requests of at most
+    /// `maximumWriteRequestLength` bytes without waiting for any reply, and
+    /// returns a future that succeeds once the server has acknowledged all of
+    /// them. Awaiting each reply in turn (as `write(_:at:)` does) limits a
+    /// transfer to one request per round trip.
+    public func writeFuture(_ data: ByteBuffer, at offset: UInt64) -> EventLoopFuture<Void> {
+        guard self.isActive else {
+            return self.client.eventLoop.makeFailedFuture(SFTPError.fileHandleInvalid)
+        }
+
+        var data = data
+        var requestOffset = offset
+        var acknowledgements: [EventLoopFuture<Void>] = []
+        while data.readableBytes > 0,
+              let slice = data.readSlice(length: Swift.min(Self.maximumWriteRequestLength, data.readableBytes)) {
+            let acknowledgement = self.client.sendRequestFuture(.write(.init(
+                requestId: self.client.allocateRequestId(),
+                handle: self.handle,
+                offset: requestOffset,
+                data: slice
+            ))).flatMapThrowing { response -> Void in
+                guard case .status(let status) = response else {
+                    throw SFTPError.invalidResponse
+                }
+                guard status.errorCode == .ok else {
+                    throw SFTPError.errorStatus(status)
+                }
+            }
+            acknowledgements.append(acknowledgement)
+            requestOffset += UInt64(slice.readableBytes)
+        }
+        return EventLoopFuture.andAllSucceed(acknowledgements, on: self.client.eventLoop)
+    }
+
+    /// Tessera: sends one read request without waiting for its reply, so
+    /// several can be in flight. The future yields an empty buffer at end of
+    /// file; before that a server may still return fewer bytes than asked.
+    public func readFuture(from offset: UInt64, length: UInt32) -> EventLoopFuture<ByteBuffer> {
+        guard self.isActive else {
+            return self.client.eventLoop.makeFailedFuture(SFTPError.fileHandleInvalid)
+        }
+
+        return self.client.sendRequestFuture(.read(.init(
+            requestId: self.client.allocateRequestId(),
+            handle: self.handle,
+            offset: offset,
+            length: length
+        ))).flatMapThrowing { response -> ByteBuffer in
+            switch response {
+            case .data(let data):
+                return data.data
+            case .status(let status) where status.errorCode == .eof:
+                return ByteBuffer()
+            default:
+                throw SFTPError.invalidResponse
+            }
+        }
+    }
+
     /// Close the file handle.
     ///
     /// - Throws: SFTPError if close fails

@@ -8,6 +8,121 @@ final class BootstrapNearbyHandshakeTests: XCTestCase {
     private let originSeed = Data((0..<32).map(UInt8.init))
     private let recipientSeed = Data((32..<64).map(UInt8.init))
 
+    func test_releasedAppleV2WireVectorExactBytes() throws {
+        let vector = try loadLegacyV2Vector()
+        XCTAssertEqual(vector.protocolVersion, NearbyBootstrapProtocol.version)
+
+        let originSeed = try XCTUnwrap(Data(hex: vector.origin.privateKeySeedHex))
+        let recipientSeed = try XCTUnwrap(Data(hex: vector.recipient.privateKeySeedHex))
+        let originPublicKey = try XCTUnwrap(Data(hex: vector.origin.publicKeyHex))
+        let recipientPublicKey = try XCTUnwrap(Data(hex: vector.recipient.publicKeyHex))
+        let originHello = NearbyHandshakeHello(
+            version: vector.protocolVersion,
+            role: .origin,
+            ephemeralPublicKey: originPublicKey,
+            displayName: nil,
+            appVersion: vector.releasedAppVersion,
+            supportedVersions: [vector.protocolVersion]
+        )
+        let recipientHello = NearbyHandshakeHello(
+            version: vector.protocolVersion,
+            role: .recipient,
+            ephemeralPublicKey: recipientPublicKey,
+            displayName: nil,
+            appVersion: vector.releasedAppVersion,
+            supportedVersions: [vector.protocolVersion]
+        )
+        XCTAssertEqual(
+            try originHello.encoded(),
+            Data(vector.origin.canonicalHelloJSON.utf8)
+        )
+        XCTAssertEqual(
+            try recipientHello.encoded(),
+            Data(vector.recipient.canonicalHelloJSON.utf8)
+        )
+
+        let projection = LegacyV2CommitmentProjection(
+            version: vector.protocolVersion,
+            role: .recipient,
+            ephemeralPublicKey: recipientPublicKey
+        )
+        let canonicalEncoder = JSONEncoder()
+        canonicalEncoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        XCTAssertEqual(
+            try canonicalEncoder.encode(projection),
+            Data(vector.commitment.canonicalProjectionJSON.utf8)
+        )
+
+        let originAttempt = try NearbyHandshake.begin(
+            role: .origin,
+            deterministicPrivateKey: originSeed
+        )
+        let recipientAttempt = try NearbyHandshake.begin(
+            role: .recipient,
+            deterministicPrivateKey: recipientSeed
+        )
+        XCTAssertEqual(originAttempt.hello.ephemeralPublicKey, originPublicKey)
+        XCTAssertEqual(recipientAttempt.hello.ephemeralPublicKey, recipientPublicKey)
+        let commitment = try NearbyHandshake.recipientCommitment(for: recipientAttempt)
+        XCTAssertEqual(commitment.helloDigest.hex, vector.commitment.helloDigestHex)
+        let releasedCommitmentBytes = Data(vector.commitment.canonicalJSON.utf8)
+        XCTAssertEqual(
+            try NearbyHandshakeCommitment.decode(releasedCommitmentBytes).encoded(),
+            releasedCommitmentBytes
+        )
+
+        let transcript = try NearbyHandshake.makeTranscript(
+            originHello: originHello,
+            recipientHello: recipientHello
+        )
+        XCTAssertEqual(transcript.hex, vector.transcriptHex)
+
+        let origin = try NearbyHandshake.completeOrigin(
+            originAttempt,
+            with: recipientAttempt.hello,
+            verifying: commitment
+        )
+        let recipient = try NearbyHandshake.completeRecipient(
+            recipientAttempt,
+            with: originAttempt.hello
+        )
+        XCTAssertEqual(origin.transcriptHash.hex, vector.transcriptHashHex)
+        XCTAssertEqual(recipient.transcriptHash, origin.transcriptHash)
+        XCTAssertEqual(origin.sas.digits, vector.sasDigits)
+        XCTAssertEqual(recipient.sas, origin.sas)
+
+        let originPrivateKey = try Curve25519.KeyAgreement.PrivateKey(
+            rawRepresentation: originSeed
+        )
+        let recipientCryptoPublicKey = try Curve25519.KeyAgreement.PublicKey(
+            rawRepresentation: recipientPublicKey
+        )
+        let sharedSecret = try originPrivateKey.sharedSecretFromKeyAgreement(
+            with: recipientCryptoPublicKey
+        )
+        let sasKey = sharedSecret.hkdfDerivedSymmetricKey(
+            using: SHA256.self,
+            salt: origin.transcriptHash,
+            sharedInfo: Data("tessera/nearby-bootstrap/sas/v1".utf8),
+            outputByteCount: 8
+        )
+        XCTAssertEqual(
+            sasKey.withUnsafeBytes { Data($0).hex },
+            vector.sasBytesHex
+        )
+
+        let originDecision = try origin.sealSASDecision(matches: true)
+        let recipientDecision = try recipient.sealSASDecision(matches: true)
+        XCTAssertTrue(try origin.openPeerSASDecision(recipientDecision))
+        XCTAssertTrue(try recipient.openPeerSASDecision(originDecision))
+        let originTest = try origin.sealTestPayload(Data("origin-vector".utf8))
+        let recipientTest = try recipient.sealTestPayload(Data("recipient-vector".utf8))
+        try assertLegacyV2Frame(originDecision, named: "origin-sas-match", in: vector)
+        try assertLegacyV2Frame(recipientDecision, named: "recipient-sas-match", in: vector)
+        try assertLegacyV2Frame(originTest, named: "origin-debug-test", in: vector)
+        try assertLegacyV2Frame(recipientTest, named: "recipient-debug-test", in: vector)
+    }
+
     func test_deterministicX25519TranscriptAndSASVector() throws {
         let (origin, recipient, originSession, recipientSession) = try makeSessions()
         let commitment = try NearbyHandshake.recipientCommitment(
@@ -389,7 +504,7 @@ final class BootstrapNearbyHandshakeTests: XCTestCase {
                 )
             }
         )
-        try receipt.validate(manifest: wireManifest, publicKey: publicKey)
+        try receipt.validate(manifest: wireManifest, publicKey: publicKey.core)
 
         XCTAssertThrowsError(try freshOrigin.sealGrantReceipt(receipt)) { error in
             XCTAssertEqual(error as? NearbyHandshakeError, .importAcceptanceRequired)
@@ -707,6 +822,46 @@ final class BootstrapNearbyHandshakeTests: XCTestCase {
         })
     }
 
+    private func loadLegacyV2Vector() throws -> LegacyNearbyBootstrapV2Vector {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("ProtocolVectors")
+            .appendingPathComponent("legacy-nearby-bootstrap")
+            .appendingPathComponent("v2")
+            .appendingPathComponent("canonical.json")
+        return try JSONDecoder().decode(
+            LegacyNearbyBootstrapV2Vector.self,
+            from: Data(contentsOf: url)
+        )
+    }
+
+    private func assertLegacyV2Frame(
+        _ actual: Data,
+        named name: String,
+        in vector: LegacyNearbyBootstrapV2Vector
+    ) throws {
+        let expected = try XCTUnwrap(vector.frames.first { $0.name == name })
+        let expectedData = try XCTUnwrap(Data(hex: expected.frameHex))
+        let alternateData = try XCTUnwrap(Data(hex: expected.alternateFrameHex))
+        XCTAssertTrue(
+            actual == expectedData || actual == alternateData,
+            "legacy v2 frame drifted: \(name), actual=\(actual.hex)"
+        )
+        XCTAssertGreaterThanOrEqual(actual.count, 14)
+        XCTAssertEqual(actual.prefix(4), Data("TBCH".utf8))
+        XCTAssertEqual(actual[4], UInt8(expected.frameVersion))
+        XCTAssertEqual(actual[5], UInt8(expected.directionByte))
+        XCTAssertEqual(
+            expected.directionByte,
+            expected.direction == "originToRecipient" ? 1 : 2
+        )
+        let sequence = actual.subdata(in: 6..<14).reduce(UInt64(0)) {
+            ($0 << 8) | UInt64($1)
+        }
+        XCTAssertEqual(sequence, expected.sequence)
+    }
+
     private func makeSessions() throws -> (
         NearbyHandshakeAttempt,
         NearbyHandshakeAttempt,
@@ -754,6 +909,60 @@ final class BootstrapNearbyHandshakeTests: XCTestCase {
     }
 }
 
+private struct LegacyNearbyBootstrapV2Vector: Decodable {
+    let protocolVersion: Int
+    let releasedAppVersion: String
+    let origin: Participant
+    let recipient: Participant
+    let commitment: Commitment
+    let transcriptHex: String
+    let transcriptHashHex: String
+    let sasBytesHex: String
+    let sasDigits: String
+    let frames: [Frame]
+
+    struct Participant: Decodable {
+        let privateKeySeedHex: String
+        let publicKeyHex: String
+        let canonicalHelloJSON: String
+    }
+
+    struct Commitment: Decodable {
+        let canonicalProjectionJSON: String
+        let helloDigestHex: String
+        let canonicalJSON: String
+    }
+
+    struct Frame: Decodable {
+        let name: String
+        let direction: String
+        let directionByte: Int
+        let sequence: UInt64
+        let frameVersion: Int
+        let frameHex: String
+        let alternateFrameHex: String
+    }
+}
+
+private struct LegacyV2CommitmentProjection: Encodable {
+    let version: Int
+    let role: NearbyHandshakeRole
+    let ephemeralPublicKey: Data
+}
+
 private extension Data {
+    init?(hex: String) {
+        guard hex.count.isMultiple(of: 2) else { return nil }
+        var bytes = Data(capacity: hex.count / 2)
+        var index = hex.startIndex
+        while index < hex.endIndex {
+            let next = hex.index(index, offsetBy: 2)
+            guard let byte = UInt8(hex[index..<next], radix: 16) else { return nil }
+            bytes.append(byte)
+            index = next
+        }
+        self = bytes
+    }
+
     var hex: String { map { String(format: "%02x", $0) }.joined() }
 }

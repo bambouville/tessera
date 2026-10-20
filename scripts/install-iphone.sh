@@ -92,6 +92,8 @@ for d in devices:
     hw = d.get("hardwareProperties", {})
     if hw.get("deviceType") != "iPhone":
         continue
+    if hw.get("reality") == "simulated":
+        continue
     iphones.append(d)
 if not iphones:
     print("  (no iPhones visible to devicectl)")
@@ -147,6 +149,8 @@ echo "==> team: $TEAM_ID"
 
 # Resolve the hardware UDID. Text-mode devicectl displays a CoreDevice
 # identifier, while xcodebuild needs the hardware UDID, so parse JSON.
+# Newer CoreDevice also lists simulators as paired devices; skip them, or an
+# iPhone simulator that sorts first gets the build (see install-ipad.sh).
 UDID="${DEVICE_UDID:-${IPHONE_UDID:-}}"
 if [[ -z "$UDID" ]]; then
   UDID="$(xcrun devicectl list devices --json-output - 2>/dev/null \
@@ -157,6 +161,8 @@ for d in data.get("result", {}).get("devices", []):
     hw = d.get("hardwareProperties", {})
     conn = d.get("connectionProperties", {})
     if hw.get("deviceType") != "iPhone":
+        continue
+    if hw.get("reality") == "simulated":
         continue
     if conn.get("pairingState") != "paired":
         continue

@@ -5,9 +5,14 @@ import Security
 import LocalAuthentication
 import MoshBridge
 import PortForwarding
+import TesseraCore
 import TmuxControl
 #if DEBUG
+import class SwiftTerm.Terminal
 import class SwiftTerm.TerminalView
+import TmuxControlCore
+import Combine
+import NIOSSH
 #endif
 import UserNotifications
 
@@ -92,7 +97,7 @@ struct ContinuityDebugHarnessScenario {
 }
 
 /// Simulator-only live continuation harness: seeds a real saved host (with a
-/// password credential) and injects a matching descriptor so the exact
+/// password or locally generated key credential) and injects a matching descriptor so the exact
 /// production fast path — resolve, connect, launch, render-ready, overlay
 /// dismissal — runs against a disposable integration fixture.
 struct ContinuityLiveHarnessConfiguration: Codable {
@@ -102,7 +107,13 @@ struct ContinuityLiveHarnessConfiguration: Codable {
     var user: String
     var address: String
     var port: Int
-    var password: String
+    var password: String?
+    /// Public-key QA never receives private material or a fallback password.
+    var generateSourceKey: Bool?
+    var injectDescriptor: Bool?
+    /// Optional fixture pin obtained through the authenticated VPS control
+    /// channel, not from the app-facing connection under test.
+    var verifiedFixtureHostKey: String?
     var transport: HostTransport
     var launchMode: HostLaunchMode
     var tmuxSessionName: String?
@@ -148,6 +159,7 @@ struct TesseraApp: App {
     @State private var connectionActivity: ConnectionActivityStore
     @State private var activityBroadcaster: ActivityBroadcaster
     @State private var continuationCoordinator: ContinuationCoordinator
+    @State private var crossDevicePairingCoordinator: CrossDevicePairingCoordinator
     @State private var bootstrapCoordinator: BootstrapCoordinator
     @State private var enrollmentCoordinator: EnrollmentCoordinator
     @State private var hostAccessStore: HostAccessStore
@@ -164,7 +176,9 @@ struct TesseraApp: App {
     var body: some Scene {
         WindowGroup {
             #if DEBUG
-            if let bootstrapNetworkHarness {
+            if ProcessInfo.processInfo.environment["TESSERA_QR_REVIEW"] != nil {
+                PairingReviewHarness()
+            } else if let bootstrapNetworkHarness {
                 BootstrapNetworkHarnessView(harness: bootstrapNetworkHarness)
             } else {
                 productionRootView
@@ -191,11 +205,13 @@ struct TesseraApp: App {
                 connectionActivity: connectionActivity,
                 activityBroadcaster: activityBroadcaster,
                 continuationCoordinator: continuationCoordinator,
+                crossDevicePairingCoordinator: crossDevicePairingCoordinator,
                 bootstrapCoordinator: bootstrapCoordinator,
                 enrollmentCoordinator: enrollmentCoordinator,
                 hostAccessStore: hostAccessStore,
                 isInitialColdLaunch: $isInitialColdLaunch
             )
+            .background(AppSwitcherPrivacyGate(appearance: appearance).frame(width: 0, height: 0))
             .onChange(of: scenePhase) { _, newPhase in
                 appLockController.handleScenePhaseChange(newPhase)
                 let isActive = (newPhase == .active)
@@ -205,6 +221,7 @@ struct TesseraApp: App {
                 }
                 if newPhase == .background {
                     bootstrapCoordinator.stopForBackground()
+                    crossDevicePairingCoordinator.applicationDidLockOrBackground()
                     enrollmentCoordinator.applicationDidEnterBackground()
                 }
 
@@ -233,6 +250,8 @@ struct TesseraApp: App {
 
     /// Seed the dev key + a few demo hosts on first launch. DEBUG-only.
     init() {
+        BrokenPipeGuard.install()
+        LiteralTextInputPolicy.install()
         UNUserNotificationCenter.current().delegate = TesseraNotificationDelegate.shared
         TmuxDiagnostics.sink = { message in
             DiagnosticLogStore.appendTmux(message)
@@ -253,6 +272,7 @@ struct TesseraApp: App {
         _connectionActivity = State(initialValue: ConnectionActivityStore.shared)
         _activityBroadcaster = State(initialValue: ActivityBroadcaster())
         _continuationCoordinator = State(initialValue: ContinuationCoordinator())
+        _crossDevicePairingCoordinator = State(initialValue: CrossDevicePairingCoordinator())
         #if DEBUG
         let bootstrapNetworkHarness = BootstrapNetworkHarness.fromEnvironment()
         let usesCompactNavigationHarness = ProcessInfo.processInfo.environment[
@@ -315,6 +335,13 @@ struct TesseraApp: App {
         }
 
         #if DEBUG
+        // Before any other seeding: the restore harness wipes its own fixtures
+        // and writes the document the first composition is about to read, and
+        // `attemptStartupRestoreIfReady` must see a settled world rather than
+        // one still being built underneath it.
+        MainActor.assumeIsolated {
+            SessionRestoreDebugHarness.applyIfRequested(into: modelContainer)
+        }
         if bootstrapNetworkHarness == nil && !usesCompactNavigationHarness && !usesHostAccessHarness {
             seedDevStateIfNeeded(into: modelContainer)
             DiagnosticLogStore.appendApp(
@@ -504,6 +531,7 @@ struct RootView: View {
     @Bindable var connectionActivity: ConnectionActivityStore
     @Bindable var activityBroadcaster: ActivityBroadcaster
     @Bindable var continuationCoordinator: ContinuationCoordinator
+    @Bindable var crossDevicePairingCoordinator: CrossDevicePairingCoordinator
     @Bindable var bootstrapCoordinator: BootstrapCoordinator
     @Bindable var enrollmentCoordinator: EnrollmentCoordinator
     @Bindable var hostAccessStore: HostAccessStore
@@ -513,7 +541,9 @@ struct RootView: View {
     var body: some View {
         ZStack {
             #if DEBUG
-            if ProcessInfo.processInfo.environment["TESSERA_COMPACT_NAVIGATION_HARNESS"] == "1" {
+            if ProcessInfo.processInfo.environment["TESSERA_SETUP_FLOW_HARNESS"] == "1" {
+                SetupFlowPresentationHarness()
+            } else if ProcessInfo.processInfo.environment["TESSERA_COMPACT_NAVIGATION_HARNESS"] == "1" {
                 CompactNavigationTransitionHarnessView()
             } else if ProcessInfo.processInfo.environment["TESSERA_IPHONE_KEYBOARD_HARNESS"] == "1" {
                 IPhoneKeyboardHarnessView()
@@ -523,28 +553,26 @@ struct RootView: View {
                 IPhoneCompanionHarnessView()
             } else if ProcessInfo.processInfo.environment["TESSERA_TMUX_EMPTY_CAPTURE_HARNESS"] == "1" {
                 TmuxEmptyCaptureHarnessView()
+            } else if ProcessInfo.processInfo.environment["TESSERA_SPLIT_BATCH_HARNESS"] == "1" {
+                SplitBatchHarnessView()
             } else if ProcessInfo.processInfo.environment["TESSERA_NETWORK_PATH_WARNING_HARNESS"] == "1" {
                 NetworkPathWarningHarnessView()
             } else if ProcessInfo.processInfo.environment["TESSERA_TERMINAL_CANVAS_HARNESS"] == "1" {
                 TerminalCanvasHarnessView()
-            } else if ProcessInfo.processInfo.environment["TESSERA_AGENT_CENTER_HARNESS"] == "1" {
-                AgentCenterHarnessView()
-            } else if ProcessInfo.processInfo.environment["TESSERA_AGENT_HOOK_HELP_HARNESS"] == "1" {
-                AgentLifecycleIntegrationHelpView()
-            } else if ProcessInfo.processInfo.environment["TESSERA_AGENT_HOOK_SOURCE_HARNESS"] == "1" {
-                AgentLifecycleIntegrationHelpView(initiallyShowsSource: true)
-            } else if ProcessInfo.processInfo.environment["TESSERA_AGENT_INTEGRATION_WARNING_HARNESS"] == "1" {
-                AgentIntegrationWarningHarnessView()
+            } else if ProcessInfo.processInfo.environment["TESSERA_SESSION_QUEUE_HARNESS"] == "1" {
+                SessionQueueHarnessView()
+            } else if ProcessInfo.processInfo.environment["TESSERA_HARDWARE_KEY_HARNESS"] == "1" {
+                HardwareKeyHarnessView()
+            } else if ProcessInfo.processInfo.environment["TESSERA_AGENT_CENTER_V2_HARNESS"] == "1" {
+                AgentCenterV2FixtureView()
+            } else if ProcessInfo.processInfo.environment["TESSERA_AGENT_ATTENTION_HARNESS"] == "1" {
+                AgentAttentionHarnessView()
             } else if ProcessInfo.processInfo.environment["TESSERA_TMUX_WINDOW_CLOSE_HARNESS"] == "1" {
                 TmuxWindowCloseHarnessView()
             } else if ProcessInfo.processInfo.environment["TESSERA_TMUX_WINDOW_LIST_HARNESS"] == "1" {
                 TmuxWindowListHarnessView()
-            } else if ProcessInfo.processInfo.environment["TESSERA_AGENT_ATTENTION_HARNESS"] == "1" {
-                AgentAttentionHarnessView()
-            } else if ProcessInfo.processInfo.environment["TESSERA_AGENT_NOTIFICATION_HARNESS"] == "1" {
-                AgentNotificationDeliveryHarnessView()
-            } else if ProcessInfo.processInfo.environment["TESSERA_AGENT_PALETTE_HARNESS"] == "1" {
-                AgentPaletteHarnessView()
+            } else if ProcessInfo.processInfo.environment["TESSERA_GRID_AUTHORITY_HARNESS"] == "1" {
+                GridAuthorityEventHarnessView()
             } else if ProcessInfo.processInfo.environment["TESSERA_UPLOAD_HARNESS"] == "1" {
                 UploadIngressHarnessView()
             } else if ProcessInfo.processInfo.environment["TESSERA_FILES_HARNESS"] == "1" {
@@ -567,6 +595,10 @@ struct RootView: View {
                 SwipePadFanHarnessView()
             } else if ProcessInfo.processInfo.environment["TESSERA_MARKDOWN_HARNESS"] == "1" {
                 MarkdownPreviewHarnessView()
+            } else if ProcessInfo.processInfo.environment["TESSERA_APPEARANCE_HARNESS"] == "1" {
+                AppearanceSettingsHarnessView()
+            } else if ProcessInfo.processInfo.environment["TESSERA_TUNNEL_BROWSER_HARNESS"] == "1" {
+                TunnelBrowserHarnessView()
             } else {
                 mainContent
             }
@@ -576,6 +608,7 @@ struct RootView: View {
         }
         .environment(appearance)
         .environment(appLockController)
+        .environment(\.terminalInputAllowed, { !appLockController.isLocked })
         .environment(onboardingController)
         .environment(appPhase)
         .environment(bellController)
@@ -587,6 +620,7 @@ struct RootView: View {
         .environment(connectionActivity)
         .environment(activityBroadcaster)
         .environment(continuationCoordinator)
+        .environment(crossDevicePairingCoordinator)
         .environment(bootstrapCoordinator)
         .environment(enrollmentCoordinator)
         .environment(hostAccessStore)
@@ -603,6 +637,7 @@ struct RootView: View {
             activityBroadcaster.setLocked(isLocked)
             if isLocked {
                 continuationCoordinator.applicationDidLock()
+                crossDevicePairingCoordinator.applicationDidLockOrBackground()
                 if bootstrapCoordinator.isPresented {
                     bootstrapCoordinator.cancel()
                 }
@@ -672,7 +707,17 @@ struct RootView: View {
         if !didInjectContinuityHarness,
            let live = ContinuityLiveHarnessConfiguration.load() {
             didInjectContinuityHarness = true
+            guard live.injectDescriptor != false else { return }
             Task { @MainActor in
+                if let line = live.verifiedFixtureHostKey {
+                    guard let key = try? NIOSSHPublicKey(openSSHPublicKey: line) else {
+                        NSLog("[ContinuityLiveHarness] invalid fixture host key")
+                        return
+                    }
+                    await KnownHostsStore.shared.trust(
+                        key, for: "\(live.address):\(live.port)"
+                    )
+                }
                 // ContentView needs time to mount observation and seed the
                 // saved host before the descriptor arrives.
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
@@ -732,8 +777,16 @@ struct RootView: View {
 
     @ViewBuilder
     private var mainContent: some View {
+        // The restore gate needs a launch that already has a host open before
+        // restore evaluates — a share target, an agent notification tap, a
+        // continuity handoff. Empty unless that case asked for it.
+        #if DEBUG
+        ContentView(debugInitialSessions: SessionRestoreDebugHarness.preopenedSessions)
+            .allowsHitTesting(!appLockController.isLocked)
+        #else
         ContentView()
             .allowsHitTesting(!appLockController.isLocked)
+        #endif
 
         if appLockController.isLocked {
             LockScreenView(
@@ -755,6 +808,113 @@ struct RootView: View {
         }
     }
 }
+
+#if DEBUG
+/// Host-free oracle for the takeover veil. The controller's one Equatable
+/// presentation (S3′) drives both the top chip and the veil; a tap goes
+/// through the session command facade to the shared reducer.
+@MainActor
+private struct GridAuthorityEventHarnessView: View {
+    @State private var tmux = TmuxController(controlPath: .sideChannel)
+    @State private var session = GridAuthorityHarnessSession()
+    @State private var facade: AppleSessionCommandFacade?
+
+    private let tokens = TerminalTheme.find(id: "void").chromeTokens()
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                HStack {
+                    Text("mac mini  ·  tmux")
+                        .font(Typography.tesseraMono(size: 13, weight: .medium))
+                    Spacer()
+                    if let peer = tmux.gridAuthority.peerDisplayName {
+                        Text("on \(peer)")
+                            .font(Typography.tesseraMono(size: 11, weight: .medium))
+                            .padding(.horizontal, 12)
+                            .frame(height: 28)
+                            .overlay(Capsule().stroke(tokens.borderStrong, lineWidth: 0.5))
+                            .accessibilityIdentifier("grid-authority.direct-chip")
+                    }
+                }
+                .foregroundStyle(tokens.fgMuted)
+                .padding(.horizontal, 20)
+                .frame(height: 48)
+
+                Text(verbatim: "terminal must pause while another device holds the grid")
+                    .font(Typography.tesseraMono(size: 14))
+                    .foregroundStyle(tokens.fg)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(28)
+            }
+
+            if let peer = tmux.gridAuthorityPresentation.peerName {
+                ContinuedElsewhereOverlay(
+                    T: tokens,
+                    peerDisplayName: peer,
+                    isReclaiming: tmux.gridAuthorityPresentation.isReclaiming,
+                    awaitingConnection: tmux.gridAuthorityPresentation.isAwaitingConnection,
+                    onTakeBack: takeBackControl,
+                    onCancel: { tmux.cancelGridAuthorityIntent() }
+                )
+                .padding(.top, 48)
+                .accessibilityIdentifier("grid-authority.portable-overlay")
+            }
+        }
+        .task {
+            facade = session.sessionCommands(tmux: tmux)
+            seedForeignAuthority()
+        }
+    }
+
+    private func seedForeignAuthority() {
+        tmux.feedTerminal = { _ in }
+        tmux.sendBytes = { _ in }
+        tmux.gridAuthorityIdentity = .init(
+            id: "GRID-AUTHORITY-HARNESS-SELF",
+            displayName: "iPad"
+        )
+        tmux.updateClientSize(cols: 166, rows: 54)
+        // The harness stands for a displayed tab. A controller starts hidden
+        // until a show or an adoption says it is on screen, and a hidden one
+        // draws no veil.
+        tmux.gridAuthorityAdoptShown()
+        tmux.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
+        // A completed attach handshake: the control channel is live, so a
+        // tap starts its claim at once (the attach read stays unanswered).
+        tmux.ingest(Array(
+            "%session-changed $0 harness\r\n%begin 0 1 0\r\n%end 0 1 0\r\n%window-add @0\r\n".utf8
+        ))
+        tmux.ingest(Array(
+            "%subscription-changed tessera-authority $0 @0 0 %0 : v1 GRID-AUTHORITY-HARNESS-PEER 1 another-device\r\n".utf8
+        ))
+    }
+
+    private func takeBackControl() {
+        _ = facade?.dispatch(.reclaimTmuxGridAuthority(reason: .user))
+    }
+}
+
+@MainActor
+private final class GridAuthorityHarnessSession: TerminalSession {
+    let host = Host(
+        name: "authority harness",
+        address: "authority.invalid",
+        launchMode: .autoTmux
+    )
+    var state: SessionState = .connected
+    let outputStream = AsyncStream<[UInt8]> { _ in }
+    var remoteWorkingDirectory: String?
+    var pendingPathInjection: String?
+
+    func connect() {}
+    func send(_ bytes: [UInt8]) {}
+    func resize(cols: Int, rows: Int) {}
+    func disconnect() {}
+}
+#endif
 
 #if DEBUG
 private struct AccessoryEditorHarnessView: View {
@@ -982,38 +1142,61 @@ struct TmuxEmptyCaptureHarnessView: View {
         controller.terminalIsInAltScreen = { [terminalBox] in
             terminalBox.view?.getTerminal().isCurrentBufferAlternate ?? false
         }
-        controller.sendBytes = { _ in }
+        let pending = PendingReplies()
+        controller.sendBytes = { bytes in
+            pending.commands.append(contentsOf: String(decoding: bytes, as: UTF8.self)
+                .split(separator: "\n")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty })
+        }
 
-        // Enter -CC and drain the normal inline attach-init FIFO.
+        // Answer commands by identity: positional replies broke when c8b95e525
+        // added deferred per-pane subscription registrations.
         controller.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
         controller.ingest(Self.responseFrame(1, flags: 0))
-        for number in 2...8 {
-            controller.ingest(Self.responseFrame(number))
-        }
+        drainPendingReplies(pending)
         controller.updateClientSize(cols: cols, rows: rows)
-        controller.ingest(Self.responseFrame(9))
+        // Inline size replay is a two-command transaction: refresh-client
+        // followed by the targetless select-window fence that makes this
+        // client tmux's latest size authority. Drain all pending replies
+        // before the harness answers render-ledger queries.
+        drainPendingReplies(pending)
 
         // Latch a complete, already-rendered first window without a network.
         controller.ingest(Array("%window-add @1\r\n".utf8))
-        controller.ingest(Self.responseFrame(50, body: ["one"]))
+        answerThrough(
+            pending,
+            matching: { $0 == TmuxRuntimeHydrationQuery.windowDetailsCommand(windowID: WindowId(1)) },
+            body: ["one"]
+        )
         controller.ingest(Array("%output %31 \(Self.seedRefreshText)\r\n".utf8))
 
         // Switch to @2, resolve valid metadata, then reproduce the diagnostic
         // log's impossible successful capture with zero body rows.
         controller.ingest(Array("%window-add @2\r\n".utf8))
-        controller.ingest(Self.responseFrame(51, body: ["two"]))
+        answerThrough(
+            pending,
+            matching: { $0 == TmuxRuntimeHydrationQuery.windowDetailsCommand(windowID: WindowId(2)) },
+            body: ["two"]
+        )
         controller.ingest(Array("%window-pane-changed @2 %32\r\n".utf8))
         controller.ingest(Array("%session-window-changed $0 @2\r\n".utf8))
-        controller.ingest(Self.responseFrame(52, body: [
-            "%32\t2\t10\tsecond pane\ttwo\thost\t0",
-        ]))
-        controller.ingest(Self.responseFrame(53))
+        answerThrough(
+            pending,
+            matching: { $0 == RenderCommands.renderedPaneMetadata(target: WindowId(2)) },
+            body: ["%32\t2\t10\tsecond pane\ttwo\thost\t0"]
+        )
+        answerThrough(pending, matching: { $0 == RenderCommands.viewport(target: WindowId(2)) })
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             probe.preserved = controller.renderedWindowId == nil
                 && controller.renderedPaneId == nil
                 && probe.feedCount == 1
-                && probe.swapCount == 0
+                // The shared ledger binds `.live` immediately before the
+                // first authenticated W1 `%output`; that initial bind is the
+                // one expected swap. The invalid W2 capture must not add a
+                // second bind or feed.
+                && probe.swapCount == 1
             NSLog(
                 "%@",
                 "[Tessera][TmuxEmptyCaptureHarness] phase=preserved token=\(runToken) ok=\(probe.preserved) feedCount=\(probe.feedCount) swapCount=\(probe.swapCount)"
@@ -1031,22 +1214,82 @@ struct TmuxEmptyCaptureHarnessView: View {
                 )
                 return
             }
-            controller.ingest(Self.responseFrame(54, body: [
-                "%32\t2\t10\tsecond pane\ttwo\thost\t0",
-            ]))
-            controller.ingest(Self.responseFrame(
-                55,
-                body: Self.recoveredLines(cols: cols, rows: rows)
-            ))
-            let recovered = controller.renderedWindowId == WindowId(2)
-                && controller.renderedPaneId == PaneId(32)
-                && probe.feedCount == 2
-                && probe.swapCount == 1
-            NSLog(
-                "%@",
-                "[Tessera][TmuxEmptyCaptureHarness] verdict=\(recovered ? "recovered" : "failed") token=\(runToken) window=\(controller.renderedWindowId?.description ?? "nil") pane=\(controller.renderedPaneId?.description ?? "nil") feedCount=\(probe.feedCount) swapCount=\(probe.swapCount) cols=\(cols) rows=\(rows)"
-            )
+            recoverEmptyCapture(cols: cols, rows: rows, runToken: runToken, pending: pending)
         }
+    }
+
+    private func recoverEmptyCapture(
+        cols: Int,
+        rows: Int,
+        runToken: String,
+        pending: PendingReplies,
+        remainingPolls: Int = 20
+    ) {
+        guard answerThrough(
+            pending,
+            matching: { $0 == RenderCommands.renderedPaneMetadata(target: WindowId(2)) },
+            body: ["%32\t2\t10\tsecond pane\ttwo\thost\t0"]
+        ) else {
+            guard remainingPolls > 0 else {
+                NSLog(
+                    "%@",
+                    "[Tessera][TmuxEmptyCaptureHarness] verdict=failed token=\(runToken) reason=no-retry pending=\(pending.commands.count)"
+                )
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                recoverEmptyCapture(
+                    cols: cols, rows: rows, runToken: runToken,
+                    pending: pending, remainingPolls: remainingPolls - 1
+                )
+            }
+            return
+        }
+        answerThrough(
+            pending,
+            matching: { $0 == RenderCommands.viewport(target: WindowId(2)) },
+            body: Self.recoveredLines(cols: cols, rows: rows)
+        )
+        let recovered = controller.renderedWindowId == WindowId(2)
+            && controller.renderedPaneId == PaneId(32)
+            && probe.feedCount == 2
+            && probe.swapCount == 2
+        NSLog(
+            "%@",
+            "[Tessera][TmuxEmptyCaptureHarness] verdict=\(recovered ? "recovered" : "failed") token=\(runToken) window=\(controller.renderedWindowId?.description ?? "nil") pane=\(controller.renderedPaneId?.description ?? "nil") feedCount=\(probe.feedCount) swapCount=\(probe.swapCount) cols=\(cols) rows=\(rows)"
+        )
+    }
+
+    private final class PendingReplies {
+        var commands: [String] = []
+        var nextNumber = 2
+    }
+
+    @discardableResult
+    private func answerThrough(
+        _ pending: PendingReplies,
+        matching predicate: (String) -> Bool,
+        body: [String] = []
+    ) -> Bool {
+        while !pending.commands.isEmpty {
+            let matches = predicate(pending.commands.removeFirst())
+            answerPendingReply(pending, body: matches ? body : [])
+            if matches { return true }
+        }
+        return false
+    }
+
+    private func drainPendingReplies(_ pending: PendingReplies) {
+        while !pending.commands.isEmpty {
+            pending.commands.removeFirst()
+            answerPendingReply(pending)
+        }
+    }
+
+    private func answerPendingReply(_ pending: PendingReplies, body: [String] = []) {
+        let number = pending.nextNumber
+        pending.nextNumber += 1
+        controller.ingest(Self.responseFrame(number, body: body))
     }
 
     private static let seedRefreshText =
@@ -1116,9 +1359,288 @@ private final class TmuxEmptyCaptureHarnessProbe {
     var preserved = false
 }
 
-/// Visual regression harness for the terminal canvas bleed. Launch with
-/// `SIMCTL_CHILD_TESSERA_TERMINAL_CANVAS_HARNESS=1 xcrun simctl launch ...`.
-/// It mirrors the production canvas inset without opening a transport.
+/// Host-free native scheduler-pressure regression; never connects to a host.
+private struct SessionQueueHarnessView: View {
+    @State private var model = SessionQueueHarnessModel()
+    var body: some View {
+        VStack {
+            Text(model.status).font(.system(size: 11, design: .monospaced))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 24).padding(.horizontal, 16)
+                .accessibilityIdentifier("session-queue-status")
+            TerminalSurfaceBound(
+                initialData: [], onMade: { model.terminal = $0 }, onReady: { model.terminalReady = true },
+                onSend: { _ in }, onResize: { _, _ in }, onTitle: { _ in },
+                onUserActivity: nil, onBell: nil, mouseReportingImpliesAltScreen: false,
+                suppressDirectColorQueryResponses: true, tmuxShortcutsEnabled: false,
+                onTmuxShortcut: { _ in }, onFindShortcut: nil, onSwitcherShortcut: nil,
+                onOpenSettings: nil, suppressFirstResponderReclaim: true, onHardwareKey: nil
+            )
+        }
+        .background(.black).foregroundStyle(.white)
+        .task { await model.run() }
+    }
+}
+
+/// Host-free pressure rig. Real Apple admission, SessionEngine, event delivery,
+/// and native terminal surface; only the network source is synthetic. Sequence
+/// and monotonic timestamps measure loss/order and end-to-end delivery age.
+@MainActor @Observable
+private final class SessionQueueHarnessModel {
+    var status = "starting"
+    @ObservationIgnored weak var terminal: TerminalView?
+    @ObservationIgnored var terminalReady = false
+    @ObservationIgnored private var paintedPackets = 0
+    @ObservationIgnored private var received = 0
+    @ObservationIgnored private var maximumAgeMs = 0.0
+    @ObservationIgnored private var latestAgeMs = 0.0
+    @ObservationIgnored private var orderFailures = 0
+    @ObservationIgnored private var expected = [UInt64(0), UInt64(0)]
+    @ObservationIgnored private var maximumInputAgeMs = 0.0
+    @ObservationIgnored private var inputsSent = 0
+    @ObservationIgnored private var inputsApplied = 0
+
+    func run() async {
+        let readinessDeadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while (!terminalReady || terminal == nil), ContinuousClock.now < readinessDeadline, !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        guard terminalReady, terminal != nil, !Task.isCancelled else {
+            status = "terminal-not-ready done=false"
+            return
+        }
+        let sources = [SessionQueueHarnessSource(), SessionQueueHarnessSource()]
+        let usesTmux = ProcessInfo.processInfo.environment["TESSERA_QUEUE_TMUX"] == "1"
+        let controllers = sources.map { _ in TmuxController() }
+        if usesTmux {
+            for (index, controller) in controllers.enumerated() {
+                controller.feedTerminalWithContext = { [weak self] bytes, _ in
+                    if index == 0, let self, let terminal = self.terminal {
+                        terminal.feed(byteArray: bytes)
+                        self.paintedPackets += 1
+                    }
+                }
+                controller.sendBytes = { [weak source = sources[index]] in source?.receiveControlCommand($0) }
+                controller.ingest(Array("\u{1B}P1000p%window-add @0\r\n".utf8))
+            }
+        }
+        let facades = sources.enumerated().map {
+            AppleSessionCommandFacade(session: $0.element, tmux: usesTmux ? controllers[$0.offset] : nil)
+        }
+        let streams = facades.map(\.events)
+        for source in sources {
+            source.onSend = { [weak self] bytes in
+                guard let self, bytes.count == 8 else { return }
+                let nanos = bytes.withUnsafeBytes { $0.loadUnaligned(as: UInt64.self) }
+                self.inputsApplied += 1
+                self.maximumInputAgeMs = max(self.maximumInputAgeMs,
+                    Double(DispatchTime.now().uptimeNanoseconds - nanos) / 1e6)
+            }
+        }
+        for facade in facades { facade.connect() }
+        while facades.contains(where: { $0.state != .connected }), !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        try? await Task.sleep(for: .seconds(1))
+        let burst = Int(ProcessInfo.processInfo.environment["TESSERA_QUEUE_BURST"] ?? "16") ?? 16
+        let rounds = min(9_000, max(1, Int(ProcessInfo.processInfo.environment["TESSERA_QUEUE_ROUNDS"] ?? "900") ?? 900))
+        let total = burst * rounds * sources.count
+        let producers = sources.map { $0.start(burst: burst, rounds: rounds, tmux: usesTmux) }
+        // Model sustained UI work in small, cooperative 2 ms turns. The
+        // physical diagnostics have much larger UI scheduling delays; this makes
+        // the executor-contention condition reproducible on a fast Mac
+        // without tying acceptance to that Mac's GPU or CPU speed.
+        let pressure = Task { @MainActor in
+            while !Task.isCancelled {
+                let end = ContinuousClock.now.advanced(by: .milliseconds(2))
+                while ContinuousClock.now < end {}
+                await Task.yield()
+            }
+        }
+        defer { producers.forEach { $0.cancel() }; pressure.cancel() }
+        await withTaskGroup(of: Void.self) { group in
+            for (index, stream) in streams.enumerated() {
+                group.addTask { @MainActor in
+                    let iterator = stream.mainActorDelivery().makeAsyncIterator()
+                    while let event = await iterator.next() {
+                        if Task.isCancelled { return }
+                        guard case .terminalBytes(_, let bytes, _) = event, bytes.count >= 16 else { continue }
+                        let sequence = bytes.withUnsafeBytes { $0.loadUnaligned(as: UInt64.self) }
+                        let nanos = bytes.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 8, as: UInt64.self) }
+                        if sequence == UInt64.max {
+                            if await controllers[index].ingestCooperatively(Array(bytes.dropFirst(16))) {
+                                iterator.consumerDidYield()
+                            }
+                            continue
+                        }
+                        if sequence != self.expected[index] { self.orderFailures += 1 }
+                        self.expected[index] = sequence + 1
+                        self.received += 1
+                        if usesTmux {
+                            if await controllers[index].ingestCooperatively(Array(bytes.dropFirst(16))) {
+                                iterator.consumerDidYield()
+                            }
+                        } else if index == 0, let terminal = self.terminal {
+                            terminal.feed(byteArray: Array(bytes.dropFirst(16))[...])
+                            self.paintedPackets += 1
+                        }
+                        self.latestAgeMs = Double(DispatchTime.now().uptimeNanoseconds - nanos) / 1e6
+                        self.maximumAgeMs = max(self.maximumAgeMs, self.latestAgeMs)
+                    }
+                }
+            }
+            group.addTask { @MainActor in
+                for tick in 0..<Int((Double(rounds) * 0.016 + 45) * 4) {
+                    try? await Task.sleep(for: .milliseconds(250))
+                    if Task.isCancelled { return }
+                    if tick % 4 == 0 {
+                        for facade in facades {
+                            var nanos = DispatchTime.now().uptimeNanoseconds
+                            self.inputsSent += 1
+                            facade.sendInput(withUnsafeBytes(of: &nanos) { Array($0) })
+                        }
+                    }
+                    let depth = facades.reduce(0) { $0 + $1._orderedLaneCountForTesting }
+                    let done = self.received == total && self.inputsApplied == self.inputsSent && self.paintedPackets == total / 2
+                    self.status = "received=\(self.received)/\(total) painted=\(self.paintedPackets)/\(total / 2) queued=\(depth) ageMs=\(Int(self.latestAgeMs)) maxAgeMs=\(Int(self.maximumAgeMs)) orderFailures=\(self.orderFailures) inputs=\(self.inputsApplied)/\(self.inputsSent) maxInputMs=\(Int(self.maximumInputAgeMs)) done=\(done)"
+                    if tick % 4 == 0 || self.received == total { NSLog("[SessionQueueHarness] %@", self.status) }
+                    if done { return }
+                }
+            }
+            // The status task is bounded, even if a regression strands bytes.
+            await group.next()
+            group.cancelAll()
+        }
+    }
+}
+
+@MainActor
+private final class SessionQueueHarnessSource: AppleSessionBackendEventSource {
+    private struct SyntheticNetworkPacket: Sendable {
+        let attemptID: UUID
+        let bytes: [UInt8]
+    }
+
+    let host: Host
+    var state: SessionState = .idle { didSet { states.send(state) } }
+    var remoteWorkingDirectory: String?
+    var pendingPathInjection: String?
+    var appleActiveSessionAttemptID: UUID?
+    var onSend: (([UInt8]) -> Void)?
+    private var controlReplyNumber = 100
+    private let states = CurrentValueSubject<SessionState, Never>(.idle)
+    let outputStream = AsyncStream<[UInt8]> { $0.finish() }
+    let appleAttemptOutputEvents: AsyncStream<SessionAttemptOutputChunk>
+    private let ingressSSH: SSHSession
+    private let syntheticNetworkOutput: AsyncStream<SyntheticNetworkPacket>.Continuation
+    private var syntheticNetworkPump: Task<Void, Never>?
+    var appleSessionStateEvents: AnyPublisher<SessionState, Never> { states.eraseToAnyPublisher() }
+    var appleWorkingDirectoryEvents: AnyPublisher<String?, Never> { Just(nil).eraseToAnyPublisher() }
+    var appleHostKeyChallengeEvents: AnyPublisher<HostKeyVerificationRequest?, Never> { Just(nil).eraseToAnyPublisher() }
+    var appleOutputQueueDiagnostics: AsyncDeliveryDiagnostics? { ingressSSH.appleOutputQueueDiagnostics }
+
+    init() {
+        let host = Host(id: UUID(), transport: .ssh)
+        let ingressSSH = SSHSession(host: host)
+        let (syntheticNetwork, syntheticNetworkOutput) = AsyncStream.makeStream(
+            of: SyntheticNetworkPacket.self,
+            bufferingPolicy: .unbounded
+        )
+        let usesLegacyPublication = ProcessInfo.processInfo.environment[
+            "TESSERA_QUEUE_LEGACY_PUBLICATION"
+        ] == "1"
+
+        self.host = host
+        self.ingressSSH = ingressSSH
+        appleAttemptOutputEvents = ingressSSH.appleAttemptOutputEvents
+        self.syntheticNetworkOutput = syntheticNetworkOutput
+        // The synthetic remote can fill this independent network FIFO without
+        // awaiting UI work. Its detached reader then crosses the exact SSH
+        // publication seam used by Citadel, while the opt-in legacy branch
+        // recreates the removed per-packet MainActor hop for same-binary A/B.
+        syntheticNetworkPump = Task.detached(priority: .userInitiated) { [weak ingressSSH] in
+            for await packet in syntheticNetwork {
+                if Task.isCancelled { return }
+                guard let ingressSSH else { return }
+                if usesLegacyPublication {
+                    await MainActor.run {
+                        ingressSSH._publishPTYOutputForTesting(
+                            packet.bytes,
+                            attemptID: packet.attemptID
+                        )
+                    }
+                } else {
+                    ingressSSH._publishPTYOutputForTesting(
+                        packet.bytes,
+                        attemptID: packet.attemptID
+                    )
+                }
+            }
+        }
+    }
+
+    deinit {
+        syntheticNetworkOutput.finish()
+        syntheticNetworkPump?.cancel()
+    }
+
+    func prepareAppleSessionAttempt(_ attemptID: UUID) { appleActiveSessionAttemptID = attemptID }
+    func connect() { state = .connected }
+    func send(_ bytes: [UInt8]) { onSend?(bytes) }
+    func resize(cols: Int, rows: Int) {}
+    func disconnect() {
+        state = .disconnected
+        syntheticNetworkOutput.finish()
+        syntheticNetworkPump?.cancel()
+        syntheticNetworkPump = nil
+    }
+    /// Synthetic remote tmux: observe actual send-keys bytes at the transport
+    /// boundary and return matching guards through the SAME output stream as
+    /// pane data. No independent parser ingress task can reorder replies.
+    func receiveControlCommand(_ bytes: [UInt8]) {
+        guard let attempt = appleActiveSessionAttemptID else { return }
+        for line in String(decoding: bytes, as: UTF8.self).split(separator: "\n") {
+            if line.hasPrefix("send-keys "), let range = line.range(of: " -H ") {
+                let input = line[range.upperBound...].split(separator: " ").compactMap { UInt8($0, radix: 16) }
+                send(input)
+            }
+            controlReplyNumber += 1
+            var marker = UInt64.max
+            var timestamp = UInt64(0)
+            var reply = withUnsafeBytes(of: &marker) { Array($0) }
+            reply += withUnsafeBytes(of: &timestamp) { Array($0) }
+            reply += Array("%begin 0 \(controlReplyNumber) 1\r\n%end 0 \(controlReplyNumber) 1\r\n".utf8)
+            syntheticNetworkOutput.yield(.init(attemptID: attempt, bytes: reply))
+        }
+    }
+    func start(burst: Int, rounds: Int, tmux: Bool) -> Task<Void, Never> {
+        let syntheticNetworkOutput = syntheticNetworkOutput
+        let attempt = appleActiveSessionAttemptID!
+        return Task.detached {
+            var sequence: UInt64 = 0
+            for _ in 0..<rounds {
+                if Task.isCancelled { return }
+                for _ in 0..<burst {
+                    var nanos = DispatchTime.now().uptimeNanoseconds
+                    var bytes = withUnsafeBytes(of: &sequence) { Array($0) }
+                    bytes += withUnsafeBytes(of: &nanos) { Array($0) }
+                    let text = String(repeating: "terminal output ", count: 5)
+                    if tmux {
+                        bytes += Array("%output %0 \\033[32mrow \(sequence) \\033[0m\(text)\\015\\012\r\n".utf8)
+                    } else {
+                        bytes += Array("\u{1B}[32mrow \(sequence) \u{1B}[0m\(text)\r\n".utf8)
+                    }
+                    syntheticNetworkOutput.yield(.init(attemptID: attempt, bytes: bytes))
+                    sequence += 1
+                }
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+        }
+    }
+}
+
+/// Visual regression harness for terminal canvas bleed. Mirrors production
+/// canvas insets without opening a transport (TESSERA_TERMINAL_CANVAS_HARNESS).
 struct TerminalCanvasHarnessView: View {
     private let fullScreenBackdrop =
         ProcessInfo.processInfo.environment["TESSERA_TERMINAL_CANVAS_FULL_SCREEN"] != "0"
@@ -1407,6 +1929,10 @@ struct MarkdownPreviewHarnessView: View {
         }
         .task {
             guard fileURL == nil else { return }
+            if ProcessInfo.processInfo.environment["TESSERA_MARKDOWN_IMAGE_HARNESS"] == "1" {
+                fileURL = try? await MarkdownImagePreviewFixture.stage()
+                return
+            }
             // A real reported document, staged into the container by the
             // runner, beats any synthetic one: its inline emphasis, links,
             // and code spans are what make a block expensive to realise.
@@ -1941,9 +2467,19 @@ struct LiveScrollVisualHarnessView: View {
     @Environment(AppearancePreferences.self) private var appearance
     @State private var sessionRegistry = SessionRegistry()
     @State private var commandPalette = CommandPalette()
-    @State private var agentCenter = AgentCenter()
+    @State private var agentCenterV2 = AgentCenterV2Coordinator()
+    @State private var programStatusCenter = ProgramStatusCenter()
     @State private var fileBridges = FileBridgeRegistry()
     @State private var liveSessionID = UUID()
+    @State private var showAgentVerification = true
+    /// `TESSERA_LIVE_SCROLL_SHOW_EDGES=1`: show the session as ContentView
+    /// shows a selected one, so it takes part in grid authority (claim, own
+    /// stamp, presented-window repair). Off by default: without show edges
+    /// the controller stays hidden and never claims the grid.
+    @State private var showEdges: SessionShowCoordinator? =
+        ProcessInfo.processInfo.environment["TESSERA_LIVE_SCROLL_SHOW_EDGES"] == "1"
+            ? SessionShowCoordinator(appForeground: false, locked: false)
+            : nil
 
     private let configuration = LiveScrollVisualConfiguration.load()
 
@@ -1968,18 +2504,59 @@ struct LiveScrollVisualHarnessView: View {
             }
             .environment(sessionRegistry)
             .environment(commandPalette)
-            .environment(agentCenter)
+            .environment(agentCenterV2)
+            .environment(programStatusCenter)
             .environment(fileBridges)
+            .environment(\.sessionShowCoordinator, showEdges)
+            .onChange(of: scenePhase, initial: true) { _, phase in
+                showEdges?.setAppForeground(phase != .background)
+            }
+            .onAppear { showEdges?.setSelectedSlot(liveSessionID) }
+            .overlay {
+                if ProcessInfo.processInfo.environment["TESSERA_AGENT_CENTER_LIVE_VERIFY"] == "1",
+                   showAgentVerification {
+                    AgentCenterV2RootView(model: agentCenterV2.presentation) {
+                        Button("terminal") { showAgentVerification = false }
+                    }
+                    .background(Color(uiColor: .systemBackground))
+                }
+            }
+            // The app draws the shared palette from ContentView, which this
+            // harness replaces. Mirrored here so a switcher pick hands the
+            // keyboard back exactly as it does in the app.
+            .overlay {
+                if Self.paletteEnabled, commandPalette.isOpen {
+                    CommandPaletteView(
+                        palette: commandPalette,
+                        onTmuxClose: sessionRegistry.requestTmuxClose,
+                        onTmuxMutation: sessionRegistry.requestTmuxMutation,
+                        onCommit: commitPalette
+                    )
+                    .environment(agentCenterV2)
+                    .environment(programStatusCenter)
+                    .transition(.opacity)
+                    .zIndex(50)
+                }
+            }
+            .task {
+                if ProcessInfo.processInfo.environment["TESSERA_AGENT_CENTER_LIVE_VERIFY"] == "1" {
+                    await agentCenterV2.setExperimentEnabled(true)
+                    agentCenterV2.setSurfaceDemand(true)
+                }
+            }
             .onAppear {
                 // Vim's blinking terminal cursor is a repeating UIView
                 // animation. XCUITest otherwise waits two 60-second
                 // quiescence timeouts around every real scroll gesture.
-                UIView.setAnimationsEnabled(false)
+                UIView.setAnimationsEnabled(ProcessInfo.processInfo.environment["TESSERA_LIVE_SCROLL_PHYSICS"] == "1")
                 appearance.cursorBlink = false
-                appearance.smoothScrollingEnabled = false
+                appearance.smoothScrollingEnabled = ProcessInfo.processInfo.environment["TESSERA_LIVE_SCROLL_PHYSICS"] == "1"
             }
             .onDisappear {
                 UIView.setAnimationsEnabled(true)
+                #if DEBUG
+                LiveScrollInitialRenderProbe.clear(sessionID: liveSessionID)
+                #endif
             }
             .onChange(of: scenePhase) { _, phase in
                 #if DEBUG
@@ -2003,10 +2580,46 @@ struct LiveScrollVisualHarnessView: View {
         }
     }
 
+    /// `TESSERA_LIVE_SCROLL_PALETTE=1`: draw the switcher and register the
+    /// live session so a window pick routes like ContentView's. Off by
+    /// default so the scroll lanes keep their single unregistered surface.
+    static var paletteEnabled: Bool {
+        ProcessInfo.processInfo.environment["TESSERA_LIVE_SCROLL_PALETTE"] == "1"
+    }
+
+    private func commitPalette(_ result: CommandPaletteCommit) {
+        switch result {
+        case .window(let sessionID, let windowID):
+            sessionRegistry.requestTmuxFocus(sessionID: sessionID, windowID: windowID)
+        case .pane(let sessionID, let windowID, let paneID):
+            sessionRegistry.requestTmuxFocus(sessionID: sessionID, windowID: windowID, paneID: paneID)
+        case .home, .session:
+            break
+        }
+    }
+}
+
+@MainActor
+private func registerLiveScrollPaletteSession(
+    _ session: Session,
+    id: UUID,
+    configuration: LiveScrollVisualConfiguration,
+    in registry: SessionRegistry
+) {
+    guard LiveScrollVisualHarnessView.paletteEnabled else { return }
+    registry.syncActiveSessions([LiveSession(
+        id: id,
+        session: session,
+        hostName: configuration.host.name,
+        hostKey: "live-scroll:\(configuration.mode.rawValue)",
+        launchMode: configuration.mode.usesTmux ? .pinnedTmux : .customCommand,
+        pinnedSessionName: configuration.tmuxSessionName
+    )])
 }
 
 private struct SSHLiveScrollVisualHarness: View {
     @StateObject private var session: SSHSession
+    @State private var sharedState: SharedSessionState = .idle
     let configuration: LiveScrollVisualConfiguration
     let liveSessionID: UUID
     let sessionRegistry: SessionRegistry
@@ -2038,25 +2651,42 @@ private struct SSHLiveScrollVisualHarness: View {
             onOpenAgentCenter: {}
         )
         .overlay(alignment: .bottomLeading) { statusProbe }
-        .task { await acceptHostKeys() }
-        .onDisappear { session.disconnect() }
+        .onReceive(session.sessionCommands.statePublisher) { sharedState = $0 }
+        .onReceive(session.sessionCommands.challengeRequests.compactMap { $0 }) { request in
+            _ = session.sessionCommands.respondToHostKeyChallenge(
+                request.id,
+                decision: .approve
+            )
+        }
+        .onAppear {
+            registerLiveScrollPaletteSession(
+                .ssh(session),
+                id: liveSessionID,
+                configuration: configuration,
+                in: sessionRegistry
+            )
+        }
+        .task { await refreshWhenReady() }
+        .onDisappear { session.sessionCommands.disconnect() }
     }
 
     private var statusProbe: some View {
         LiveScrollStatusProbe(
             label: configuration.mode.label,
             isReady: sessionRegistry.isRenderReady(liveSessionID),
-            state: session.state
+            state: legacySessionState(from: sharedState),
+            liveSessionID: liveSessionID,
+            requiresInitialTmuxRender: configuration.mode.requiresInitialTmuxRender
         )
     }
 
-    private func acceptHostKeys() async {
+    private func refreshWhenReady() async {
         var didResignFirstResponder = false
         while !Task.isCancelled {
-            session.pendingHostKeyVerification?.accept()
             if sessionRegistry.isRenderReady(liveSessionID) {
                 LiveScrollTerminalExposure.refresh()
                 if UIDevice.current.userInterfaceIdiom != .phone,
+                   ProcessInfo.processInfo.environment["TESSERA_LIVE_SCROLL_KEEP_KEYBOARD"] != "1",
                    !didResignFirstResponder {
                     UIApplication.shared.sendAction(
                         #selector(UIResponder.resignFirstResponder),
@@ -2074,6 +2704,7 @@ private struct SSHLiveScrollVisualHarness: View {
 
 private struct MoshLiveScrollVisualHarness: View {
     @StateObject private var session: MoshSession
+    @State private var sharedState: SharedSessionState = .idle
     let configuration: LiveScrollVisualConfiguration
     let liveSessionID: UUID
     let sessionRegistry: SessionRegistry
@@ -2105,25 +2736,42 @@ private struct MoshLiveScrollVisualHarness: View {
             onOpenAgentCenter: {}
         )
         .overlay(alignment: .bottomLeading) { statusProbe }
-        .task { await acceptHostKeys() }
-        .onDisappear { session.disconnect() }
+        .onReceive(session.sessionCommands.statePublisher) { sharedState = $0 }
+        .onReceive(session.sessionCommands.challengeRequests.compactMap { $0 }) { request in
+            _ = session.sessionCommands.respondToHostKeyChallenge(
+                request.id,
+                decision: .approve
+            )
+        }
+        .onAppear {
+            registerLiveScrollPaletteSession(
+                .mosh(session),
+                id: liveSessionID,
+                configuration: configuration,
+                in: sessionRegistry
+            )
+        }
+        .task { await refreshWhenReady() }
+        .onDisappear { session.sessionCommands.disconnect() }
     }
 
     private var statusProbe: some View {
         LiveScrollStatusProbe(
             label: configuration.mode.label,
             isReady: sessionRegistry.isRenderReady(liveSessionID),
-            state: session.state
+            state: legacySessionState(from: sharedState),
+            liveSessionID: liveSessionID,
+            requiresInitialTmuxRender: configuration.mode.requiresInitialTmuxRender
         )
     }
 
-    private func acceptHostKeys() async {
+    private func refreshWhenReady() async {
         var didResignFirstResponder = false
         while !Task.isCancelled {
-            session.pendingHostKeyVerification?.accept()
             if sessionRegistry.isRenderReady(liveSessionID) {
                 LiveScrollTerminalExposure.refresh()
                 if UIDevice.current.userInterfaceIdiom != .phone,
+                   ProcessInfo.processInfo.environment["TESSERA_LIVE_SCROLL_KEEP_KEYBOARD"] != "1",
                    !didResignFirstResponder {
                     UIApplication.shared.sendAction(
                         #selector(UIResponder.resignFirstResponder),
@@ -2147,22 +2795,110 @@ private enum LiveScrollTerminalExposure {
             .flatMap(\.windows)
         let terminals = windows.flatMap { terminalViews(in: $0) }
         guard !terminals.isEmpty else { return }
+        // Only what is on screen: a dormant overlay stays mounted at zero
+        // opacity, and another scene's terminals are not in front.
+        let shown = terminals.filter(isShown)
+        var candidates = shown.isEmpty ? terminals : shown
+        // A split lane aims its fingers at one pane, at this fraction of the
+        // window's width: only terminals under that point are the target.
+        // An SSH+tmux grid gives every pane its own terminal, and the one
+        // aimed at need not be the largest.
+        if let aimX = ProcessInfo.processInfo.environment["TESSERA_LIVE_SCROLL_AIM_X"]
+            .flatMap(Double.init).map({ CGFloat($0) }) {
+            let aimed = candidates.filter { terminal in
+                guard let window = terminal.window else { return false }
+                let point = CGPoint(x: window.bounds.width * aimX, y: window.bounds.midY)
+                return terminal.convert(terminal.bounds, to: window).contains(point)
+            }
+            if !aimed.isEmpty { candidates = aimed }
+        }
 
         // UIKit subviews are back-to-front. On equal-size mosh surfaces the
         // later terminal is the revealed capture-pane overlay and therefore
         // the gesture target; otherwise choose the largest production surface.
-        var chosen = terminals[0]
-        for terminal in terminals.dropFirst() {
+        var chosen = candidates[0]
+        for terminal in candidates.dropFirst() {
             let candidateArea = terminal.bounds.width * terminal.bounds.height
             let chosenArea = chosen.bounds.width * chosen.bounds.height
             if candidateArea >= chosenArea { chosen = terminal }
         }
+        let exposesRows = ProcessInfo.processInfo.environment["TESSERA_LIVE_SCROLL_EXPOSE_ROWS"] == "1"
+        let rowSource = exposesRows ? frontmost(within: chosen, among: candidates) : chosen
         for terminal in terminals {
             terminal.isAccessibilityElement = terminal === chosen
             terminal.accessibilityIdentifier = terminal === chosen
                 ? "live-scroll-terminal"
                 : nil
+            if exposesRows {
+                terminal.accessibilityValue = terminal === chosen ? visibleRows(of: rowSource) : nil
+            }
         }
+    }
+
+    /// The terminal whose rows are on screen over `chosen`: a revealed
+    /// history overlay covering the focused pane of an iPad split, else
+    /// `chosen` itself.
+    private static func frontmost(within chosen: TerminalView, among terminals: [TerminalView]) -> TerminalView {
+        guard let window = chosen.window else { return chosen }
+        let chosenFrame = chosen.convert(chosen.bounds, to: window).insetBy(dx: -1, dy: -1)
+        return terminals.last {
+            $0.window === window && chosenFrame.contains($0.convert($0.bounds, to: window))
+        } ?? chosen
+    }
+
+    private static func isShown(_ terminal: TerminalView) -> Bool {
+        guard terminal.window?.windowScene?.activationState == .foregroundActive else { return false }
+        var view: UIView? = terminal
+        while let current = view {
+            if current.isHidden || current.alpha <= 0.01 || current.layer.opacity <= 0.01 { return false }
+            view = current.superview
+        }
+        return true
+    }
+
+    /// The fixture rows on screen, for gestures graded by content: the Metal
+    /// surface is black to XCUITest. "rows=00412-00447 n=36 order=1 top=0
+    /// tail=1 tick=00031 screen=36 lines=1540 cols=82": the lowest and
+    /// highest numbered fixture rows visible, how many there are and whether
+    /// each follows the one above, whether the view sits at its oldest loaded
+    /// row or at its live tail, the latest fixture heartbeat on screen, how
+    /// many rows the screen shows, how many the terminal holds (output that
+    /// scrolled has reached it), and its width, which a fixture row wider
+    /// than the terminal wraps at.
+    private static func visibleRows(of view: TerminalView) -> String {
+        let cell = TerminalCellMetrics.cellSize(for: view)
+        guard cell.height > 0 else { return "rows=- n=0 order=1 top=0 tail=0 tick=- screen=0 lines=0 cols=0" }
+        let lines = String(decoding: view.getTerminal().getBufferAsData(kind: .active), as: UTF8.self)
+            .split(separator: "\n", omittingEmptySubsequences: false)
+        // Rows whose centre is on screen. The viewport is rarely a whole
+        // number of rows, so a partial top row must not push the bottom row
+        // (the live tail's cursor line) out of the readout.
+        let first = max(0, Int((view.contentOffset.y / cell.height - 0.5).rounded(.up)))
+        let last = Int(((view.contentOffset.y + view.bounds.height) / cell.height - 0.5).rounded(.down))
+        let visible = lines.dropFirst(first).prefix(max(1, last - first + 1))
+        var numbers: [Int] = []
+        var tick = "-"
+        for line in visible {
+            if let match = line.firstMatch(of: /TESSERA_SCROLL_[A-Z_]+?_(\d{5}) \|/) {
+                numbers.append(Int(match.1) ?? 0)
+            }
+            // A resize can leave an older tick behind: keep the newest.
+            for match in line.matches(of: /TESSERA_TICK_(\d{5})/) where tick == "-" || String(match.1) > tick {
+                tick = String(match.1)
+            }
+        }
+        let maxOffsetY = max(0, view.contentSize.height - view.bounds.height)
+        let rows = numbers.isEmpty
+            ? "-"
+            : String(format: "%05d-%05d", numbers.min() ?? 0, numbers.max() ?? 0)
+        // With `n` equal to the span, the rows run in order without a
+        // missing, repeated or stale row between the bounds.
+        let ordered = zip(numbers, numbers.dropFirst()).allSatisfy { $0 + 1 == $1 }
+        return "rows=\(rows) n=\(numbers.count) order=\(ordered ? 1 : 0)"
+            + " top=\(view.contentOffset.y <= 0.5 ? 1 : 0)"
+            + " tail=\(maxOffsetY - view.contentOffset.y <= 1 ? 1 : 0) tick=\(tick)"
+            + " screen=\(max(0, last - first + 1)) lines=\(Int((view.contentSize.height / cell.height).rounded()))"
+            + " cols=\(view.getTerminal().cols)"
     }
 
     private static func terminalViews(in view: UIView) -> [TerminalView] {
@@ -2179,25 +2915,50 @@ private struct LiveScrollStatusProbe: View {
     let label: String
     let isReady: Bool
     let state: SessionState
+    let liveSessionID: UUID
+    let requiresInitialTmuxRender: Bool
     @State private var foregroundProbeValue: String?
+    @State private var initialTmuxRenderReady = false
 
     var body: some View {
-        Text(verbatim: "scroll")
-            .font(.system(size: 1))
-            .foregroundStyle(Color.white.opacity(0.01))
-            .frame(width: 2, height: 2)
-            .accessibilityIdentifier("live-scroll-status")
-            .accessibilityLabel(label)
-            .accessibilityValue(foregroundProbeValue ?? (isReady ? "ready" : stateDescription))
-            .allowsHitTesting(false)
-            .task {
-                while !Task.isCancelled {
-                    #if DEBUG
-                    foregroundProbeValue = LiveScrollForegroundProbe.statusValue
-                    #endif
-                    try? await Task.sleep(for: .milliseconds(50))
-                }
+        ZStack {
+            Text(verbatim: "scroll")
+                .font(.system(size: 1))
+                .foregroundStyle(Color.white.opacity(0.01))
+                .frame(width: 2, height: 2)
+                .accessibilityIdentifier("live-scroll-status")
+                .accessibilityLabel(label)
+                .accessibilityValue(foregroundProbeValue ?? (isReady ? "ready" : stateDescription))
+
+            // This must stay separate from broader registry readiness: the
+            // launch watchdog can deliberately reveal a stalled session, but
+            // screenshot capture needs a real initial tmux render.
+            Text(verbatim: "tmux-render")
+                .font(.system(size: 1))
+                .foregroundStyle(Color.white.opacity(0.01))
+                .frame(width: 2, height: 2)
+                .accessibilityIdentifier("live-scroll-initial-render")
+                .accessibilityValue(initialTmuxRenderStatus)
+        }
+        .accessibilityElement(children: .contain)
+        .allowsHitTesting(false)
+        .task(id: liveSessionID) {
+            while !Task.isCancelled {
+                #if DEBUG
+                initialTmuxRenderReady = LiveScrollInitialRenderProbe.isReady(
+                    for: liveSessionID
+                )
+                foregroundProbeValue = LiveScrollForegroundProbe.statusValue
+                #endif
+                try? await Task.sleep(for: .milliseconds(50))
             }
+        }
+    }
+
+    private var initialTmuxRenderStatus: String {
+        requiresInitialTmuxRender
+            ? (initialTmuxRenderReady ? "ready" : "waiting")
+            : "not-required"
     }
 
     private var stateDescription: String {
@@ -2217,6 +2978,15 @@ private struct LiveScrollVisualConfiguration: Decodable {
         case sshTmux = "ssh-tmux"
         case mosh
         case moshTmux = "mosh-tmux"
+
+        var requiresInitialTmuxRender: Bool {
+            switch self {
+            case .sshTmux, .moshTmux:
+                true
+            case .ssh, .mosh:
+                false
+            }
+        }
 
         var transport: HostTransport {
             switch self {
@@ -2239,6 +3009,7 @@ private struct LiveScrollVisualConfiguration: Decodable {
     let password: String
     let launchCommand: String
     let tmuxSessionName: String?
+    let privateKeyFilename: String?
 
     var host: Host {
         Host(
@@ -2248,6 +3019,7 @@ private struct LiveScrollVisualConfiguration: Decodable {
             user: user,
             password: password,
             transport: mode.transport,
+            privateKeyFilename: privateKeyFilename,
             autoTmux: mode.usesTmux,
             launchMode: mode.usesTmux ? .pinnedTmux : .customCommand,
             tmuxSessionName: mode.usesTmux ? tmuxSessionName : nil,
@@ -2271,6 +3043,9 @@ private struct LiveScrollVisualConfiguration: Decodable {
 struct TerminalScrollHarnessView: View {
     @Environment(AppearancePreferences.self) private var appearance
     @State private var oracle = TerminalScrollHarnessOracle()
+    @State private var previewRequest: FilesPanelController.PreviewRequest?
+    @State private var previewResizePulse = false
+    private var previewResizeMode: Bool { ProcessInfo.processInfo.environment["TESSERA_IDLE_REDRAW_HARNESS"] == "preview" }
     // XCUITest's synthesized pointer event waits several seconds for the app
     // to idle before returning. Keep the DEBUG-only notice around long enough
     // for accessibility to inspect it; production retains the two-second TTL.
@@ -2287,19 +3062,29 @@ struct TerminalScrollHarnessView: View {
     var body: some View {
         ZStack(alignment: .top) {
             TerminalSurfaceBound(
-                initialData: Self.fixtureBytes,
+                initialData: previewResizeMode ? [] : Self.fixtureBytes,
                 onMade: { view in
                     view.isAccessibilityElement = true
                     view.accessibilityIdentifier = "terminal-scroll-harness"
                     view.accessibilityLabel = "terminal scroll harness"
                     oracle.terminalView = view
+                    if ProcessInfo.processInfo.environment["TESSERA_SCROLL_BENCHMARK"] == "1",
+                       let view = view as? TesseraResponderAwareTerminalView {
+                        oracle.benchmark = TerminalScrollBenchmark(view: view)
+                    }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         oracle.update()
                     }
                 },
                 onReady: {},
                 onSend: { _ in },
-                onResize: { _, _ in },
+                onResize: { cols, rows in
+                    guard previewResizeMode else { return }
+                    oracle.previewColumns = cols
+                    oracle.previewRows = rows
+                    oracle.previewNeedsFullPaint = true
+                    NSLog("[Tessera][PreviewResize] remote-size=%dx%d", cols, rows)
+                },
                 onTitle: { _ in },
                 onUserActivity: nil,
                 onBell: nil,
@@ -2315,7 +3100,7 @@ struct TerminalScrollHarnessView: View {
                 onFindShortcut: nil,
                 onSwitcherShortcut: nil,
                 onOpenSettings: nil,
-                suppressFirstResponderReclaim: false,
+                suppressFirstResponderReclaim: ProcessInfo.processInfo.environment["TESSERA_IDLE_REDRAW_HARNESS"] != nil,
                 onHardwareKey: nil,
                 onTerminalScrolled: { _ in oracle.update() },
                 scrollRetentionID: "integration-scroll-harness",
@@ -2328,6 +3113,16 @@ struct TerminalScrollHarnessView: View {
                 }
             )
 
+            if previewResizeMode {
+                Button("Open Markdown") {
+                    let url = FileManager.default.temporaryDirectory.appendingPathComponent("terminal-preview.md")
+                    try? "# Terminal preview\n\nDismiss this document to check the prompt.".write(to: url, atomically: true, encoding: .utf8)
+                    previewRequest = .init(localURL: url, title: "Terminal preview.md")
+                }
+                .accessibilityIdentifier("preview-resize-open")
+                .padding(40)
+            }
+
             if let prevention = agentScrollNotice.prevention {
                 AgentScrollPreventionNotice(
                     agentName: prevention.agentName,
@@ -2339,16 +3134,96 @@ struct TerminalScrollHarnessView: View {
                 .allowsHitTesting(false)
             }
         }
-        .ignoresSafeArea()
+        .padding(ProcessInfo.processInfo.environment["TESSERA_IDLE_REDRAW_HARNESS"] != nil ? 32 : 0)
+        .ignoresSafeArea(.all, edges: ProcessInfo.processInfo.environment["TESSERA_IDLE_REDRAW_HARNESS"] == nil ? .all : [])
         .background(Color.black)
+        .padding(.bottom, previewResizePulse ? 32 : 0)
+        .quickLookPreview(item: $previewRequest)
+        .statusBarHidden(previewResizeMode)
         .preferredColorScheme(.dark)
+        .task {
+            guard let mode = ProcessInfo.processInfo.environment["TESSERA_IDLE_REDRAW_HARNESS"] else { return }
+            guard mode != "benchmark" else { return }
+            // Host-free visual reproduction through the production renderer.
+            // Deliberate holds let simctl capture the Metal layer at each stage.
+            try? await Task.sleep(for: .seconds(3))
+            guard let view = oracle.terminalView as? TerminalView else { return }
+            if mode == "preview" {
+                for frame in 0..<650 {
+                    guard !Task.isCancelled else { return }
+                    let cols = oracle.previewColumns, rows = oracle.previewRows
+                    if cols > 0 && rows > 0 {
+                        if oracle.previewNeedsFullPaint {
+                            view.feed(text: TerminalPreviewResizeFixture.screen(cols: cols, rows: rows))
+                            oracle.previewNeedsFullPaint = false
+                        }
+                        view.feed(text: TerminalPreviewResizeFixture.tick(frame: frame, cols: cols, rows: rows))
+                        if frame % 100 == 0 {
+                            NSLog("[Tessera][PreviewResize] tick=%d local=%dx%d remote=%dx%d", frame, view.getTerminal().cols, view.getTerminal().rows, cols, rows)
+                        }
+                    }
+                    if frame == 100 {
+                        NSLog("[Tessera][PreviewResize] stage=before")
+                        let url = FileManager.default.temporaryDirectory.appendingPathComponent("terminal-preview.md")
+                        try? "# Terminal preview\n\nDismiss this document to check the prompt.".write(to: url, atomically: true, encoding: .utf8)
+                        previewRequest = .init(localURL: url, title: "Terminal preview.md")
+                    }
+                    if frame == 300 {
+                        NSLog("[Tessera][PreviewResize] stage=dismiss")
+                        previewRequest = nil
+                        if ProcessInfo.processInfo.environment["TESSERA_PREVIEW_RESIZE_PULSE"] == "1" {
+                            previewResizePulse = true
+                        }
+                    }
+                    if frame == 302 { previewResizePulse = false }
+                    if frame == 600 {
+                        let defects = TerminalPreviewResizeFixture.backgroundDefects(in: view.getTerminal())
+                        let clean = defects == 0 && view.getTerminal().rows == rows && view.getTerminal().cols == cols
+                        view.accessibilityValue = clean ? "preview-clean" : "preview-corrupt"
+                        NSLog("[Tessera][PreviewResize] stage=after clean=%d defects=%d", clean, defects)
+                    }
+                    try? await Task.sleep(for: .milliseconds(10))
+                }
+                return
+            }
+            if mode == "color" || mode == "color-baseline" {
+                var framer = TmuxLiveOutputFramer()
+                var filter = TerminalOutputContrastFilter()
+                for (index, part) in ["\u{1B}[38;2;58;58;", "\u{1B}[0m\u{1B}[H\u{1B}[2Jprompt", "58;48;2;0;0;30mX"].enumerated() {
+                    let bytes = index == 1 || mode == "color-baseline" ? Array(part.utf8) : framer.process(Array(part.utf8))
+                    view.feed(byteArray: filter.process(bytes[...], defaultBackgroundRGB: 0,
+                        defaultForegroundRGB: 0xD4D4D4, minimumContrast: 0.3))
+                }
+                let text = String(decoding: view.getTerminal().getBufferAsData(), as: UTF8.self)
+                let clean = text.contains("promptX") && !text.contains("58;48;2;0;0;30m")
+                view.accessibilityValue = clean ? "repaint-clean" : "repaint-leaked"
+                NSLog("[Tessera][IdleRedrawHarness] stage=color clean=%d", clean)
+                return
+            }
+            view.contentOffset.y -= 600
+            let readingPosition = view.contentOffset.y
+            oracle.update()
+            NSLog("[Tessera][IdleRedrawHarness] stage=history offset=%.1f", view.contentOffset.y)
+            try? await Task.sleep(for: .seconds(4))
+            for frame in 0..<30 {
+                guard !Task.isCancelled else { return }
+                view.feed(text: "\u{1B}[?2026h\u{1B}[s\u{1B}[1;1Hidle redraw \(frame)\u{1B}[u\u{1B}[?2026l")
+                oracle.update()
+                try? await Task.sleep(for: .milliseconds(150))
+            }
+            NSLog("[Tessera][IdleRedrawHarness] stage=redrawn offset=%.1f", view.contentOffset.y)
+            view.accessibilityValue = abs(view.contentOffset.y - readingPosition) < 0.5 ? "redraw-stable" : "redraw-jumped"
+        }
         .onAppear {
             // The harness has no visual-animation assertion. Cursor blinking
             // and inertial glide only keep XCUITest's quiescence detector
             // occupied, so turn them off inside this DEBUG/env-only surface.
-            UIView.setAnimationsEnabled(false)
+            UIView.setAnimationsEnabled(previewResizeMode || ProcessInfo.processInfo.environment["TESSERA_SCROLL_BENCHMARK"] == "1")
+            if previewResizeMode {
+                UserDefaults.standard.set(ProcessInfo.processInfo.environment["TESSERA_PREVIEW_MODE"] ?? "popup", forKey: QuickLookPresentationMode.storageKey)
+            }
             appearance.cursorBlink = false
-            appearance.smoothScrollingEnabled = false
+            appearance.smoothScrollingEnabled = ProcessInfo.processInfo.environment["TESSERA_SCROLL_BENCHMARK"] == "1"
         }
         .onDisappear {
             UIView.setAnimationsEnabled(true)
@@ -2358,6 +3233,9 @@ struct TerminalScrollHarnessView: View {
     private static let fixtureBytes: [UInt8] = {
         var text = ""
         for row in 1...500 {
+            if ProcessInfo.processInfo.environment["TESSERA_SCROLL_BENCHMARK"] == "1" {
+                text += row % 12 < 6 ? "\u{1B}[48;5;22m" : "\u{1B}[48;5;52m"
+            }
             text += String(format: "TESSERA_SCROLL_ROW_%04d ", row)
             text += String(repeating: "0123456789abcdef", count: 8)
             text += "\r\n"
@@ -2391,10 +3269,33 @@ struct TerminalTouchScrollHarnessView: View {
         ] == "1"
     }
 
+    /// A mosh+tmux primary screen: finger pans take the pointer's route to
+    /// the host's history hook, which the oracle records.
+    private var moshPrimary: Bool {
+        ProcessInfo.processInfo.environment[
+            "TESSERA_TOUCH_SCROLL_HARNESS_MOSH_PRIMARY"
+        ] == "1"
+    }
+
+    /// An SSH+tmux primary screen: finger pans stay on UIScrollView's own
+    /// pan, and its frames must reach the host (the inline history gate)
+    /// through `onNativeScrollFrame`, which the oracle records.
+    private var inlinePrimary: Bool {
+        ProcessInfo.processInfo.environment[
+            "TESSERA_TOUCH_SCROLL_HARNESS_INLINE_PRIMARY"
+        ] == "1"
+    }
+
+    private var initialFixtureBytes: [UInt8] {
+        if moshPrimary { return Self.primaryFixtureBytes }
+        if inlinePrimary { return Self.inlinePrimaryFixtureBytes }
+        return Self.fixtureBytes
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             TerminalSurfaceBound(
-                initialData: Self.fixtureBytes,
+                initialData: initialFixtureBytes,
                 onMade: { view in
                     view.isAccessibilityElement = true
                     view.accessibilityIdentifier = "terminal-touch-scroll-harness"
@@ -2408,6 +3309,12 @@ struct TerminalTouchScrollHarnessView: View {
                 onTitle: { _ in },
                 onUserActivity: nil,
                 onBell: nil,
+                onPrimaryScrollbackDelta: moshPrimary ? { _, pointsY, _, _, _, _ in
+                    oracle.notePrimaryHistoryRequest(pointsY: pointsY)
+                    return .consumedCancelInertia
+                } : nil,
+                primaryTouchScrollIsLocal: moshPrimary ? { true } : nil,
+                touchPansTakePointerRoute: moshPrimary ? { true } : nil,
                 agentScrollBlockingActive: blocksAgentScrolling,
                 onAgentScrollBlocked: {
                     oracle.noteAgentScrollBlocked()
@@ -2422,6 +3329,9 @@ struct TerminalTouchScrollHarnessView: View {
                 onOpenSettings: nil,
                 suppressFirstResponderReclaim: false,
                 onHardwareKey: nil,
+                onNativeScrollFrame: inlinePrimary ? { view, previousOffsetY in
+                    oracle.noteNativeScrollFrame(view, previousOffsetY: previousOffsetY)
+                } : nil,
                 scrollRetentionID: "integration-touch-scroll-harness",
                 onScrollDiagnostic: { message in
                     NSLog("[Tessera][TouchScrollHarness] \(message)")
@@ -2459,6 +3369,15 @@ struct TerminalTouchScrollHarnessView: View {
          "CLAUDE_TOUCH_SCROLL_FIXTURE\r\n").utf8
     )
 
+    private static let primaryFixtureBytes = Array(
+        (1...80).map { "MOSH_PRIMARY_TOUCH_FIXTURE \($0)\r\n" }.joined().utf8
+    )
+
+    /// A few screens of local scrollback, so one fling can reach the top.
+    private static let inlinePrimaryFixtureBytes = Array(
+        (1...160).map { "INLINE_PRIMARY_TOUCH_FIXTURE \($0)\r\n" }.joined().utf8
+    )
+
     private static let agentPrevention = AgentScrollPrevention(
         agentID: AgentInstanceID(
             sessionID: UUID(uuidString: "A6E70000-0000-0000-0000-000000000002")!,
@@ -2471,13 +3390,49 @@ struct TerminalTouchScrollHarnessView: View {
 private final class TerminalTouchScrollHarnessOracle {
     weak var terminalView: TerminalView?
     private var sawMouseDrag = false
+    private var sawPrimaryHistoryRequest = false
+    private var sawNativeDragUp = false
+    private var sawNativeGlideUp = false
+    private var sawNativeCrossing = false
 
     func markReady() {
         terminalView?.accessibilityValue = "ready"
     }
 
+    /// A gesture that was blocked yet also reached the history hook (or moved
+    /// primary history natively) reads differently, whichever came first.
     func noteAgentScrollBlocked() {
-        terminalView?.accessibilityValue = "agent-scroll-blocked"
+        terminalView?.accessibilityValue = sawPrimaryHistoryRequest || sawNativeDragUp || sawNativeGlideUp
+            ? "agent-scroll-blocked-after-history" : "agent-scroll-blocked"
+    }
+
+    func notePrimaryHistoryRequest(pointsY: Double) {
+        guard pointsY != 0 else { return }
+        sawPrimaryHistoryRequest = true
+        terminalView?.accessibilityValue = "primary-history-requested"
+    }
+
+    /// Upward finger frames while dragging, then a glide that carries past
+    /// the oldest row (bounces make its offset negative): what the inline
+    /// history gate needs to see from a finger's fling.
+    func noteNativeScrollFrame(_ view: TerminalView, previousOffsetY: CGFloat) {
+        let offsetY = view.contentOffset.y
+        guard offsetY < previousOffsetY else { return }
+        if view.isDecelerating {
+            sawNativeGlideUp = true
+            if sawNativeDragUp && offsetY < 0 { sawNativeCrossing = true }
+        } else if view.isTracking || view.isDragging {
+            sawNativeDragUp = true
+        }
+        let state: String
+        if sawNativeCrossing {
+            state = "native-frames-crossed-oldest"
+        } else if sawNativeGlideUp {
+            state = "native-frames-gliding"
+        } else {
+            state = "native-frames-dragging"
+        }
+        terminalView?.accessibilityValue = state
     }
 
     func noteSent(_ bytes: ArraySlice<UInt8>) {
@@ -2501,10 +3456,120 @@ private final class TerminalTouchScrollHarnessOracle {
     }
 }
 
+enum TerminalPreviewResizeFixture {
+    static func backgroundDefects(in terminal: Terminal) -> Int {
+        var defects = 0
+        for row in max(0, terminal.rows - 3)..<terminal.rows {
+            for col in 0..<terminal.cols {
+                if terminal.getCharData(col: col, row: row)?.attribute.bg != .trueColor(red: 30, green: 30, blue: 30) { defects += 1 }
+            }
+        }
+        return defects
+    }
+    static func screen(cols: Int, rows: Int) -> String {
+        var text = "\u{1B}[0m\u{1B}[H\u{1B}[2J"
+        for row in 1...max(1, rows - 4) {
+            text += "\u{1B}[\(row);1HHistory row \(row) " + String(repeating: ".", count: max(0, cols - 20))
+        }
+        text += "\u{1B}[\(rows - 3);1HWorked for 6m 45s"
+        for row in (rows - 2)...rows {
+            text += "\u{1B}[\(row);1H\u{1B}[48;2;30;30;30m" + String(repeating: " ", count: cols) + "\u{1B}[0m"
+        }
+        return text + "\u{1B}[\(rows - 1);1H\u{1B}[48;2;30;30;30mAsk Codex to do anything\u{1B}[0m"
+    }
+    static func tick(frame: Int, cols: Int, rows: Int) -> String {
+        var text = "\u{1B}[?2026h\u{1B}[48;2;30;30;30m\u{1B}[38;2;100;100;100m"
+        for index in 0..<16 {
+            let row = rows - 2 + index % 3
+            let col = 28 + (index * 7 + frame % 13) % max(1, cols - 29)
+            text += "\u{1B}[\(row);\(col)H" + (frame % 2 == 0 ? "⠂" : " ")
+        }
+        return text + "\u{1B}[0m\u{1B}[?2026l"
+    }
+}
+
+/// Repeatable, host-free renderer workload. It changes only the viewport, using
+/// continuous point offsets; actual gesture routing is covered by the UI lane.
+private final class TerminalScrollBenchmark: NSObject {
+    weak var view: TesseraResponderAwareTerminalView?
+    private var link: CADisplayLink?
+    private var start: CFTimeInterval = 0
+    private var origin: CGFloat = 0
+    private var samples: [[Double]] = []
+
+    init(view: TesseraResponderAwareTerminalView) {
+        self.view = view
+        super.init()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in self?.begin() }
+    }
+
+    private func begin() {
+        guard let view else { return }
+        view.cachesCoreGraphicsRows = ProcessInfo.processInfo.environment["TESSERA_SCROLL_BENCHMARK_UNCACHED"] != "1"
+        if let raw = ProcessInfo.processInfo.environment["TESSERA_SCROLL_BENCHMARK_FONT"], let size = Double(raw) {
+            view.font = .monospacedSystemFont(ofSize: size, weight: .regular)
+        }
+        if ProcessInfo.processInfo.environment["TESSERA_SCROLL_BENCHMARK_METAL"] == "1" {
+            try? view.setUseMetal(true)
+        }
+        _ = view.resignFirstResponder()
+        var text = "\u{1B}[0m\u{1B}[2J\u{1B}[3J\u{1B}[H\u{1B}[?25l"
+        for row in 0..<1500 {
+            text += row % 12 < 6 ? "\u{1B}[48;5;22m" : "\u{1B}[48;5;52m"
+            text += String(format: "%04d | ", row) + String(repeating: "0123456789abcdef", count: 9) + "\u{1B}[K\r\n"
+        }
+        view.feed(text: text)
+        origin = max(0, view.contentSize.height - view.bounds.height - 4000)
+        view.contentOffset.y = origin
+        view.scrollBenchmarkRecording = true
+        let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        link.add(to: .main, forMode: .common)
+        self.link = link
+        NSLog("[Tessera][ScrollBenchmark] stage=ready metal=%@", String(view.isUsingMetalRenderer))
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        guard let view else { link.invalidate(); self.link = nil; return }
+        if start == 0 { start = link.timestamp }
+        let elapsed = link.timestamp - start
+        if elapsed >= 12 {
+            link.invalidate()
+            self.link = nil
+            view.scrollBenchmarkRecording = false
+            let result: [String: Any] = ["samples": samples, "drawMilliseconds": view.scrollBenchmarkDrawMilliseconds,
+                                       "metal": view.isUsingMetalRenderer, "width": view.bounds.width, "height": view.bounds.height]
+            if let data = try? JSONSerialization.data(withJSONObject: result) {
+                let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                    .appendingPathComponent("scroll-benchmark.json")
+                try? data.write(to: url)
+            }
+            NSLog("[Tessera][ScrollBenchmark] stage=done")
+            return
+        }
+        // Idle, slow drag, fast glide, reversal, settle. Absolute time makes
+        // before/after recordings comparable even when a display frame stalls.
+        let movement: Double
+        switch elapsed {
+        case ..<2: movement = 0
+        case ..<5: movement = (elapsed - 2) * 180
+        case ..<8: movement = 540 + 1500 * (1 - exp(-(elapsed - 5) * 2))
+        case ..<10: movement = 2036.28 - (elapsed - 8) * 650
+        default: movement = 736.28
+        }
+        view.contentOffset.y = origin - movement
+        samples.append([elapsed, Double(view.contentOffset.y)])
+    }
+}
+
 /// Mutates only the existing UIKit accessibility value, so scroll assertions
 /// do not trigger a SwiftUI render pass (or XCTest's quiescence heuristics).
 private final class TerminalScrollHarnessOracle {
+    var benchmark: TerminalScrollBenchmark?
     weak var terminalView: UIScrollView?
+    var previewColumns = 0
+    var previewRows = 0
+    var previewNeedsFullPaint = true
     private var agentScrollWasBlocked = false
 
     func noteAgentScrollBlocked() {
@@ -2784,6 +3849,7 @@ enum LiveScrollForegroundProbe {
     private static var maxFeedBytes = 0
     private static var feedCount = 0
     private static var totalFeedBytes = 0
+    private static var feedRecords: [String] = []
     private static var tail: [UInt8] = []
     private static var sendAction: (() -> Void)?
     private static var didSendAfterForeground = false
@@ -2794,15 +3860,21 @@ enum LiveScrollForegroundProbe {
         maxFeedBytes = 0
         feedCount = 0
         totalFeedBytes = 0
+        feedRecords.removeAll(keepingCapacity: true)
         tail.removeAll(keepingCapacity: true)
         didSendAfterForeground = false
     }
 
-    static func observeRenderedFeed(_ bytes: ArraySlice<UInt8>) {
+    static func observeRenderedFeed(
+        _ bytes: ArraySlice<UInt8>,
+        source: TmuxController.TerminalFeedSource,
+        reason: String?
+    ) {
         guard isArmed else { return }
         feedCount += 1
         totalFeedBytes += bytes.count
         maxFeedBytes = max(maxFeedBytes, bytes.count)
+        feedRecords.append("\(source.rawValue):\(reason ?? "none"):\(bytes.count)")
         tail.append(contentsOf: bytes)
         if tail.count > 512 {
             tail.removeFirst(tail.count - 512)
@@ -2829,7 +3901,47 @@ enum LiveScrollForegroundProbe {
     static var statusValue: String? {
         guard isArmed else { return nil }
         let state = didObserveMarker ? "foreground-live" : "foreground-probe-armed"
-        return "\(state)|feed-count=\(feedCount)|total-feed=\(totalFeedBytes)|max-feed=\(maxFeedBytes)"
+        return "\(state)|feed-count=\(feedCount)|total-feed=\(totalFeedBytes)|feeds=\(feedRecords.joined(separator: ","))|max-feed=\(maxFeedBytes)"
+    }
+}
+#endif
+
+#if DEBUG
+/// DEBUG-only fence for production live-scroll capture. `SessionRegistry`
+/// deliberately treats a watchdog-revealed launch as presentable; visual
+/// automation additionally needs the controller's actual initial render bit.
+@MainActor
+enum LiveScrollInitialRenderProbe {
+    private static var readySessionIDs: Set<UUID> = []
+
+    static func observe(sessionID: UUID, isReady: Bool) {
+        guard ProcessInfo.processInfo.environment["TESSERA_LIVE_SCROLL_HARNESS"] == "1"
+        else { return }
+        set(sessionID: sessionID, isReady: isReady)
+    }
+
+    static func isReady(for sessionID: UUID) -> Bool {
+        readySessionIDs.contains(sessionID)
+    }
+
+    static func clear(sessionID: UUID) {
+        readySessionIDs.remove(sessionID)
+    }
+
+    private static func set(sessionID: UUID, isReady: Bool) {
+        if isReady {
+            readySessionIDs.insert(sessionID)
+        } else {
+            readySessionIDs.remove(sessionID)
+        }
+    }
+
+    static func _testReset() {
+        readySessionIDs.removeAll()
+    }
+
+    static func _testObserve(sessionID: UUID, isReady: Bool) {
+        set(sessionID: sessionID, isReady: isReady)
     }
 }
 #endif
@@ -2928,6 +4040,24 @@ struct SwipePadStatusHarnessView: View {
 /// (and optionally TESSERA_SWIPEPAD_FORCE_ACTIVE_DIRECTION) to freeze the
 /// open radial for screenshots. No terminal or provider connection is
 /// created.
+/// The Appearance settings page on its own, so the terminal-font picker can be
+/// captured at both idioms without navigating a live app. Fonts are the reason
+/// this exists: every row renders in the face it names, so a family that failed
+/// to bundle, or a row whose sample overflows a compact width, is visible here
+/// and nowhere else. Never reaches a release build (`#if DEBUG` at the call
+/// site) and opens no connection.
+struct AppearanceSettingsHarnessView: View {
+    @Environment(\.designTokens) private var T
+
+    var body: some View {
+        ScrollView {
+            AppearanceSettingsView()
+                .padding(20)
+        }
+        .background(T.bg.ignoresSafeArea())
+    }
+}
+
 struct SwipePadFanHarnessView: View {
     @Environment(AppearancePreferences.self) private var appearance
     @Environment(SpeechDictationController.self) private var dictation
@@ -3140,6 +4270,222 @@ struct SwipePadDictationHarnessView: View {
             }
         }
         .ignoresSafeArea()
+    }
+}
+#endif
+
+#if DEBUG
+/// Host-free hardware-keyboard harness. Launch with
+/// `SIMCTL_CHILD_TESSERA_HARDWARE_KEY_HARNESS=1 xcrun simctl launch ...` on a
+/// simulator with "Connect Hardware Keyboard" on, then press the chord under
+/// test: every byte sequence the terminal surface would put on the wire is
+/// logged with `[Tessera][HWKey]` and listed on screen.
+///
+/// It exists because the modifier a hardware key holds is not observable from
+/// a unit test — `UIKey` has no public initializer — and reproducing a
+/// dropped ⇧ needs the real UIKit dispatch order, not a mock of it.
+@MainActor
+@Observable
+final class HardwareKeyHarnessLog {
+    private(set) var lines: [String] = []
+
+    func note(_ bytes: ArraySlice<UInt8>) {
+        let hex = bytes.map { String(format: "%02X", $0) }.joined(separator: " ")
+        let readable = bytes.map { byte -> String in
+            switch byte {
+            case 0x1B: return "ESC"
+            case 0x20...0x7E: return String(UnicodeScalar(byte))
+            default: return "<\(byte)>"
+            }
+        }.joined()
+        let line = "\(hex)   \(readable)"
+        NSLog("[Tessera][HWKey] \(line)")
+        lines.insert(line, at: 0)
+        if lines.count > 14 { lines.removeLast() }
+    }
+}
+
+struct HardwareKeyHarnessView: View {
+    @Environment(AppearancePreferences.self) private var appearance
+    @Environment(AppPhase.self) private var appPhase
+    @State private var log = HardwareKeyHarnessLog()
+    @State private var surfaceVisible = true
+    @State private var localText = ""
+    @FocusState private var localTextFocused: Bool
+    @State private var terminal = HardwareKeyHarnessTerminal()
+    @State private var modifierState = ModifierState()
+    @State private var refreshCount = 0
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if ProcessInfo.processInfo.environment["TESSERA_SOFTWARE_KEYBOARD_REFERENCE"] != "1" {
+            TerminalSurfaceBound(
+                initialData: Array(("Tessera hardware-key harness — press a chord\r\n"
+                    + (ProcessInfo.processInfo.environment["TESSERA_SOFTWARE_KEYBOARD_HARNESS"] == "1"
+                        ? "\u{1b}[?25l" : "")
+                    + (ProcessInfo.processInfo.environment["TESSERA_HARDWARE_KEY_MOUSE"] == "1"
+                        ? "\u{1b}[?1000h\u{1b}[?1006h" : "")).utf8),
+                onMade: { view in
+                    terminal.attach(view)
+                    // Synthetic hardware keys do not attach a GCKeyboard in
+                    // Simulator. Model its absent software input view explicitly.
+                    if ProcessInfo.processInfo.environment["TESSERA_SOFTWARE_KEYBOARD_HARNESS"] != "1" {
+                        view.inputAccessoryView = nil
+                        view.inputView = UIView(frame: .zero)
+                    }
+                    view.isAccessibilityElement = true
+                    view.accessibilityIdentifier = "hardware-key-harness"
+                    view.accessibilityLabel = "hardware key harness"
+                    DispatchQueue.main.async { _ = view.becomeFirstResponder() }
+                },
+                onReady: {},
+                onSend: { bytes in log.note(bytes) },
+                onResize: { _, _ in },
+                onTitle: { _ in },
+                onUserActivity: nil,
+                onBell: nil,
+                agentScrollBlockingActive: false,
+                onAgentScrollBlocked: nil,
+                mouseReportingImpliesAltScreen: false,
+                suppressDirectColorQueryResponses: true,
+                softwareModifierState: modifierState,
+                tmuxShortcutsEnabled: false,
+                onTmuxShortcut: { _ in },
+                onFindShortcut: nil,
+                onSwitcherShortcut: nil,
+                onOpenSettings: nil,
+                suppressFirstResponderReclaim: !surfaceVisible || localTextFocused,
+                onHardwareKey: nil,
+                onTerminalScrolled: nil,
+                scrollRetentionID: nil,
+                onScrollDiagnostic: nil
+            )
+            .environment(\.terminalDrawingEnabled, surfaceVisible)
+            .environment(\.terminalInputAllowed, { terminal.inputAllowed })
+            }
+
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(surfaceVisible ? "Hide terminal" : "Show terminal") {
+                        surfaceVisible.toggle()
+                    }
+                    .accessibilityIdentifier("hardware-key-toggle")
+                    TextField("Local input", text: $localText)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .focused($localTextFocused)
+                        .accessibilityIdentifier("hardware-key-local-input")
+                        .frame(width: 200)
+                    Button("Focus terminal") { localTextFocused = false }
+                        .accessibilityIdentifier("hardware-key-focus")
+                    Button("Release focus") { terminal.releaseFocus() }
+                        .accessibilityIdentifier("hardware-key-release")
+                    Button("Background cleanup") { terminal.inactive.dismissTransientInteractions() }
+                        .accessibilityIdentifier("hardware-key-background-cleanup")
+                }
+                .padding(20)
+                .background(Color.gray)
+                Spacer()
+            }
+            .padding(.top, 80)
+
+            HardwareKeyHarnessLogView(log: log)
+            if ProcessInfo.processInfo.environment["TESSERA_SOFTWARE_KEYBOARD_HARNESS"] == "1" {
+                VStack {
+                    HStack {
+                        Button("Refresh \(refreshCount)") {
+                            refreshCount += 1
+                            terminal.view?.feed(text: "output \(refreshCount)\r\n$ ")
+                        }
+                            .accessibilityIdentifier("keyboard-refresh")
+                        Button("Dismiss") { modifierState.dismissSoftwareKeyboard() }
+                            .accessibilityIdentifier("keyboard-dismiss")
+                        Button("Show") { modifierState.showSoftwareKeyboard() }
+                            .accessibilityIdentifier("keyboard-show")
+                    }
+                    Text(modifierState.suppressesSoftwareKeyboardReclaim ? "dismissed" : "automatic")
+                        .accessibilityIdentifier("keyboard-intent")
+                }
+                .padding(.top, 150)
+                .foregroundStyle(.white)
+            }
+        }
+        .ignoresSafeArea()
+        .background(Color.black)
+        .preferredColorScheme(.dark)
+        .onChange(of: appPhase.isActive) { _, isActive in
+            // Mirror SessionView/MoshSessionView's production inactive edge.
+            if !isActive {
+                if ProcessInfo.processInfo.environment["TESSERA_HARDWARE_KEY_BLOCK_ON_WAKE"] == "1" {
+                    terminal.inputAllowed = false
+                }
+                terminal.active.dismissTransientInteractions()
+            }
+        }
+        .onAppear {
+            // XCUITest waits for the app to go idle before returning from each
+            // synthesized key press. A blinking cursor never goes idle, so
+            // every `typeKey` would burn the full 60s animation timeout.
+            UIView.setAnimationsEnabled(false)
+            appearance.cursorBlink = false
+            UserDefaults.standard.set(true, forKey: DiagnosticLogStore.verboseDiagnosticsDefaultsKey)
+        }
+        .onDisappear {
+            UIView.setAnimationsEnabled(true)
+        }
+    }
+}
+
+@MainActor
+private final class HardwareKeyHarnessTerminal {
+    var inputAllowed = true
+    weak var view: TerminalView?
+    let active = TerminalBox(traceLabel: "keyboard-active")
+    let inactive = TerminalBox(traceLabel: "keyboard-inactive")
+
+    func releaseFocus() {
+        guard let view else { return }
+        _ = view.resignFirstResponder()
+        // Expose the actual result without an observable-state change that
+        // would make updateUIView reclaim focus and invalidate the experiment.
+        view.accessibilityValue = view.isFirstResponder ? "focused" : "unfocused"
+    }
+
+    func attach(_ view: TerminalView) {
+        self.view = view
+        active.attach(view)
+        // A real mounted background terminal in the same window, as in
+        // ContentView's session stack. No host or transport is involved.
+        let background = TesseraResponderAwareTerminalView(frame: .zero)
+        background.setSessionDrawingEnabled(false)
+        view.superview?.addSubview(background)
+        inactive.attach(background)
+    }
+}
+
+/// Keep diagnostic output observation outside the terminal's parent. Logging
+/// a click must not trigger updateUIView and accidentally repair lost focus.
+private struct HardwareKeyHarnessLogView: View {
+    let log: HardwareKeyHarnessLog
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("SENT BYTES (newest first)")
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundStyle(.yellow)
+            ForEach(Array(log.lines.enumerated()), id: \.offset) { _, line in
+                Text(line)
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundStyle(.white)
+            }
+        }
+        .padding(10)
+        .background(Color.black.opacity(0.75))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .padding(16)
+        .allowsHitTesting(false)
+        .accessibilityIdentifier("hardware-key-harness-log")
     }
 }
 #endif

@@ -108,7 +108,8 @@ public final class SwipePadProfileStore {
                 // that still equals the old factory macro for its direction
                 // was never customized there and adopts the current factory
                 // binding (this is how the 2026-08 Claude deny/always macro
-                // correction reaches existing installs). Per-direction, not
+                // correction and the 2026-10 bare-digit answers reach
+                // existing installs). Per-direction, not
                 // whole-map: a user who only customized an unrelated
                 // direction (say `.down`) must still receive the deny/always
                 // correction on the untouched ones — otherwise their trained
@@ -117,7 +118,7 @@ public final class SwipePadProfileStore {
                 // is a real customization and is kept verbatim.
                 var merged = d
                 merged.bindings = user.bindings
-                if let legacyMacros = Self.supersededFactoryMacros[d.id] {
+                for legacyMacros in Self.supersededFactoryMacros[d.id] ?? [] {
                     for (direction, legacyMacro) in legacyMacros
                     where merged.bindings[direction]?.macro == legacyMacro {
                         merged.bindings[direction] = d.bindings[direction]
@@ -158,12 +159,14 @@ public final class SwipePadProfileStore {
     /// dictionary that matches one of these byte-for-byte (macros only) was
     /// never customized and is silently upgraded to the current factory set.
     /// Pre-2026-08 Claude bound left=2↵/up=3↵ against a menu Claude later
-    /// reordered — leaving "deny" sending "Yes, and always allow…".
-    private static let supersededFactoryMacros: [UUID: [SwipeDirection: String]] = [
+    /// reordered — leaving "deny" sending "Yes, and always allow…". The
+    /// 2026-08 set then kept a trailing Enter that the shared core's
+    /// digit-alone answers no longer send; it reached the composer, and the
+    /// live menu's petals lost their trained directions to it.
+    private static let supersededFactoryMacros: [UUID: [[SwipeDirection: String]]] = [
         SwipePadProfile.builtInClaudeCodeID: [
-            .right: "1↵",
-            .left: "2↵",
-            .up: "3↵",
+            [.right: "1↵", .left: "2↵", .up: "3↵"],
+            [.right: "1↵", .left: "3↵", .up: "2↵"],
         ],
     ]
 

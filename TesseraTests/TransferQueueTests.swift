@@ -4,6 +4,52 @@ import Observation
 
 final class TransferQueueTests: XCTestCase {
     @MainActor
+    func test_sharePreparationDeduplicatesAndClearsEveryTerminalPhase() async {
+        for phase in [TransferPhase.completed, .failed("fixture"), .cancelled] {
+            let preparation = FileSharePreparation()
+            let path = "/fixture/share.txt"
+            let item = TransferItem(direction: .download, displayName: "share.txt", remotePath: path, localURL: nil)
+            var calls = 0
+            preparation.start(path) { calls += 1; return item }
+            preparation.start(path) { calls += 1; return nil }
+            XCTAssertEqual(calls, 1)
+            XCTAssertTrue(preparation.isPreparing(path))
+            item.phase = .cancelling(fraction: nil)
+            XCTAssertTrue(preparation.isPreparing(path))
+            item.phase = phase
+            XCTAssertFalse(preparation.isPreparing(path))
+            let next = TransferItem(direction: .download, displayName: "share.txt", remotePath: path, localURL: nil)
+            preparation.start(path) { calls += 1; return next }
+            await Task.yield()
+            XCTAssertTrue(preparation.isPreparing(path), "old completion must not clear the next request")
+            XCTAssertEqual(calls, 2)
+            next.phase = .cancelled
+        }
+    }
+
+    @MainActor
+    func test_sharePreparationFailureBeforeEnqueueDoesNotLeaveProgress() {
+        let preparation = FileSharePreparation()
+        preparation.start("/fixture/share.txt") { nil }
+        XCTAssertFalse(preparation.isPreparing("/fixture/share.txt"))
+    }
+
+    @MainActor
+    func test_agentAttachmentCancellationStopsTransferAndResolvesWaiter() async throws {
+        let bridge = RecordingUploadBridge(uploadDelayNanos: 10_000_000_000)
+        let queue = TransferQueue(bridge: bridge)
+        let file = try temporaryURL(filename: "attachment.txt", contents: "fixture")
+        let task = Task { try await queue.uploadAgentAttachment(localURL: file) }
+        await assertEventually { !bridge.uploadedPaths.isEmpty }
+        task.cancel()
+        do { _ = try await task.value; XCTFail("cancelled attachment reported success") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertEqual(queue.items.first?.phase, .cancelled)
+        XCTAssertTrue(bridge.renamedPaths.isEmpty)
+        XCTAssertFalse(bridge.removedPaths.isEmpty, "partial remote upload must be removed")
+    }
+
+    @MainActor
     func test_downloadLifecycleReportsProgressAndWritesFile() async throws {
         let bridge = ProgressHoldingBridge()
         let queue = TransferQueue(bridge: bridge)

@@ -10,13 +10,14 @@ import PortForwarding
 ///
 /// Layout: rules grouped by host, connected hosts on top with a green
 /// dot, disconnected hosts below with a muted dot. Each row toggles
-/// enabled, jumps to host editor via the chevron, opens HTTP-ish ports
-/// in Safari while running. Hosts with zero rules don't render.
+/// enabled, jumps to host editor via the chevron, and — while the rule is
+/// running and the shared policy says a page can be there — opens the
+/// forwarded port in the in-app browser. Hosts with zero rules don't render.
 struct TunnelsPageView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.designTokens) private var T
-    @Environment(\.openURL) private var openURL
     @Environment(TunnelsRegistry.self) private var registry
+    @Environment(AppPhase.self) private var appPhase
 
     @Query(sort: [SortDescriptor<PersistedHost>(\.sortOrder)])
     private var allHosts: [PersistedHost]
@@ -24,6 +25,22 @@ struct TunnelsPageView: View {
     /// Selected host id → flips the parent ContentView's `selectedItem`
     /// to the matching host editor when the user taps the chevron.
     let onEditHost: (PersistedHost) -> Void
+
+    /// The tunnel the in-app browser is showing, if any.
+    @State private var browsing: BrowsedTunnel?
+
+    /// Identified by its rule so `fullScreenCover(item:)` rebuilds the browser
+    /// when the user closes one tunnel's page and opens another's.
+    private struct BrowsedTunnel: Identifiable {
+        let id: UUID
+        let target: ForwardedWebTarget
+        let label: String
+    }
+
+    private struct ServiceMonitorKey: Equatable {
+        let managers: Set<ObjectIdentifier>
+        let appActive: Bool
+    }
 
     private struct HostGroup: Identifiable {
         let host: PersistedHost
@@ -75,6 +92,23 @@ struct TunnelsPageView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(T.bg)
+        // Every connected host's rows say whether anything answers behind
+        // them, so this page looks for as long as it is showing and the app
+        // is in front — tunnels keep running in the background, looks don't.
+        .task(id: ServiceMonitorKey(
+            managers: Set(registry.managers.values.map(ObjectIdentifier.init)),
+            appActive: appPhase.isActive
+        )) {
+            guard appPhase.isActive else { return }
+            await withTaskGroup(of: Void.self) { group in
+                for manager in registry.managers.values {
+                    group.addTask { await manager.monitorServices() }
+                }
+            }
+        }
+        .fullScreenCover(item: $browsing) { tunnel in
+            TunnelWebBrowserView(target: tunnel.target, ruleLabel: tunnel.label)
+        }
     }
 
     @ViewBuilder
@@ -135,13 +169,13 @@ struct TunnelsPageView: View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 0) {
-                    Text(String(rule.localPort))
+                    Text(String(rule.bind.port))
                         .font(Typography.tesseraMono(size: 13, weight: .semibold))
                         .foregroundStyle(group.isConnected && rule.enabled ? T.accent : T.fgMuted)
                     Text(verbatim: " → ")
                         .font(Typography.tesseraMono(size: 13))
                         .foregroundStyle(T.fgDim)
-                    Text(verbatim: "\(rule.remoteHost):\(rule.remotePort)")
+                    Text(verbatim: rule.targetDisplayText)
                         .font(Typography.tesseraMono(size: 13))
                         .foregroundStyle(T.fg)
                     if !rule.label.isEmpty {
@@ -157,11 +191,12 @@ struct TunnelsPageView: View {
 
             Spacer(minLength: 12)
 
-            if isRunning && isHTTPPort(rule.localPort) {
+            // One heuristic for "is there a page here", shared with Android
+            // and with the session bar's tunnel sheet; this view used to keep
+            // a second copy of the port list.
+            if isRunning, let target = ForwardedWebPolicy.webTarget(for: rule) {
                 Button {
-                    if let url = URL(string: "http://localhost:\(rule.localPort)/") {
-                        openURL(url)
-                    }
+                    browsing = BrowsedTunnel(id: rule.id, target: target, label: rule.label)
                 } label: {
                     Image(systemName: "arrow.up.right.square")
                         .font(.system(size: 14, weight: .medium))
@@ -211,7 +246,9 @@ struct TunnelsPageView: View {
             case .active(let n):
                 let f = group.manager?.forwarders[rule.id]
                 return "\u{2191} \(byteString(f?.bytesUp ?? 0))   \u{2193} \(byteString(f?.bytesDown ?? 0))   ·   \(n) active"
-            case .listening: return String(localized: "listening · 0 active")
+            case .listening:
+                return group.manager?.forwarders[rule.id]?.listeningStatusText
+                    ?? String(localized: "listening · 0 active")
             case .idle: return String(localized: "idle")
             case .error(let reason): return reason
             }
@@ -256,10 +293,5 @@ struct TunnelsPageView: View {
             return String(format: "%.1f %@", scaled, suffix)
         }
         return "\(n) B"
-    }
-
-    private func isHTTPPort(_ p: UInt16) -> Bool {
-        let nonHTTP: Set<UInt16> = [22, 5432, 3306, 6379, 27017, 11211, 25, 110, 143]
-        return !nonHTTP.contains(p)
     }
 }

@@ -1,0 +1,10 @@
+{
+  "records" : [
+    { "record" : { "text" : "newest", "type" : "assistant" }, "recordID" : "r2", "sequence" : 2 },
+    { "record" : { "isMeta" : true, "text" : "system injection", "type" : "user" }, "recordID" : "r1", "sequence" : 1 },
+    { "record" : { "title" : "final title", "type" : "ai-title" }, "recordID" : "r3", "sequence" : 3 },
+    { "record" : { "cost" : 1.25, "duration" : 4, "lines_added" : 9, "lines_removed" : 3, "type" : "cost-state" }, "recordID" : "r4", "sequence" : 4 },
+    { "record" : { "pending" : 2, "type" : "queue-operation" }, "recordID" : "r5", "sequence" : 5 }
+  ],
+  "v" : 1
+}

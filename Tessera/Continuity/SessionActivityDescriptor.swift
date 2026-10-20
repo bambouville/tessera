@@ -1,8 +1,9 @@
 import Foundation
+import TesseraProtocolCore
 
-/// The public, credential-free description of one endpoint in a continuation
-/// route. The same type represents the destination and each bastion hop so the
-/// route cannot acquire an untyped payload as the feature grows.
+/// Apple-facing adapter around the portable continuation-v1 endpoint. The app
+/// keeps its runtime enums at UI/session boundaries while every byte and
+/// validation decision comes from `TesseraProtocolCore`.
 struct SessionActivityEndpoint: Codable, Equatable, Sendable {
     let hostID: UUID
     let name: String
@@ -12,7 +13,6 @@ struct SessionActivityEndpoint: Codable, Equatable, Sendable {
     let transport: HostTransport
     let hostKeyFingerprint: String?
 
-    /// Wire-contract spelling used by the design and trust-card integration.
     var hostKeyFP: String? { hostKeyFingerprint }
 
     init(
@@ -45,42 +45,39 @@ struct SessionActivityEndpoint: Codable, Equatable, Sendable {
         )
     }
 
-    private enum CodingKeys: String, CodingKey {
-        case hostID
-        case name
-        case user
-        case address
-        case port
-        case transport
-        case hostKeyFingerprint = "hostKeyFP"
+    init(core: ContinuationEndpointV1) {
+        self.init(
+            hostID: core.hostID,
+            name: core.name,
+            user: core.user,
+            address: core.address,
+            port: core.port,
+            transport: HostTransport(core.transport),
+            hostKeyFingerprint: core.hostKeyFingerprint
+        )
+    }
+
+    var core: ContinuationEndpointV1 {
+        ContinuationEndpointV1(
+            hostID: hostID,
+            name: name,
+            user: user,
+            address: address,
+            port: port,
+            transport: ContinuationWireTransport(transport),
+            hostKeyFingerprint: hostKeyFingerprint
+        )
     }
 
     init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        hostID = try values.decode(UUID.self, forKey: .hostID)
-        name = try values.decode(String.self, forKey: .name)
-        user = try values.decode(String.self, forKey: .user)
-        address = try values.decode(String.self, forKey: .address)
-        port = try values.decode(Int.self, forKey: .port)
-        transport = try values.decode(HostTransport.self, forKey: .transport)
-        hostKeyFingerprint = try values.decodeIfPresent(String.self, forKey: .hostKeyFingerprint)
+        self.init(core: try ContinuationEndpointV1(from: decoder))
     }
 
     func encode(to encoder: Encoder) throws {
-        var values = encoder.container(keyedBy: CodingKeys.self)
-        try values.encode(hostID, forKey: .hostID)
-        try values.encode(name, forKey: .name)
-        try values.encode(user, forKey: .user)
-        try values.encode(address, forKey: .address)
-        try values.encode(port, forKey: .port)
-        try values.encode(transport, forKey: .transport)
-        try values.encodeIfPresent(hostKeyFingerprint, forKey: .hostKeyFingerprint)
+        try core.encode(to: encoder)
     }
 }
 
-/// Collision-free resolver identity for one route position. Keeping the
-/// coordinates typed avoids treating delimiter-bearing usernames or hostnames
-/// as structure when independently-created host records are compared.
 struct SessionActivityRouteCoordinate: Equatable, Sendable {
     let user: String
     let address: String
@@ -100,91 +97,50 @@ struct SessionActivityRouteCoordinate: Equatable, Sendable {
         port = host.port
         transport = host.transport
     }
+
+    init(core: ContinuationRouteCoordinate) {
+        user = core.user
+        address = core.address
+        port = core.port
+        transport = HostTransport(core.transport)
+    }
 }
 
-/// A versioned allowlist of the public information needed to continue or
-/// reconnect a session on another device.
-///
-/// Deliberately absent: passwords, credential modes, key identifiers/private
-/// handles, commands, environment variables, snippets, notes, trust pins, and
-/// terminal contents. `hostKeyFP` is a public fingerprint used only to inform
-/// the receiving device's explicit TOFU decision; it is never installed as a
-/// local trust pin.
+/// Compatibility facade retaining the app's established source API while
+/// delegating schema-v1 coding and validation to the portable shared core.
 struct SessionActivityDescriptor: Codable, Equatable, Sendable {
-    static let currentSchemaVersion = 1
-    static let maximumHandoffBytes = 3 * 1024
-    static let maximumViaCount = 8
+    typealias DescriptorError = ContinuationDescriptorError
 
-    enum DescriptorError: Error, Equatable, LocalizedError {
-        case unsupportedSchemaVersion(Int)
-        case invalidPort(Int)
-        case emptyConnectionKey
-        case invalidHostKeyFingerprint
-        case brokenJumpChain(String)
-        case duplicateRouteHostID(UUID)
-        case tooManyViaEndpoints(Int)
-        case missingTmuxSessionName
-        case invalidTmuxSessionName
-        case unexpectedTmuxSessionName
-        case connectionKeyMismatch(expected: String, actual: String)
-        case exceedsHandoffBudget(actual: Int, maximum: Int)
+    static let currentSchemaVersion = ContinuationDescriptorV1.currentSchemaVersion
+    static let maximumHandoffBytes = ContinuationDescriptorV1.maximumHandoffBytes
+    static let maximumViaCount = ContinuationDescriptorV1.maximumViaCount
 
-        var errorDescription: String? {
-            switch self {
-            case .unsupportedSchemaVersion(let version):
-                return String(localized: "Unsupported continuation schema version \(version).")
-            case .invalidPort(let port):
-                return String(localized: "Continuation endpoint has invalid port \(port).")
-            case .emptyConnectionKey:
-                return String(localized: "Continuation endpoint has an empty connection key.")
-            case .invalidHostKeyFingerprint:
-                return String(localized: "Continuation endpoint has an empty host-key fingerprint.")
-            case .brokenJumpChain(let reason):
-                return String(localized: "Continuation route is unavailable: \(reason)")
-            case .duplicateRouteHostID(let id):
-                return String(localized: "Continuation route repeats host \(id.uuidString).")
-            case .tooManyViaEndpoints(let count):
-                return String(
-                    localized: "Continuation route contains \(count) jump hosts.",
-                    comment: "Continuity validation error. Pluralized on the jump-host count."
-                )
-            case .missingTmuxSessionName:
-                return String(localized: "A tmux continuation requires its resolved session name.")
-            case .invalidTmuxSessionName:
-                return String(localized: "The continuation tmux session name contains unsafe characters.")
-            case .unexpectedTmuxSessionName:
-                return String(localized: "A plain reconnect cannot advertise a tmux session.")
-            case .connectionKeyMismatch:
-                return String(localized: "Continuation connection key does not match its endpoint route.")
-            case .exceedsHandoffBudget(let actual, let maximum):
-                return String(localized: "Continuation descriptor is \(actual) bytes; the limit is \(maximum).")
-            }
-        }
-    }
+    /// Portable representation used by the Apple transport, resolver, and
+    /// state-machine adapters. Keeping this internal prevents UI call sites
+    /// from taking a dependency on wire-only types while avoiding a second
+    /// source of protocol truth inside the app target.
+    let core: ContinuationDescriptorV1
 
-    let schemaVersion: Int
-    let endpoint: SessionActivityEndpoint
-    let connectionKey: String
-    let launchMode: HostLaunchMode
-    /// Resolved server-side tmux session name. This is required for tmux
-    /// launch modes and absent for honest plain SSH/mosh reconnects.
-    let tmuxSessionName: String?
-    /// Bastions in dial order, outermost first.
-    let via: [SessionActivityEndpoint]
+    var schemaVersion: Int { core.schemaVersion }
+    var endpoint: SessionActivityEndpoint { SessionActivityEndpoint(core: core.endpoint) }
+    var connectionKey: String { core.connectionKey }
+    var launchMode: HostLaunchMode { HostLaunchMode(core.launchMode) }
+    var tmuxSessionName: String? { core.tmuxSessionName }
+    var via: [SessionActivityEndpoint] { core.via.map(SessionActivityEndpoint.init(core:)) }
 
-    var hostID: UUID { endpoint.hostID }
-    var name: String { endpoint.name }
-    var user: String { endpoint.user }
-    var address: String { endpoint.address }
-    var port: Int { endpoint.port }
-    var transport: HostTransport { endpoint.transport }
-    var hostKeyFingerprint: String? { endpoint.hostKeyFingerprint }
-    var hostKeyFP: String? { endpoint.hostKeyFP }
-    var tmux: String? { tmuxSessionName }
-    var v: Int { schemaVersion }
-
-    var continuationAction: ContinuationAction {
-        ContinuationAction(launchMode: launchMode)
+    var hostID: UUID { core.hostID }
+    var name: String { core.name }
+    var user: String { core.user }
+    var address: String { core.address }
+    var port: Int { core.port }
+    var transport: HostTransport { HostTransport(core.transport) }
+    var hostKeyFingerprint: String? { core.hostKeyFingerprint }
+    var hostKeyFP: String? { core.hostKeyFP }
+    var tmux: String? { core.tmux }
+    var v: Int { core.v }
+    var continuationAction: ContinuationAction { core.continuationAction }
+    var resolverRoute: [SessionActivityRouteCoordinate] {
+        core.resolverRoute.map(SessionActivityRouteCoordinate.init(core:))
     }
 
     init(
@@ -194,17 +150,19 @@ struct SessionActivityDescriptor: Codable, Equatable, Sendable {
         via: [SessionActivityEndpoint] = [],
         connectionKey: String? = nil
     ) {
-        schemaVersion = Self.currentSchemaVersion
-        self.endpoint = endpoint
-        self.connectionKey = connectionKey ?? Self.connectionKey(for: endpoint, via: via)
-        self.launchMode = launchMode
-        self.tmuxSessionName = tmuxSessionName
-        self.via = via
+        core = ContinuationDescriptorV1(
+            endpoint: endpoint.core,
+            launchMode: ContinuationWireLaunchMode(launchMode),
+            tmuxSessionName: tmuxSessionName,
+            via: via.map(\.core),
+            connectionKey: connectionKey
+        )
     }
 
-    /// Extracts the descriptor's allowlisted fields from the live Host DTO.
-    /// Secret-bearing Host fields are intentionally never accepted as
-    /// descriptor initializer parameters.
+    init(core: ContinuationDescriptorV1) {
+        self.core = core
+    }
+
     init(
         host: Host,
         resolvedTmuxSessionName: String?,
@@ -215,85 +173,56 @@ struct SessionActivityDescriptor: Codable, Equatable, Sendable {
         if let broken = host.jumpChainBrokenReason {
             throw DescriptorError.brokenJumpChain(broken)
         }
-        let endpoint = SessionActivityEndpoint(
-            host: host,
-            hostKeyFingerprint: hostKeyFingerprint
-        )
-        let via = host.jumpChain.map {
-            SessionActivityEndpoint(
-                host: $0,
-                hostKeyFingerprint: viaHostKeyFingerprints[$0.id]
-            )
-        }
         self.init(
-            endpoint: endpoint,
+            endpoint: SessionActivityEndpoint(
+                host: host,
+                hostKeyFingerprint: hostKeyFingerprint
+            ),
             launchMode: host.launchMode,
             tmuxSessionName: resolvedTmuxSessionName,
-            via: via,
+            via: host.jumpChain.map {
+                SessionActivityEndpoint(
+                    host: $0,
+                    hostKeyFingerprint: viaHostKeyFingerprints[$0.id]
+                )
+            },
             connectionKey: connectionKey
         )
         try validate()
     }
 
-    /// The exact connection-key shape used by `PersistedHost.connectionKey`.
-    /// Keeping this pure makes endpoint matching available before SwiftData or
-    /// credential resolution enters the continuation flow.
     static func connectionKey(
         for endpoint: SessionActivityEndpoint,
         via: [SessionActivityEndpoint]
     ) -> String {
-        var key = "\(endpoint.transport.rawValue):\(endpoint.user)@\(endpoint.address):\(endpoint.port)"
-        if !via.isEmpty {
-            key += "&via=" + via.map(\.hostID.uuidString).joined(separator: ",")
-        }
-        return key
+        ContinuationDescriptorV1.connectionKey(
+            for: endpoint.core,
+            via: via.map(\.core)
+        )
     }
 
-    /// Resolver-only route identity for independently-created saved hosts.
-    /// Persisted and wire connection keys retain UUIDs; this typed route
-    /// intentionally uses ordered public endpoint coordinates so equivalent
-    /// bastion routes can match even when every local UUID differs.
     static func resolverRoute(
         for endpoint: SessionActivityEndpoint,
         via: [SessionActivityEndpoint]
     ) -> [SessionActivityRouteCoordinate] {
-        (via + [endpoint]).map(SessionActivityRouteCoordinate.init(endpoint:))
+        ContinuationDescriptorV1.resolverRoute(
+            for: endpoint.core,
+            via: via.map(\.core)
+        ).map(SessionActivityRouteCoordinate.init(core:))
     }
 
-    var resolverRoute: [SessionActivityRouteCoordinate] {
-        Self.resolverRoute(for: endpoint, via: via)
-    }
-
-    /// Encodes the descriptor for NSUserActivity and enforces the design's
-    /// practical 3 KiB payload budget at the boundary that broadcasts it.
     func handoffData() throws -> Data {
-        try validate()
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(self)
-        guard data.count <= Self.maximumHandoffBytes else {
-            throw DescriptorError.exceedsHandoffBudget(
-                actual: data.count,
-                maximum: Self.maximumHandoffBytes
-            )
-        }
-        return data
+        try core.encoded()
     }
 
     init(handoffData: Data) throws {
-        guard handoffData.count <= Self.maximumHandoffBytes else {
-            throw DescriptorError.exceedsHandoffBudget(
-                actual: handoffData.count,
-                maximum: Self.maximumHandoffBytes
-            )
-        }
-        self = try JSONDecoder().decode(Self.self, from: handoffData)
-        try validate()
+        core = try ContinuationDescriptorV1(encoded: handoffData)
     }
 
-    /// Builds a local, credential-empty editor prefill. Sender UUIDs are
-    /// adopted intentionally so a subsequently bootstrapped/synced copy takes
-    /// the resolver's UUID fast path rather than becoming a duplicate.
+    func validate() throws {
+        try core.validate()
+    }
+
     func makePrefilledHost() -> Host {
         let routeFingerprints = Dictionary(
             uniqueKeysWithValues: ([endpoint] + via).compactMap { routeEndpoint in
@@ -329,121 +258,20 @@ struct SessionActivityDescriptor: Codable, Equatable, Sendable {
         )
     }
 
-    func validate() throws {
-        guard schemaVersion == Self.currentSchemaVersion else {
-            throw DescriptorError.unsupportedSchemaVersion(schemaVersion)
-        }
-        guard !connectionKey.isEmpty else {
-            throw DescriptorError.emptyConnectionKey
-        }
-        guard via.count <= Self.maximumViaCount else {
-            throw DescriptorError.tooManyViaEndpoints(via.count)
-        }
-        for candidate in [endpoint] + via {
-            guard (1...65_535).contains(candidate.port) else {
-                throw DescriptorError.invalidPort(candidate.port)
-            }
-            if let fingerprint = candidate.hostKeyFingerprint,
-               fingerprint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                throw DescriptorError.invalidHostKeyFingerprint
-            }
-        }
-        var seen = Set<UUID>()
-        for candidate in via + [endpoint] {
-            guard seen.insert(candidate.hostID).inserted else {
-                throw DescriptorError.duplicateRouteHostID(candidate.hostID)
-            }
-        }
-
-        switch continuationAction {
-        case .continueSession:
-            guard let tmuxSessionName,
-                  !tmuxSessionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw DescriptorError.missingTmuxSessionName
-            }
-            guard MoshBootstrap.isShellSafeSessionName(tmuxSessionName) else {
-                throw DescriptorError.invalidTmuxSessionName
-            }
-        case .reconnect:
-            guard tmuxSessionName == nil else {
-                throw DescriptorError.unexpectedTmuxSessionName
-            }
-        }
-
-        let expected = Self.connectionKey(for: endpoint, via: via)
-        guard connectionKey == expected else {
-            throw DescriptorError.connectionKeyMismatch(expected: expected, actual: connectionKey)
-        }
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case schemaVersion = "v"
-        case hostID
-        case connectionKey
-        case name
-        case user
-        case address
-        case port
-        case transport
-        case launchMode
-        case tmuxSessionName = "tmux"
-        case via
-        case hostKeyFingerprint = "hostKeyFP"
-    }
-
     init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
-        endpoint = SessionActivityEndpoint(
-            hostID: try values.decode(UUID.self, forKey: .hostID),
-            name: try values.decode(String.self, forKey: .name),
-            user: try values.decode(String.self, forKey: .user),
-            address: try values.decode(String.self, forKey: .address),
-            port: try values.decode(Int.self, forKey: .port),
-            transport: try values.decode(HostTransport.self, forKey: .transport),
-            hostKeyFingerprint: try values.decodeIfPresent(
-                String.self,
-                forKey: .hostKeyFingerprint
-            )
-        )
-        connectionKey = try values.decode(String.self, forKey: .connectionKey)
-        launchMode = try values.decode(HostLaunchMode.self, forKey: .launchMode)
-        tmuxSessionName = try values.decodeIfPresent(String.self, forKey: .tmuxSessionName)
-        via = try values.decode([SessionActivityEndpoint].self, forKey: .via)
-        try validate()
+        core = try ContinuationDescriptorV1(from: decoder)
     }
 
     func encode(to encoder: Encoder) throws {
-        try validate()
-        var values = encoder.container(keyedBy: CodingKeys.self)
-        try values.encode(schemaVersion, forKey: .schemaVersion)
-        try values.encode(hostID, forKey: .hostID)
-        try values.encode(connectionKey, forKey: .connectionKey)
-        try values.encode(name, forKey: .name)
-        try values.encode(user, forKey: .user)
-        try values.encode(address, forKey: .address)
-        try values.encode(port, forKey: .port)
-        try values.encode(transport, forKey: .transport)
-        try values.encode(launchMode, forKey: .launchMode)
-        try values.encodeIfPresent(tmuxSessionName, forKey: .tmuxSessionName)
-        try values.encode(via, forKey: .via)
-        try values.encodeIfPresent(hostKeyFingerprint, forKey: .hostKeyFingerprint)
+        try core.encode(to: encoder)
     }
 }
 
-/// User-visible semantics for a continuation. Only tmux-owned screens can be
-/// continued; plain SSH and plain mosh always create a new remote session.
-enum ContinuationAction: String, Codable, Equatable, Sendable {
-    case continueSession
-    case reconnect
+typealias ContinuationAction = TesseraProtocolCore.ContinuationAction
 
+extension ContinuationAction {
     init(launchMode: HostLaunchMode) {
-        switch launchMode {
-        case .autoTmux, .pinnedTmux:
-            self = .continueSession
-        case .customCommand:
-            self = .reconnect
-        }
+        self.init(launchMode: ContinuationWireLaunchMode(launchMode))
     }
 
     var label: String {
@@ -452,6 +280,78 @@ enum ContinuationAction: String, Codable, Equatable, Sendable {
             String(localized: "Continue", comment: "Continuation action name")
         case .reconnect:
             String(localized: "Reconnect", comment: "Continuation action name")
+        }
+    }
+}
+
+extension ContinuationDescriptorError: @retroactive LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .unsupportedSchemaVersion(let version):
+            String(localized: "Unsupported continuation schema version \(version).")
+        case .invalidPort(let port):
+            String(localized: "Continuation endpoint has invalid port \(port).")
+        case .emptyConnectionKey:
+            String(localized: "Continuation endpoint has an empty connection key.")
+        case .invalidHostKeyFingerprint:
+            String(localized: "Continuation endpoint has an empty host-key fingerprint.")
+        case .brokenJumpChain(let reason):
+            String(localized: "Continuation route is unavailable: \(reason)")
+        case .duplicateRouteHostID(let id):
+            String(localized: "Continuation route repeats host \(id.uuidString).")
+        case .tooManyViaEndpoints(let count):
+            String(
+                localized: "Continuation route contains \(count) jump hosts.",
+                comment: "Continuity validation error. Pluralized on the jump-host count."
+            )
+        case .missingTmuxSessionName:
+            String(localized: "A tmux continuation requires its resolved session name.")
+        case .invalidTmuxSessionName:
+            String(localized: "The continuation tmux session name contains unsafe characters.")
+        case .unexpectedTmuxSessionName:
+            String(localized: "A plain reconnect cannot advertise a tmux session.")
+        case .connectionKeyMismatch:
+            String(localized: "Continuation connection key does not match its endpoint route.")
+        case .exceedsHandoffBudget(let actual, let maximum):
+            String(localized: "Continuation descriptor is \(actual) bytes; the limit is \(maximum).")
+        }
+    }
+}
+
+extension ContinuationWireTransport {
+    init(_ transport: HostTransport) {
+        switch transport {
+        case .ssh: self = .ssh
+        case .mosh: self = .mosh
+        }
+    }
+}
+
+extension HostTransport {
+    init(_ transport: ContinuationWireTransport) {
+        switch transport {
+        case .ssh: self = .ssh
+        case .mosh: self = .mosh
+        }
+    }
+}
+
+private extension ContinuationWireLaunchMode {
+    init(_ launchMode: HostLaunchMode) {
+        switch launchMode {
+        case .autoTmux: self = .autoTmux
+        case .pinnedTmux: self = .pinnedTmux
+        case .customCommand: self = .customCommand
+        }
+    }
+}
+
+private extension HostLaunchMode {
+    init(_ launchMode: ContinuationWireLaunchMode) {
+        switch launchMode {
+        case .autoTmux: self = .autoTmux
+        case .pinnedTmux: self = .pinnedTmux
+        case .customCommand: self = .customCommand
         }
     }
 }

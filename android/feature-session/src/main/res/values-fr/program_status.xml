@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="program_status_needs_input">attend une saisie</string>
+    <string name="program_status_needs_approval">attend une approbation</string>
+    <string name="program_status_needs_answer">attend une réponse</string>
+    <string name="program_status_sign_in_needed">connexion requise</string>
+    <string name="program_status_failed">échec</string>
+    <string name="program_status_finished">terminé</string>
+    <string name="program_status_working">en cours</string>
+    <string name="program_status_ready">prêt</string>
+    <string name="program_status_unavailable">état indisponible</string>
+    <string name="program_status_program">programme</string>
+    <string name="program_status_programs">programmes</string>
+    <string name="program_status_needs_attention">demande votre attention</string>
+    <string name="program_status_visit_checks">ouvrir un volet le marque comme vu</string>
+    <string name="program_status_open_pane">ouvrir le volet</string>
+    <plurals name="program_status_count_need_input">
+        <item quantity="one">%d attend une saisie</item>
+        <item quantity="other">%d attendent une saisie</item>
+        <item quantity="many">%d attendent une saisie</item>
+    </plurals>
+    <plurals name="program_status_count_need_approval">
+        <item quantity="one">%d attend une approbation</item>
+        <item quantity="other">%d attendent une approbation</item>
+        <item quantity="many">%d attendent une approbation</item>
+    </plurals>
+    <plurals name="program_status_count_need_answer">
+        <item quantity="one">%d attend une réponse</item>
+        <item quantity="other">%d attendent une réponse</item>
+        <item quantity="many">%d attendent une réponse</item>
+    </plurals>
+    <plurals name="program_status_count_need_sign_in">
+        <item quantity="one">%d attend une connexion</item>
+        <item quantity="other">%d attendent une connexion</item>
+        <item quantity="many">%d attendent une connexion</item>
+    </plurals>
+    <plurals name="program_status_count_failed">
+        <item quantity="one">%d en échec</item>
+        <item quantity="other">%d en échec</item>
+        <item quantity="many">%d en échec</item>
+    </plurals>
+    <plurals name="program_status_count_finished">
+        <item quantity="one">%d terminé</item>
+        <item quantity="other">%d terminés</item>
+        <item quantity="many">%d terminés</item>
+    </plurals>
+    <string name="program_status_open_agent_center">ouvrir le centre d\'agents</string>
+    <string name="program_status_raw_session">session simple</string>
+    <string name="program_status_window">fenêtre %1$d</string>
+    <string name="program_status_named_window">fenêtre %1$d « %2$s »</string>
+    <string name="program_status_pane">volet %1$s</string>
+    <string name="program_status_pane_unavailable">volet indisponible</string>
+    <string name="program_status_all_caught_up">tout est à jour</string>
+    <plurals name="program_status_pane_count">
+        <item quantity="one">%d volet</item>
+        <item quantity="many">%d volets</item>
+        <item quantity="other">%d volets</item>
+    </plurals>
+</resources>

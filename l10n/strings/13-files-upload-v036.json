@@ -215,6 +215,14 @@
     "zh-Hans": "由于终端未连接，已上传的路径已复制到剪贴板。",
     "zh-Hant": "由於終端機未連線，已上傳的路徑已複製到剪貼簿。"
   },
+  "The uploaded path was copied to the clipboard because this session is being controlled from another device.": {
+    "de": "Der hochgeladene Pfad wurde in die Zwischenablage kopiert, weil diese Sitzung von einem anderen Gerät gesteuert wird.",
+    "es": "La ruta del archivo subido se copió en el portapapeles porque esta sesión se está controlando desde otro dispositivo.",
+    "fr": "Le chemin du fichier téléversé a été copié dans le presse-papiers, car cette session est contrôlée depuis un autre appareil.",
+    "ja": "このセッションは別のデバイスから操作されているため、アップロードしたパスをクリップボードにコピーしました。",
+    "zh-Hans": "由于此会话正由另一台设备控制，已上传的路径已复制到剪贴板。",
+    "zh-Hant": "由於此工作階段正由另一台裝置控制，已上傳的路徑已複製到剪貼簿。"
+  },
   "Try Again": {
     "de": "Erneut versuchen",
     "es": "Intentar de nuevo",

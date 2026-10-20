@@ -33,8 +33,8 @@ SIMCTL_CHILD_TESSERA_FILES_HARNESS=1 \
   xcrun simctl launch "$UDID" "$BUNDLE_ID" >"$CASE_DIR/launch.txt"
 sleep 2
 xcrun simctl io "$UDID" screenshot "$CASE_DIR/initial-launch.raw.png" >/dev/null
-sips -r 270 "$CASE_DIR/initial-launch.raw.png" \
-  --out "$CASE_DIR/initial-launch.png" >/dev/null
+"$HERE/normalize-landscape-screenshot.sh" "$CASE_DIR/initial-launch.raw.png" \
+  "$CASE_DIR/initial-launch.png" >/dev/null
 rm "$CASE_DIR/initial-launch.raw.png"
 
 xcrun simctl io "$UDID" recordVideo --codec=h264 --force "$VIDEO" \
@@ -46,7 +46,18 @@ cleanup_recording() {
     wait "$record_pid" || true
   fi
 }
-trap cleanup_recording EXIT
+exit_cleanup() {
+  local status=$?
+  # bash 3.2 enters this trap with $? = 0 after a `set -u` abort under
+  # `set -e`; only a run that reached script_completed=1 may exit 0.
+  if [[ "$status" -eq 0 && "${script_completed:-0}" != 1 ]]; then
+    echo "${0##*/}: aborted before completion (bash set -u abort?)" >&2
+    status=1
+  fi
+  cleanup_recording
+  exit "$status"
+}
+trap exit_cleanup EXIT
 
 for _ in {1..50}; do
   grep -q 'Recording started' "$CASE_DIR/record-video.log" && break
@@ -82,10 +93,17 @@ before_offset="$(jq -r '."before-long-press"' "$CASE_DIR/event-offsets.json")"
 # lag wall-clock event timestamps, so the settled frame is the last decoded
 # frame: recording stops only after the post-dismiss-settled marker and test
 # teardown complete.
-ffmpeg -hide_banner -loglevel error -ss "$before_offset" -i "$VIDEO" \
-  -vf 'transpose=cclock' -frames:v 1 "$CASE_DIR/before-event-frame.png"
+# simctl recordings are variable-frame-rate and can have a long presentation
+# timestamp gap around an idle UI. Seeking to the event offset chooses the next
+# frame, which may already contain the long-press backstop. Decode through the
+# marker instead and retain the last frame at or before it.
+rotate="$("$HERE/landscape-video-filter.sh" "$VIDEO")"
+frame_filter="${rotate%,}"
+ffmpeg -hide_banner -loglevel error -i "$VIDEO" -to "$before_offset" \
+  -vf "${frame_filter:-null}" -fps_mode vfr -update 1 -y \
+  "$CASE_DIR/before-event-frame.png"
 ffmpeg -hide_banner -loglevel error -i "$VIDEO" \
-  -vf 'transpose=cclock' -fps_mode passthrough -update 1 -y \
+  -vf "${frame_filter:-null}" -fps_mode vfr -update 1 -y \
   "$CASE_DIR/post-dismiss-settled-frame.png"
 test -s "$CASE_DIR/before-event-frame.png"
 test -s "$CASE_DIR/post-dismiss-settled-frame.png"
@@ -95,13 +113,13 @@ xcrun xcresulttool get test-results summary --path "$XCRESULT" \
 ffprobe -v error -show_entries format=duration,size -of json "$VIDEO" \
   >"$CASE_DIR/video-info.json"
 ffmpeg -hide_banner -loglevel error -i "$VIDEO" \
-  -vf "setpts=N/30/TB,transpose=cclock,signalstats,metadata=print:file=$CASE_DIR/signalstats.txt" \
-  -f null -
+  -vf "setpts=N/30/TB,${rotate}signalstats,metadata=print:file=$CASE_DIR/signalstats.txt" \
+  -r 30 -f null -
 python3 "$HERE/summarize-signalstats.py" \
   "$CASE_DIR/signalstats.txt" "$CASE_DIR/signalstats-summary.json"
 ffmpeg -hide_banner -loglevel error -i "$VIDEO" \
-  -vf 'setpts=N/30/TB,transpose=cclock,fps=3,scale=320:-1,tile=6x8:padding=2:margin=2' \
-  -frames:v 1 "$CASE_DIR/timeline-contact-sheet.png"
+  -vf "setpts=N/30/TB,${rotate}fps=3,scale=320:-1,tile=6x8:padding=2:margin=2" \
+  -frames:v 1 -y "$CASE_DIR/timeline-contact-sheet.png"
 
 cat >"$CASE_DIR/case.json" <<'JSON'
 {
@@ -115,7 +133,8 @@ cat >"$CASE_DIR/case.json" <<'JSON'
     "The card remains backed for the post-dismiss suppression interval and returns without a transparency flash or delayed geometry shift. Normal system whole-screen dimming is not a failure.",
     "The pre-interaction and settled post-interaction card return to the same intended translucent frosted tone and geometry; neither normal endpoint is expected to remain opaque."
   ],
-  "capture_notes": "Use before-event-frame.png and post-dismiss-settled-frame.png for normal frosted tone and geometry comparison: both come from one uninterrupted recording after XCUITest established its window geometry, and both should visibly transmit softened/tinted HARNESS stripes. The baseline is selected from the before-long-press event offset. Because simctl movie PTS can lag wall-clock event timestamps, the settled image is the recording's last decoded frame; recording stops only after the post-dismiss-settled marker and test teardown complete. initial-launch.png is only a content/layout reference and must not be used as the pre-interaction geometry baseline. The contact sheet samples the entire recording at 3 fps after physically normalizing the fixed simulator framebuffer to landscape. Ignore XCUITest's initial orientation transition before the before-long-press marker. Only the suppression interval must use the deliberately near-black opaque regression backstop; it is not a hole. A failure exposes colorful HARNESS stripes through the card during that interval, loses the card/rows, or flashes transparent during recovery. signalstats-summary.json contains the complete compact per-frame metric series. Event timestamps and derived offsets are in xctest.log and event-offsets.json.",
+  "capture_notes": "Use before-event-frame.png and post-dismiss-settled-frame.png for normal frosted tone and geometry comparison: both come from one uninterrupted recording after XCUITest established its window geometry, and both should visibly transmit softened/tinted HARNESS stripes. The baseline is selected from the before-long-press event offset. Because simctl movie PTS can lag wall-clock event timestamps, the settled image is the recording's last decoded frame; recording stops only after the post-dismiss-settled marker and test teardown complete. initial-launch.png is only a content/layout reference and must not be used as the pre-interaction geometry baseline. The contact sheet samples the entire recording at 3 fps after normalizing displayed portrait frames to landscape. Ignore XCUITest's initial orientation transition before the before-long-press marker. Only the suppression interval must use the deliberately near-black opaque regression backstop; it is not a hole. A failure exposes colorful HARNESS stripes through the card during that interval, loses the card/rows, or flashes transparent during recovery. signalstats-summary.json contains the complete compact per-frame metric series. Event timestamps and derived offsets are in xctest.log and event-offsets.json.",
   "deterministic_precheck": {"verdict": "not-run"}
 }
 JSON
+script_completed=1

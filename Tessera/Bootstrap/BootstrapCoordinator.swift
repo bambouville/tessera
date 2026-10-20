@@ -38,6 +38,19 @@ struct BootstrapCredentialChecklistItem: Identifiable, Equatable, Sendable {
         }
     }
 
+    /// Wording for the QR transport, where the box decides whether the host is
+    /// copied at all rather than whether a key grant is installed.
+    var copyDetail: LocalizedStringResource {
+        switch authenticationHint {
+        case .publicKey:
+            return "Copied, and the paired device's key is installed using this device's existing access."
+        case .password:
+            return "Copied. Its password never leaves this device and is requested on first connect."
+        case .none:
+            return "Copied. A credential is requested on first connect."
+        }
+    }
+
     var detail: LocalizedStringResource {
         switch authenticationHint {
         case .publicKey:
@@ -75,6 +88,17 @@ struct BootstrapGrantSelectionState: Equatable, Sendable {
     var selectedOptionalTransfers: Set<BootstrapOptionalTransfer>
 
     var selectedCount: Int { selectedHostIDs.count }
+}
+
+extension BootstrapCredentialChecklistItem {
+    /// Both setup transports describe a host to the sender the same way.
+    init(_ host: BootstrapHostDescriptor) {
+        self.init(
+            id: host.id,
+            hostName: host.name,
+            authenticationHint: host.authenticationHint
+        )
+    }
 }
 
 struct BootstrapGrantInstallRequest: Equatable, Sendable {
@@ -196,7 +220,7 @@ struct BootstrapFirstOpenStore {
 @Observable
 final class BootstrapCoordinator {
     typealias BiometricAuthorizer = @MainActor @Sendable (String) async -> BootstrapBiometricDecision
-    typealias ManifestExporter = @MainActor @Sendable () async throws -> BootstrapManifest
+    typealias ManifestExporter = @MainActor @Sendable (Bool) async throws -> BootstrapManifest
     typealias ManifestImporter = @MainActor @Sendable (
         BootstrapManifest,
         String
@@ -238,6 +262,10 @@ final class BootstrapCoordinator {
     private(set) var activeHandshakeTranscriptHash: Data?
 
     var isPresented: Bool { phase != .inactive }
+    var hasCompletedFirstOpen: Bool { firstOpenStore.isComplete }
+
+    // Cancel defers the offer until the next launch, including tour re-entry.
+    private var hasOfferedFirstOpen = false
 
     private struct PendingOriginBatch {
         let manifest: BootstrapManifest
@@ -254,6 +282,7 @@ final class BootstrapCoordinator {
     private let firstOpenStore: BootstrapFirstOpenStore
     private let biometricAuthorizer: BiometricAuthorizer
     private let handshakeTimeoutNanoseconds: UInt64
+    private let recipientDeclaresAgentCenterEnabled: Bool
     private var manifestExporter: ManifestExporter?
     private var manifestImporter: ManifestImporter?
     private var recipientKeyProvider: RecipientKeyProvider?
@@ -298,6 +327,7 @@ final class BootstrapCoordinator {
         service: NearbyTransferService,
         firstOpenStore: BootstrapFirstOpenStore = BootstrapFirstOpenStore(),
         biometricAuthorizer: @escaping BiometricAuthorizer,
+        recipientDeclaresAgentCenterEnabled: Bool = true,
         manifestExporter: ManifestExporter? = nil,
         manifestImporter: ManifestImporter? = nil,
         recipientKeyProvider: RecipientKeyProvider? = nil,
@@ -318,6 +348,7 @@ final class BootstrapCoordinator {
         self.firstOpenStore = firstOpenStore
         self.biometricAuthorizer = biometricAuthorizer
         self.handshakeTimeoutNanoseconds = handshakeTimeoutNanoseconds
+        self.recipientDeclaresAgentCenterEnabled = recipientDeclaresAgentCenterEnabled
         self.manifestExporter = manifestExporter
         self.manifestImporter = manifestImporter
         self.recipientKeyProvider = recipientKeyProvider
@@ -358,10 +389,11 @@ final class BootstrapCoordinator {
         admissionHandler: @escaping BootstrapAdmissionHandler = { _ in .proceedFull },
         finalAdmissionValidator: @escaping BootstrapFinalAdmissionValidator = { _ in true }
     ) {
-        manifestExporter = manifestExporter ?? {
+        manifestExporter = manifestExporter ?? { peerSupportsAgentCenterEnabled in
             try await BootstrapManifestAdapter.export(
                 from: modelContext,
-                appearance: appearance
+                appearance: appearance,
+                peerSupportsAgentCenterEnabled: peerSupportsAgentCenterEnabled
             )
         }
         manifestImporter = { manifest, peerName in
@@ -483,8 +515,10 @@ final class BootstrapCoordinator {
 
     func beginIfFirstOpen(hasHosts: Bool) {
         guard phase == .inactive,
+              !hasOfferedFirstOpen,
               (!hasHosts || interruptedImportProvider()),
               !firstOpenStore.isComplete else { return }
+        hasOfferedFirstOpen = true
         phase = .welcome
     }
 
@@ -781,15 +815,21 @@ final class BootstrapCoordinator {
         )
     }
 
-    private static func liveRecordRecipientGrant(
+    /// Shared by the Pairing-v1 adapter after the authenticated grant receipt
+    /// is durable. The legacy Bonjour coordinator remains a caller; this is
+    /// the one SwiftData/ledger mutation boundary for recipient bootstrap keys.
+    static func liveRecordRecipientGrant(
         _ record: BootstrapRecipientGrantRecord,
-        in modelContext: ModelContext
+        in modelContext: ModelContext,
+        save: (ModelContext) throws -> Void = { try $0.save() }
     ) throws {
         let hosts = try modelContext.fetch(FetchDescriptor<PersistedHost>())
         guard let host = hosts.first(where: { $0.id == record.hostID }) else {
             throw BootstrapCoordinatorError.missingHost(record.hostID)
         }
         let identities = try modelContext.fetch(FetchDescriptor<Identity>())
+        let previousIdentity = host.identity
+        var insertedIdentity: Identity?
         let identity = identities.first {
             guard $0.user == host.effectiveUser,
                   case .key(let keyID) = $0.credentialMode
@@ -802,10 +842,16 @@ final class BootstrapCoordinator {
                 credentialMode: .key(record.recipientKey.storedKeyID)
             )
             modelContext.insert(created)
+            insertedIdentity = created
             return created
         }()
         host.identity = identity
-        try modelContext.save()
+        do { try save(modelContext) }
+        catch {
+            host.identity = previousIdentity
+            if let insertedIdentity { modelContext.delete(insertedIdentity) }
+            throw error
+        }
 
         KeySecurityMetadataStore().recordRemoteInstallation(
             keyID: record.recipientKey.storedKeyID,
@@ -818,6 +864,37 @@ final class BootstrapCoordinator {
             flow: .bootstrap,
             publicKeyFingerprint: record.recipientKey.publicKey.fingerprint,
             authorizedKeysLine: record.recipientKey.publicKey.authorizedKeysLine
+        )
+    }
+
+    /// Writes the recoverable, pre-remote-mutation receipt for a Pairing-v1
+    /// recipient import. It is deliberately public only inside the app module:
+    /// the shared runtime sees neither SwiftData nor device-key metadata.
+    static func liveRecordRecipientGrantIntent(_ record: BootstrapRecipientGrantRecord) {
+        KeySecurityMetadataStore().recordRemoteInstallation(
+            keyID: record.recipientKey.storedKeyID,
+            hostID: record.hostID,
+            hostLabel: record.hostName,
+            endpoint: record.endpoint,
+            routeIdentity: record.routeIdentity,
+            peerDeviceName: record.peerDeviceName,
+            direction: .receivedFromPeer,
+            flow: .bootstrap,
+            verificationState: .uncertain,
+            publicKeyFingerprint: record.recipientKey.publicKey.fingerprint,
+            authorizedKeysLine: record.recipientKey.publicKey.authorizedKeysLine
+        )
+    }
+
+    static func liveDiscardRecipientGrantIntent(_ record: BootstrapRecipientGrantRecord) {
+        KeySecurityMetadataStore().discardRemoteInstallationIntent(
+            keyID: record.recipientKey.storedKeyID,
+            hostID: record.hostID,
+            routeIdentity: record.routeIdentity,
+            publicKeyFingerprint: record.recipientKey.publicKey.fingerprint,
+            authorizedKeysLine: record.recipientKey.publicKey.authorizedKeysLine,
+            direction: .receivedFromPeer,
+            flow: .bootstrap
         )
     }
 
@@ -1100,7 +1177,7 @@ final class BootstrapCoordinator {
                 let publicKeyFrame = try await connection.receive(maximumSize: 65_536)
                 try Task.checkCancellation()
                 let publicKey = try session.openRecipientPublicKey(publicKeyFrame)
-                let manifest = try await manifestExporter()
+                let manifest = try await manifestExporter(session.peerSupportsAgentCenterEnabled)
                 try Task.checkCancellation()
                 let checklist = manifest.hosts.map(Self.checklistItem)
                 let selection = BootstrapGrantSelectionState(
@@ -1140,7 +1217,7 @@ final class BootstrapCoordinator {
             guard let self else { return }
             do {
                 try await connection.send(
-                    try session.sealRecipientPublicKey(key.publicKey)
+                    try session.sealRecipientPublicKey(key.publicKey, declareManifestExtensions: recipientDeclaresAgentCenterEnabled)
                 )
                 let proof = try await connection.receive(maximumSize: 65_536)
                 try Task.checkCancellation()
@@ -1206,7 +1283,10 @@ final class BootstrapCoordinator {
                 )
                 try Task.checkCancellation()
                 let grantReceipt = try session.openGrantReceipt(grantFrame)
-                try grantReceipt.validate(manifest: manifest, publicKey: key.publicKey)
+                try grantReceipt.validate(
+                    manifest: manifest,
+                    publicKey: key.publicKey.core
+                )
 
                 for result in grantReceipt.results {
                     guard let descriptor = descriptorsByID[result.hostID] else {
@@ -1369,7 +1449,7 @@ final class BootstrapCoordinator {
             )
             try grantReceipt.validate(
                 manifest: wireManifest,
-                publicKey: pendingOriginBatch.publicKey
+                publicKey: pendingOriginBatch.publicKey.core
             )
             try await connection.send(try session.sealGrantReceipt(grantReceipt))
 
@@ -1593,11 +1673,7 @@ final class BootstrapCoordinator {
     private static func checklistItem(
         _ host: BootstrapHostDescriptor
     ) -> BootstrapCredentialChecklistItem {
-        BootstrapCredentialChecklistItem(
-            id: host.id,
-            hostName: host.name,
-            authenticationHint: host.authenticationHint
-        )
+        BootstrapCredentialChecklistItem(host)
     }
 
     private static func result(
@@ -1694,7 +1770,13 @@ final class BootstrapCoordinator {
         case is CancellationError: code = "cancelled"
         default: code = "other"
         }
-        return "failureCode=\(code) failureType=\(String(reflecting: type(of: error)))"
+        // Preserve the released Apple diagnostic spelling after the manifest
+        // error moved behind the shared ProtocolCore typealias. The value is
+        // intentionally a stable category, never peer-controlled content.
+        let typeName = error is BootstrapManifestError
+            ? "Tessera.BootstrapManifestError"
+            : String(reflecting: type(of: error))
+        return "failureCode=\(code) failureType=\(typeName)"
     }
 
     /// Maps protocol errors to actionable failure text. Version mismatches

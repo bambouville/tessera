@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tmux_move_left">左に移動</string>
+    <string name="tmux_move_right">右に移動</string>
+    <string name="tmux_move_up">上に移動</string>
+    <string name="tmux_move_down">下に移動</string>
+    <string name="tmux_move_start">先頭に移動</string>
+    <string name="tmux_move_end">末尾に移動</string>
+    <string name="tmux_tidy">ウインドウ番号を整理</string>
+    <string name="tmux_order_failed">tmux ウインドウの順序を更新できませんでした。</string>
+    <string name="tmux_order_changed">ウインドウの順序が変更されました。もう一度お試しください。</string>
+    <string name="tmux_order_timeout">ウインドウの並べ替えがタイムアウトしました。</string>
+    <string name="tmux_order_unavailable">ウインドウはまだ並べ替えできません。</string>
+    <string name="tmux_window_label">ウインドウ %1$d、%2$s</string>
+    <string name="tmux_window_index_label">ウインドウ %1$d、%2$s、tmux インデックス %3$d</string>
+    <string name="tmux_window_index_detail">tmux インデックス %1$d · %2$s</string>
+    <string name="tmux_split_right">右に分割</string>
+    <string name="tmux_split_left">左に分割</string>
+    <string name="tmux_split_down">下に分割</string>
+    <string name="tmux_split_up">上に分割</string>
+</resources>

@@ -1,0 +1,11 @@
+{
+  "Scan": {"de":"Scannen","es":"Escanear","fr":"Scanner","ja":"スキャン","zh-Hans":"扫描","zh-Hant":"掃描"},
+  "Discover": {"de":"Suchen","es":"Buscar","fr":"Rechercher","ja":"検出","zh-Hans":"发现","zh-Hant":"探索"},
+  "Verify": {"de":"Prüfen","es":"Verificar","fr":"Vérifier","ja":"確認","zh-Hans":"验证","zh-Hant":"驗證"},
+  "Choose": {"de":"Auswählen","es":"Elegir","fr":"Choisir","ja":"選択","zh-Hans":"选择","zh-Hant":"選擇"},
+  "Transfer": {"de":"Übertragen","es":"Transferir","fr":"Transférer","ja":"転送","zh-Hans":"传输","zh-Hant":"傳輸"},
+  "Connect": {"de":"Verbinden","es":"Conectar","fr":"Connecter","ja":"接続","zh-Hans":"连接","zh-Hant":"連線"},
+  "ALREADY AUTHORIZED": {"de":"BEREITS AUTORISIERT","es":"YA AUTORIZADO","fr":"DÉJÀ AUTORISÉ","ja":"承認済み","zh-Hans":"已授权","zh-Hant":"已授權"},
+  "CONFIGURATION COPIED": {"de":"KONFIGURATION KOPIERT","es":"CONFIGURACIÓN COPIADA","fr":"CONFIGURATION COPIÉE","ja":"設定をコピー済み","zh-Hans":"配置已复制","zh-Hant":"設定已複製"},
+  "ACCESS NOT VERIFIED": {"de":"ZUGRIFF NICHT VERIFIZIERT","es":"ACCESO SIN VERIFICAR","fr":"ACCÈS NON VÉRIFIÉ","ja":"アクセス未確認","zh-Hans":"访问权限未验证","zh-Hant":"存取權限未驗證"}
+}

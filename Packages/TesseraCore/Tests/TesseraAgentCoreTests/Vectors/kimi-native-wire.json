@@ -1,0 +1,395 @@
+{
+  "upstream": "95478e8c7ba248fd2470d5bb151555ec7fedd19d",
+  "protocolVersion": "1.5",
+  "records": [
+    {
+      "type": "config.update",
+      "agentId": "main"
+    },
+    {
+      "type": "context.append_loop_event",
+      "agentId": "main",
+      "event": {
+        "type": "step.begin",
+        "uuid": "step"
+      }
+    },
+    {
+      "type": "context.append_message",
+      "agentId": "main",
+      "message": {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "synthetic request"
+          }
+        ],
+        "toolCalls": []
+      }
+    },
+    {
+      "type": "context.apply_compaction",
+      "summary": "synthetic",
+      "compactedCount": 1,
+      "agentId": "main"
+    },
+    {
+      "type": "context.clear",
+      "agentId": "main"
+    },
+    {
+      "type": "context.undo",
+      "agentId": "main",
+      "count": 1
+    },
+    {
+      "type": "cron.add",
+      "task": {
+        "id": "synthetic",
+        "cron": "synthetic",
+        "prompt": "synthetic",
+        "createdAt": 1
+      },
+      "agentId": "main"
+    },
+    {
+      "type": "cron.cursor",
+      "id": "synthetic",
+      "lastFiredAt": 1,
+      "agentId": "main"
+    },
+    {
+      "type": "cron.delete",
+      "ids": [],
+      "agentId": "main"
+    },
+    {
+      "type": "file_history.checkpoint",
+      "agentId": "main",
+      "turnId": 1,
+      "entries": {}
+    },
+    {
+      "type": "file_history.tracked",
+      "agentId": "main",
+      "turnId": 1,
+      "path": "synthetic",
+      "entry": {
+        "key": "synthetic",
+        "version": 1
+      }
+    },
+    {
+      "type": "forked",
+      "agentId": "main"
+    },
+    {
+      "type": "full_compaction.begin",
+      "agentId": "main",
+      "source": "manual"
+    },
+    {
+      "type": "full_compaction.cancel",
+      "agentId": "main"
+    },
+    {
+      "type": "full_compaction.complete",
+      "agentId": "main"
+    },
+    {
+      "type": "goal.clear",
+      "agentId": "main"
+    },
+    {
+      "type": "goal.create",
+      "agentId": "main",
+      "goalId": "synthetic",
+      "objective": "synthetic"
+    },
+    {
+      "type": "goal.update",
+      "agentId": "main"
+    },
+    {
+      "type": "interaction.request",
+      "agentId": "main",
+      "id": "synthetic",
+      "kind": "approval",
+      "request": {}
+    },
+    {
+      "type": "interaction.resolved",
+      "agentId": "main",
+      "id": "synthetic",
+      "response": {}
+    },
+    {
+      "type": "interruptionReminder.recorded",
+      "agentId": "main",
+      "turnId": 1
+    },
+    {
+      "type": "llm.request",
+      "agentId": "main",
+      "kind": "loop",
+      "provider": "synthetic",
+      "model": "synthetic",
+      "toolSelect": false,
+      "systemPromptHash": "synthetic",
+      "toolsHash": "synthetic",
+      "messageCount": 1
+    },
+    {
+      "type": "llm.tools_snapshot",
+      "agentId": "main",
+      "hash": "synthetic",
+      "tools": []
+    },
+    {
+      "type": "mcp.tools_discovered",
+      "agentId": "main",
+      "serverName": "synthetic",
+      "hash": "synthetic",
+      "tools": [],
+      "enabledNames": []
+    },
+    {
+      "type": "permission.record_approval_result",
+      "agentId": "main",
+      "turnId": 1,
+      "toolCallId": "synthetic",
+      "toolName": "synthetic",
+      "action": "synthetic",
+      "result": {
+        "decision": "approved"
+      }
+    },
+    {
+      "type": "permission.set_mode",
+      "agentId": "main",
+      "mode": "manual"
+    },
+    {
+      "type": "plan_mode.cancel",
+      "agentId": "main"
+    },
+    {
+      "type": "plan_mode.enter",
+      "agentId": "main",
+      "id": "synthetic"
+    },
+    {
+      "type": "plan_mode.exit",
+      "agentId": "main"
+    },
+    {
+      "type": "plan.revision",
+      "agentId": "main",
+      "id": "synthetic",
+      "version": 1,
+      "key": "synthetic",
+      "sha256": "synthetic",
+      "bytes": 1
+    },
+    {
+      "type": "plugin.session_start",
+      "agentId": "main",
+      "content": "synthetic"
+    },
+    {
+      "type": "profile.bind",
+      "agentId": "main",
+      "thinkingEffort": "off",
+      "systemPrompt": "synthetic",
+      "disallowedTools": []
+    },
+    {
+      "type": "prompt.aborted",
+      "agentId": "main",
+      "promptId": "synthetic",
+      "abortedAt": "synthetic"
+    },
+    {
+      "type": "prompt.accepted",
+      "agentId": "main",
+      "promptId": "synthetic"
+    },
+    {
+      "type": "prompt.completed",
+      "agentId": "main",
+      "promptId": "synthetic",
+      "finishedAt": "synthetic",
+      "reason": "completed"
+    },
+    {
+      "type": "prompt.steered",
+      "agentId": "main",
+      "activePromptId": "synthetic",
+      "promptIds": [],
+      "content": [],
+      "steeredAt": "synthetic"
+    },
+    {
+      "type": "runtime.set_binding",
+      "agentId": "main",
+      "workspaceId": "synthetic",
+      "runtimeId": "synthetic"
+    },
+    {
+      "type": "swarm_mode.enter",
+      "agentId": "main",
+      "trigger": "manual"
+    },
+    {
+      "type": "swarm_mode.exit",
+      "agentId": "main"
+    },
+    {
+      "type": "task.started",
+      "agentId": "main",
+      "info": {
+        "kind": "agent",
+        "taskId": "task",
+        "agentId": "child",
+        "status": "running",
+        "description": "synthetic task",
+        "startedAt": 1
+      }
+    },
+    {
+      "type": "task.terminated",
+      "agentId": "main",
+      "info": {
+        "kind": "agent",
+        "taskId": "task",
+        "agentId": "child",
+        "status": "completed",
+        "description": "synthetic task",
+        "startedAt": 1
+      }
+    },
+    {
+      "type": "task.waitDelivered",
+      "agentId": "main",
+      "keys": []
+    },
+    {
+      "type": "token_counting.measured",
+      "agentId": "main",
+      "length": 1,
+      "tokens": 1
+    },
+    {
+      "type": "token_counting.rebased",
+      "agentId": "main",
+      "length": 1,
+      "tokens": 1,
+      "measured": false
+    },
+    {
+      "type": "token_counting.truncated",
+      "agentId": "main",
+      "length": 1,
+      "tokens": 1
+    },
+    {
+      "type": "token_counting.turn_recorded",
+      "agentId": "main",
+      "length": 1,
+      "tokens": 1,
+      "turnId": 1
+    },
+    {
+      "type": "tools.register_user_tool",
+      "agentId": "main",
+      "name": "synthetic",
+      "description": "synthetic",
+      "parameters": {}
+    },
+    {
+      "type": "tools.reset_active_tools",
+      "agentId": "main"
+    },
+    {
+      "type": "tools.set_active_tools",
+      "agentId": "main",
+      "names": []
+    },
+    {
+      "type": "tools.unregister_user_tool",
+      "agentId": "main",
+      "name": "synthetic"
+    },
+    {
+      "type": "tools.update_store",
+      "agentId": "main",
+      "key": "synthetic",
+      "value": {}
+    },
+    {
+      "type": "tower_mode.enter",
+      "agentId": "main"
+    },
+    {
+      "type": "tower_mode.exit",
+      "agentId": "main"
+    },
+    {
+      "type": "turn.cancel",
+      "agentId": "main"
+    },
+    {
+      "type": "turn.ended",
+      "agentId": "main",
+      "turnId": 1,
+      "reason": "completed"
+    },
+    {
+      "type": "turn.prompt",
+      "agentId": "main",
+      "input": [],
+      "origin": {
+        "kind": "user"
+      }
+    },
+    {
+      "type": "turn.steer",
+      "agentId": "main",
+      "input": [],
+      "origin": {
+        "kind": "user"
+      }
+    },
+    {
+      "type": "turn.step.interrupted",
+      "agentId": "main",
+      "turnId": 1,
+      "step": 1,
+      "reason": "synthetic"
+    },
+    {
+      "type": "turn.step.retrying",
+      "agentId": "main",
+      "turnId": 1,
+      "step": 1,
+      "failedAttempt": 1,
+      "nextAttempt": 1,
+      "maxAttempts": 1,
+      "delayMs": 1,
+      "errorName": "synthetic",
+      "errorMessage": "synthetic"
+    },
+    {
+      "type": "usage.record",
+      "agentId": "main",
+      "model": "synthetic",
+      "usage": {
+        "inputOther": 1,
+        "output": 1,
+        "inputCacheRead": 1,
+        "inputCacheCreation": 1
+      }
+    }
+  ]
+}

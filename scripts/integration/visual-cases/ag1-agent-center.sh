@@ -13,7 +13,7 @@ DERIVED_DATA="$(jq -r .derived_data "$RUNTIME")"
 BUNDLE_ID=com.bambouville.TesseraApp
 mkdir -p "$CASE_DIR"
 
-rm -rf "$VISUAL_ROOT/ag1-hook-disclosure.xcresult"
+rm -rf "$VISUAL_ROOT/ag1-agent-center-v2.xcresult"
 xcrun simctl spawn "$UDID" launchctl setenv TESSERA_VISUAL_CAPTURE 1
 TESSERA_VISUAL_CAPTURE=1 xcodebuild test-without-building \
   -project "$HERE/../../Tessera.xcodeproj" \
@@ -21,97 +21,19 @@ TESSERA_VISUAL_CAPTURE=1 xcodebuild test-without-building \
   -configuration Debug \
   -destination "platform=iOS Simulator,id=$UDID" \
   -derivedDataPath "$DERIVED_DATA" \
-  -resultBundlePath "$VISUAL_ROOT/ag1-hook-disclosure.xcresult" \
-  -only-testing:TesseraUITests/VisualCaptureProbe/testAgentHookHelpDisclosureExpands \
-  -only-testing:TesseraUITests/VisualCaptureProbe/testAgentCenterHarnessCoversLifecycleStatesAndIdentity \
-  -only-testing:TesseraUITests/VisualCaptureProbe/testAgentAttentionTopBarAndPopoverUseCurrentWindowVisibility \
-  -only-testing:TesseraUITests/VisualCaptureProbe/testAgentNotificationDeliversWhileBackgroundAssertionIsActive \
-  -only-testing:TesseraUITests/VisualCaptureProbe/testAgentCenterInstallPromptOpensHelpAndSource \
-  -only-testing:TesseraUITests/VisualCaptureProbe/testAgentIntegrationMissingAgentConfirmationDisclosesOneStepActivation \
-  -only-testing:TesseraUITests/VisualCaptureProbe/testAgentIntegrationWarningOpensHelpAndSource \
-  -only-testing:TesseraUITests/VisualCaptureProbe/testCompactAgentIntegrationWarningAppearsInHostSwitcher \
-  >"$CASE_DIR/hook-disclosure-xctest.log" 2>&1
+  -resultBundlePath "$VISUAL_ROOT/ag1-agent-center-v2.xcresult" \
+  -only-testing:TesseraUITests/VisualCaptureProbe/testAgentCenterV2HarnessCoversThreadHierarchyAndActions \
+  -only-testing:TesseraUITests/VisualCaptureProbe/testAgentCenterV2HarnessCoversLoadingAndCompactUrgentFallback \
+  -only-testing:TesseraUITests/VisualCaptureProbe/testAgentCenterV2HarnessCoversErrorTraitsAndKeyboardFocus \
+  >"$CASE_DIR/agent-center-v2-xctest.log" 2>&1
 
 xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
-SIMCTL_CHILD_TESSERA_AGENT_CENTER_HARNESS=1 \
+SIMCTL_CHILD_TESSERA_AGENT_CENTER_V2_HARNESS=1 \
   xcrun simctl launch "$UDID" "$BUNDLE_ID" >"$CASE_DIR/launch.txt"
 sleep 2
 xcrun simctl io "$UDID" screenshot "$CASE_DIR/agent-center.raw.png" >/dev/null
-sips -r 270 "$CASE_DIR/agent-center.raw.png" --out "$CASE_DIR/agent-center.png" >/dev/null
+"$HERE/normalize-landscape-screenshot.sh" "$CASE_DIR/agent-center.raw.png" "$CASE_DIR/agent-center.png" >/dev/null
 rm "$CASE_DIR/agent-center.raw.png"
-
-xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
-SIMCTL_CHILD_TESSERA_AGENT_ATTENTION_HARNESS=1 \
-  xcrun simctl launch "$UDID" "$BUNDLE_ID" >"$CASE_DIR/attention-bar-launch.txt"
-sleep 2
-xcrun simctl io "$UDID" screenshot "$CASE_DIR/attention-bar.raw.png" >/dev/null
-sips -r 270 "$CASE_DIR/attention-bar.raw.png" --out "$CASE_DIR/attention-bar.png" >/dev/null
-rm "$CASE_DIR/attention-bar.raw.png"
-
-xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
-SIMCTL_CHILD_TESSERA_AGENT_ATTENTION_HARNESS=1 \
-SIMCTL_CHILD_TESSERA_AGENT_ATTENTION_AUTO_OPEN=1 \
-  xcrun simctl launch "$UDID" "$BUNDLE_ID" >"$CASE_DIR/attention-popover-launch.txt"
-sleep 2
-xcrun simctl io "$UDID" screenshot "$CASE_DIR/attention-popover.raw.png" >/dev/null
-sips -r 270 "$CASE_DIR/attention-popover.raw.png" --out "$CASE_DIR/attention-popover.png" >/dev/null
-rm "$CASE_DIR/attention-popover.raw.png"
-
-xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
-SIMCTL_CHILD_TESSERA_AGENT_HOOK_HELP_HARNESS=1 \
-  xcrun simctl launch "$UDID" "$BUNDLE_ID" >"$CASE_DIR/hook-help-launch.txt"
-sleep 2
-xcrun simctl io "$UDID" screenshot "$CASE_DIR/hook-help.raw.png" >/dev/null
-sips -r 270 "$CASE_DIR/hook-help.raw.png" --out "$CASE_DIR/hook-help.png" >/dev/null
-rm "$CASE_DIR/hook-help.raw.png"
-
-xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
-SIMCTL_CHILD_TESSERA_AGENT_HOOK_SOURCE_HARNESS=1 \
-  xcrun simctl launch "$UDID" "$BUNDLE_ID" >"$CASE_DIR/hook-source-launch.txt"
-# The exact source is a width-constrained, vertically scrollable, selectable
-# text view. Its first layout can outlive the generic two-second launch settle
-# on a cold sim, leaving the app's launch progress veil in the screenshot.
-# Capture the stable disclosure state that a person actually reads. Under
-# concurrent simulator load, four seconds can still catch SpringBoard between
-# the test runner yielding foreground and the harness scene becoming active.
-sleep 6
-xcrun simctl io "$UDID" screenshot "$CASE_DIR/hook-source.raw.png" >/dev/null
-sips -r 270 "$CASE_DIR/hook-source.raw.png" --out "$CASE_DIR/hook-source.png" >/dev/null
-rm "$CASE_DIR/hook-source.raw.png"
-
-xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
-SIMCTL_CHILD_TESSERA_AGENT_INTEGRATION_WARNING_HARNESS=1 \
-  xcrun simctl launch "$UDID" "$BUNDLE_ID" >"$CASE_DIR/integration-warning-launch.txt"
-# The warning popover mounts from SessionTopBar.onAppear. A cold simulator can
-# still be showing the launch snapshot after the generic two-second settle,
-# producing a blank attachment even though the XCUITest interaction passed.
-sleep 4
-xcrun simctl io "$UDID" screenshot "$CASE_DIR/integration-warning.raw.png" >/dev/null
-sips -r 270 "$CASE_DIR/integration-warning.raw.png" --out "$CASE_DIR/integration-warning.png" >/dev/null
-rm "$CASE_DIR/integration-warning.raw.png"
-
-xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
-SIMCTL_CHILD_TESSERA_AGENT_INTEGRATION_WARNING_HARNESS=1 \
-SIMCTL_CHILD_TESSERA_AGENT_INTEGRATION_WARNING_AUTO_OPEN=0 \
-SIMCTL_CHILD_TESSERA_AGENT_INTEGRATION_WARNING_COMPACT=1 \
-SIMCTL_CHILD_TESSERA_AGENT_INTEGRATION_WARNING_STATE=missing-agent \
-  xcrun simctl launch "$UDID" "$BUNDLE_ID" >"$CASE_DIR/compact-integration-warning-bar-launch.txt"
-sleep 2
-xcrun simctl io "$UDID" screenshot "$CASE_DIR/compact-integration-warning-bar.raw.png" >/dev/null
-sips -r 270 "$CASE_DIR/compact-integration-warning-bar.raw.png" --out "$CASE_DIR/compact-integration-warning-bar.png" >/dev/null
-rm "$CASE_DIR/compact-integration-warning-bar.raw.png"
-
-xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
-SIMCTL_CHILD_TESSERA_AGENT_INTEGRATION_WARNING_HARNESS=1 \
-SIMCTL_CHILD_TESSERA_AGENT_INTEGRATION_WARNING_AUTO_OPEN=0 \
-SIMCTL_CHILD_TESSERA_AGENT_INTEGRATION_WARNING_COMPACT=1 \
-SIMCTL_CHILD_TESSERA_AGENT_INTEGRATION_WARNING_STATE=missing-agent \
-SIMCTL_CHILD_TESSERA_AGENT_INTEGRATION_WARNING_SWITCHER_AUTO_OPEN=1 \
-  xcrun simctl launch "$UDID" "$BUNDLE_ID" >"$CASE_DIR/compact-integration-warning-switcher-launch.txt"
-sleep 2
-xcrun simctl io "$UDID" screenshot "$CASE_DIR/compact-integration-warning-switcher.raw.png" >/dev/null
-sips -r 270 "$CASE_DIR/compact-integration-warning-switcher.raw.png" --out "$CASE_DIR/compact-integration-warning-switcher.png" >/dev/null
-rm "$CASE_DIR/compact-integration-warning-switcher.raw.png"
 
 xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
 SIMCTL_CHILD_TESSERA_SWIPEPAD_FAN_HARNESS=1 \
@@ -121,7 +43,7 @@ SIMCTL_CHILD_TESSERA_SWIPEPAD_FORCE_RADIAL_OPEN=1 \
   xcrun simctl launch "$UDID" "$BUNDLE_ID" >"$CASE_DIR/swipepad-partial-fan-launch.txt"
 sleep 2
 xcrun simctl io "$UDID" screenshot "$CASE_DIR/swipepad-partial-fan.raw.png" >/dev/null
-sips -r 270 "$CASE_DIR/swipepad-partial-fan.raw.png" --out "$CASE_DIR/swipepad-partial-fan.png" >/dev/null
+"$HERE/normalize-landscape-screenshot.sh" "$CASE_DIR/swipepad-partial-fan.raw.png" "$CASE_DIR/swipepad-partial-fan.png" >/dev/null
 rm "$CASE_DIR/swipepad-partial-fan.raw.png"
 
 xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
@@ -132,43 +54,25 @@ SIMCTL_CHILD_TESSERA_SWIPEPAD_FORCE_RADIAL_OPEN=1 \
   xcrun simctl launch "$UDID" "$BUNDLE_ID" >"$CASE_DIR/swipepad-idle-launch.txt"
 sleep 2
 xcrun simctl io "$UDID" screenshot "$CASE_DIR/swipepad-idle.raw.png" >/dev/null
-sips -r 270 "$CASE_DIR/swipepad-idle.raw.png" --out "$CASE_DIR/swipepad-idle.png" >/dev/null
+"$HERE/normalize-landscape-screenshot.sh" "$CASE_DIR/swipepad-idle.raw.png" "$CASE_DIR/swipepad-idle.png" >/dev/null
 rm "$CASE_DIR/swipepad-idle.raw.png"
 
-xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
-SIMCTL_CHILD_TESSERA_AGENT_PALETTE_HARNESS=1 \
-  xcrun simctl launch "$UDID" "$BUNDLE_ID" >"$CASE_DIR/palette-launch.txt"
-sleep 2
-xcrun simctl io "$UDID" screenshot "$CASE_DIR/agent-palette.raw.png" >/dev/null
-sips -r 270 "$CASE_DIR/agent-palette.raw.png" --out "$CASE_DIR/agent-palette.png" >/dev/null
-rm "$CASE_DIR/agent-palette.raw.png"
 
 cat >"$CASE_DIR/case.json" <<'JSON'
 {
   "id": "AG1-agent-center",
-  "title": "Agent Center lifecycle states, session identity, and inline controls",
+  "title": "Agent Center v2 host-free visual fixture",
   "matrix_ids": ["AG1"],
   "invariants": [
-    "A real Codex plan-approval menu, just-finished agent, working agent, idle agent, and unavailable agent appear in urgency order with distinct readable status treatment.",
-    "Each card keeps its provider session reference, human task summary, host, transport, tmux window/pane address, duration, meaningful viewport excerpt, and open affordance legible without overlap or clipping.",
-    "The working card's task remains the submitted Validate Agent Center request even while its viewport excerpt contains the live Improve documentation composer suggestion.",
-    "The blocked plan card renders only its parsed valid answer buttons; working and idle cards render their correct message, queue, interrupt, and send controls.",
-    "A just-finished group is visually distinct from idle, and idle duration reports time since the last provider lifecycle event.",
-    "The Agent Center sidebar row keeps amber needs-input and neutral total counts while its green completion count represents only unread off-screen completions; viewing Agent Center clears that green count without erasing the just-finished card.",
-    "The foreground terminal bar aggregates only unread off-screen needs-input and just-finished events; its popover identifies each exact tmux location and offers an open action.",
-    "A user-initiated working turn owns a finite iPadOS background assertion; a synthetic Stop delivered after Home schedules an immediate local notification and is verified in the system delivered-notification store.",
-    "Every pane in the currently visible tmux window is omitted from unread attention and the active tab has no green completion marker; inactive waiting and unread-finished windows are amber and green respectively.",
-    "The unavailable card exposes an explicit install-status-hook action rather than implying that remote mutation is automatic.",
-    "Hook help explains why lifecycle integration is necessary, enumerates every remote mutation and privacy boundary, and its show-more state exposes readable exact source without clipping the primary disclosure controls.",
-    "The terminal top bar warning is visible at the far right only when Agent Center integration needs attention, and its popover gives a succinct reason plus a state-specific fix action.",
-    "At compact width the host-name switcher itself carries the integration warning, and the switcher's first section explains the missing hook with its install action without adding another top-bar button.",
-    "A hook-proven idle Codex or Claude composer exposes one SwipePad switch-mode target whose Shift-Tab action and label remain readable without crowding the compact screen.",
-    "When fewer than four SwipePad actions are available, the fan packs only the live targets into a centered continuous arc without a reserved empty slot or a large visual gap.",
-    "An inactive shell warning offers distinct immediate and automatic activation actions; automatic activation names the future-window startup behavior and remains behind explicit confirmation.",
-    "The command palette lists sessions before urgency-ranked agents, shows location context, and remains navigation-only.",
-    "The page is landscape, uses the Tessera flat frosted design language, and has no horizontal truncation of the primary actions at iPad width."
+    "The primary iPad fixture shows the mockup's existing navigation, grouped thread list, and selected structured thread without a browser-tab row.",
+    "The fixture includes needs-input, working, unread-finished, recent, and identity-unproven live-terminal rows; their grouped labels and selected-thread provider/project/branch/host/context/cost metadata are asserted by XCUITest.",
+    "The selected thread exposes Live, Activity, and Changes plus text, collapsed thinking, tool, edit, workflow, subagent, and permission-prompt blocks; the deterministic test enters Activity and Changes.",
+    "The host-free fixture renders New and Fork sheets, the selected thread's prompt actions, Open Terminal, dictation, Send/Queue, and Interrupt controls without a host connection or remote mutation.",
+    "The loading, error, and degraded scenes assert searching, a source-changed safe error, and the no-proven-transcript live-terminal fallback; the compact scene asserts list-to-detail navigation and Open terminal to answer when the prompt lacks a prompt-answer capability.",
+    "Deterministic fixture runs force dark/accessibility Dynamic Type and light/standard Dynamic Type, then verify action, list, and composer keyboard-focus ownership through the fixture's DEBUG accessibility state.",
+    "The retained SwipePad screenshots cover only a three-option fan and an idle fan, including their compact radial packing."
   ],
-  "capture_notes": "DEBUG Agent Center, attention, hook-disclosure, and SwipePad harnesses with deterministic in-memory state; no host connection, mutation, or user data. The aggregate programmatic lane separately drives real installed Codex and Claude through idle, working, visible permission, approval, and idle. Screenshot pixels were rotated counter-clockwise to normalize simctl's fixed portrait framebuffer into landscape.",
-  "deterministic_precheck": {"verdict": "pass", "details": "XCUITest proves current-window completion-marker suppression, unread tab clearing, top-bar/popover counts, compact host-switcher warning placement, and real local-notification delivery while backgrounded; it also expands direct Help and reaches exact source through both the Agent Center install and terminal-warning repair confirmations. Unit coverage proves exact Shift-Tab bytes, idle-only target selection, and packed fan gesture geometry; real-provider lanes verify scene direction, background-assertion policy, plan, and permission classification."}
+  "capture_notes": "DEBUG Agent Center v2 and SwipePad fixtures use deterministic shared-domain snapshots only; no host connection, remote mutation, notification delivery, lifecycle-install UI, command-palette route, or background assertion is represented here. Frames are normalized to upright landscape whichever shape simctl returns.",
+  "deterministic_precheck": {"verdict": "pass", "details": "XCUITest checks the V2 fixture's grouped list, structured thread hierarchy and block kinds, prompt choices, all three projections, New and Fork sheet entry, loading search state, source-changed error, degraded live-terminal fallback, dark/light and Dynamic Type trait injection, keyboard-focus ownership, and compact list-detail navigation with its Open terminal to answer fallback. Separate retained captures show only the stated SwipePad fan variants."}
 }
 JSON

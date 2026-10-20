@@ -11,6 +11,7 @@
 
 import Foundation
 import Observation
+import TesseraDomainCore
 
 @Observable
 @MainActor
@@ -45,6 +46,7 @@ final class FilesPanelController {
         let id = UUID()
         let localURL: URL
         let title: String
+        var prepareImages: (@MainActor () async throws -> Void)? = nil
     }
 
     struct ShareRequest: Identifiable {
@@ -87,6 +89,14 @@ final class FilesPanelController {
     func close() {
         isOpen = false
         bridge?.suppressIdleTeardown = false
+        // `textEntryActive` is only ever written by FilesPanelView's
+        // `syncTextEntryFlag()`, driven by .onChange modifiers on a view that is
+        // mounted only while `isOpen`. Closing with a field still focused tears
+        // that view down before it can clear the flag, and nothing else can:
+        // the session ORs it into `suppressFirstResponderReclaim`, so a stale
+        // true suppresses every terminal reclaim path for the life of the
+        // session. Releasing it here is the only place that always runs.
+        textEntryActive = false
     }
 
     func toggle() {
@@ -400,25 +410,31 @@ final class FilesPanelController {
         Task { @MainActor in
             do {
                 try await bridge.connect()
-                guard let candidate = RemotePathResolver.pathCandidate(from: selection) else {
+                // Both readings of the selection: the strict token, then
+                // the whitespace-collapsed rejoin for a path an agent's
+                // wrapped TUI output broke across rows.
+                let candidates = RemotePathResolver.pathCandidates(from: selection)
+                guard let candidate = candidates.first else {
                     onMiss(String(localized: "Selection doesn't look like a path."))
                     return
                 }
-                guard let absolute = RemotePathResolver.expand(
-                    candidate, home: bridge.homeDirectory,
-                    cwd: cwd ?? terminalDirectory) else {
+                let absolutes = candidates.compactMap {
+                    RemotePathResolver.expand(
+                        $0, home: bridge.homeDirectory, cwd: cwd ?? terminalDirectory)
+                }
+                guard !absolutes.isEmpty else {
                     onMiss(String(
                         localized: "Can't resolve \(candidate) — no directory signal for relative paths.",
                         comment: "A relative path could not be resolved; the argument is the text the user selected"
                     ))
                     return
                 }
-                switch (try await RemotePathResolver.resolve(absolute: absolute, bridge: bridge), intent) {
+                switch (try await RemotePathResolver.resolve(anyOf: absolutes, bridge: bridge), intent) {
                 case (.file(let entry), .quickLook):
                     stageForPresentation(
                         entry, using: queue, allowClosedPanel: true, onFailure: onMiss
                     ) { [weak self] url in
-                        self?.presentedPreview = PreviewRequest(localURL: url, title: entry.name)
+                        self?.presentedPreview = self?.previewRequest(url: url, entry: entry)
                     }
                 case (.file(let entry), .reveal):
                     revealDirectory((entry.path as NSString).deletingLastPathComponent)
@@ -588,7 +604,7 @@ final class FilesPanelController {
 
         onPreviewFile = { [weak self] entry in
             self?.stageForPresentation(entry, using: queue) { url in
-                self?.presentedPreview = PreviewRequest(localURL: url, title: entry.name)
+                self?.presentedPreview = self?.previewRequest(url: url, entry: entry)
             }
         }
 
@@ -671,7 +687,7 @@ final class FilesPanelController {
     static func handleTerminalDrop(
         _ providers: [NSItemProvider],
         queue: any TransferQueueing,
-        inject: @escaping @MainActor (String) -> Void,
+        inject: @escaping @MainActor (String) async -> Void,
         reportFailure: @escaping @MainActor (String) -> Void
     ) -> Bool {
         let eligible = providers.filter {
@@ -730,8 +746,10 @@ final class FilesPanelController {
                 copyError = error
             }
         }
-        if let coordinationError { throw coordinationError }
-        if let copyError { throw copyError }
+        if let error = coordinationError ?? copyError {
+            try? FileManager.default.removeItem(at: staging)
+            throw error
+        }
         return staged
     }
 
@@ -743,6 +761,16 @@ final class FilesPanelController {
         return RemoteFileItemProvider.itemProviderIfDraggable(for: entry) { destination in
             try await bridge.download(remotePath: entry.path, to: destination, progress: nil)
         }
+    }
+
+    private func previewRequest(url: URL, entry: RemoteFileEntry) -> PreviewRequest {
+        var request = PreviewRequest(localURL: url, title: entry.name)
+        if let bridge, MarkdownPreviewSupport.isMarkdown(fileURL: url, displayTitle: entry.name) {
+            request.prepareImages = {
+                try await MarkdownImageStaging.stage(document: url, remotePath: entry.path, bridge: bridge)
+            }
+        }
+        return request
     }
 
     /// Download to a fresh temp dir, wait for the queue to finish the
@@ -843,13 +871,13 @@ private final class TerminalDropBatch {
     private var staged: [URL?]
     private var remaining: Int
     private let queue: any TransferQueueing
-    private let inject: @MainActor (String) -> Void
+    private let inject: @MainActor (String) async -> Void
     private let reportFailure: @MainActor (String) -> Void
 
     init(
         count: Int,
         queue: any TransferQueueing,
-        inject: @escaping @MainActor (String) -> Void,
+        inject: @escaping @MainActor (String) async -> Void,
         reportFailure: @escaping @MainActor (String) -> Void
     ) {
         self.staged = Array(repeating: nil, count: count)
@@ -878,7 +906,7 @@ private final class TerminalDropBatch {
                 await item.awaitFinished()
                 switch item.phase {
                 case .completed:
-                    if let path = item.resolvedRemotePath { inject(path) }
+                    if let path = item.resolvedRemotePath { await inject(path) }
                 case .failed(let message):
                     reportFailure(message)
                 default:

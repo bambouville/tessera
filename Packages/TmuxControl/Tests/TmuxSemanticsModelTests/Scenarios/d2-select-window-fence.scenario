@@ -1,0 +1,22 @@
+scenario d2-select-window-fence
+# The D2 fix: a targetless select-window in the same line makes the side
+# channel `latest`, and the forced -C pass sizes from it. A later laptop
+# keystroke takes `latest` back without any stamp (W4).
+session O 80x24 w0
+group O-tessera-view O
+session probes 80x24 p0
+control probe probes no-output
+tty laptop O 200x50
+control side O-tessera-view no-output
+key laptop
+send side select-window ; refresh-client -C 100,30
+expect side %begin 1
+expect side %layout-change {w0} *,100x30,0,0,*
+expect-size w0 100x30
+expect-latest w0 side
+expect-current O-tessera-view w0
+key laptop
+expect-latest w0 laptop
+expect-size w0 200x49
+send probe display-message -p -t {w0} 'size=#{window_width}x#{window_height}'
+expect probe size=200x49

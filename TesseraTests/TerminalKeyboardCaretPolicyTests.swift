@@ -99,3 +99,23 @@ struct TerminalKeyboardCaretPolicyTests {
         #expect(min(hold, 0) == 0)
     }
 }
+
+/// Mosh uses the native terminal as the one compact history surface. An iPad
+/// split may additionally mount a detached focused-pane reader.
+struct MoshHistorySurfacePolicyTests {
+    @Test("Only a regular-width pane grid uses a detached mosh history overlay")
+    func detachedOverlayIsNeverSelectedOnPhone() {
+        #expect(MoshHistorySurfacePolicy.usesDetachedOverlay(
+            isPhone: false,
+            windowRendersAsPaneGrid: true
+        ))
+        #expect(!MoshHistorySurfacePolicy.usesDetachedOverlay(
+            isPhone: true,
+            windowRendersAsPaneGrid: true
+        ))
+        #expect(!MoshHistorySurfacePolicy.usesDetachedOverlay(
+            isPhone: false,
+            windowRendersAsPaneGrid: false
+        ))
+    }
+}

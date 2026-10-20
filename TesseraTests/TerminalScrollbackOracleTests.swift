@@ -1,5 +1,6 @@
 import XCTest
 import SwiftTerm
+import TmuxControlCore
 import UIKit
 @testable import TmuxControl
 @testable import Tessera
@@ -11,6 +12,237 @@ import UIKit
 @MainActor
 final class TerminalScrollbackOracleTests: XCTestCase {
     private let esc = "\u{1B}"
+
+    func testCoreGraphicsRowCacheMatchesUncachedPixelsAcrossMutations() throws {
+        let view = TesseraResponderAwareTerminalView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        view.setSessionDrawingEnabled(true)
+        view.layoutIfNeeded()
+        view.feed(text: "\(esc)[?25l" + (0..<200).map {
+            "\(esc)[48;5;\($0 % 2 == 0 ? 22 : 52)mrow \($0) mixed ASCII ┃▌ café\(esc)[K\r\n"
+        }.joined())
+        func pixels() throws -> Data {
+            view.layoutIfNeeded()
+            let image = UIGraphicsImageRenderer(size: view.bounds.size).image {
+                // Compare the terminal painter itself; UIKit caret/selection
+                // child layers can settle between two offscreen layer captures.
+                $0.cgContext.translateBy(x: -view.bounds.minX, y: -view.bounds.minY)
+                view.draw(view.bounds)
+            }
+            return try XCTUnwrap(image.cgImage?.dataProvider?.data) as Data
+        }
+        func compare(_ label: String, mutation: () -> Void) throws {
+            view.cachesCoreGraphicsRows = true
+            _ = try pixels() // Populate before changing content or presentation.
+            mutation()
+            let cached = try pixels()
+            view.cachesCoreGraphicsRows = false
+            let uncached = try pixels()
+            if cached != uncached {
+                NSLog("[TesseraTest][RowCache] mismatch=%@ offset=%.1f colors=%d/%d", label, view.contentOffset.y, Set(cached).count, Set(uncached).count)
+            }
+            XCTAssertTrue(cached == uncached, "Cached pixels differ: \(label)")
+            XCTAssertGreaterThan(Set(uncached).count, 8, "Oracle must contain rendered text")
+        }
+        try compare("fractional history") { view.contentOffset.y -= 223.5 }
+        try compare("sub-row motion") { view.contentOffset.y -= 2.5 }
+        try compare("reverse") { view.contentOffset.y += 41.5 }
+        try compare("offscreen output") { view.feed(text: "new output\r\n") }
+        try compare("palette") { view.feed(text: "\(esc)]4;22;rgb:20/60/c0\u{7}") }
+        try compare("foreground") { view.nativeForegroundColor = .yellow }
+        try compare("selection") { view.selectAll() }
+        try compare("selection color") { view.selectedTextBackgroundColor = .magenta }
+        try compare("selection cleared") { view.selectNone() }
+        try compare("font") { view.font = .monospacedSystemFont(ofSize: 13, weight: .regular) }
+        try compare("alternate buffer") { view.feed(text: "\(esc)[?1049h\(esc)[2J\(esc)[Halt screen") }
+        try compare("same-row overwrite") { view.feed(text: "\(esc)[H\(esc)[31mNEW screen") }
+        try compare("graphemes") { view.feed(text: "\(esc)[H👩🏽‍💻 e\u{301} 漢字") }
+        try compare("link payload") { view.feed(text: "\(esc)[2;1H\(esc)]8;;https://example.com\u{7}link\(esc)]8;;\u{7}") }
+        try compare("link style") { view.linkHighlightMode = .always }
+        try compare("synchronized snapshot") { view.feed(text: "\(esc)[?2026h\(esc)[Hpending") }
+        try compare("synchronized commit") { view.feed(text: "\(esc)[?2026l") }
+        try compare("primary restored") { view.feed(text: "\(esc)[?1049l") }
+        try compare("history cleared") { view.feed(text: "\(esc)[2J\(esc)[3J\(esc)[Hfresh screen") }
+    }
+
+    func testTransientPreviewResizeKeepsLiveGridAndPromptIntact() {
+        let view = TesseraResponderAwareTerminalView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        view.layoutSubviews()
+        let terminal = view.getTerminal()
+        let cols = terminal.cols, rows = terminal.rows
+        // Independent wire fixture also keeps this oracle available to Release
+        // test builds, where the interactive DEBUG harness is not compiled.
+        var screen = "\(esc)[0m\(esc)[H\(esc)[2J"
+        for row in (rows - 2)...rows {
+            screen += "\(esc)[\(row);1H\(esc)[48;2;30;30;30m" + String(repeating: " ", count: cols)
+        }
+        screen += "\(esc)[\(rows - 1);1HAsk Codex to do anything\(esc)[0m"
+        view.feed(text: screen)
+        let before = terminal.getBufferAsData()
+        view.frame.size.height -= 32
+        view.layoutSubviews()
+        XCTAssertEqual(terminal.rows, rows, "Transient modal geometry must not resize the emulator before the remote")
+        view.feed(text: "\(esc)[?2026h\(esc)[\(rows);28H\(esc)[48;2;30;30;30m⠂\(esc)[0m\(esc)[?2026l")
+        view.frame.size.height += 32
+        view.layoutSubviews()
+        let text = String(decoding: terminal.getBufferAsData(), as: UTF8.self)
+        XCTAssertEqual(text.components(separatedBy: "Ask Codex to do anything").count - 1, 1, text)
+        XCTAssertEqual(terminal.cols, cols)
+        XCTAssertEqual(terminal.rows, rows)
+        for row in (rows - 3)..<rows {
+            for col in 0..<cols {
+                XCTAssertEqual(terminal.getCharData(col: col, row: row)?.attribute.bg,
+                    .trueColor(red: 30, green: 30, blue: 30), "Background hole at \(col),\(row)")
+            }
+        }
+        XCTAssertEqual(terminal.getBufferAsData().filter { $0 == 10 }.count, before.filter { $0 == 10 }.count, "Transient resize must not create extra history")
+    }
+
+    func testLastingLayoutResizeCommitsAfterSettleAndCancelsSupersededSize() async throws {
+        let view = TesseraResponderAwareTerminalView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        view.layoutSubviews()
+        let terminal = view.getTerminal()
+        let rows = terminal.rows
+        view.frame.size.height = 540
+        view.layoutSubviews()
+        view.frame.size.height = 570
+        view.layoutSubviews()
+        XCTAssertEqual(terminal.rows, rows)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(terminal.rows, 38)
+        view.frame.size.height = 510
+        view.layoutSubviews()
+        view.frame.size.height = 570
+        view.layoutSubviews()
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(terminal.rows, 38, "Canceled work must not commit a stale grid")
+    }
+
+    func testAuthoritativeResizeSupersedesPendingLayout() async throws {
+        let view = TesseraResponderAwareTerminalView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        view.layoutSubviews()
+        let box = TerminalBox(traceLabel: "preview-resize-oracle")
+        box.attach(view)
+        view.frame.size.height = 540
+        view.layoutSubviews()
+        box.resize(columns: 70, rows: 30)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(view.getTerminal().cols, 70)
+        XCTAssertEqual(view.getTerminal().rows, 30)
+    }
+
+    func testFontChangeDuringTransientLayoutReconcilesRestoredBounds() async throws {
+        let bounds = CGRect(x: 0, y: 0, width: 900, height: 600)
+        let view = TesseraResponderAwareTerminalView(frame: bounds)
+        view.layoutSubviews()
+        view.frame.size.height -= 32
+        view.layoutSubviews()
+        let font = UIFont.monospacedSystemFont(ofSize: 17, weight: .regular)
+        view.font = font
+        view.frame = bounds
+        view.layoutSubviews()
+        try await Task.sleep(for: .milliseconds(200))
+        let expected = TesseraResponderAwareTerminalView(frame: bounds)
+        expected.font = font
+        expected.layoutSubviews()
+        XCTAssertEqual(view.getTerminal().rows, expected.getTerminal().rows)
+        XCTAssertEqual(view.getTerminal().cols, expected.getTerminal().cols)
+    }
+
+    func testRepaintMustNotInterruptPendingColorSequence() {
+        let view = TesseraResponderAwareTerminalView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        var filter = TerminalOutputContrastFilter()
+        var framer = TmuxLiveOutputFramer()
+        for (index, part) in ["\(esc)[38;2;58;58;", "\(esc)[0m\(esc)[H\(esc)[2Jprompt", "58;48;2;0;0;30mX"].enumerated() {
+            let bytes = index == 1 ? Array(part.utf8) : framer.process(Array(part.utf8))
+            view.feed(byteArray: filter.process(bytes[...], defaultBackgroundRGB: 0,
+                defaultForegroundRGB: 0xD4D4D4, minimumContrast: 0.3))
+        }
+        let text = String(decoding: view.getTerminal().getBufferAsData(), as: UTF8.self)
+        XCTAssertFalse(text.contains("58;48;2;0;0;30m"), text)
+        XCTAssertTrue(text.contains("promptX"), text)
+    }
+
+    func testIdleSynchronizedRedrawPreservesPrimaryHistory() {
+        let view = TesseraResponderAwareTerminalView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        view.feed(text: (1...200).map { "history-\($0)\r\n" }.joined())
+        let bottom = view.contentOffset.y
+        XCTAssertGreaterThan(bottom, 600)
+        view.contentOffset.y = bottom - 400
+        let readingPosition = view.contentOffset.y
+
+        // A TUI can redraw its idle prompt without adding a history line.
+        // Split at both synchronized-output boundaries, as network reads do.
+        for _ in 0..<8 {
+            for bytes in ["\(esc)[?2026h", "\(esc)[s\(esc)[1;1Hidle prompt\(esc)[u", "\(esc)[?2026l"] {
+                view.feed(text: bytes)
+                XCTAssertEqual(view.contentOffset.y, readingPosition, accuracy: 0.5)
+            }
+        }
+    }
+
+    func testSynchronizedOutputTimeoutPreservesHistory() async throws {
+        let view = TesseraResponderAwareTerminalView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        view.feed(text: (1...200).map { "history-\($0)\r\n" }.joined())
+        view.feed(text: "\(esc)[?2026h")
+        view.contentOffset.y -= 400.5
+        let readingPosition = view.contentOffset.y
+        try await Task.sleep(for: .milliseconds(1200))
+        XCTAssertEqual(view.contentOffset.y, readingPosition, accuracy: 0.5)
+    }
+
+    func testSynchronizedHistoryOverflowPreservesContentAndFractionalOffset() async throws {
+        for timeout in [false, true] {
+            let view = TesseraResponderAwareTerminalView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+            let terminal = view.getTerminal()
+            terminal.changeScrollback(240)
+            view.feed(text: (1...400).map { "history-\($0)\r\n" }.joined())
+            let retainedIndices = (0..<500).filter { terminal.getScrollInvariantLine(row: $0) != nil }
+            let first = try XCTUnwrap(retainedIndices.first)
+            let rowHeight = view.contentSize.height / CGFloat(retainedIndices.count)
+            let coordinator = TerminalSurfaceBound.Coordinator(
+                onReady: {}, onSend: { _ in }, onResize: { _, _ in }, onTitle: { _ in },
+                onUserActivity: nil, onBell: nil, onPrimaryScrollbackDelta: nil,
+                onPrimaryScrollbackUnderflow: nil, agentScrollBlockingActive: false,
+                onAgentScrollBlocked: nil, mouseReportingImpliesAltScreen: false,
+                suppressDirectColorQueryResponses: true, softwareModifierState: nil,
+                onHardwareKey: nil, onTerminalScrolled: nil, scrollRetentionID: "overflow-test",
+                onScrollDiagnostic: nil)
+            coordinator.terminalView = view
+            view.terminalDelegate = coordinator
+            coordinator.applyPrimaryScrollbackDelta(view: view,
+                pointsY: Double((view.contentOffset.y - 20 * rowHeight - 0.5) / 3),
+                isInertial: false, diagnosticPrefix: "test")
+            let before = view.contentOffset.y
+            let text = terminal.getScrollInvariantLine(row: first + 20)?.translateToString()
+            view.feed(text: "\(esc)[?2026h")
+            view.feed(text: "new1\r\nnew2\r\nnew3\r\n")
+            XCTAssertEqual(view.contentOffset.y, before, accuracy: 0.01, "frozen snapshot must not move")
+            if timeout { try await Task.sleep(for: .milliseconds(1200)) }
+            else { view.feed(text: "\(esc)[?2026l") }
+            XCTAssertEqual(view.contentOffset.y, before - 3 * rowHeight, accuracy: 0.01)
+            let newFirst = try XCTUnwrap((0..<500).first { terminal.getScrollInvariantLine(row: $0) != nil })
+            XCTAssertEqual(newFirst, first + 3)
+            XCTAssertEqual(terminal.getScrollInvariantLine(row: newFirst + Int(view.contentOffset.y / rowHeight))?.translateToString(), text)
+            // Another frame invokes the production coordinator's retained
+            // offset restore. It must use the rebased anchor from frame one.
+            view.feed(text: "\(esc)[?2026hnew4\r\n\(esc)[?2026l")
+            XCTAssertEqual(view.contentOffset.y, before - 4 * rowHeight, accuracy: 0.01)
+            XCTAssertEqual(terminal.getScrollInvariantLine(row: newFirst + 1 + Int(view.contentOffset.y / rowHeight))?.translateToString(), text)
+        }
+    }
+
+    func testSynchronizedAppendAndAlternateExitFollowLiveTail() {
+        let view = TesseraResponderAwareTerminalView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        view.feed(text: (1...200).map { "history-\($0)\r\n" }.joined())
+        let oldBottom = view.contentOffset.y
+        view.feed(text: "\(esc)[?2026h")
+        view.feed(text: "latest line\r\n")
+        view.feed(text: "\(esc)[?2026l")
+        XCTAssertGreaterThan(view.contentOffset.y, oldBottom)
+        let primaryBottom = view.contentOffset.y
+        view.feed(text: "\(esc)[?1049h\(esc)[?2026h\(esc)[?1049l\(esc)[?2026l")
+        XCTAssertEqual(view.contentOffset.y, primaryBottom, accuracy: 0.5)
+    }
 
     func testAgentScrollGuardClaimsPageKeysOnlyWhileActive() {
         let container = TesseraTerminalContainer(frame: .zero)

@@ -20,6 +20,8 @@ final class SessionRegistry {
         let sessionID: UUID
         let windowID: WindowId
         let paneID: PaneId?
+        let carrierID: ObjectIdentifier
+        let expiresAt: ContinuousClock.Instant
     }
 
     struct TmuxCloseRequest: Equatable {
@@ -58,8 +60,25 @@ final class SessionRegistry {
     private(set) var tmuxCloseRequest: TmuxCloseRequest?
     private(set) var tmuxMutationRequest: TmuxMutationRequest?
     private var nextTmuxFocusToken: UInt64 = 0
+    @ObservationIgnored private var tmuxFocusDeadlineTask: Task<Void, Never>?
+    @ObservationIgnored private var pendingTmuxFocus: PendingTmuxFocus?
     private var nextTmuxCloseToken: UInt64 = 0
     private var nextTmuxMutationToken: UInt64 = 0
+
+    private struct PendingTmuxFocus {
+        let controllerID: ObjectIdentifier
+        let connectionGeneration: UInt64
+        let carrierGeneration: UInt64
+        var authority: TmuxController.GridAuthority
+        var awaitingAuthority = false
+    }
+
+    /// View-owned controllers publish the same palette snapshot for both layouts.
+    private(set) var tmuxPaletteSnapshots: [UUID: CommandPaletteTmuxSnapshot] = [:]
+
+    func setTmuxPaletteSnapshot(_ snapshot: CommandPaletteTmuxSnapshot, for id: UUID) {
+        if tmuxPaletteSnapshots[id] != snapshot { tmuxPaletteSnapshots[id] = snapshot }
+    }
 
     /// Sessions that have ever been touched, ordered most-recent first.
     /// Used as the MRU walk order for the cycle HUD and as the sort
@@ -91,10 +110,15 @@ final class SessionRegistry {
     func syncActiveSessions(_ sessions: [LiveSession]) {
         activeSessions = sessions
         let liveIDs = Set(sessions.map(\.id))
+        tmuxPaletteSnapshots = tmuxPaletteSnapshots.filter { liveIDs.contains($0.key) }
         lastTouched = lastTouched.filter { liveIDs.contains($0.key) }
         renderReadyIDs = renderReadyIDs.intersection(liveIDs)
         gridAuthorityPeerNames = gridAuthorityPeerNames.filter {
             liveIDs.contains($0.key)
+        }
+        if let request = tmuxFocusRequest,
+           sessions.first(where: { $0.id == request.sessionID }).map({ ObjectIdentifier($0.session.terminalSession) }) != request.carrierID {
+            finishTmuxFocus(request, reason: "carrier-changed")
         }
     }
 
@@ -143,21 +167,96 @@ final class SessionRegistry {
     }
 
     /// Route a compact switcher destination back into the owning session view.
-    /// The request is an observable one-shot token; only the matching live
-    /// session consumes it, so controllers stay view-owned.
+    /// The matching view retains an authority-refused request through one
+    /// settlement, bounded by its original token and carrier.
     func requestTmuxFocus(
         sessionID: UUID,
         windowID: WindowId,
-        paneID: PaneId? = nil
+        paneID: PaneId? = nil,
+        lifetime: Duration = .seconds(10)
     ) {
-        guard activeSessions.contains(where: { $0.id == sessionID }) else { return }
+        guard let live = session(for: sessionID) else { return }
+        tmuxFocusDeadlineTask?.cancel()
+        pendingTmuxFocus = nil
         nextTmuxFocusToken &+= 1
-        tmuxFocusRequest = TmuxFocusRequest(
+        let request = TmuxFocusRequest(
             token: nextTmuxFocusToken,
             sessionID: sessionID,
             windowID: windowID,
-            paneID: paneID
+            paneID: paneID,
+            carrierID: ObjectIdentifier(live.session.terminalSession),
+            expiresAt: ContinuousClock.now.advanced(by: lifetime)
         )
+        tmuxFocusRequest = request
+        tmuxFocusDeadlineTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: lifetime) } catch { return }
+            self?.finishTmuxFocus(request, reason: "deadline")
+        }
+    }
+
+    func handleTmuxFocusRequest(sessionID: UUID, carrier: any TerminalSession,
+                                tmux: TmuxController, commands: AppleSessionCommandFacade, isShown: Bool) {
+        guard let request = tmuxFocusRequest, request.sessionID == sessionID else { return }
+        // The request is made before the reveal it accompanies renders (a
+        // phone switches tabs after it), so a hidden view waits for `isActive`.
+        guard isShown else { return }
+        guard ContinuousClock.now < request.expiresAt,
+              ObjectIdentifier(carrier) == request.carrierID,
+              session(for: sessionID).map({ ObjectIdentifier($0.session.terminalSession) }) == request.carrierID
+        else { finishTmuxFocus(request, reason: "target-unavailable"); return }
+
+        var pending = pendingTmuxFocus ?? PendingTmuxFocus(
+            controllerID: ObjectIdentifier(tmux), connectionGeneration: tmux.controlConnectionGeneration,
+            carrierGeneration: commands.generation.rawValue, authority: tmux.gridAuthority)
+        guard pending.controllerID == ObjectIdentifier(tmux),
+              pending.connectionGeneration == tmux.controlConnectionGeneration,
+              pending.carrierGeneration == commands.generation.rawValue
+        else { finishTmuxFocus(request, reason: "carrier-changed"); return }
+        pendingTmuxFocus = pending
+        // Agent Center proved the pane moments ago; a control client still
+        // attaching or rehydrating has no authoritative window list to deny
+        // it. Wait (bounded by the deadline) instead of reading absence.
+        guard tmux.mode == .tmuxControl, tmux.isWindowListHydrated else { return }
+        guard let window = tmux.windows.first(where: { $0.id == request.windowID }),
+              request.paneID.map({ pane in
+                  let panes = window.layout?.paneIds ?? window.panes.map(\.id)
+                  return panes.contains(pane) || (panes.isEmpty && window.activePaneId == pane)
+              }) ?? true
+        else { finishTmuxFocus(request, reason: "target-unavailable"); return }
+        let retry = pending.awaitingAuthority
+        if retry {
+            let changed = pending.authority != tmux.gridAuthority
+            pending.authority = tmux.gridAuthority
+            pendingTmuxFocus = pending
+            guard changed, tmux.gridAuthority == .mine else { return }
+        }
+
+        var result = commands.dispatch(.selectTmuxWindow(request.windowID.description))
+        if result == .handled, let paneID = request.paneID {
+            result = commands.dispatch(.selectTmuxPane(paneID.description))
+        }
+        if case .refused = result, !retry {
+            pending.awaitingAuthority = true
+            pendingTmuxFocus = pending
+            return
+        }
+        finishTmuxFocus(request, reason: result == .handled ? nil : "selection-refused")
+    }
+
+    func cancelTmuxFocus(sessionID: UUID) {
+        guard let request = tmuxFocusRequest, request.sessionID == sessionID else { return }
+        finishTmuxFocus(request, reason: "hidden")
+    }
+
+    private func finishTmuxFocus(_ request: TmuxFocusRequest, reason: String?) {
+        guard tmuxFocusRequest?.token == request.token else { return }
+        if let reason {
+            NSLog("[TmuxFocus] dropped sid=%@ token=%llu reason=%@", String(request.sessionID.uuidString.prefix(8)), request.token, reason)
+        }
+        tmuxFocusDeadlineTask?.cancel()
+        tmuxFocusDeadlineTask = nil
+        pendingTmuxFocus = nil
+        tmuxFocusRequest = nil
     }
 
     /// Route a compact switcher's destructive action to the matching
@@ -184,7 +283,10 @@ final class SessionRegistry {
     func requestTmuxMutation(_ action: CommandPaletteTmuxMutation) {
         let sessionID: UUID
         switch action {
-        case .split(let id, _, _), .rename(let id, _, _):
+        case .split(let id, _, _),
+             .rename(let id, _, _),
+             .moveWindow(let id, _, _),
+             .renumberWindows(let id):
             sessionID = id
         }
         guard activeSessions.contains(where: { $0.id == sessionID }) else { return }

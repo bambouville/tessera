@@ -36,6 +36,19 @@ struct RemotePathResolverTests {
         #expect(RemotePathResolver.pathCandidate(from: String(repeating: "a", count: 2000)) == nil)
     }
 
+    /// The one deliberate iOS-visible change of the shared-core
+    /// extraction: a selection carrying ISO control characters (NUL, ESC,
+    /// a bare CR) is terminal debris, not a path, and no longer reaches
+    /// the Files menu. The rule itself is pinned in
+    /// `TesseraDomainCoreTests.RemotePathResolutionTests`.
+    @Test func candidateRejectsControlCharacters() {
+        #expect(RemotePathResolver.pathCandidate(from: "/tmp/a\u{0}b") == nil)
+        #expect(RemotePathResolver.pathCandidate(from: "/tmp/\u{1B}[31mred") == nil)
+        #expect(!RemotePathResolver.isPlausiblePath("/tmp/\u{1B}[31mred"))
+        // Ordinary selections are untouched — trailing newlines still trim.
+        #expect(RemotePathResolver.pathCandidate(from: "/tmp/x\r\n") == "/tmp/x")
+    }
+
     // MARK: - isPlausiblePath (menu gate)
 
     @Test func plausibilityGate() {
@@ -154,6 +167,131 @@ struct RemotePathResolverTests {
         await #expect(throws: FileBridgeError.self) {
             _ = try await RemotePathResolver.resolve(
                 absolute: "\(home)/projects/dashboard/missing.txt", bridge: bridge)
+        }
+    }
+
+    // MARK: - Whitespace-tolerant selection resolution
+
+    /// Tree for the wrapped-path cases: a leaf whose name has no spaces, a
+    /// leaf whose name does, and a *directory* whose name does.
+    @MainActor
+    private func wrappedTreeBridge() async throws -> MockFileBridge {
+        func file(_ dir: String, _ name: String) -> RemoteFileEntry {
+            RemoteFileEntry(name: name, path: "\(dir)/\(name)", kind: .file,
+                            size: 1024, modified: Date(), permissions: 0o644)
+        }
+        func dir(_ parent: String, _ name: String) -> RemoteFileEntry {
+            RemoteFileEntry(name: name, path: "\(parent)/\(name)", kind: .directory,
+                            size: nil, modified: Date(), permissions: 0o755)
+        }
+        let home = "/home/mock"
+        let docs = "\(home)/docs"
+        let design = "\(home)/Design Files"
+        let bridge = MockFileBridge(tree: [
+            "/": [dir("", "home")],
+            "/home": [dir("/home", "mock")],
+            home: [dir(home, "docs"), dir(home, "Design Files")],
+            docs: [file(docs, "reviewv3.pdf"), file(docs, "Q3 notes.md"), dir(docs, "old")],
+            design: [file(design, "logo.png")],
+            "\(docs)/old": [],
+        ])
+        try await bridge.connect()
+        return bridge
+    }
+
+    /// The reported case: an agent printed the path, the TUI wrapped it, and
+    /// the selection arrives as two indented fragments.
+    @Test @MainActor func selectionResolvesAfterWrappingCollapsesTheName() async throws {
+        let bridge = try await wrappedTreeBridge()
+        let candidates = RemotePathResolver.pathCandidates(from: "docs/review\n    v3.pdf")
+        let absolutes = candidates.compactMap {
+            RemotePathResolver.expand($0, home: bridge.homeDirectory, cwd: "/home/mock")
+        }
+        #expect(absolutes == ["/home/mock/docs/reviewv3.pdf"])
+
+        guard case .file(let entry) = try await RemotePathResolver.resolve(
+            anyOf: absolutes, bridge: bridge) else {
+            Issue.record("expected the wrapped path to resolve to a file")
+            return
+        }
+        #expect(entry.path == "/home/mock/docs/reviewv3.pdf")
+    }
+
+    /// The other direction: the *file* is the one with spaces, and the
+    /// selection lost them to the wrap.
+    @Test @MainActor func selectionResolvesToANameThatKeptItsSpaces() async throws {
+        let bridge = try await wrappedTreeBridge()
+        guard case .file(let entry) = try await RemotePathResolver.resolve(
+            anyOf: ["/home/mock/docs/Q3notes.md"], bridge: bridge) else {
+            Issue.record("expected a whitespace-tolerant file hit")
+            return
+        }
+        #expect(entry.name == "Q3 notes.md")
+        #expect(entry.path == "/home/mock/docs/Q3 notes.md")
+    }
+
+    /// A directory name lost its space, so the parent listing itself misses
+    /// and the walk has to match segment by segment.
+    @Test @MainActor func selectionWalksDirectoriesThatLostTheirSpaces() async throws {
+        let bridge = try await wrappedTreeBridge()
+        guard case .file(let entry) = try await RemotePathResolver.resolve(
+            anyOf: ["/home/mock/DesignFiles/logo.png"], bridge: bridge) else {
+            Issue.record("expected the walk to find the spaced directory")
+            return
+        }
+        #expect(entry.path == "/home/mock/Design Files/logo.png")
+
+        // Directories route as directories, not files.
+        let directory = try await RemotePathResolver.resolve(
+            anyOf: ["/home/mock/DesignFiles"], bridge: bridge)
+        #expect(directory == .directory("/home/mock/Design Files"))
+    }
+
+    /// Exact spelling is always tried first, so the tolerant pass can never
+    /// shadow a file that is really there.
+    @Test @MainActor func exactHitWinsOverTheCollapsedReading() async throws {
+        let bridge = try await wrappedTreeBridge()
+        bridge.tree["/home/mock/docs"]?.append(RemoteFileEntry(
+            name: "review v3.pdf", path: "/home/mock/docs/review v3.pdf", kind: .file,
+            size: 2048, modified: Date(), permissions: 0o644))
+
+        // Quoted selection: strict "review v3.pdf" first, collapsed second.
+        let candidates = RemotePathResolver.pathCandidates(from: "'docs/review v3.pdf'")
+        let absolutes = candidates.compactMap {
+            RemotePathResolver.expand($0, home: bridge.homeDirectory, cwd: "/home/mock")
+        }
+        #expect(absolutes == ["/home/mock/docs/review v3.pdf", "/home/mock/docs/reviewv3.pdf"])
+        guard case .file(let entry) = try await RemotePathResolver.resolve(
+            anyOf: absolutes, bridge: bridge) else {
+            Issue.record("expected the exact name to win")
+            return
+        }
+        #expect(entry.name == "review v3.pdf")
+    }
+
+    /// Two names that collapse alike and no exact hit: refuse rather than
+    /// open an arbitrary document.
+    @Test @MainActor func ambiguousCollapsedNamesRefuseToGuess() async throws {
+        let bridge = try await wrappedTreeBridge()
+        bridge.tree["/home/mock/docs"]?.append(RemoteFileEntry(
+            name: "review v3.pdf", path: "/home/mock/docs/review v3.pdf", kind: .file,
+            size: 2048, modified: Date(), permissions: 0o644))
+
+        await #expect(throws: FileBridgeError.self) {
+            _ = try await RemotePathResolver.resolve(
+                anyOf: ["/home/mock/docs/re viewv3.pdf"], bridge: bridge)
+        }
+    }
+
+    /// A miss is still a miss — the fallback adds tolerance, not invention.
+    @Test @MainActor func unresolvableSelectionStillThrows() async throws {
+        let bridge = try await wrappedTreeBridge()
+        await #expect(throws: FileBridgeError.self) {
+            _ = try await RemotePathResolver.resolve(
+                anyOf: ["/home/mock/docs/nothinghere.pdf"], bridge: bridge)
+        }
+        await #expect(throws: FileBridgeError.self) {
+            _ = try await RemotePathResolver.resolve(anyOf: [], bridge: bridge)
         }
     }
 }

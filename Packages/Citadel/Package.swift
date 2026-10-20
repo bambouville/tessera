@@ -14,13 +14,16 @@ let package = Package(
             name: "Citadel",
             targets: ["Citadel"]
         ),
+        .executable(
+            name: "CitadelAndroidSmoke",
+            targets: ["CitadelAndroidSmoke"]
+        ),
     ],
     dependencies: [
-        // .package(path: "/Users/joannisorlandos/git/joannis/swift-nio-ssh"),
-        .package(url: "https://github.com/Wellz26/swift-nio-ssh.git", "0.3.4" ..< "0.4.0"),
+        // Upstream contains the local-close fix pinned by SSHDependencyRegressionTests.
+        .package(url: "https://github.com/apple/swift-nio-ssh.git", exact: "0.15.0"),
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.81.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.0.0"),
-        .package(url: "https://github.com/attaswift/BigInt.git", from: "5.2.0"),
         .package(url: "https://github.com/apple/swift-crypto.git", from: "3.12.3"),
     ],
     targets: [
@@ -33,8 +36,24 @@ let package = Package(
                 .product(name: "NIO", package: "swift-nio"),
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "_CryptoExtras", package: "swift-crypto"),
-                .product(name: "BigInt", package: "BigInt"),
                 .product(name: "Logging", package: "swift-log"),
+            ]
+        ),
+        .executableTarget(
+            name: "CitadelAndroidSmoke",
+            dependencies: [
+                "Citadel",
+                .product(name: "NIO", package: "swift-nio"),
+                .product(name: "NIOSSH", package: "swift-nio-ssh"),
+            ]
+        ),
+        .testTarget(
+            name: "SSHDependencyRegressionTests",
+            dependencies: [
+                "Citadel",
+                .product(name: "NIOSSH", package: "swift-nio-ssh"),
+                .product(name: "NIOEmbedded", package: "swift-nio"),
+                .product(name: "Crypto", package: "swift-crypto"),
             ]
         ),
     ]

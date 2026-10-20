@@ -1,9 +1,9 @@
 /*
- * config.h for building mosh on iOS as an SPM cxxTarget.
+ * config.h for building the embedded mosh core as an SPM C++ target.
  *
  * Mosh upstream uses GNU autotools to generate config.h per platform.
- * iOS builds can't run `configure`, so this file is hand-authored from
- * the probes that matter for iOS 17+ / Darwin / arm64 / libc++.
+ * Cross-compiled Apple/Android builds can't run `configure`, so this file is
+ * hand-authored from the small portable source subset used by Tessera.
  *
  * Conventions per the integration plan:
  *   - Define what's actually available on Darwin.
@@ -13,9 +13,8 @@
  *     Leaving HAVE_SECURE_GETENV undefined makes mosh fall back to
  *     plain getenv (Darwin doesn't have secure_getenv).
  *
- * Crypto backend: USE_APPLE_COMMON_CRYPTO_AES = 1 so ocb_internal.cc
- * uses Apple CommonCrypto for the AES block cipher. No OpenSSL dep
- * on iOS.
+ * Crypto is platform-selected: Apple uses CommonCrypto; non-Apple builds use
+ * the upstream OpenSSL-compatible backend supplied by the target toolchain.
  *
  * Package version strings are only used in mosh-client.cc (frontend
  * we're replacing) and a few log messages. Minimal values keep link
@@ -26,7 +25,7 @@
 #define MOSH_IOS_CONFIG_H
 
 /* ---- package metadata (minimal; frontend is replaced by our client) ---- */
-#define PACKAGE_STRING          "mosh (tessera-ios)"
+#define PACKAGE_STRING          "mosh (tessera-embedded)"
 #define PACKAGE_NAME            "mosh"
 #define PACKAGE                 "mosh"
 #define VERSION                 "1.4.0-tessera"
@@ -36,7 +35,11 @@
 #define PACKAGE_URL             "https://mosh.org"
 
 /* ---- crypto backend ---- */
+#if defined(__APPLE__)
 #define USE_APPLE_COMMON_CRYPTO_AES     1
+#else
+#define USE_OPENSSL_AES                 1
+#endif
 
 /* ---- POSIX header probes ---- */
 #define HAVE_SYS_SOCKET_H               1
@@ -61,7 +64,11 @@
 #define HAVE_GETTIMEOFDAY               1
 #define HAVE_INET_PTON                  1
 #define HAVE_INET_NTOP                  1
+#if defined(__APPLE__) && defined(__MACH__)
 #define HAVE_MACH_ABSOLUTE_TIME         1
+#else
+#define HAVE_MACH_ABSOLUTE_TIME         0
+#endif
 #define HAVE_GETADDRINFO                1
 #define HAVE_GETNAMEINFO                1
 

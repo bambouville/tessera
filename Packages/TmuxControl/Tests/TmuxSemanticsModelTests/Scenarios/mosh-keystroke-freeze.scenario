@@ -1,0 +1,26 @@
+scenario mosh-keystroke-freeze
+# A keystroke on the mosh visible client (tmux attach -f ignore-size on the
+# view) makes it `latest`. recalculate refuses to size from it while a sizing
+# client exists, and with two sizing clients only `latest` may size the
+# window, so the window freezes: even a forced -C pass leaves it alone.
+session O 80x24 w0
+group O-tessera-view O
+session probes 80x24 p0
+control probe probes no-output
+tty laptop O 200x50
+control side O-tessera-view no-output
+send side select-window ; refresh-client -C 100,30
+expect-size w0 100x30
+tty visible O-tessera-view 100x31 ignore-size
+expect-latest w0 visible
+key laptop
+expect-size w0 200x49
+send side select-window ; refresh-client -C 100,30
+expect-size w0 100x30
+key visible
+expect-latest w0 visible
+send side refresh-client -C 90,28
+expect-not side %layout-change {w0} *
+expect-size w0 100x30
+send probe display-message -p -t {w0} 'size=#{window_width}x#{window_height}'
+expect probe size=100x30

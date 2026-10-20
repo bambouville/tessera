@@ -1,0 +1,65 @@
+{
+  "%lld need input": {
+    "en": { "one": "%lld needs input", "other": "%lld need input" },
+    "de": { "one": "%lld braucht Eingabe", "other": "%lld brauchen Eingabe" },
+    "es": { "one": "%lld necesita entrada", "other": "%lld necesitan entrada" },
+    "fr": { "one": "%lld attend une saisie", "other": "%lld attendent une saisie" },
+    "ja": { "other": "%lld 件が入力待ち" },
+    "zh-Hans": { "other": "%lld 项等待输入" },
+    "zh-Hant": { "other": "%lld 項等待輸入" }
+  },
+  "%lld need approval": {
+    "en": { "one": "%lld needs approval", "other": "%lld need approval" },
+    "de": { "one": "%lld braucht Freigabe", "other": "%lld brauchen Freigabe" },
+    "es": { "one": "%lld necesita aprobación", "other": "%lld necesitan aprobación" },
+    "fr": { "one": "%lld attend une approbation", "other": "%lld attendent une approbation" },
+    "ja": { "other": "%lld 件が承認待ち" },
+    "zh-Hans": { "other": "%lld 项等待批准" },
+    "zh-Hant": { "other": "%lld 項等待核准" }
+  },
+  "%lld need an answer": {
+    "en": { "one": "%lld needs an answer", "other": "%lld need answers" },
+    "de": { "one": "%lld braucht eine Antwort", "other": "%lld brauchen eine Antwort" },
+    "es": { "one": "%lld necesita una respuesta", "other": "%lld necesitan una respuesta" },
+    "fr": { "one": "%lld attend une réponse", "other": "%lld attendent une réponse" },
+    "ja": { "other": "%lld 件が回答待ち" },
+    "zh-Hans": { "other": "%lld 项等待回答" },
+    "zh-Hant": { "other": "%lld 項等待回答" }
+  },
+  "%lld need sign-in": {
+    "en": { "one": "%lld needs sign-in", "other": "%lld need sign-in" },
+    "de": { "one": "%lld braucht eine Anmeldung", "other": "%lld brauchen eine Anmeldung" },
+    "es": { "one": "%lld requiere inicio de sesión", "other": "%lld requieren inicio de sesión" },
+    "fr": { "one": "%lld attend une connexion", "other": "%lld attendent une connexion" },
+    "ja": { "other": "%lld 件がサインイン待ち" },
+    "zh-Hans": { "other": "%lld 项需要登录" },
+    "zh-Hant": { "other": "%lld 項需要登入" }
+  },
+  "%lld failed": {
+    "en": { "one": "%lld failed", "other": "%lld failed" },
+    "de": { "one": "%lld fehlgeschlagen", "other": "%lld fehlgeschlagen" },
+    "es": { "one": "%lld falló", "other": "%lld fallaron" },
+    "fr": { "one": "%lld en échec", "other": "%lld en échec" },
+    "ja": { "other": "%lld 件が失敗" },
+    "zh-Hans": { "other": "%lld 项失败" },
+    "zh-Hant": { "other": "%lld 項失敗" }
+  },
+  "%lld finished": {
+    "en": { "one": "%lld finished", "other": "%lld finished" },
+    "de": { "one": "%lld fertig", "other": "%lld fertig" },
+    "es": { "one": "%lld terminado", "other": "%lld terminados" },
+    "fr": { "one": "%lld terminé", "other": "%lld terminés" },
+    "ja": { "other": "%lld 件が完了" },
+    "zh-Hans": { "other": "%lld 项已完成" },
+    "zh-Hant": { "other": "%lld 項已完成" }
+  },
+  "%lld panes": {
+    "en": { "one": "%lld pane", "other": "%lld panes" },
+    "de": { "one": "%lld Pane", "other": "%lld Panes" },
+    "es": { "one": "%lld panel", "other": "%lld paneles" },
+    "fr": { "one": "%lld volet", "other": "%lld volets" },
+    "ja": { "other": "%lld 個のペイン" },
+    "zh-Hans": { "other": "%lld 个窗格" },
+    "zh-Hant": { "other": "%lld 個窗格" }
+  }
+}

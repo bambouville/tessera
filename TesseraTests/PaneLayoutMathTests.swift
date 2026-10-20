@@ -1,13 +1,264 @@
 import XCTest
 import CoreGraphics
+import UIKit
+import SwiftUI
 import TmuxControl
 @testable import Tessera
 
-/// Frame-math tests for the split-pane grid (plan risk #2: a pane's terminal
-/// surface MUST be an exact integer number of cells, or SwiftTerm computes a
-/// different cols/rows than tmux and every live escape mis-renders). Until now
-/// `PaneLayoutMath` was exercised only live; these pin the geometry.
+final class MoshRenderSurfaceDeclarationTests: XCTestCase {
+    private func declarations(
+        paneIDs: [PaneId] = [PaneId(1), PaneId(2)],
+        activePaneID: PaneId? = PaneId(1),
+        overlay: (windowID: WindowId, paneID: PaneId)? = nil,
+        usesDetachedOverlay: Bool = true
+    ) -> [SurfaceDeclaration] {
+        MoshHistorySurfacePolicy.declarations(
+            windowID: WindowId(7), paneIDs: paneIDs, activePaneID: activePaneID,
+            overlay: overlay, usesDetachedOverlay: usesDetachedOverlay
+        )
+    }
+
+    func test_unfocusedReaderAddsPinnedOverlayWithoutChangingExistingDeclarations() {
+        let before = declarations()
+        let reading = declarations(overlay: (WindowId(7), PaneId(2)))
+        XCTAssertEqual(Array(reading.prefix(before.count)), before)
+        XCTAssertEqual(reading.last, SurfaceDeclaration(
+            surfaceID: SurfaceId("overlay:%2"), presentation: .overlay,
+            windowID: WindowId(7), paneID: PaneId(2)
+        ))
+        XCTAssertEqual(reading.count, 3)
+        XCTAssertNil(reading[0].windowID)
+        XCTAssertNil(reading[0].paneID)
+    }
+
+    func test_onlyAReaderOfTheFocusedPaneBlocksItsClicks() {
+        func covers(_ readyOverlay: (windowID: WindowId, paneID: PaneId)?, ready: Bool = true,
+                    live: Bool = false, focused: PaneId? = PaneId(1)) -> Bool {
+            MoshHistorySurfacePolicy.historyCoversFocusedPane(
+                liveHistoryRevealed: live, overlayContentReady: ready, readyOverlay: readyOverlay,
+                windowID: WindowId(7), focusedPaneID: focused
+            )
+        }
+        XCTAssertTrue(covers((WindowId(7), PaneId(1))))
+        XCTAssertFalse(covers((WindowId(7), PaneId(2))), "reading another pane leaves the focused one live")
+        XCTAssertFalse(covers(nil, ready: false))
+        XCTAssertTrue(covers(nil, ready: false, live: true), "compact layouts read on the live surface")
+        // Unknown reader, window or focus stays blocked.
+        XCTAssertTrue(covers(nil))
+        XCTAssertTrue(covers((WindowId(8), PaneId(2))))
+        XCTAssertTrue(covers((WindowId(7), PaneId(2)), focused: nil))
+    }
+
+    func test_focusedReaderDoesNotDuplicateOverlay() {
+        XCTAssertEqual(declarations(overlay: (WindowId(7), PaneId(1))), declarations())
+    }
+
+    func test_foreignOrRemovedReaderIsNotDeclared() {
+        XCTAssertEqual(declarations(overlay: (WindowId(8), PaneId(2))), declarations())
+        XCTAssertEqual(declarations(overlay: (WindowId(7), PaneId(3))), declarations())
+    }
+
+    func test_readerSurvivesMissingActivePaneAndDismissalRemovesOnlyReaderDeclaration() {
+        let reading = declarations(activePaneID: nil, overlay: (WindowId(7), PaneId(2)))
+        XCTAssertEqual(reading.map(\.surfaceID), [.live, SurfaceId("overlay:%2")])
+        let dismissed = declarations(activePaneID: nil)
+        XCTAssertEqual(dismissed, [reading[0]])
+    }
+
+    func test_compactAndSinglePaneKeepOnlyLivePainter() {
+        for isPhone in [false, true] {
+            for rendersAsGrid in [false, true] where isPhone || !rendersAsGrid {
+                let surfaces = declarations(
+                    overlay: (WindowId(7), PaneId(2)),
+                    usesDetachedOverlay: MoshHistorySurfacePolicy.usesDetachedOverlay(
+                        isPhone: isPhone, windowRendersAsPaneGrid: rendersAsGrid
+                    )
+                )
+                XCTAssertEqual(surfaces, [SurfaceDeclaration(surfaceID: .live, presentation: .single)])
+            }
+        }
+    }
+
+    func test_unhydratedPanesPreserveFocusedDeclarationWithoutRetainingUnknownReader() {
+        let surfaces = declarations(paneIDs: [], overlay: (WindowId(7), PaneId(2)))
+        XCTAssertEqual(surfaces, declarations(paneIDs: []))
+        XCTAssertEqual(surfaces.map(\.surfaceID), [.live, SurfaceId("overlay:%1")])
+    }
+
+    func test_readerDeclarationAndRetirementPreserveLiveOwnerAndOtherCapture() throws {
+        let snapshot = TmuxSnapshot(
+            sessionID: SessionId(0), sessionName: "work", activeWindowID: WindowId(7),
+            windows: [.init(id: WindowId(7), name: "split", activePaneID: PaneId(1),
+                            panes: [.init(id: PaneId(1), isActive: true), .init(id: PaneId(2))])],
+            authority: .unknown
+        )
+        let focusedSurface = SurfaceId("overlay:%1")
+        let readerSurface = SurfaceId("overlay:%2")
+        var ledger = TmuxRenderLedger()
+        _ = ledger.reduce(.clientSize(columns: 80, rows: 24))
+        _ = ledger.reduce(.transportAttached(.sideChannel), snapshot: snapshot)
+        _ = ledger.reduce(.surfacesDeclared(declarations()), snapshot: snapshot)
+        let liveOwner = try XCTUnwrap(ledger.owner(for: .live))
+
+        _ = ledger.reduce(.scrollbackRequested(focusedSurface, pointsY: 1, isInertial: false))
+        let reading = declarations(overlay: (WindowId(7), PaneId(2)))
+        _ = ledger.reduce(.surfacesDeclared(reading))
+        XCTAssertEqual(ledger.owner(for: .live), liveOwner)
+        XCTAssertTrue(ledger.isHistoryPresentationPending(for: focusedSurface))
+
+        _ = ledger.reduce(.scrollbackRequested(readerSurface, pointsY: 1, isInertial: false))
+        _ = ledger.reduce(.surfacesDeclared(reading))
+        _ = ledger.reduce(.scrollbackReturnedToTail(focusedSurface))
+        XCTAssertFalse(ledger.isHistoryPresentationPending(for: focusedSurface))
+        XCTAssertEqual(ledger.owner(for: .live), liveOwner)
+        XCTAssertTrue(ledger.isHistoryPresentationPending(for: readerSurface))
+
+        _ = ledger.reduce(.surfacesDeclared(declarations()))
+        XCTAssertNil(ledger.owner(for: readerSurface))
+        XCTAssertFalse(ledger.isHistoryPresentationPending(for: readerSurface))
+        XCTAssertEqual(ledger.owner(for: .live), liveOwner)
+        _ = ledger.reduce(.scrollbackRequested(focusedSurface, pointsY: 1, isInertial: false))
+        XCTAssertTrue(ledger.isHistoryPresentationPending(for: focusedSurface))
+    }
+
+    func test_splitInputReturnsOnlyItsFocusedPaneToTail() throws {
+        let snapshot = TmuxSnapshot(
+            sessionID: SessionId(0), sessionName: "work", activeWindowID: WindowId(7),
+            windows: [.init(id: WindowId(7), name: "split", activePaneID: PaneId(1),
+                            panes: [.init(id: PaneId(1), isActive: true), .init(id: PaneId(2))])],
+            authority: .unknown
+        )
+        var ledger = TmuxRenderLedger()
+        _ = ledger.reduce(.clientSize(columns: 80, rows: 24))
+        _ = ledger.reduce(.transportAttached(.sideChannel), snapshot: snapshot)
+        _ = ledger.reduce(.surfacesDeclared(declarations(overlay: (WindowId(7), PaneId(2)))))
+        let inputSurface = try XCTUnwrap(MoshHistorySurfacePolicy.inputSurfaceID(
+            focusedPaneID: PaneId(1), usesDetachedOverlay: true
+        ))
+        let otherReader = SurfaceId("overlay:%2")
+        _ = ledger.reduce(.scrollbackRequested(inputSurface, pointsY: -20, isInertial: false))
+        _ = ledger.reduce(.scrollbackRequested(otherReader, pointsY: -20, isInertial: false))
+        let otherOwner = ledger.owner(for: otherReader)
+        _ = ledger.reduce(.scrollbackReturnedToTail(inputSurface))
+        XCTAssertFalse(ledger.isHistoryPresentationPending(for: inputSurface))
+        XCTAssertTrue(ledger.isHistoryPresentationPending(for: otherReader))
+        XCTAssertEqual(ledger.owner(for: otherReader), otherOwner)
+        // Typing after focusing the reader returns that pane to its tail.
+        let readerInput = try XCTUnwrap(MoshHistorySurfacePolicy.inputSurfaceID(
+            focusedPaneID: PaneId(2), usesDetachedOverlay: true
+        ))
+        _ = ledger.reduce(.scrollbackReturnedToTail(readerInput))
+        XCTAssertFalse(ledger.isHistoryPresentationPending(for: otherReader))
+        XCTAssertEqual(MoshHistorySurfacePolicy.inputSurfaceID(
+            focusedPaneID: PaneId(1), usesDetachedOverlay: false
+        ), .live)
+        XCTAssertNil(MoshHistorySurfacePolicy.inputSurfaceID(
+            focusedPaneID: nil, usesDetachedOverlay: true
+        ))
+    }
+}
+
+/// Frame-math tests for the split-pane grid: each terminal surface must compute
+/// the same integer cell grid as tmux, or live escapes mis-render.
 final class PaneLayoutMathTests: XCTestCase {
+
+    func test_terminalSurfaceSizePreservesGridAfterPixelSnapping() {
+        for hundredths in 1000...2400 {
+            let font = TerminalFontResolver.uiFont(
+                id: TerminalFontCatalog.defaultID,
+                size: CGFloat(hundredths) / 100
+            )
+            for scale: CGFloat in [2, 3] {
+                let cell = TerminalCellMetrics.cellSize(font: font, scale: scale)
+                XCTAssertEqual(cell.height, cell.height.rounded(), "row lengths must stay exact")
+                for count in 10...200 {
+                    let grid = CGSize(width: CGFloat(count) * cell.width, height: CGFloat(count) * cell.height)
+                    let surface = TerminalCellMetrics.surfaceSize(for: grid, cellSize: cell)
+                    let columns = Int((surface.width * scale).rounded() / scale / cell.width)
+                    let rows = Int((surface.height * scale).rounded() / scale / cell.height)
+                    if (count >= 20 && columns != count) || (count <= 120 && rows != count)
+                        || surface.height != grid.height {
+                        XCTFail("font=\(font.pointSize) scale=\(scale) count=\(count): got \(columns)x\(rows)")
+                        return
+                    }
+                }
+            }
+        }
+    }
+
+    func test_terminalSurfaceSizeRepairsFractionalCellRegression() {
+        let font = TerminalFontResolver.uiFont(id: TerminalFontCatalog.defaultID, size: 15.0677)
+        let cell = TerminalCellMetrics.cellSize(font: font, scale: 3)
+        XCTAssertEqual(cell.width, 28.0 / 3.0)
+        let grid = CGSize(width: 46 * cell.width, height: 24 * cell.height)
+        let snappedExactWidth = (grid.width * 3).rounded() / 3
+        XCTAssertEqual(Int(snappedExactWidth / cell.width), 45, "exact framing must reproduce the lost column")
+
+        let surface = TerminalCellMetrics.surfaceSize(for: grid, cellSize: cell)
+        XCTAssertEqual(surface.height, grid.height, "preserve the scrollback viewport height")
+        XCTAssertEqual(Int((surface.width * 3).rounded() / 3 / cell.width), 46)
+        XCTAssertEqual(Int((surface.height * 3).rounded() / 3 / cell.height), 24)
+    }
+
+    func test_scrollPaneUsesViewportCellsAndExcludesBorders() {
+        let panes: [(PaneId, CellRect)] = [
+            (PaneId(1), CellRect(width: 4, height: 4, x: 0, y: 1)),
+            (PaneId(2), CellRect(width: 5, height: 4, x: 5, y: 1))
+        ]
+        func target(_ point: CGPoint, offset: CGPoint = .zero, inset: CGPoint = .zero) -> PaneId? {
+            PaneLayoutMath.scrollPane(
+                at: point, contentOffset: offset, canvasInset: inset,
+                cellSize: CGSize(width: 10, height: 20), panes: panes, fallback: PaneId(1)
+            )
+        }
+        XCTAssertEqual(target(CGPoint(x: 50, y: 20)), PaneId(2))
+        XCTAssertEqual(target(CGPoint(x: 99.9, y: 99.9)), PaneId(2))
+        XCTAssertEqual(target(CGPoint(x: 45, y: 40)), PaneId(1), "divider keeps focused routing")
+        XCTAssertEqual(target(CGPoint(x: 60, y: 10)), PaneId(1), "title row is a border")
+        XCTAssertEqual(target(CGPoint(x: 100, y: 40)), PaneId(1), "right edge is exclusive")
+        XCTAssertEqual(target(CGPoint(x: -1, y: 40)), PaneId(1))
+        XCTAssertEqual(target(CGPoint(x: 67, y: 1053), offset: CGPoint(x: 5, y: 1000),
+                              inset: CGPoint(x: 2, y: 3)), PaneId(2))
+    }
+
+    func test_scrollPaneStackedLayoutAndInvalidGeometry() {
+        let panes = [
+            (PaneId(1), CellRect(width: 10, height: 2, x: 0, y: 0)),
+            (PaneId(2), CellRect(width: 10, height: 2, x: 0, y: 3))
+        ]
+        XCTAssertEqual(PaneLayoutMath.scrollPane(
+            at: CGPoint(x: 20, y: 60), contentOffset: .zero,
+            cellSize: CGSize(width: 10, height: 20), panes: panes, fallback: PaneId(1)
+        ), PaneId(2))
+        XCTAssertEqual(PaneLayoutMath.scrollPane(
+            at: CGPoint(x: 20, y: 50), contentOffset: .zero,
+            cellSize: CGSize(width: 10, height: 20), panes: panes, fallback: PaneId(1)
+        ), PaneId(1))
+        XCTAssertEqual(PaneLayoutMath.scrollPane(
+            at: .zero, contentOffset: .zero, cellSize: .zero, panes: panes, fallback: PaneId(1)
+        ), PaneId(1))
+    }
+
+    func test_scrollPaneSingleAndZoomedCanvasKeepsFocusedPane() {
+        for panes: [(PaneId, CellRect)] in [[], [(PaneId(7), CellRect(width: 10, height: 5, x: 0, y: 0))]] {
+            XCTAssertEqual(PaneLayoutMath.scrollPane(
+                at: CGPoint(x: 95, y: 95), contentOffset: .zero,
+                cellSize: CGSize(width: 10, height: 20), panes: panes, fallback: PaneId(7)
+            ), PaneId(7))
+        }
+    }
+
+    func test_scrollGestureRetainsStartingPaneThroughMotionAndGlide() {
+        var target = TmuxScrollGestureTarget()
+        target.begin(paneID: PaneId(2))
+        // Motion across a divider, a focus update, and synthetic glide frames
+        // all read the same snapshot; only a new physical gesture replaces it.
+        for _ in 0..<120 { XCTAssertEqual(target.paneID, PaneId(2)) }
+        target.begin(paneID: PaneId(1))
+        XCTAssertEqual(target.paneID, PaneId(1))
+        target.begin(paneID: nil)
+        XCTAssertNil(target.paneID)
+    }
 
     private func root(_ string: String) -> LayoutNode {
         guard let layout = WindowLayout.parse(string) else {
@@ -34,64 +285,122 @@ final class PaneLayoutMathTests: XCTestCase {
         XCTAssertEqual(viewport.cols, 39)
         XCTAssertEqual(viewport.rows, 15)
 
-        let single = CompactTmuxClientSizing.clientSize(
-            for: viewport,
-            windowRect: CellRect(width: 80, height: 24, x: 0, y: 0),
-            focusRect: CellRect(width: 80, height: 24, x: 0, y: 0)
+        func ratio(_ window: CellRect, _ focus: CellRect) -> (cols: Int, rows: Int) {
+            CompactTmuxClientSizing.clientSize(
+                for: viewport,
+                layout: nil,
+                focusPaneId: nil,
+                windowRect: window,
+                focusRect: focus
+            )
+        }
+
+        let single = ratio(
+            CellRect(width: 80, height: 24, x: 0, y: 0),
+            CellRect(width: 80, height: 24, x: 0, y: 0)
         )
         XCTAssertEqual(single.cols, 39)
         XCTAssertEqual(single.rows, 15)
 
-        let leftHalf = CompactTmuxClientSizing.clientSize(
-            for: viewport,
-            windowRect: CellRect(width: 80, height: 24, x: 0, y: 0),
-            focusRect: CellRect(width: 40, height: 24, x: 0, y: 0)
+        let leftHalf = ratio(
+            CellRect(width: 80, height: 24, x: 0, y: 0),
+            CellRect(width: 40, height: 24, x: 0, y: 0)
         )
         XCTAssertEqual(leftHalf.cols, 78, "a 50/50 split needs two phone widths")
         XCTAssertEqual(leftHalf.rows, 15)
 
-        let rightHalf = CompactTmuxClientSizing.clientSize(
-            for: viewport,
-            windowRect: CellRect(width: 80, height: 24, x: 0, y: 0),
-            focusRect: CellRect(width: 39, height: 24, x: 41, y: 0)
+        let rightHalf = ratio(
+            CellRect(width: 80, height: 24, x: 0, y: 0),
+            CellRect(width: 39, height: 24, x: 41, y: 0)
         )
         XCTAssertEqual(rightHalf.cols, 80, "the gutter-adjusted right pane still gets 39 columns")
         XCTAssertEqual(rightHalf.rows, 15)
 
-        let stackedBottom = CompactTmuxClientSizing.clientSize(
-            for: viewport,
-            windowRect: CellRect(width: 80, height: 24, x: 0, y: 0),
-            focusRect: CellRect(width: 80, height: 11, x: 0, y: 13)
+        let stackedBottom = ratio(
+            CellRect(width: 80, height: 24, x: 0, y: 0),
+            CellRect(width: 80, height: 11, x: 0, y: 13)
         )
         XCTAssertEqual(stackedBottom.cols, 39)
         XCTAssertEqual(stackedBottom.rows, 33, "a short stacked pane expands the client height")
 
-        XCTAssertTrue(
+        // With the layout tree the size is solved against tmux's resize: a
+        // 59-of-200-column right pane needs 181 columns, not the ratio's 170,
+        // because tmux takes a shrink from both panes in turn.
+        let narrowRight = try XCTUnwrap(WindowLayout.parse("0000,200x40,0,0{140x40,0,0,0,59x40,141,0,1}"))
+        let solved = CompactTmuxClientSizing.clientSize(
+            for: (cols: 50, rows: 40),
+            layout: narrowRight,
+            focusPaneId: PaneId(1),
+            windowRect: narrowRight.root.rect,
+            focusRect: CellRect(width: 59, height: 40, x: 141, y: 0)
+        )
+        XCTAssertEqual(solved.cols, 181)
+        XCTAssertEqual(solved.rows, 40)
+
+        var memo = TmuxCompactReprojectionMemo()
+        func reproject(
+            last: (cols: Int, rows: Int),
+            window: CellRect,
+            focus: CellRect,
+            layout: WindowLayout? = nil,
+            pane: PaneId? = nil
+        ) -> Bool {
             CompactTmuxClientSizing.shouldReprojectLayout(
                 viewport: viewport,
-                lastClientSize: viewport,
-                windowRect: CellRect(width: 80, height: 24, x: 0, y: 0),
-                focusRect: CellRect(width: 40, height: 24, x: 0, y: 0)
+                lastClientSize: last,
+                layout: layout,
+                focusPaneId: pane,
+                windowRect: window,
+                focusRect: focus,
+                memo: &memo,
+                diagnostics: .ssh
+            )
+        }
+        XCTAssertTrue(
+            reproject(
+                last: viewport,
+                window: CellRect(width: 80, height: 24, x: 0, y: 0),
+                focus: CellRect(width: 40, height: 24, x: 0, y: 0)
             ),
             "initial split hydration must expand an unprojected phone viewport"
         )
         XCTAssertTrue(
-            CompactTmuxClientSizing.shouldReprojectLayout(
-                viewport: viewport,
-                lastClientSize: (78, 15),
-                windowRect: CellRect(width: 78, height: 15, x: 0, y: 0),
-                focusRect: CellRect(width: 78, height: 15, x: 0, y: 0)
+            reproject(
+                last: (78, 15),
+                window: CellRect(width: 78, height: 15, x: 0, y: 0),
+                focus: CellRect(width: 78, height: 15, x: 0, y: 0)
             ),
             "a local collapse on the phone-owned canvas must return to one viewport"
         )
         XCTAssertFalse(
-            CompactTmuxClientSizing.shouldReprojectLayout(
-                viewport: viewport,
-                lastClientSize: (78, 15),
-                windowRect: CellRect(width: 160, height: 50, x: 0, y: 0),
-                focusRect: CellRect(width: 80, height: 50, x: 0, y: 0)
+            reproject(
+                last: (78, 15),
+                window: CellRect(width: 160, height: 50, x: 0, y: 0),
+                focus: CellRect(width: 80, height: 50, x: 0, y: 0)
             ),
             "a larger peer layout must not make the phone reclaim tmux sizing"
+        )
+        // The layout tmux leaves after the solved advertisement holds.
+        let fitted = try XCTUnwrap(WindowLayout.parse("0000,78x15,0,0{39x15,0,0,0,38x15,40,0,1}"))
+        XCTAssertEqual(
+            CompactTmuxClientSizing.clientSize(
+                for: viewport,
+                layout: fitted,
+                focusPaneId: PaneId(0),
+                windowRect: fitted.root.rect,
+                focusRect: CellRect(width: 39, height: 15, x: 0, y: 0)
+            ).cols,
+            78
+        )
+        XCTAssertFalse(
+            reproject(
+                last: (78, 15),
+                window: fitted.root.rect,
+                focus: CellRect(width: 39, height: 15, x: 0, y: 0),
+                layout: fitted,
+                pane: PaneId(0)
+            ),
+            "the solved canvas is a fixed point"
         )
 
         XCTAssertNil(
@@ -101,6 +410,129 @@ final class PaneLayoutMathTests: XCTestCase {
             ),
             "pre-layout sub-cell viewports must never resize tmux"
         )
+    }
+
+    /// A measured frame that keeps the phone's cell grid is judged like a
+    /// layout update: it must neither reclaim a peer's grid nor restart a
+    /// held resize cycle by re-pushing the current layout's projection. A
+    /// new grid is the phone's own resize and always advertises.
+    func test_compactMeasuredViewportWithTheSameGridIsJudgedLikeALayoutUpdate() {
+        func advertises(
+            _ viewport: (cols: Int, rows: Int),
+            previous: (cols: Int, rows: Int)?,
+            last: (cols: Int, rows: Int),
+            window: (Int, Int),
+            focus: (Int, Int),
+            memo: inout TmuxCompactReprojectionMemo
+        ) -> Bool {
+            CompactTmuxClientSizing.shouldAdvertiseMeasuredViewport(
+                viewport,
+                previousViewport: previous,
+                lastClientSize: last,
+                layout: nil,
+                focusPaneId: nil,
+                windowRect: CellRect(width: window.0, height: window.1, x: 0, y: 0),
+                focusRect: CellRect(width: focus.0, height: focus.1, x: 0, y: 0),
+                memo: &memo,
+                diagnostics: .ssh
+            )
+        }
+        let phone = (cols: 39, rows: 15)
+        // A larger peer's grid whose projection (104x15) differs from what
+        // the phone last advertised.
+        var memo = TmuxCompactReprojectionMemo()
+        XCTAssertFalse(
+            advertises(phone, previous: phone, last: (78, 15), window: (160, 50), focus: (60, 50), memo: &memo),
+            "an unchanged grid must not reclaim a peer's canvas"
+        )
+        XCTAssertTrue(advertises(phone, previous: nil, last: (78, 15), window: (160, 50), focus: (60, 50), memo: &memo))
+        XCTAssertTrue(advertises(phone, previous: (40, 15), last: (78, 15), window: (160, 50), focus: (60, 50), memo: &memo))
+        // The phone's own canvas drifted under it: the unchanged grid still
+        // repairs it, as a layout update would.
+        var own = TmuxCompactReprojectionMemo()
+        XCTAssertTrue(advertises(phone, previous: phone, last: (78, 15), window: (78, 15), focus: (37, 15), memo: &own))
+
+        // The ratio two-cycle (45 of 200 columns) stopped by the guard.
+        let viewport = (cols: 50, rows: 40)
+        var held = TmuxCompactReprojectionMemo()
+        var last = viewport
+        var window = 200
+        var decisions: [Bool] = []
+        for _ in 0..<5 {
+            let reprojects = CompactTmuxClientSizing.shouldReprojectLayout(
+                viewport: viewport,
+                lastClientSize: last,
+                layout: nil,
+                focusPaneId: nil,
+                windowRect: CellRect(width: window, height: 40, x: 0, y: 0),
+                focusRect: CellRect(width: window == 200 ? 45 : 56, height: 40, x: 0, y: 0),
+                memo: &held,
+                diagnostics: .ssh
+            )
+            decisions.append(reprojects)
+            guard reprojects else { break }
+            last = (window == 200 ? 223 : 200, 40)
+            window = last.cols
+        }
+        XCTAssertEqual(decisions, [true, true, true, true, false])
+        XCTAssertTrue(held.isHoldingCycle)
+        XCTAssertFalse(
+            advertises(viewport, previous: viewport, last: last, window: (window, 40), focus: (window == 200 ? 45 : 56, 40), memo: &held),
+            "an unchanged grid must not restart a held cycle"
+        )
+        XCTAssertTrue(held.isHoldingCycle)
+    }
+
+    @MainActor
+    func test_compactShapeOnlyFlatteningReprojectsTheSSHCanvas() throws {
+        let controller = TmuxController()
+        controller.sendBytesAdmitting = { _ in true }
+        defer { controller.reset() }
+        controller.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
+        controller.sendControlCommand("refresh-client -C 200,40")
+        let published = try XCTUnwrap(controller.lastPublishedClientSize)
+        let nested = try XCTUnwrap(WindowLayout.parse("0000,200x40,0,0{100x40,0,0,0,99x40,101,0{58x40,101,0,2,40x40,160,0,1}}"))
+        let flat = try XCTUnwrap(WindowLayout.parse("0000,200x40,0,0{100x40,0,0,0,58x40,101,0,2,40x40,160,0,1}"))
+        let focus = CellRect(width: 40, height: 40, x: 160, y: 0)
+        func key(_ layout: WindowLayout) -> String {
+            TmuxCompactClientSizing.observationKey(mode: "tmuxControl", windowId: WindowId(0),
+                focusPaneId: PaneId(1), layout: layout, windowRect: layout.root.rect, focusRect: focus)
+        }
+        XCTAssertNotEqual(key(nested), key(flat))
+        var memo = TmuxCompactReprojectionMemo()
+        func reprojects(_ layout: WindowLayout) -> Bool {
+            CompactTmuxClientSizing.shouldReprojectLayout(viewport: (50, 40), lastClientSize: (published.columns, published.rows),
+                layout: layout, focusPaneId: PaneId(1), windowRect: layout.root.rect,
+                focusRect: focus, memo: &memo, diagnostics: .ssh)
+        }
+        XCTAssertFalse(reprojects(nested))
+        XCTAssertTrue(reprojects(flat))
+        XCTAssertEqual(CompactTmuxClientSizing.clientSize(for: (50, 40), layout: flat,
+            focusPaneId: PaneId(1), windowRect: flat.root.rect, focusRect: focus).cols, 230)
+    }
+
+    @MainActor
+    func test_compactSSHWriteBeforeConnectionReportsFailure() {
+        let session = SSHSession(host: Host(transport: .ssh))
+        XCTAssertFalse(session.sendAdmitting(Array("refresh-client -C 202,40\n".utf8)),
+            "a disconnected SSH request cannot enter the ordered writer")
+    }
+
+    @MainActor
+    func test_compactMoshSideChannelWriteAfterDisconnectReportsFailure() {
+        let channel = TmuxControlChannel(host: Host(transport: .mosh), sessionName: "compact-unit", initialSize: nil)
+        channel.disconnect()
+        XCTAssertFalse(channel.sendAdmitting(Array("refresh-client -C 202,40\n".utf8)),
+            "a terminated side-channel writer cannot admit a size")
+    }
+
+    @MainActor
+    func test_compactMoshSideChannelAdmissionIsSynchronousAndRejectsEmptyInput() {
+        let channel = TmuxControlChannel(host: Host(transport: .mosh), sessionName: "compact-unit", initialSize: nil)
+        defer { channel.disconnect() }
+        XCTAssertFalse(channel.sendAdmitting([]))
+        XCTAssertTrue(channel.sendAdmitting(Array("refresh-client -C 202,40\n".utf8)),
+            "the ordered queue admits synchronously before its writer starts")
     }
 
     // MARK: - maxVerticalLeaves (header reserve-rows count)
@@ -434,5 +866,86 @@ final class PaneLayoutMathTests: XCTestCase {
         let x = PaneLayoutMath.closeButtonRect(for: tiny, cellSize: cell)
         XCTAssertEqual(x.width, 12, "✕ width clamps to the pane width when narrower than cellH")
         XCTAssertTrue(tiny.surfaceFrame.contains(x))
+    }
+}
+
+@MainActor
+final class GeometryNeutralTmuxCanvasModifierTests: XCTestCase {
+    private final class Mounts {
+        var count = 0
+        weak var view: UIView?
+    }
+
+    private struct CountingSurface: UIViewRepresentable {
+        let mounts: Mounts
+        func makeUIView(context: Context) -> UIView {
+            mounts.count += 1
+            let view = UIView()
+            mounts.view = view
+            return view
+        }
+        func updateUIView(_ uiView: UIView, context: Context) {}
+    }
+
+    private struct Host: View {
+        let windowRect: CellRect?
+        let mounts: Mounts
+        var body: some View {
+            CountingSurface(mounts: mounts)
+                .modifier(GeometryNeutralTmuxCanvasModifier(
+                    windowRect: windowRect,
+                    focusRect: windowRect,
+                    cellSize: CGSize(width: 9, height: 18),
+                    onViewportSize: { _ in }
+                ))
+        }
+    }
+
+    @discardableResult
+    private func settle(_ controller: UIViewController, until condition: () -> Bool = { true }) -> Bool {
+        let deadline = Date().addingTimeInterval(3)
+        repeat {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            controller.view.setNeedsLayout()
+            controller.view.layoutIfNeeded()
+        } while !condition() && Date() < deadline
+        return condition()
+    }
+
+    /// A mosh terminal remounted when tmux metadata arrived came back blank:
+    /// its screen was painted into the discarded view, and mosh does not
+    /// resend an unchanged screen.
+    func test_tmuxMetadataArrivingOrLeavingKeepsTheSurfaceMounted() throws {
+        let mounts = Mounts()
+        let controller = UIHostingController(rootView: Host(windowRect: nil, mounts: mounts))
+        // A scene-less window never commits SwiftUI updates after its first layout.
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 600)
+        window.rootViewController = controller
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        func frameInWindow() -> CGRect? { mounts.view.map { $0.convert($0.bounds, to: nil) } }
+        settle(controller)
+        XCTAssertEqual(mounts.count, 1)
+        let plain = try XCTUnwrap(frameInWindow())
+        XCTAssertGreaterThan(plain.width, 0)
+        XCTAssertGreaterThan(plain.height, 0)
+
+        controller.rootView = Host(windowRect: CellRect(width: 46, height: 30, x: 0, y: 0), mounts: mounts)
+        XCTAssertTrue(settle(controller) { frameInWindow() != plain }, "the projection never applied")
+        XCTAssertEqual(mounts.count, 1, "the projected canvas must not remount the surface")
+        // The surface is half a cell wider than the 46x30 grid, scaled to fit.
+        let scale = min(plain.width / (46 * 9), plain.height / (30 * 18))
+        let projected = try XCTUnwrap(frameInWindow())
+        XCTAssertEqual(projected.width, (46 * 9 + 4.5) * scale, accuracy: 1)
+        XCTAssertEqual(projected.height, 30 * 18 * scale, accuracy: 1)
+
+        controller.rootView = Host(windowRect: nil, mounts: mounts)
+        XCTAssertTrue(settle(controller) { frameInWindow() == plain }, "the plain viewport never returned")
+        XCTAssertEqual(mounts.count, 1, "losing the layout must not remount the surface")
     }
 }

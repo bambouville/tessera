@@ -1,0 +1,11 @@
+{
+  "downgradedSelectedTransactionVersion": 1,
+  "handshakeExpiryBoundary": 1700000060,
+  "sessionExpiryBoundary": 1700000300,
+  "postCompletionEnvelopeKind": "abort",
+  "expectedErrors": {
+    "downgrade": "downgradeDetected",
+    "expiredTransition": "offerExpired",
+    "postCompletionTraffic": "unexpectedMessageOrder"
+  }
+}

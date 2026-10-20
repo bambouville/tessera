@@ -56,6 +56,7 @@ final class AutoTmuxLaunchRegressionTests: XCTestCase {
     @MainActor
     func test_liveAutoTmuxAttachesOnSecondConnect() async throws {
         let config = try Config.load()
+        try await runAutoTmuxLaunch(config: config, label: "first-connect", keepSession: true)
         try await runAutoTmuxLaunch(config: config, label: "second-connect")
     }
 
@@ -87,12 +88,30 @@ final class AutoTmuxLaunchRegressionTests: XCTestCase {
         )
     }
 
+    /// Field regression from 2026-08-29: the poisoned-command watchdog tried
+    /// to replace the inline SSH PTY, briefly reopened tmux, then the owning
+    /// SSH session transitioned to `.disconnected` and its sidebar row was
+    /// removed. Exercise the same child-channel replacement against the live
+    /// tmux 3.4 fixture and require the logical transport to stay connected.
+    @MainActor
+    func test_liveAutoTmuxPTYRecoveryKeepsSessionConnected() async throws {
+        let config = try Config.load()
+        try await runAutoTmuxLaunch(
+            config: config,
+            label: "pty-recovery",
+            sendOnStatePublish: true,
+            recoverAfterAttach: true
+        )
+    }
+
     @MainActor
     private func runAutoTmuxLaunch(
         config: Config,
         label: String,
         sendOnStatePublish: Bool = false,
-        useChaosHost: Bool = false
+        useChaosHost: Bool = false,
+        recoverAfterAttach: Bool = false,
+        keepSession: Bool = false
     ) async throws {
         let address = useChaosHost ? config.chaosHost : config.stableHost
         let host = Host(
@@ -131,74 +150,122 @@ final class AutoTmuxLaunchRegressionTests: XCTestCase {
         let name = HostRuntimeStateStore.sessionName(for: host)
         let command = AutoTmuxScript.command(sessionName: name)
         var sentAt = Date()
-
-        // Production timing: the send is scheduled on the main actor the
-        // instant `.connected` is published, which is before `withPTY` has
-        // opened the shell channel.
-        var immediateSendDone = false
-        var cancellable: AnyCancellable?
-        if sendOnStatePublish {
-            cancellable = session.$state.sink { newState in
-                guard case .connected = newState, !immediateSendDone else { return }
-                immediateSendDone = true
-                DispatchQueue.main.async {
-                    tmux.suppressPassthroughOutputUntilControlMode = true
-                    sentAt = Date()
-                    session.send(Array(command.utf8))
+        // The launch creates the host's automatic session on the shared
+        // fixture; remove it by exact name over a separate exec channel, on
+        // failure as well, so the next run starts from a fresh host again.
+        func removeFixtureSession() async {
+            _ = try? await session.executeConnectedCommand(
+                "tmux kill-session -t '=\(name)' >/dev/null 2>&1 || true"
+            )
+        }
+        do {
+            // Production timing: the send is scheduled on the main actor the
+            // instant `.connected` is published, which is before `withPTY` has
+            // opened the shell channel.
+            var immediateSendDone = false
+            var cancellable: AnyCancellable?
+            if sendOnStatePublish {
+                cancellable = session.$state.sink { newState in
+                    guard case .connected = newState, !immediateSendDone else { return }
+                    immediateSendDone = true
+                    DispatchQueue.main.async {
+                        tmux.suppressPassthroughOutputUntilControlMode = true
+                        sentAt = Date()
+                        session.send(Array(command.utf8))
+                    }
                 }
             }
-        }
-        defer { cancellable?.cancel() }
+            defer { cancellable?.cancel() }
 
-        session.connect()
-        try await waitUntil("ssh connect (\(label))", timeout: 30) {
-            if case .failed(let reason) = session.state {
-                XCTFail("connect failed: \(reason)")
-                return true
+            session.connect()
+            try await waitUntil("ssh connect (\(label))", timeout: 30) {
+                if case .failed(let reason) = session.state {
+                    XCTFail("connect failed: \(reason)")
+                    return true
+                }
+                if case .connected = session.state { return true }
+                if let pending = session.pendingHostKeyVerification, !pending.isResolved {
+                    pending.accept()
+                }
+                return false
             }
-            if case .connected = session.state { return true }
-            if let pending = session.pendingHostKeyVerification, !pending.isResolved {
-                pending.accept()
-            }
-            return false
-        }
 
-        // SessionView's send site.
-        if !sendOnStatePublish {
-            tmux.suppressPassthroughOutputUntilControlMode = true
-            sentAt = Date()
-            session.send(Array(command.utf8))
-        }
-
-        var reachedControlMode = false
-        do {
-            try await waitUntil("tmux control mode (\(label))", timeout: 25) {
-                tmux.mode == .tmuxControl
+            // SessionView's send site.
+            if !sendOnStatePublish {
+                tmux.suppressPassthroughOutputUntilControlMode = true
+                sentAt = Date()
+                session.send(Array(command.utf8))
             }
-            reachedControlMode = true
+
+            var reachedControlMode = false
+            do {
+                try await waitUntil("tmux control mode (\(label))", timeout: 25) {
+                    tmux.mode == .tmuxControl
+                }
+                reachedControlMode = true
+            } catch {
+                reachedControlMode = false
+            }
+
+            transcript.chunks = transcriptBox.chunks
+            let elapsed = Date().timeIntervalSince(sentAt)
+            let report = """
+                auto-tmux launch [\(label)]
+                  session name: \(name)
+                  control mode: \(reachedControlMode) after \(String(format: "%.2f", elapsed))s
+                  passthrough chunks: \(transcript.chunks.count) (\(transcript.byteCount) bytes)
+                \(transcript.rendered)
+                """
+            print(report)
+            try? report.write(
+                toFile: NSTemporaryDirectory() + "autotmux-\(label).log",
+                atomically: true,
+                encoding: .utf8
+            )
+            XCTAssertTrue(
+                reachedControlMode,
+                "auto-tmux never reached control mode.\n\(report)"
+            )
+
+            if recoverAfterAttach {
+                let oldGeneration = session.interactivePTYGeneration
+                XCTAssertTrue(
+                    session.requestInteractivePTYRecovery(reason: "live-regression-test")
+                )
+                try await waitUntil("replacement PTY generation", timeout: 10) {
+                    session.interactivePTYGeneration > oldGeneration
+                        || session.state == .disconnected
+                }
+                let recoveryDiagnostics = DiagnosticLogStore.attachmentData().map {
+                    String(decoding: $0, as: UTF8.self)
+                } ?? "<no diagnostics>"
+                XCTAssertEqual(
+                    session.state,
+                    .connected,
+                    "PTY recovery disconnected the owning SSH session.\n\(recoveryDiagnostics)"
+                )
+
+                tmux.reset()
+                tmux.suppressPassthroughOutputUntilControlMode = true
+                session.send(Array(command.utf8))
+                try await waitUntil("tmux control mode after PTY recovery", timeout: 25) {
+                    tmux.mode == .tmuxControl || session.state == .disconnected
+                }
+                let reattachDiagnostics = DiagnosticLogStore.attachmentData().map {
+                    String(decoding: $0, as: UTF8.self)
+                } ?? "<no diagnostics>"
+                XCTAssertEqual(
+                    session.state,
+                    .connected,
+                    "replacement PTY ended and removed the live session.\n\(reattachDiagnostics)"
+                )
+                XCTAssertEqual(tmux.mode, .tmuxControl)
+            }
         } catch {
-            reachedControlMode = false
+            await removeFixtureSession()
+            throw error
         }
-
-        transcript.chunks = transcriptBox.chunks
-        let elapsed = Date().timeIntervalSince(sentAt)
-        let report = """
-            auto-tmux launch [\(label)]
-              session name: \(name)
-              control mode: \(reachedControlMode) after \(String(format: "%.2f", elapsed))s
-              passthrough chunks: \(transcript.chunks.count) (\(transcript.byteCount) bytes)
-            \(transcript.rendered)
-            """
-        print(report)
-        try? report.write(
-            toFile: NSTemporaryDirectory() + "autotmux-\(label).log",
-            atomically: true,
-            encoding: .utf8
-        )
-        XCTAssertTrue(
-            reachedControlMode,
-            "auto-tmux never reached control mode.\n\(report)"
-        )
+        if !keepSession { await removeFixtureSession() }
     }
 
     @MainActor

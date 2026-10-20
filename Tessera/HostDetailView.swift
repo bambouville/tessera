@@ -285,6 +285,7 @@ struct HostDetailView: View {
         VStack(alignment: .leading, spacing: 20) {
             Field(label: "name") {
                 Input(text: hostNameBinding, verbatimPlaceholder: "my-server")
+                    .literalTextInput()
             }
 
             if isPhone {
@@ -468,8 +469,7 @@ struct HostDetailView: View {
 
                     HStack(spacing: 8) {
                         Input(text: $newTag, placeholder: "tag")
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
+                            .literalTextInput()
                             .onSubmit(addTag)
 
                         Btn("add", style: .default, compact: true, action: addTag)
@@ -485,6 +485,7 @@ struct HostDetailView: View {
 
             Field(label: "environment variables", sub: "one KEY=value per line; an optional leading `export ` is stripped. values are passed to the remote shell verbatim — `$HOME`, `$(…)`, and quotes work as written.") {
                 multilineInput(verbatim: "PATH=/opt/local/bin:$PATH\nEDITOR=nvim", text: $host.envVars)
+                    .literalTextInput()
             }
 
             Text("tmux gotcha: env vars and the startup snippet only run when tmux *starts*. if you re-attach to an existing tmux session on this host, the running panes keep their old env. run `tmux kill-server` on the remote (or kill the session) and reconnect to pick up changes.")
@@ -606,6 +607,7 @@ struct HostDetailView: View {
         VStack(alignment: .leading, spacing: 20) {
             Field(label: "startup snippet", sub: "commands run immediately after connect") {
                 multilineInput("startup snippet", text: $host.startupSnippet)
+                    .literalTextInput()
             }
         }
     }
@@ -615,8 +617,7 @@ struct HostDetailView: View {
     private var addressField: some View {
         Field(label: "address") {
             Input(text: hostAddressBinding, verbatimPlaceholder: "192.168.1.10")
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
+                .literalTextInput()
                 .textContentType(.URL)
         }
     }
@@ -624,8 +625,7 @@ struct HostDetailView: View {
     private var userField: some View {
         Field(label: "user") {
             Input(text: hostUserBinding, placeholder: "username")
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
+                .literalTextInput()
                 .textContentType(.username)
         }
     }
@@ -1047,8 +1047,7 @@ struct HostDetailView: View {
                         text: optionalStringBinding($host.tmuxSessionName),
                         verbatimPlaceholder: "dev"
                     )
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                    .literalTextInput()
                 }
 
                 Text("letters, numbers, dash, underscore, dot only; anything else falls back to the auto-derived name.")
@@ -1060,8 +1059,7 @@ struct HostDetailView: View {
                         text: optionalStringBinding($host.launchCommand),
                         verbatimPlaceholder: customLaunchPlaceholder
                     )
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                    .literalTextInput()
                 }
 
                 Text(customLaunchDescription)
@@ -1179,6 +1177,7 @@ struct HostDetailView: View {
             .font(Typography.tesseraMono(size: 13))
             .foregroundStyle(T.fg)
             .keyboardType(.numberPad)
+            .literalTextInput()
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .background(T.inputBg)

@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "no-op",
+      "request": {
+        "order": ["@1", "@2", "@3"],
+        "moving": "@2",
+        "destination": 1,
+        "capabilities": {"supportsMoveBefore": true, "supportsSubscriptions": true},
+        "sessionID": "$7",
+        "activeWindowID": "@1",
+        "highestIndex": 3
+      },
+      "response": {"commands": [], "expectedOrder": ["@1", "@2", "@3"]},
+      "serverOrder": ["@1", "@2", "@3"]
+    },
+    {
+      "name": "modern-front",
+      "request": {
+        "order": ["@1", "@2", "@3"],
+        "moving": "@3",
+        "destination": 0,
+        "capabilities": {"supportsMoveBefore": true, "supportsSubscriptions": true},
+        "sessionID": "$7",
+        "activeWindowID": "@1",
+        "highestIndex": 3
+      },
+      "response": {
+        "commands": ["move-window -d -b -s $7:@3 -t $7:@1", "select-window -t $7:@1"],
+        "expectedOrder": ["@3", "@1", "@2"]
+      },
+      "serverOrder": ["@3", "@1", "@2"]
+    },
+    {
+      "name": "legacy-front",
+      "request": {
+        "order": ["@1", "@2", "@3"],
+        "moving": "@3",
+        "destination": 0,
+        "capabilities": {"supportsMoveBefore": false, "supportsSubscriptions": false},
+        "sessionID": "$7",
+        "activeWindowID": "@1",
+        "highestIndex": 3
+      },
+      "response": {
+        "commands": ["swap-window -d -s $7:@3 -t $7:@2", "swap-window -d -s $7:@3 -t $7:@1", "select-window -t $7:@1"],
+        "expectedOrder": ["@3", "@1", "@2"]
+      },
+      "serverOrder": ["@3", "@1", "@2"]
+    },
+    {
+      "name": "drop-after-predecessor",
+      "request": {
+        "order": ["@1", "@2", "@3"],
+        "moving": "@1",
+        "destination": 2,
+        "capabilities": {"supportsMoveBefore": true, "supportsSubscriptions": true},
+        "sessionID": "$7",
+        "activeWindowID": "@2",
+        "highestIndex": 3
+      },
+      "response": {
+        "commands": ["move-window -d -a -s $7:@1 -t $7:@3", "select-window -t $7:@2"],
+        "expectedOrder": ["@2", "@3", "@1"]
+      },
+      "serverOrder": ["@2", "@3", "@1"]
+    }
+  ]
+}

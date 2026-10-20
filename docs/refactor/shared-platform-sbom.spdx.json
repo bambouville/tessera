@@ -1,0 +1,134 @@
+{
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "creationInfo": {
+    "created": "2026-08-23T00:00:00Z",
+    "creators": [
+      "Tool: Tessera shared-platform dependency audit"
+    ]
+  },
+  "dataLicense": "CC0-1.0",
+  "documentNamespace": "https://bambouville.com/spdx/tessera/shared-platform/2026-08-23",
+  "name": "Tessera shared platform core dependency SBOM",
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-TesseraSharedCore",
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/bambouville/tessera",
+      "filesAnalyzed": false,
+      "licenseConcluded": "GPL-3.0-only",
+      "licenseDeclared": "GPL-3.0-only",
+      "name": "Tessera shared platform core",
+      "versionInfo": "development"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-SwiftCrypto",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "95ba0316a9b733e92bb6b071255ff46263bbe7dc"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/apple/swift-crypto.git",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "name": "swift-crypto",
+      "versionInfo": "3.15.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-SwiftASN1",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "a9a5efd40eaf558a2bcd48d64b1d1646be686008"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/apple/swift-asn1.git",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "name": "swift-asn1",
+      "versionInfo": "1.7.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-Mosh",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "64bea12b2ec55fc0a5f995ab2fe42ce219549806"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/bambouville/mosh.git",
+      "filesAnalyzed": false,
+      "licenseComments": "Mosh source files carry the canonical OpenSSL linking exception. The separate upstream COPYING.iOS distribution commitment is recorded by its own text and is not Tessera's App Store exception.",
+      "licenseConcluded": "GPL-3.0-or-later WITH cryptsetup-OpenSSL-exception",
+      "licenseDeclared": "GPL-3.0-or-later WITH cryptsetup-OpenSSL-exception",
+      "name": "mosh",
+      "versionInfo": "1.4.0-5-g64bea12"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-OpenSSL",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "name": "OpenSSL",
+      "primaryPackagePurpose": "LIBRARY",
+      "versionInfo": "3.5.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-Protobuf",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "f0dc78d7e6e331b8c6bb2d5283e06aa26883ca7c"
+        }
+      ],
+      "copyrightText": "Copyright 2008 Google Inc.",
+      "downloadLocation": "https://github.com/protocolbuffers/protobuf.git",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "name": "protobuf",
+      "versionInfo": "21.12"
+    }
+  ],
+  "relationships": [
+    {
+      "relatedSpdxElement": "SPDXRef-Package-SwiftCrypto",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-TesseraSharedCore"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-SwiftASN1",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-SwiftCrypto"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-Mosh",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-TesseraSharedCore"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-Protobuf",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-Mosh"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-OpenSSL",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-Mosh"
+    }
+  ],
+  "spdxVersion": "SPDX-2.3"
+}

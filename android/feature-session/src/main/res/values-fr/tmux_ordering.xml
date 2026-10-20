@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tmux_move_left">Déplacer à gauche</string>
+    <string name="tmux_move_right">Déplacer à droite</string>
+    <string name="tmux_move_up">Déplacer vers le haut</string>
+    <string name="tmux_move_down">Déplacer vers le bas</string>
+    <string name="tmux_move_start">Déplacer au début</string>
+    <string name="tmux_move_end">Déplacer à la fin</string>
+    <string name="tmux_tidy">Réorganiser les numéros des fenêtres</string>
+    <string name="tmux_order_failed">Impossible de mettre à jour l’ordre des fenêtres tmux.</string>
+    <string name="tmux_order_changed">L’ordre des fenêtres a changé. Réessayez.</string>
+    <string name="tmux_order_timeout">Le déplacement des fenêtres a expiré.</string>
+    <string name="tmux_order_unavailable">Le déplacement des fenêtres n’est pas encore disponible.</string>
+    <string name="tmux_window_label">Fenêtre %1$d, %2$s</string>
+    <string name="tmux_window_index_label">Fenêtre %1$d, %2$s, indice tmux %3$d</string>
+    <string name="tmux_window_index_detail">indice tmux %1$d · %2$s</string>
+    <string name="tmux_split_right">Diviser à droite</string>
+    <string name="tmux_split_left">Diviser à gauche</string>
+    <string name="tmux_split_down">Diviser vers le bas</string>
+    <string name="tmux_split_up">Diviser vers le haut</string>
+</resources>

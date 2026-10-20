@@ -1,0 +1,20 @@
+{
+  "%lld files": {
+    "de": { "one": "%lld Datei", "other": "%lld Dateien" },
+    "en": { "one": "%lld file", "other": "%lld files" },
+    "es": { "one": "%lld archivo", "other": "%lld archivos" },
+    "fr": { "one": "%lld fichier", "other": "%lld fichiers" },
+    "ja": { "other": "%lld 個のファイル" },
+    "zh-Hans": { "other": "%lld 个文件" },
+    "zh-Hant": { "other": "%lld 個檔案" }
+  },
+  "%lld questions waiting": {
+    "de": { "one": "%lld Frage wartet auf Antwort", "other": "%lld Fragen warten auf Antwort" },
+    "en": { "one": "%lld question waiting", "other": "%lld questions waiting" },
+    "es": { "one": "%lld pregunta pendiente", "other": "%lld preguntas pendientes" },
+    "fr": { "one": "%lld question en attente", "other": "%lld questions en attente" },
+    "ja": { "other": "%lld 件の質問が回答待ち" },
+    "zh-Hans": { "other": "%lld 个问题等待回答" },
+    "zh-Hant": { "other": "%lld 個問題等待回答" }
+  }
+}

@@ -32,7 +32,7 @@ SIMCTL_CHILD_TESSERA_TMUX_WINDOW_CLOSE_HARNESS=1 \
   xcrun simctl launch "$UDID" "$BUNDLE_ID" >"$CASE_DIR/tabs-launch.txt"
 sleep 2
 xcrun simctl io "$UDID" screenshot "$CASE_DIR/tabs.raw.png" >/dev/null
-sips -r 270 "$CASE_DIR/tabs.raw.png" --out "$CASE_DIR/tabs.png" >/dev/null
+"$HERE/normalize-landscape-screenshot.sh" "$CASE_DIR/tabs.raw.png" "$CASE_DIR/tabs.png" >/dev/null
 rm "$CASE_DIR/tabs.raw.png"
 
 xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
@@ -41,7 +41,7 @@ SIMCTL_CHILD_TESSERA_TMUX_WINDOW_CLOSE_AUTO_CONFIRM=1 \
   xcrun simctl launch "$UDID" "$BUNDLE_ID" >"$CASE_DIR/confirmation-launch.txt"
 sleep 2
 xcrun simctl io "$UDID" screenshot "$CASE_DIR/confirmation.raw.png" >/dev/null
-sips -r 270 "$CASE_DIR/confirmation.raw.png" --out "$CASE_DIR/confirmation.png" >/dev/null
+"$HERE/normalize-landscape-screenshot.sh" "$CASE_DIR/confirmation.raw.png" "$CASE_DIR/confirmation.png" >/dev/null
 rm "$CASE_DIR/confirmation.raw.png"
 
 cat >"$CASE_DIR/case.json" <<'JSON'
@@ -55,7 +55,7 @@ cat >"$CASE_DIR/case.json" <<'JSON'
     "Closing a window whose full layout contains multiple panes presents a destructive confirmation naming the pane count and clearly states that every pane in the window will close.",
     "The confirmation offers an unambiguous cancel action and follows Tessera's flat frosted visual language."
   ],
-  "capture_notes": "DEBUG host-free SessionTopBar harness with authoritative tmux window/layout hydration; no host connection, remote command, or user data. tabs.png shows the three per-tab close controls. confirmation.png shows the split-window destructive prompt. Screenshot pixels were rotated counter-clockwise to normalize simctl's fixed portrait framebuffer into landscape.",
+  "capture_notes": "DEBUG host-free SessionTopBar harness with authoritative tmux window/layout hydration; no host connection, remote command, or user data. tabs.png shows the three per-tab close controls. confirmation.png shows the split-window destructive prompt. Frames are normalized to upright landscape whichever shape simctl returns.",
   "deterministic_precheck": {"verdict": "pass", "details": "XCUITest proved all three X controls exist, single-pane close is immediate, split close can be cancelled or confirmed, confirmation removes the targeted window, and a zoomed two-pane window still requires the two-pane confirmation."}
 }
 JSON

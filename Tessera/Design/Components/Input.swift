@@ -1,6 +1,55 @@
 import SwiftUI
 import UIKit
 
+extension View {
+    func literalTextInput() -> some View {
+        self
+            .autocorrectionDisabled()
+            .textInputAutocapitalization(.never)
+    }
+}
+
+private protocol LiteralInputTraits: AnyObject {
+    var smartDashesType: UITextSmartDashesType { get set }
+    var smartQuotesType: UITextSmartQuotesType { get set }
+    var smartInsertDeleteType: UITextSmartInsertDeleteType { get set }
+}
+
+extension UITextField: LiteralInputTraits {}
+extension UITextView: LiteralInputTraits {}
+
+/// Tessera's inputs hold commands, hosts, paths, names and agent prompts.
+/// SwiftTerm already disables these substitutions; this covers SwiftUI fields
+/// and alert text fields that have no API for them.
+enum LiteralTextInputPolicy {
+    static func install() {
+        _ = observers
+    }
+
+    private static let observers = [
+        UITextField.textDidBeginEditingNotification,
+        UITextView.textDidBeginEditingNotification
+    ].map { name in
+        NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { notification in
+            guard let input = notification.object as? (UIResponder & LiteralInputTraits) else { return }
+            var changed = false
+            if input.smartDashesType != .no {
+                input.smartDashesType = .no
+                changed = true
+            }
+            if input.smartQuotesType != .no {
+                input.smartQuotesType = .no
+                changed = true
+            }
+            if input.smartInsertDeleteType != .no {
+                input.smartInsertDeleteType = .no
+                changed = true
+            }
+            if changed && input.isFirstResponder { input.reloadInputViews() }
+        }
+    }
+}
+
 struct Input: View {
     @Binding var text: String
     /// Already resolved, so `TextField` takes its `StringProtocol` overload.

@@ -9,7 +9,10 @@ import Foundation
 /// the same units as `ScrollDispatcher.ScrollEvent.deltaY` — raw gesture
 /// points, positive = user scrolling up through content.
 ///
-/// Each event is converted to an instantaneous velocity of
+/// When available, UIKit's release velocity supplies the estimate for a known
+/// continuous input source, including began/ended-only coalesced flicks. An
+/// unclassified source still needs a `.changed` event. Without a native
+/// estimate, each event becomes an instantaneous velocity of
 /// `delta / (time since the previous event)`. That denominator matters:
 /// event timestamps are taken at *delivery*, so after a main-thread hitch
 /// UIKit coalesces the whole stall's motion into one large delta — divided
@@ -22,10 +25,9 @@ import Foundation
 ///
 /// Returns nil (no inertia) when the gesture doesn't qualify:
 ///
-///   - Too few continuous samples. Discrete mouse-wheel notches arrive on
-///     iPadOS as `.began`→`.ended` pairs with **no** `.changed` events, so
-///     wheels never reach the sample minimum — matching macOS, where wheel
-///     scrolling has no momentum (momentum is a trackpad-only behavior).
+///   - No known continuous source or continuous sample (or too few samples
+///     for the fallback). Callers must keep classified discrete wheel input
+///     out of the inertia path; callback count alone cannot classify a flick.
 ///   - The finger paused before lifting — no samples inside the window.
 ///   - Release speed below `minimumStartSpeed` — a slow deliberate drag
 ///     stops dead, like UIKit.
@@ -38,9 +40,8 @@ public struct ScrollVelocityTracker: Sendable {
         public var sampleWindow: TimeInterval
 
         /// Minimum in-window velocity samples (trailing same-direction
-        /// run) for a fling. Trackpads deliver `.changed` events at
-        /// display rate (a real flick produces well over 3 in 100 ms);
-        /// wheel notches deliver none.
+        /// run) for the fallback estimator. A known continuous input source
+        /// can use native velocity without any intermediate callback.
         public var minimumSamples: Int
 
         /// Speeds below this (points/second) don't start inertia.
@@ -113,7 +114,17 @@ public struct ScrollVelocityTracker: Sendable {
 
     /// Estimated velocity in points/second at release, or nil when the
     /// gesture shouldn't glide.
-    public func releaseVelocity(at timestamp: TimeInterval) -> Double? {
+    public func releaseVelocity(at timestamp: TimeInterval, reportedVelocity: Double? = nil, knownContinuousInput: Bool = false) -> Double? {
+        // UIKit already estimates pan velocity from the input stream. Use it
+        // when available: a short continuous flick may produce only one or two
+        // coalesced changed callbacks, which cannot satisfy the fallback's
+        // median sample count. Callers that classify continuous/discrete input
+        // directly may also admit a began/ended-only continuous flick.
+        if let reportedVelocity, reportedVelocity.isFinite {
+            guard knownContinuousInput || lastTimestamp != nil,
+                  abs(reportedVelocity) >= config.minimumStartSpeed else { return nil }
+            return reportedVelocity.clamped(toMagnitude: config.maximumSpeed)
+        }
         let cutoff = timestamp - config.sampleWindow
         let recent = samples.filter { $0.timestamp >= cutoff && $0.timestamp <= timestamp }
         guard let lastSample = recent.last else { return nil }

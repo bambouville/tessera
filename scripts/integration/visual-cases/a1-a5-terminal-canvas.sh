@@ -17,7 +17,7 @@ SIMCTL_CHILD_TESSERA_TERMINAL_CANVAS_HARNESS=1 \
   xcrun simctl launch "$UDID" "$BUNDLE_ID" >"$CASE_DIR/launch.txt"
 sleep 2
 xcrun simctl io "$UDID" screenshot "$CASE_DIR/full-canvas.raw.png" >/dev/null
-sips -r 270 "$CASE_DIR/full-canvas.raw.png" --out "$CASE_DIR/full-canvas.png" >/dev/null
+"$HERE/normalize-landscape-screenshot.sh" "$CASE_DIR/full-canvas.raw.png" "$CASE_DIR/full-canvas.png" >/dev/null
 rm "$CASE_DIR/full-canvas.raw.png"
 
 cat >"$CASE_DIR/case.json" <<'JSON'
@@ -30,7 +30,7 @@ cat >"$CASE_DIR/case.json" <<'JSON'
     "The top reserved chrome area does not introduce an opaque black slab.",
     "The canvas is landscape, full-screen, unclipped, and free of stale-width seams."
   ],
-  "capture_notes": "DEBUG terminal-canvas harness; no host connection and no user data. Screenshot pixels were rotated counter-clockwise to normalize simctl's fixed portrait framebuffer into landscape.",
+  "capture_notes": "DEBUG terminal-canvas harness; no host connection and no user data. Frames are normalized to upright landscape whichever shape simctl returns.",
   "deterministic_precheck": {"verdict": "not-run"}
 }
 JSON

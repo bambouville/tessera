@@ -8,15 +8,27 @@ public enum PaneSplitAxis: Sendable, Equatable {
 /// Semantic keys must stay semantic when tmux's pane application negotiated
 /// an extended keyboard protocol. Sending a literal CR/ESC byte with `-H`
 /// can be interpreted as composer text by modern TUIs instead of Enter/Escape.
-public enum PaneInputKey: Sendable {
-    case enter
-    case escape
+public enum PaneInputKey: String, Sendable {
+    case enter = "Enter", escape = "Escape", tab = "Tab", backTab = "BTab"
+    case up = "Up", down = "Down", left = "Left", right = "Right"
+    case shiftLeft = "S-Left", controlRightBracket = "C-]"
+}
 
-    fileprivate var tmuxName: String {
-        switch self {
-        case .enter: "Enter"
-        case .escape: "Escape"
-        }
+@MainActor
+private final class AgentPaneWriteCompletion {
+    var deadlineTask: Task<Void, Never>?
+    private var continuation: CheckedContinuation<Bool, Never>?
+
+    init(_ continuation: CheckedContinuation<Bool, Never>) {
+        self.continuation = continuation
+    }
+
+    func complete(_ acknowledged: Bool) {
+        guard let continuation else { return }
+        self.continuation = nil
+        deadlineTask?.cancel()
+        deadlineTask = nil
+        continuation.resume(returning: acknowledged)
     }
 }
 
@@ -31,32 +43,31 @@ public extension TmuxController {
     /// Split an explicitly selected pane from a touch switcher. Stable pane
     /// ids let compact UI target an inactive window without first selecting it
     /// and racing the asynchronous `%session-window-changed` notification.
-    func splitPane(_ paneId: PaneId, axis: PaneSplitAxis) {
+    ///
+    /// `before` places the new pane ahead of the target on the split axis —
+    /// left of a `-h` split, above a `-v` one — which is tmux's `-b`. Without
+    /// it tmux always appends, the only placement `⌘D` / `⌘⇧D` can express.
+    func splitPane(_ paneId: PaneId, axis: PaneSplitAxis, before: Bool = false) {
         guard !userMutationsSuppressedWhileYielded else { return }
+        // `isWindowListHydrated` for the same reason `killWindow`,
+        // `renameWindow` and `selectWindow` require it: a session change
+        // keeps the previous window list on screen while marking it stale,
+        // and a bare `%id` resolves against whatever session now owns it.
         guard mode == .tmuxControl,
+              isWindowListHydrated,
               windows.contains(where: { window in
                   window.panes.contains(where: { $0.id == paneId })
               })
         else { return }
         preemptMoshPaneBorderSplit(forTargeting: paneId)
 
-        let flag: String
-        switch axis {
-        case .horizontal:
-            flag = "-h"
-        case .vertical:
-            flag = "-v"
-        }
-
-        sendPaneOperationCommand(
-            "split-window \(flag) -t \(paneId.description) -e COLORTERM=truecolor"
-        )
+        sendPaneOperationCommand(TmuxWindowCommands.splitPane(paneId, horizontal: axis == .horizontal, before: before))
     }
 
     func selectPane(_ paneId: PaneId) {
         guard !userMutationsSuppressedWhileYielded,
               mode == .tmuxControl else { return }
-        sendPaneOperationCommand("select-pane -t \(paneId.description)")
+        selectPaneAcrossTmuxClients(paneId, preservingWindowZoom: false)
     }
 
     /// Select a compact full-screen pane without losing a server-side zoom.
@@ -68,10 +79,10 @@ public extension TmuxController {
     /// intermediate layout. `-Z` is also a no-op for an unzoomed window, so
     /// use it unconditionally instead of trusting potentially stale layout
     /// metadata from another attached client.
-    func selectPanePreservingWindowZoom(_ paneId: PaneId) {
+    public func selectPanePreservingWindowZoom(_ paneId: PaneId) {
         guard !userMutationsSuppressedWhileYielded,
               mode == .tmuxControl else { return }
-        sendPaneOperationCommand("select-pane -Z -t \(paneId.description)")
+        selectPaneAcrossTmuxClients(paneId, preservingWindowZoom: true)
     }
 
     func killActivePane() {
@@ -92,6 +103,20 @@ public extension TmuxController {
               mode == .tmuxControl,
               let activePaneId else { return }
         sendPaneOperationCommand("resize-pane -Z -t \(activePaneId.description)")
+    }
+
+    /// Set, rather than toggle, pane zoom so a delayed presentation command
+    /// cannot invert state that changed while it crossed the shared session
+    /// boundary.
+    public func setPaneZoomed(_ paneId: PaneId, zoomed: Bool) {
+        guard !userMutationsSuppressedWhileYielded,
+              mode == .tmuxControl,
+              let window = windows.first(where: { window in
+                  window.panes.contains(where: { $0.id == paneId })
+              }),
+              window.isZoomed != zoomed
+        else { return }
+        sendPaneOperationCommand("resize-pane -Z -t \(paneId.description)")
     }
 
     func cyclePane(forward: Bool) {
@@ -132,33 +157,42 @@ public extension TmuxController {
     /// Agent Center needs to distinguish local enqueue from tmux accepting
     /// the pane-targeted input. Agent Center deliberately does not publish the
     /// ordinary user-input observer here: tmux accepting Return is not proof
-    /// that an agent composer submitted it.
-    func sendInputAcknowledged(_ bytes: [UInt8], toPane paneId: PaneId) async -> Bool {
-        guard !userMutationsSuppressedWhileYielded,
-              mode == .tmuxControl,
+    /// that an agent composer submitted it. The proved pane's `send-keys`
+    /// leaves grid authority unchanged, so it also runs while yielded.
+    func sendInputAcknowledged(_ bytes: [UInt8], toPane paneId: PaneId,
+                               completionTimeout: Duration = .seconds(10)) async -> Bool {
+        guard mode == .tmuxControl,
               !bytes.isEmpty else { return false }
 
         let hex = bytes.map { String(format: "%02x", $0) }.joined(separator: " ")
-        let result = await withCheckedContinuation { continuation in
-            sendControlCommand("send-keys -t \(paneId.description) -H \(hex)") { result in
-                continuation.resume(returning: result)
-            }
-        }
-        guard case .success = result else { return false }
-        return true
+        return await sendAgentPaneCommandAcknowledged("send-keys -t \(paneId.description) -H \(hex)",
+                                                     completionTimeout: completionTimeout)
     }
 
-    func sendKeyAcknowledged(_ key: PaneInputKey, toPane paneId: PaneId) async -> Bool {
-        guard !userMutationsSuppressedWhileYielded,
-              mode == .tmuxControl else { return false }
+    /// Agent Center's named key to a proved pane leaves grid authority
+    /// unchanged; success reports tmux's acknowledgement, even while yielded.
+    func sendKeyAcknowledged(_ key: PaneInputKey, toPane paneId: PaneId,
+                             completionTimeout: Duration = .seconds(10)) async -> Bool {
+        guard mode == .tmuxControl else { return false }
 
-        let result = await withCheckedContinuation { continuation in
-            sendControlCommand("send-keys -t \(paneId.description) \(key.tmuxName)") { result in
-                continuation.resume(returning: result)
+        return await sendAgentPaneCommandAcknowledged("send-keys -t \(paneId.description) \(key.rawValue)",
+                                                     completionTimeout: completionTimeout)
+    }
+
+    /// Only the caller expires. The command's FIFO slot stays reserved until
+    /// its reply or reset; a late ACK cannot resume the caller or send a key.
+    private func sendAgentPaneCommandAcknowledged(_ command: String, completionTimeout: Duration) async -> Bool {
+        await withCheckedContinuation { continuation in
+            let completion = AgentPaneWriteCompletion(continuation)
+            completion.deadlineTask = Task { @MainActor in
+                do { try await Task.sleep(for: completionTimeout) } catch { return }
+                completion.complete(false)
+            }
+            sendControlCommand(command) { result in
+                if case .success = result { completion.complete(true) }
+                else { completion.complete(false) }
             }
         }
-        guard case .success = result else { return false }
-        return true
     }
 
     private func sendPaneOperationCommand(_ command: String) {

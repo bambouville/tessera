@@ -1,4 +1,5 @@
 import XCTest
+import TesseraEnrollmentCore
 @testable import Tessera
 
 @MainActor
@@ -27,6 +28,7 @@ final class EnrollmentServiceTests: XCTestCase {
 
     private final class SuspendingAuthorizer: EnrollmentBiometricAuthorizing {
         private var continuation: CheckedContinuation<EnrollmentFreshBiometricAuthorization, Error>?
+        var hasPendingAuthorization: Bool { continuation != nil }
 
         func authorizeFreshBiometrics(
             reason: String
@@ -365,7 +367,9 @@ final class EnrollmentServiceTests: XCTestCase {
                 grantSnapshot: makeGrantInstallRequest(for: request).grantSnapshot
             )
         }
-        await Task.yield()
+        while !authorizer.hasPendingAuthorization {
+            await Task.yield()
+        }
         XCTAssertEqual(origin.state, .authorizing(request))
         try origin.cancel()
         authorizer.succeed(at: now)
@@ -379,6 +383,38 @@ final class EnrollmentServiceTests: XCTestCase {
         XCTAssertEqual(grants, [])
         XCTAssertEqual(origin.state, .cancelled(request.id))
         XCTAssertEqual(requester.state, .cancelled(request.id))
+    }
+
+    func test_appleLockRevokesSharedGrantWhilePreservingCancellationBehavior() async throws {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let pair = EnrollmentLoopbackTransport.pair()
+        let requester = try EnrollmentService(
+            transport: pair.0,
+            authorizer: Authorizer(result: .failure(TestAuthorizationError.denied)),
+            now: { now }
+        )
+        let origin = try EnrollmentService(
+            transport: pair.1,
+            authorizer: Authorizer(result: .success(
+                EnrollmentFreshBiometricAuthorization(evaluatedAt: now)
+            )),
+            now: { now }
+        )
+        let request = makeRequest()
+        try requester.request(request)
+        _ = try await origin.approve(
+            grantSnapshot: makeGrantInstallRequest(for: request).grantSnapshot
+        )
+
+        origin.applicationDidLock()
+
+        XCTAssertEqual(origin.state, .cancelled(request.id))
+        XCTAssertEqual(requester.state, .cancelled(request.id))
+        XCTAssertEqual(
+            origin.sharedState,
+            .failed(request.id, .policyInvalidated)
+        )
+        XCTAssertEqual(requester.sharedState, .cancelled(request.id))
     }
 
     func test_installationFailurePropagatesWithoutSuccess() async throws {
@@ -540,30 +576,19 @@ final class EnrollmentServiceTests: XCTestCase {
         }
     }
 
-    func test_peerBindingAssertionRejectsUnboundAndEmptySASTransports() throws {
+    func test_peerBindingAssertionAllowsOnlyAuthenticatedAppleTransport() throws {
         let denied = Authorizer(result: .failure(TestAuthorizationError.denied))
-
-        for binding in [
-            EnrollmentPeerBinding.unbound,
-            .sasBound(transcriptHash: Data())
-        ] {
-            let pair = EnrollmentLoopbackTransport.pair(peerBinding: binding)
-            XCTAssertThrowsError(
-                try EnrollmentService(transport: pair.0, authorizer: denied)
-            ) { error in
-                XCTAssertEqual(error as? EnrollmentService.ServiceError, .peerBindingRequired)
-            }
+        let unboundPair = EnrollmentLoopbackTransport.pair(peerBinding: .unbound)
+        XCTAssertThrowsError(
+            try EnrollmentService(transport: unboundPair.0, authorizer: denied)
+        ) { error in
+            XCTAssertEqual(error as? EnrollmentService.ServiceError, .peerBindingRequired)
         }
 
         let applePair = EnrollmentLoopbackTransport.pair(
             peerBinding: .appleAccountContinuationStream
         )
         XCTAssertNoThrow(try EnrollmentService(transport: applePair.0, authorizer: denied))
-
-        let sasPair = EnrollmentLoopbackTransport.pair(
-            peerBinding: .sasBound(transcriptHash: Data("verified transcript".utf8))
-        )
-        XCTAssertNoThrow(try EnrollmentService(transport: sasPair.0, authorizer: denied))
     }
 
     func test_mismatchedEnrollmentIDIsProtocolFailure() throws {
@@ -621,6 +646,105 @@ final class EnrollmentServiceTests: XCTestCase {
             XCTAssertEqual(error as? EnrollmentService.ServiceError, .transportFailure)
         }
         XCTAssertEqual(requester.state, .failed(request.id, .transportFailure))
+        XCTAssertEqual(
+            requester.sharedState,
+            .failed(request.id, .transportFailure)
+        )
+    }
+
+    func test_installedSendFailureReconcilesBothAuthorities() async throws {
+        let setup = try await makeApprovedEnrollment()
+        setup.originTransport.failNextSend()
+
+        XCTAssertThrowsError(try setup.origin.installationSucceeded()) {
+            XCTAssertEqual($0 as? EnrollmentService.ServiceError, .transportFailure)
+        }
+        assertTransportFailure(setup.origin, id: setup.request.id)
+    }
+
+    func test_recordedSendFailureReconcilesBothAuthorities() async throws {
+        let setup = try await makeApprovedEnrollment()
+        try setup.origin.installationSucceeded()
+        setup.requesterTransport.failNextSend()
+
+        XCTAssertThrowsError(try setup.requester.requesterPersistenceSucceeded()) {
+            XCTAssertEqual($0 as? EnrollmentService.ServiceError, .transportFailure)
+        }
+        assertTransportFailure(setup.requester, id: setup.request.id)
+    }
+
+    func test_finalAcknowledgementSendFailureIsTransportFailureNotCompletion() async throws {
+        let setup = try await makeApprovedEnrollment()
+        try setup.origin.installationSucceeded()
+        setup.originTransport.failNextSend()
+
+        try setup.requester.requesterPersistenceSucceeded()
+
+        assertTransportFailure(setup.origin, id: setup.request.id)
+        assertTransportFailure(setup.requester, id: setup.request.id)
+    }
+
+    func test_rejectSendFailureOverridesLogicalRejection() throws {
+        let pair = EnrollmentLoopbackTransport.pair()
+        let denied = Authorizer(result: .failure(TestAuthorizationError.denied))
+        let requester = try EnrollmentService(transport: pair.0, authorizer: denied)
+        let origin = try EnrollmentService(transport: pair.1, authorizer: denied)
+        let request = makeRequest()
+        try requester.request(request)
+        pair.1.failNextSend()
+
+        XCTAssertThrowsError(try origin.reject()) {
+            XCTAssertEqual($0 as? EnrollmentService.ServiceError, .transportFailure)
+        }
+        assertTransportFailure(origin, id: request.id)
+    }
+
+    func test_cancelSendFailureOverridesLogicalCancellation() throws {
+        let pair = EnrollmentLoopbackTransport.pair()
+        let denied = Authorizer(result: .failure(TestAuthorizationError.denied))
+        let requester = try EnrollmentService(transport: pair.0, authorizer: denied)
+        _ = try EnrollmentService(transport: pair.1, authorizer: denied)
+        let request = makeRequest()
+        try requester.request(request)
+        pair.0.failNextSend()
+
+        XCTAssertThrowsError(try requester.cancel()) {
+            XCTAssertEqual($0 as? EnrollmentService.ServiceError, .transportFailure)
+        }
+        assertTransportFailure(requester, id: request.id)
+    }
+
+    func test_failureNoticeSendFailuresUseSharedTransportAuthority() async throws {
+        let installation = try await makeApprovedEnrollment()
+        installation.originTransport.failNextSend()
+        XCTAssertThrowsError(try installation.origin.installationFailed()) {
+            XCTAssertEqual($0 as? EnrollmentService.ServiceError, .transportFailure)
+        }
+        assertTransportFailure(installation.origin, id: installation.request.id)
+
+        let persistence = try await makeApprovedEnrollment()
+        try persistence.origin.installationSucceeded()
+        persistence.requesterTransport.failNextSend()
+        XCTAssertThrowsError(try persistence.requester.requesterPersistenceFailed()) {
+            XCTAssertEqual($0 as? EnrollmentService.ServiceError, .transportFailure)
+        }
+        assertTransportFailure(persistence.requester, id: persistence.request.id)
+    }
+
+    func test_protocolFailureResponseSendFailureRemainsTransportFailure() throws {
+        let pair = EnrollmentLoopbackTransport.pair()
+        let denied = Authorizer(result: .failure(TestAuthorizationError.denied))
+        let requester = try EnrollmentService(transport: pair.0, authorizer: denied)
+        _ = try EnrollmentService(transport: pair.1, authorizer: denied)
+        let request = makeRequest()
+        try requester.request(request)
+        pair.0.failNextSend()
+
+        try pair.1.send(EnrollmentFrameCodec.encode(
+            .installed(enrollmentID: UUID())
+        ))
+
+        assertTransportFailure(requester, id: request.id)
     }
 
     func test_deviceEnrollmentKeyReuseRequiresLiveIntegrityAndMutableSecureEnclaveBoundary() {
@@ -716,20 +840,86 @@ final class EnrollmentServiceTests: XCTestCase {
 
         try requester.request(request)
         XCTAssertEqual(origin.state, .awaitingApproval(request))
+        XCTAssertEqual(requester.sharedState, .requesting(request.core))
+        XCTAssertEqual(origin.sharedState, .awaitingApproval(request.core))
         let grant = try await origin.approve(
             grantSnapshot: makeGrantInstallRequest(for: request).grantSnapshot
         )
         XCTAssertEqual(grant, EnrollmentGrantRequest(request: request))
+        guard case .installing(let sharedGrant) = origin.sharedState else {
+            return XCTFail("shared approval state was \(origin.sharedState)")
+        }
+        XCTAssertEqual(sharedGrant.request, request.core)
         try origin.installationSucceeded()
 
         XCTAssertEqual(origin.state, .awaitingRequesterRecord(grant))
         XCTAssertEqual(requester.state, .recordingRequester(request))
+        guard case .awaitingRequesterRecord(let installedGrant, _) = origin.sharedState else {
+            return XCTFail("shared install state was \(origin.sharedState)")
+        }
+        XCTAssertEqual(installedGrant.request, request.core)
+        XCTAssertEqual(requester.sharedState, .recordingRequester(request.core))
         try requester.requesterPersistenceSucceeded()
 
         XCTAssertEqual(originAuth.callCount, 1)
         XCTAssertEqual(requesterAuth.callCount, 0)
         XCTAssertEqual(origin.state, .completed(request.id))
         XCTAssertEqual(requester.state, .completed(request.id))
+        guard case .completed(let originReceipt) = origin.sharedState,
+              case .completed(let requesterReceipt) = requester.sharedState else {
+            return XCTFail("shared completion did not reach both peers")
+        }
+        XCTAssertEqual(originReceipt.enrollmentID, request.id)
+        XCTAssertEqual(requesterReceipt.enrollmentID, request.id)
+    }
+
+    private func makeApprovedEnrollment() async throws -> (
+        requester: EnrollmentService,
+        origin: EnrollmentService,
+        requesterTransport: EnrollmentLoopbackTransport,
+        originTransport: EnrollmentLoopbackTransport,
+        request: EnrollmentRequest
+    ) {
+        let now = Date(timeIntervalSince1970: 30_000)
+        let pair = EnrollmentLoopbackTransport.pair()
+        let requester = try EnrollmentService(
+            transport: pair.0,
+            authorizer: Authorizer(result: .failure(TestAuthorizationError.denied)),
+            now: { now }
+        )
+        let origin = try EnrollmentService(
+            transport: pair.1,
+            authorizer: Authorizer(result: .success(
+                EnrollmentFreshBiometricAuthorization(evaluatedAt: now)
+            )),
+            now: { now }
+        )
+        let request = makeRequest()
+        try requester.request(request)
+        _ = try await origin.approve(
+            grantSnapshot: makeGrantInstallRequest(for: request).grantSnapshot
+        )
+        return (requester, origin, pair.0, pair.1, request)
+    }
+
+    private func assertTransportFailure(
+        _ service: EnrollmentService,
+        id: UUID,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(
+            service.state,
+            .failed(id, .transportFailure),
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            service.sharedState,
+            .failed(id, .transportFailure),
+            file: file,
+            line: line
+        )
     }
 
     private func makeRequest() -> EnrollmentRequest {

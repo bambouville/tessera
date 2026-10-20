@@ -87,6 +87,10 @@ enum SwipePadPetalLayout {
     /// order. A menu longer than four shows the first three plus a "more"
     /// petal unless down is itself a trained live option; in that case all
     /// four directions keep their macros and the puck exposes More.
+    /// A digit bound with a trailing Enter trains the same answer as the
+    /// bare digit the shared core now sends: Claude's factory deny was `3↵`
+    /// until 2026-10, and a stored or customized copy of it must not leave
+    /// the live "No" free while sticky consent fills its direction.
     static func promptLayout(
         for prompt: AgentPrompt,
         profile: SwipePadProfile? = nil
@@ -98,8 +102,8 @@ enum SwipePadPetalLayout {
         if let profile {
             for direction in SwipeDirection.allCases {
                 let binding = profile.binding(for: direction)
-                if binding.isBound, macroDirection[binding.macro] == nil {
-                    macroDirection[binding.macro] = direction
+                if binding.isBound, macroDirection[trainedAnswerKey(binding.macro)] == nil {
+                    macroDirection[trainedAnswerKey(binding.macro)] = direction
                 }
             }
         }
@@ -111,7 +115,7 @@ enum SwipePadPetalLayout {
         // Matching spans the FULL menu, so a trained option at position 5+
         // cannot disappear merely because it was outside the first four.
         let moreUsesPuck = overflowing && options.contains {
-            macroDirection[$0.responseMacro] == .down
+            macroDirection[trainedAnswerKey($0.responseMacro)] == .down
         }
         var available = overflowing && !moreUsesPuck
             ? directionOrder.filter { $0 != .down }
@@ -120,7 +124,7 @@ enum SwipePadPetalLayout {
         var placed: [SwipePadPetalModel] = []
         var untrained: [AgentPromptOption] = []
         for option in options {
-            guard let trained = macroDirection[option.responseMacro] else {
+            guard let trained = macroDirection[trainedAnswerKey(option.responseMacro)] else {
                 untrained.append(option)
                 continue
             }
@@ -170,6 +174,15 @@ enum SwipePadPetalLayout {
         profile: SwipePadProfile? = nil
     ) -> [SwipePadPetalModel] {
         promptLayout(for: prompt, profile: profile).petals
+    }
+
+    /// The bytes a macro sends, with Enter dropped after a lone menu digit.
+    private static func trainedAnswerKey(_ macro: String) -> String {
+        var bytes = MacroEncoder.encode(macro)
+        if bytes.count == 2, bytes[1] == 0x0D, (0x31...0x39).contains(bytes[0]) {
+            bytes.removeLast()
+        }
+        return String(decoding: bytes, as: UTF8.self)
     }
 
     private static func petal(

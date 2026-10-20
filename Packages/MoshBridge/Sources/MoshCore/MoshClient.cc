@@ -1,4 +1,6 @@
 #include "MoshClient.h"
+#include "MoshFullRepaintFence.h"
+#include "MoshTerminalFrame.h"
 
 #include <algorithm>
 #include <array>
@@ -6,6 +8,7 @@
 #include <cerrno>
 #include <climits>
 #include <clocale>
+#include <cstring>
 #include <cwchar>
 #include <limits>
 #include <mutex>
@@ -24,6 +27,10 @@
 #include "terminaloverlay.h"
 #include "timestamp.h"
 #include "user.h"
+
+#include <netdb.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 
 namespace {
 
@@ -95,6 +102,73 @@ bool locale_name_contains_utf8(const char *name) {
         || lower.find("utf8") != std::string::npos;
 }
 
+struct AddrInfoList {
+    struct addrinfo *head = nullptr;
+    ~AddrInfoList() {
+        if (head != nullptr) {
+            freeaddrinfo(head);
+        }
+    }
+};
+
+// The vendored client resolves its UDP target with AI_NUMERICHOST, exactly
+// like mosh-client, whose wrapper script resolves the name first and hands it
+// the address. Both platforms hand us the address the user typed, so do that
+// resolution here, once, for every caller of the C ABI. A literal passes
+// through untouched; a name resolves with the same default preference as the
+// mosh wrapper (--family=prefer-inet): IPv4 first, then IPv6.
+std::string numeric_udp_host(const std::string &host, const std::string &port) {
+    struct addrinfo hints;
+    std::memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_flags = AI_NUMERICHOST | AI_NUMERICSERV;
+
+    AddrInfoList literal;
+    if (getaddrinfo(host.c_str(), port.c_str(), &hints, &literal.head) == 0) {
+        return host;
+    }
+
+    hints.ai_flags = AI_NUMERICSERV;
+    AddrInfoList resolved;
+    const int status = getaddrinfo(host.c_str(), port.c_str(), &hints, &resolved.head);
+    if (status != 0 || resolved.head == nullptr) {
+        throw std::runtime_error(
+            "Could not resolve the mosh host " + host + ": "
+            + (status == EAI_SYSTEM ? std::strerror(errno) : gai_strerror(status)));
+    }
+
+    const struct addrinfo *chosen = nullptr;
+    for (const struct addrinfo *candidate = resolved.head; candidate != nullptr;
+         candidate = candidate->ai_next) {
+        if (candidate->ai_family == AF_INET) {
+            chosen = candidate;
+            break;
+        }
+    }
+    if (chosen == nullptr) {
+        for (const struct addrinfo *candidate = resolved.head; candidate != nullptr;
+             candidate = candidate->ai_next) {
+            if (candidate->ai_family == AF_INET6) {
+                chosen = candidate;
+                break;
+            }
+        }
+    }
+    if (chosen == nullptr) {
+        chosen = resolved.head;
+    }
+
+    char numeric[NI_MAXHOST];
+    const int named = getnameinfo(chosen->ai_addr, chosen->ai_addrlen, numeric, sizeof(numeric),
+                                  nullptr, 0, NI_NUMERICHOST);
+    if (named != 0) {
+        throw std::runtime_error(
+            "Could not resolve the mosh host " + host + ": " + gai_strerror(named));
+    }
+    return std::string(numeric);
+}
+
 void ensure_utf8_ctype_locale() {
     static std::once_flag once;
     std::call_once(once, [] {
@@ -163,14 +237,19 @@ public:
         terminated_ = false;
         emitted_close_sequence_ = false;
 
-        emit_bytes(display_.new_frame(false, local_framebuffer_, local_framebuffer_));
+        emit_bytes(tessera_mosh::terminal_frame(display_, false, local_framebuffer_, local_framebuffer_));
+
+        // Resolved on the caller's start thread: both platforms call start()
+        // off their UI threads, and the SSH bootstrap that preceded this
+        // already proved the name reachable.
+        const std::string udp_host = numeric_udp_host(host_, port_string_);
 
         Network::UserStream initial_user_stream;
         Terminal::Complete initial_terminal(cols_, rows_);
         network_ = NetworkPointer(new NetworkType(initial_user_stream,
                                                   initial_terminal,
                                                   key_.c_str(),
-                                                  host_.c_str(),
+                                                  udp_host.c_str(),
                                                   port_string_.c_str()));
         network_->set_send_delay(1);
         network_->get_current_state().push_back(Parser::Resize(cols_, rows_));
@@ -283,6 +362,33 @@ public:
         network_->get_current_state().push_back(Parser::Resize(cols, rows));
     }
 
+    uint64_t begin_full_repaint_fence() {
+        freeze_timestamp();
+        if (!started_ || terminated_ || !network_ || network_->shutdown_in_progress()) {
+            return 0;
+        }
+        const uint64_t token = tessera_mosh::full_repaint_fence_token(network_->get_sent_state_last());
+        if (token != 0) {
+            // The control channel has already fenced tmux geometry. Repeating
+            // this device's resize forces a newer SSP input state, and the
+            // server's post-input echo acknowledgement proves its frame
+            // was produced after that state. Normal ticks send and receive it.
+            network_->get_current_state().push_back(Parser::Resize(cols_, rows_));
+        }
+        return token;
+    }
+
+    bool full_repaint_fence_ready(uint64_t token) const {
+        if (!started_ || terminated_ || !network_ || network_->shutdown_in_progress()) {
+            return false;
+        }
+        const auto &remote = network_->get_latest_remote_state().state;
+        const auto &framebuffer = remote.get_fb();
+        return tessera_mosh::full_repaint_fence_ready(
+            token, network_->get_sent_state_last(), remote.get_echo_ack(),
+            framebuffer.ds.get_width(), framebuffer.ds.get_height(), cols_, rows_);
+    }
+
     /// Repaint the whole screen from the client's authoritative framebuffer.
     ///
     /// The SSP diff stream assumes the local terminal shows exactly what
@@ -303,7 +409,7 @@ public:
 
         next_framebuffer_ = network_->get_latest_remote_state().state.get_fb();
         overlays_.apply(next_framebuffer_);
-        emit_bytes(display_.new_frame(false, next_framebuffer_, next_framebuffer_));
+        emit_bytes(tessera_mosh::terminal_frame(display_, false, next_framebuffer_, next_framebuffer_));
         local_framebuffer_ = next_framebuffer_;
     }
 
@@ -366,6 +472,20 @@ public:
             && now - last_acked_state <= kReplyLateThresholdMilliseconds;
     }
 
+    uint64_t server_contact_age_ms() const {
+        if (!connected()) return 0;
+        const uint64_t now = Network::timestamp();
+        const uint64_t timestamp = network_->get_latest_remote_state().timestamp;
+        return now >= timestamp ? now - timestamp : 0;
+    }
+
+    uint64_t reply_age_ms() const {
+        if (!connected()) return 0;
+        const uint64_t now = Network::timestamp();
+        const uint64_t timestamp = network_->get_sent_state_acked_timestamp();
+        return now >= timestamp ? now - timestamp : 0;
+    }
+
     bool shutdown_complete() const {
         return terminated_;
     }
@@ -422,7 +542,7 @@ private:
         next_framebuffer_ = network_->get_latest_remote_state().state.get_fb();
         overlays_.apply(next_framebuffer_);
 
-        const std::string diff = display_.new_frame(true,
+        const std::string diff = tessera_mosh::terminal_frame(display_, true,
                                                     local_framebuffer_,
                                                     next_framebuffer_);
         emit_bytes(diff);
@@ -567,6 +687,14 @@ void MoshClient::resize(int cols, int rows) {
     impl_->resize(cols, rows);
 }
 
+uint64_t MoshClient::begin_full_repaint_fence() {
+    return impl_->begin_full_repaint_fence();
+}
+
+bool MoshClient::full_repaint_fence_ready(uint64_t token) const {
+    return impl_->full_repaint_fence_ready(token);
+}
+
 void MoshClient::force_full_repaint() {
     impl_->force_full_repaint();
 }
@@ -593,6 +721,14 @@ bool MoshClient::connected() const {
 
 bool MoshClient::transport_reachable() const {
     return impl_->transport_reachable();
+}
+
+uint64_t MoshClient::server_contact_age_ms() const {
+    return impl_->server_contact_age_ms();
+}
+
+uint64_t MoshClient::reply_age_ms() const {
+    return impl_->reply_age_ms();
 }
 
 bool MoshClient::shutdown_complete() const {

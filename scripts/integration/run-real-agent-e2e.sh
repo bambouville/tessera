@@ -15,8 +15,10 @@ fi
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
-INSTALLER_SOURCE="$REPO_ROOT/Tessera/AgentCenter/RemoteAgentLifecycleIntegrationInstaller.swift"
+AUTHENTICATED_HOME=$HOME
+INSTALLER_SOURCE="$REPO_ROOT/Packages/TesseraCore/Sources/TesseraAgentCore/Lifecycle/RemoteAgentLifecycleIntegrationInstaller.swift"
 DUMP_SOURCE="$SCRIPT_DIR/AgentIntegrationSourceDump.swift"
+DUMPER_BUILDER="$SCRIPT_DIR/build-agent-integration-dumper.sh"
 TMUX_BIN=$(command -v tmux || true)
 CODEX_BIN=$(command -v codex || true)
 CLAUDE_BIN=$(command -v claude || true)
@@ -28,7 +30,7 @@ for required in "$TMUX_BIN" "$CODEX_BIN" "$CLAUDE_BIN" "$SWIFTC_BIN"; do
         exit 1
     fi
 done
-for source in "$INSTALLER_SOURCE" "$DUMP_SOURCE"; do
+for source in "$INSTALLER_SOURCE" "$DUMP_SOURCE" "$DUMPER_BUILDER"; do
     if [ ! -r "$source" ]; then
         printf 'missing production integration source: %s\n' "$source" >&2
         exit 1
@@ -39,10 +41,17 @@ RUN_DIR=$(mktemp -d "${TMPDIR:-/tmp}/tessera-real-agent-e2e.XXXXXX")
 PRODUCTION_HOME="$RUN_DIR/home"
 DUMPER="$RUN_DIR/dump-agent-integration"
 SOCKET="tessera-agent-e2e-$$"
-INTEGRATION_VERSION=8
+CODEX_PERMISSION_PROBE="$REPO_ROOT/scripts/integration/out/.tessera-codex-permission-probe-$$"
+INTEGRATION_VERSION=9
 
 cleanup() {
     outcome=$?
+    # macOS /bin/sh is bash 3.2, which enters this trap with $? = 0 after a
+    # `set -u` abort under `set -e`; only a completed run may exit 0.
+    if [ "$outcome" -eq 0 ] && [ "${script_completed:-0}" != 1 ]; then
+        printf '%s\n' "${0##*/}: aborted before completion (bash set -u abort?)" >&2
+        outcome=1
+    fi
     trap - EXIT HUP INT TERM
     # Nothing in cleanup may abort it or replace the functional outcome:
     # under `set -e` a single failed command here (e.g. rm racing a late
@@ -74,6 +83,7 @@ cleanup() {
     fi
     rm -rf "$RUN_DIR/swift-module-cache" 2>/dev/null
     rm -f "$DUMPER" 2>/dev/null
+    rm -f "$CODEX_PERMISSION_PROBE" 2>/dev/null
     if [ "$outcome" -ne 0 ]; then
         printf 'real Agent Center E2E failed; preserved artifacts=%s\n' "$RUN_DIR" >&2
     fi
@@ -96,8 +106,7 @@ fi
 if [ -f "$HOME/.claude.json" ]; then
     cp -p "$HOME/.claude.json" "$PRODUCTION_HOME/.claude.json"
 fi
-"$SWIFTC_BIN" -module-cache-path "$RUN_DIR/swift-module-cache" -O \
-    "$INSTALLER_SOURCE" "$DUMP_SOURCE" -o "$DUMPER"
+SWIFTC_BIN="$SWIFTC_BIN" sh "$DUMPER_BUILDER" "$DUMPER" "$RUN_DIR/swift-module-cache"
 INSTALL_COMMAND=$("$DUMPER" install-command)
 INSTALL_OUTPUT=$(HOME="$PRODUCTION_HOME" SHELL=/bin/zsh \
     CODEX_HOME="$PRODUCTION_HOME/.codex" \
@@ -167,6 +176,12 @@ if ! printf '%s\n' "$SHELL_STATUS_OUTPUT" | grep -q \
 fi
 printf '%s\n' "$SHELL_STATUS_OUTPUT" > "$RUN_DIR/production-shell-status.txt"
 "$TMUX_BIN" -L "$SOCKET" kill-session -t activation
+
+count_events() {
+    jq -s --arg provider "$2" --arg event "$3" --arg state "$4" \
+        '[.[] | select(.provider == $provider and .event == $event and .state == $state)] | length' \
+        "$1" 2>/dev/null || printf '0'
+}
 
 wait_for_event() {
     raw_output=$1
@@ -287,6 +302,62 @@ with open(destination, "w", encoding="utf-8") as output:
 PY
 }
 
+start_codex_output_capture() {
+    # This private tmux server has no GUI terminal to answer Codex's startup
+    # palette probe. Answer its actual OSC 10/11 queries once, before their
+    # deadline, so the real Max/Ultra effects have a known background color.
+    if [ ! -f "$RUN_DIR/provider-output-capture.py" ]; then
+        cat > "$RUN_DIR/provider-output-capture.py" <<'PY'
+import json
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import time
+
+tmux, socket, target, destination, ready = sys.argv[1:]
+queries = {code: re.compile(rb"\x1b\]" + code + rb";\?(?:\x07|\x1b\\)") for code in (b"10", b"11")}
+seen = set()
+replied = False
+tail = b""
+with open(destination, "wb", buffering=0) as output:
+    pathlib.Path(ready).touch()
+    while True:
+        chunk = os.read(0, 65_536)
+        if not chunk:
+            break
+        output.write(chunk)
+        if replied:
+            continue
+        tail = (tail + chunk)[-8192:]
+        seen.update(code for code, pattern in queries.items() if pattern.search(tail))
+        if len(seen) != 2:
+            continue
+        reply = b"\x1b]10;rgb:eeee/eeee/eeee\x1b\\\x1b]11;rgb:1111/1111/1111\x1b\\"
+        subprocess.check_call([tmux, "-L", socket, "send-keys", "-t", target, "-H",
+                               *[f"{byte:02x}" for byte in reply]], timeout=1)
+        pathlib.Path(destination + ".palette-probe.json").write_text(json.dumps({
+            "foregroundQuery": True, "backgroundQuery": True,
+            "replied": True, "repliedAtNs": time.time_ns(),
+        }) + "\n")
+        replied = True
+PY
+    fi
+    rm -f "$2.capture-ready"
+    "$TMUX_BIN" -L "$SOCKET" pipe-pane -t "$1" \
+        "python3 '$RUN_DIR/provider-output-capture.py' '$TMUX_BIN' '$SOCKET' '$1' '$2' '$2.capture-ready'"
+    capture_attempts=0
+    while [ ! -f "$2.capture-ready" ] && [ "$capture_attempts" -lt 40 ]; do
+        capture_attempts=$((capture_attempts + 1))
+        sleep 0.05
+    done
+    if [ ! -f "$2.capture-ready" ]; then
+        printf 'Codex output capture did not become ready for %s\n' "$1" >&2
+        return 1
+    fi
+}
+
 finish_osc_capture() {
     target=$1
     provider=$2
@@ -400,12 +471,23 @@ wait_for_composer() {
             sleep 0.25
             continue
         fi
+        if printf '%s\n' "$screen" | grep -Fqi 'Update available' \
+            && printf '%s\n' "$screen" | grep -Fqi 'Skip until next version'; then
+            capture_screen "$target" "$RUN_DIR/codex/update-available-screen.txt"
+            "$TMUX_BIN" -L "$SOCKET" send-keys -t "$target" -H 32
+            sleep 0.05
+            "$TMUX_BIN" -L "$SOCKET" send-keys -t "$target" Enter
+            ready_samples=0
+            attempts=$((attempts + 1))
+            sleep 0.25
+            continue
+        fi
         # A provider name can appear in startup warnings and trust dialogs. The
         # live composer is distinguished by owning the cursor on a prompt row
         # that is not a numbered menu option.
         if printf '%s\n' "$screen" | grep -Eqi "$provider_pattern" \
-            && printf '%s\n' "$cursor_line" | grep -Eq '^[[:space:]]*[›❯>]' \
-            && ! printf '%s\n' "$cursor_line" | grep -Eq '^[[:space:]]*[›❯>][[:space:]]*[0-9]+[.)]' \
+            && printf '%s\n' "$cursor_line" | grep -Eq '^[[:space:]]*[›»❯>]' \
+            && ! printf '%s\n' "$cursor_line" | grep -Eq '^[[:space:]]*[›»❯>][[:space:]]*[0-9]+[.)]' \
             && ! printf '%s\n' "$screen" | grep -Eqi 'Booting|model:[[:space:]]+loading|esc to interrupt|tab to queue message'; then
             ready_samples=$((ready_samples + 1))
             # Startup paints an apparently usable composer before provider
@@ -432,6 +514,16 @@ accept_workspace_trust_if_present() {
     theme_choices=0
     while [ "$attempts" -lt 80 ]; do
         screen=$("$TMUX_BIN" -L "$SOCKET" capture-pane -p -N -t "$target" 2>/dev/null || true)
+        if printf '%s\n' "$screen" | grep -Fqi 'Update available' \
+            && printf '%s\n' "$screen" | grep -Fqi 'Skip until next version'; then
+            capture_screen "$target" "$RUN_DIR/codex/update-available-screen.txt"
+            "$TMUX_BIN" -L "$SOCKET" send-keys -t "$target" -H 32
+            sleep 0.05
+            "$TMUX_BIN" -L "$SOCKET" send-keys -t "$target" Enter
+            attempts=0
+            sleep 0.5
+            continue
+        fi
         # This gate deliberately gives the provider a disposable HOME. Current
         # Claude releases can therefore show their text-theme chooser before
         # workspace trust even when authentication is available.
@@ -518,20 +610,310 @@ assert_permission_cursor_row() {
 }
 
 send_staged_prompt() {
-    target=$1
-    prompt=$2
-    # Tessera sends pasted UTF-8 and Return as distinct tmux send-keys frames.
-    # od produces whitespace-separated byte pairs accepted by send-keys -H.
-    hex=$(LC_ALL=C printf '%s' "$prompt" | od -An -v -tx1)
-    # Deliberate field splitting: every pair is one tmux hex key argument.
-    # shellcheck disable=SC2086
-    "$TMUX_BIN" -L "$SOCKET" send-keys -t "$target" -H $hex
-    # Real Codex and Claude composers briefly remain in their paste/input
-    # transition after the bytes render. This transport-level gate uses a
-    # conservative fixed delay before one semantic Enter; the app's E2E/unit
-    # coverage separately verifies its live-composer readiness boundary.
-    sleep 0.4
-    "$TMUX_BIN" -L "$SOCKET" send-keys -t "$target" Enter
+    # Assess the same settled SGR capture and cursor tuple as the native tmux
+    # endpoints. Only the production insertion encoder may produce the single
+    # text write; then production safety AND exact presence must authorize its
+    # separate submission key. Never retry either terminal write.
+    if [ ! -f "$RUN_DIR/guarded-provider-send.py" ]; then
+        cat > "$RUN_DIR/guarded-provider-send.py" <<'PY'
+import base64
+import json
+import pathlib
+import re
+import subprocess
+import sys
+import time
+
+tmux, socket, dumper, run_dir, target, text, expected_marker = sys.argv[1:]
+session = target.partition(":")[0]
+provider = {"codex": "codex", "codex-ultra": "codex", "claude": "claude"}.get(session)
+if provider is None:
+    raise SystemExit("unknown guarded provider target")
+artifacts = pathlib.Path(run_dir) / session / "composer-guards"
+artifacts.mkdir(parents=True, exist_ok=True)
+action = str(time.time_ns())
+
+def control(*arguments):
+    return subprocess.check_output([tmux, "-L", socket, *arguments], timeout=5)
+
+def sample(require_empty):
+    before = control("display-message", "-p", "-t", target,
+                     "#{cursor_y}:#{cursor_x}:#{cursor_flag}").decode().strip()
+    if not re.fullmatch(r"[0-9]+:[0-9]+:[01]", before):
+        return None
+    captured = control("capture-pane", "-p", "-e", "-N", "-t", target).decode("utf-8")
+    after = control("display-message", "-p", "-t", target,
+                    "#{cursor_y}:#{cursor_x}:#{cursor_flag}").decode().strip()
+    if before != after:
+        return None
+    # capture-pane adds one output newline; native endpoints join its rows.
+    visible = captured.removesuffix("\n")
+    row, column, cursor_visible = map(int, before.split(":"))
+    plain = re.sub(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", "", visible)
+    plain = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", plain).replace("\r", "")
+    rows = plain.split("\n")
+    request = {
+        "provider": provider, "visibleText": visible,
+        "cursorLine": rows[row] if row < len(rows) else None,
+        "text": text, "cursorRow": row, "cursorColumn": column,
+        "cursorVisible": bool(cursor_visible), "requireEmpty": require_empty,
+        "queueWhenWorking": False, "capturedAtNs": time.time_ns(),
+    }
+    result = subprocess.check_output([dumper, "composer-assess"],
+                                     input=json.dumps(request).encode(), timeout=5)
+    return request, json.loads(result)
+
+def await_guard(stage, require_empty):
+    deadline = time.monotonic() + 2
+    last = None
+    attempts = 0
+    while True:
+        attempts += 1
+        observed = sample(require_empty)
+        if observed is not None:
+            last = observed
+            request, result = observed
+            ready = result["assessment"] == "readyReturn"
+            if require_empty and expected_marker:
+                ready = ready and (request["cursorLine"] or "").lstrip().startswith(expected_marker + " ")
+            if not require_empty:
+                ready = ready and result["presence"] == "present" and result["submissionKey"] == "return"
+            if ready:
+                break
+        if time.monotonic() + 0.15 >= deadline:
+            break
+        time.sleep(0.15)
+    prefix = artifacts / (action + "-" + stage)
+    if last is not None:
+        request, result = last
+        prefix.with_suffix(".request.json").write_text(json.dumps(request, indent=2) + "\n")
+        prefix.with_suffix(".assessment.json").write_text(json.dumps(result, indent=2) + "\n")
+        prefix.with_suffix(".screen.txt").write_text(request["visibleText"] + "\n")
+        ready = result["assessment"] == "readyReturn"
+        if require_empty and expected_marker:
+            ready = ready and (request["cursorLine"] or "").lstrip().startswith(expected_marker + " ")
+        if not require_empty:
+            ready = ready and result["presence"] == "present" and result["submissionKey"] == "return"
+        if ready:
+            result["guardAcceptedAtNs"] = time.time_ns()
+            prefix.with_suffix(".assessment.json").write_text(json.dumps(result, indent=2) + "\n")
+            print(f"{provider} composer guard stage={stage} assessment={result['assessment']} "
+                  f"presence={result['presence']} attempts={attempts}")
+            return result
+        reason = f"assessment={result['assessment']} presence={result['presence']} {result['shape']}"
+    else:
+        reason = "capture unavailable"
+    raise SystemExit(f"{provider} production composer guard refused {stage}: {reason}; artifacts={prefix}")
+
+preflight = await_guard("before-insert", True)
+encoded = preflight.get("insertionBase64")
+if encoded is None:
+    raise SystemExit("production insertion encoder refused prompt")
+insertion = base64.b64decode(encoded, validate=True)
+write_timing = {"guardAcceptedAtNs": preflight["guardAcceptedAtNs"], "startedAtNs": time.time_ns()}
+write_artifact = artifacts / (action + "-text-write.json")
+write_artifact.write_text(json.dumps(write_timing) + "\n")
+subprocess.check_call([tmux, "-L", socket, "send-keys", "-t", target, "-H",
+                       *[f"{byte:02x}" for byte in insertion]], timeout=5)
+write_timing["acknowledgedAtNs"] = time.time_ns()
+write_artifact.write_text(json.dumps(write_timing) + "\n")
+await_guard("before-submit", False)
+subprocess.check_call([tmux, "-L", socket, "send-keys", "-t", target, "Enter"], timeout=5)
+PY
+    fi
+    python3 "$RUN_DIR/guarded-provider-send.py" "$TMUX_BIN" "$SOCKET" "$DUMPER" "$RUN_DIR" "$1" "$2" "${3:-}"
+}
+
+send_codex_effort_with_animation() {
+    capture_screen "$1" "$3/$2-before-animation.txt"
+    send_staged_prompt "$1" /model
+    python3 - "$TMUX_BIN" "$SOCKET" "$DUMPER" "$RUN_DIR" "$1" "$2" "$3" <<'PY'
+import json
+import pathlib
+import re
+import subprocess
+import sys
+import time
+
+tmux, socket, dumper, run_dir, target, effort, probe_dir = sys.argv[1:]
+if effort not in {"max", "ultra"}:
+    raise SystemExit("unsupported effort fixture")
+artifacts = pathlib.Path(probe_dir) / (effort + "-animation")
+artifacts.mkdir(parents=True, exist_ok=True)
+marker = "»" if effort == "ultra" else "›"
+needle = "TESSERA_CODEX_" + effort.upper() + "_OK"
+prompt = f"Reply exactly {needle}. Do not use tools."
+
+def background_colors(value):
+    return {tuple(map(int, rgb)) for rgb in re.findall(r"(?<![0-9])48;2;([0-9]+);([0-9]+);([0-9]+)", value)}
+
+baseline_colors = background_colors((pathlib.Path(probe_dir) / (effort + "-before-animation.txt")).read_text())
+
+def effect_colors(value):
+    # A run split or count change cannot establish animation. Keep actual
+    # non-neutral RGB values absent from the settled pre-effect screen.
+    return frozenset(color for color in background_colors(value)
+                     if color not in baseline_colors and max(color) - min(color) >= 8)
+
+def control(*arguments):
+    return subprocess.check_output([tmux, "-L", socket, *arguments], timeout=5)
+
+def plain(value):
+    value = re.sub(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", "", value)
+    return re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", value).replace("\r", "")
+
+def options(title):
+    deadline = time.monotonic() + 3
+    while True:
+        screen = control("capture-pane", "-p", "-e", "-N", "-t", target).decode("utf-8")
+        visible = plain(screen)
+        start = visible.rfind(title)
+        if start >= 0:
+            items = []
+            for line in visible[start:].splitlines():
+                match = re.match(r"^\s*(?:›\s*)?([0-9]+)\.\s+(.*)", line)
+                if match:
+                    items.append((int(match[1]), match[2]))
+            if items:
+                (artifacts / (title.replace(" ", "-") + ".txt")).write_text(screen)
+                return items
+        if time.monotonic() >= deadline:
+            raise SystemExit(f"Codex did not open {title}; artifacts={artifacts}")
+        time.sleep(0.05)
+
+def normalized_label(value):
+    # Current Codex builds display title-cased model names and append current
+    # or default annotations before their aligned description column.
+    label = re.split(r"\s{2,}", value.strip(), maxsplit=1)[0]
+    label = re.sub(r"\s+\((?:current|default)\)", "", label, flags=re.IGNORECASE)
+    return label.replace("…", "...").casefold()
+
+def matching_options(items, label):
+    wanted = normalized_label(label)
+    return [index for index, value in items if normalized_label(value) == wanted]
+
+def choose(items, label):
+    matching = matching_options(items, label)
+    if len(matching) != 1:
+        raise SystemExit(f"Codex menu did not contain one {label}: {items}")
+    index = matching[0]
+    subprocess.check_call([tmux, "-L", socket, "send-keys", "-t", target,
+                           "Home", *(["Down"] * (index - 1)), "Enter"], timeout=5)
+
+models = options("Select Model")
+if not matching_options(models, "gpt-6.1-sol"):
+    choose(models, "All models")
+    models = options("Select Model")
+choose(models, "gpt-6.1-sol")
+choose(options("Select Reasoning Level"), "More reasoning…")
+advanced = options("Advanced Reasoning")
+choose(advanced, effort.capitalize())
+
+# Observe changing colors on the same empty physical composer before starting
+# one send during the effect. Continue capture while its guard either admits
+# that frame or waits for bounded settling; report that distinction.
+send = None
+send_started_ns = None
+started = time.monotonic()
+backgrounds = set()
+spark = False
+frames = []
+anchor_row = None
+try:
+    while time.monotonic() - started < 1.8:
+        before = control("display-message", "-p", "-t", target,
+                         "#{cursor_y}:#{cursor_x}:#{cursor_flag}").decode().strip()
+        screen = control("capture-pane", "-p", "-e", "-N", "-t", target).decode("utf-8").removesuffix("\n")
+        after = control("display-message", "-p", "-t", target,
+                        "#{cursor_y}:#{cursor_x}:#{cursor_flag}").decode().strip()
+        elapsed_ms = round((time.monotonic() - started) * 1000)
+        prefix = artifacts / f"frame-{elapsed_ms:04d}"
+        prefix.with_suffix(".txt").write_text(screen + "\n")
+        frame = {"elapsedMs": elapsed_ms, "settled": before == after}
+        if before == after and re.fullmatch(r"[0-9]+:[0-9]+:[01]", before):
+            row, column, cursor_visible = map(int, before.split(":"))
+            lines = plain(screen).split("\n")
+            request = {"provider": "codex", "visibleText": screen,
+                       "cursorLine": lines[row] if row < len(lines) else None,
+                       "text": prompt, "cursorRow": row, "cursorColumn": column,
+                       "cursorVisible": bool(cursor_visible), "requireEmpty": True,
+                       "queueWhenWorking": False}
+            result = json.loads(subprocess.check_output([dumper, "composer-assess"],
+                                input=json.dumps(request).encode(), timeout=5))
+            frame.update(assessment=result["assessment"], presence=result["presence"])
+            prefix.with_suffix(".request.json").write_text(json.dumps(request, indent=2) + "\n")
+            prefix.with_suffix(".assessment.json").write_text(json.dumps(result, indent=2) + "\n")
+            if (result["assessment"] == "readyReturn" and column == 2
+                    and (request["cursorLine"] or "").lstrip().startswith(marker + " ")
+                    and (anchor_row is None or row == anchor_row)):
+                anchor_row = row
+                band = "\n".join(screen.split("\n")[max(0, row - 1):row + 2])
+                colors = effect_colors(band)
+                if colors:
+                    backgrounds.add(colors)
+                spark = spark or "✦" in band or "✧" in band
+                frame["effectColors"] = sorted(colors)
+        frames.append(frame)
+        if send is None and (len(backgrounds) >= 2 or spark):
+            send_started_ns = time.time_ns()
+            send = subprocess.Popen(["python3", str(pathlib.Path(run_dir) / "guarded-provider-send.py"),
+                                     tmux, socket, dumper, run_dir, target, prompt, marker],
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        time.sleep(0.025)
+    output, errors = send.communicate(timeout=10) if send is not None else ("", "no animated empty composer observed")
+except BaseException:
+    if send is not None and send.poll() is None:
+        send.kill()
+        send.wait()
+    raise
+(artifacts / "send-stdout.txt").write_text(output)
+(artifacts / "send-stderr.txt").write_text(errors)
+summary = {"effort": effort, "marker": marker, "frames": frames,
+           "distinctBackgroundFrames": len(backgrounds), "sparkObserved": spark,
+           "sendStartedAtNs": send_started_ns,
+           "guardedSendSucceeded": send is not None and send.returncode == 0}
+accepted = []
+for path in (pathlib.Path(run_dir) / "codex" / "composer-guards").glob("*-before-insert.request.json"):
+    request = json.loads(path.read_text())
+    assessment = json.loads(path.with_name(path.name.replace(".request.json", ".assessment.json")).read_text())
+    if (request.get("text") == prompt and request.get("capturedAtNs", 0) >= (send_started_ns or 0)
+            and "guardAcceptedAtNs" in assessment):
+        accepted.append((path, request))
+if accepted:
+    path, request = max(accepted, key=lambda value: value[1]["capturedAtNs"])
+    row = request["cursorRow"]
+    band = "\n".join(request["visibleText"].split("\n")[max(0, row - 1):row + 2])
+    summary["acceptedPreflightHadEffectColors"] = bool(effect_colors(band))
+    summary["acceptedPreflightCapturedAtNs"] = request["capturedAtNs"]
+    write_path = pathlib.Path(str(path).replace("-before-insert.request.json", "-text-write.json"))
+    if write_path.exists():
+        summary["writeTiming"] = json.loads(write_path.read_text())
+(artifacts / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+if send is None or send.returncode:
+    raise SystemExit(f"Codex {effort} guarded send failed: {errors}; artifacts={artifacts}")
+if len(backgrounds) < 2 and not spark:
+    raise SystemExit(f"Codex {effort} produced no captured effort animation; artifacts={artifacts}")
+print(output, end="")
+print(f"Codex {effort} animation observed in {len(frames)} timestamped frames; "
+      f"acceptedDuringEffect={summary.get('acceptedPreflightHadEffectColors', False)}; artifacts={artifacts}")
+PY
+}
+
+run_codex_effort_matrix() {
+    for effort in max ultra; do
+        write_osc_events "$raw_output" codex "$events"
+        effort_submit=$(( $(count_events "$events" codex UserPromptSubmit working) + 1 ))
+        effort_stop=$(( $(count_events "$events" codex Stop idle) + 1 ))
+        send_codex_effort_with_animation "$target" "$effort" "$probe_dir"
+        wait_for_event "$raw_output" "$events" codex UserPromptSubmit working "$effort_submit" \
+            "Codex $effort guarded send working state"
+        wait_for_successful_event "$raw_output" "$events" "$target" codex Stop idle "$effort_stop" \
+            "Codex $effort completed idle state" "$probe_dir/$effort-provider-failure-screen.txt"
+        effort_needle=$(printf '%s' "$effort" | tr '[:lower:]' '[:upper:]')
+        wait_for_screen_occurrences "$target" "TESSERA_CODEX_${effort_needle}_OK" 2 "Codex $effort response"
+        wait_for_retained_state "$target" codex Stop idle "Codex $effort completed idle"
+        capture_screen "$target" "$probe_dir/$effort-final-screen.txt"
+    done
 }
 
 approve_option() {
@@ -555,7 +937,29 @@ approve_option() {
 trust_codex_hooks() {
     target=$1
     probe_dir=$2
-    wait_for_screen_pattern "$target" 'Hooks need review|Use /skills to list available skills' "Codex hook review or composer"
+    attempts=0
+    while [ "$attempts" -lt 240 ]; do
+        screen=$("$TMUX_BIN" -L "$SOCKET" capture-pane -p -N -t "$target" 2>/dev/null || true)
+        if printf '%s\n' "$screen" | grep -Fqi 'Update available' \
+            && printf '%s\n' "$screen" | grep -Fqi 'Skip until next version'; then
+            capture_screen "$target" "$probe_dir/update-available-screen.txt"
+            "$TMUX_BIN" -L "$SOCKET" send-keys -t "$target" -H 32
+            sleep 0.05
+            "$TMUX_BIN" -L "$SOCKET" send-keys -t "$target" Enter
+            attempts=0
+            sleep 0.5
+            continue
+        fi
+        if printf '%s\n' "$screen" | grep -Eq 'Hooks need review|Use /skills to list available skills'; then
+            break
+        fi
+        attempts=$((attempts + 1))
+        sleep 0.25
+    done
+    if [ "$attempts" -ge 240 ]; then
+        printf 'timed out waiting for Codex hook review or composer\n%s\n' "$screen" >&2
+        return 1
+    fi
     screen=$("$TMUX_BIN" -L "$SOCKET" capture-pane -p -N -t "$target")
     if printf '%s\n' "$screen" | grep -Fq 'Hooks need review'; then
         capture_screen "$target" "$probe_dir/hook-review-screen.txt"
@@ -576,6 +980,8 @@ trust_codex_hooks() {
             "$TMUX_BIN" -L "$SOCKET" send-keys -t "$target" -H 74
             sleep 0.5
         fi
+        "$TMUX_BIN" -L "$SOCKET" send-keys -t "$target" Escape
+        wait_for_composer "$target" 'OpenAI Codex|codex' "Codex after hook review"
     fi
     capture_screen "$target" "$probe_dir/hook-trusted-screen.txt"
 
@@ -618,7 +1024,11 @@ assert_state_sequence() {
         | ([ $events[] | select(.value.event == "Stop" and .value.state == "idle") ][0].key) as $firstStop
         | ([ $events[] | select(.value.event == "UserPromptSubmit" and .value.state == "working") ][1].key) as $secondSubmit
         | ([ $events[] | select(.value.event == "PermissionRequest" and .value.state == "waitingForInput") ][0].key) as $permission
-        | ([ $events[] | select(.value.event == "PostToolUse" and .value.state == "working") ][0].key) as $postTool
+        | ([ $events[] | select(
+                .value.event == "PostToolUse"
+                and .value.state == "working"
+                and .key > $permission
+            ) ][0].key) as $postTool
         | ([ $events[] | select(.value.event == "Stop" and .value.state == "idle") ][1].key) as $secondStop
         | ($start < $firstSubmit and $firstSubmit < $firstStop
             and $firstStop < $secondSubmit and $secondSubmit < $permission
@@ -656,17 +1066,75 @@ assert_event_reason() {
         "$events" >/dev/null
 }
 
+# `/clear` starts another conversation in the same provider process. Agent
+# Center hands the pane to it only because the agent PID is unchanged, so the
+# first finished turn after it must carry a new session ID and the same PID.
+clear_conversation() {
+    raw_output=$1
+    events=$2
+    target=$3
+    provider=$4
+    composer_pattern=$5
+    probe_dir=$6
+    write_osc_events "$raw_output" "$provider" "$events"
+    before=$(jq -s -c --arg provider "$provider" \
+        '[.[] | select(.provider == $provider and .event == "UserPromptSubmit")] | last | {sessionId, agentPid}' "$events")
+    if ! printf '%s\n' "$before" | jq -e '(.sessionId // "") != "" and (.agentPid | type == "number")' >/dev/null 2>&1; then
+        printf '%s had no conversation with a session and agent PID to clear: %s\n' "$provider" "$before" >&2
+        return 1
+    fi
+    wait_for_composer "$target" "$composer_pattern" "$provider before /clear"
+    send_staged_prompt "$target" "/clear"
+    wait_for_composer "$target" "$composer_pattern" "$provider after /clear"
+    send_staged_prompt "$target" "Reply exactly TESSERA_CLEARED_OK. Do not use tools."
+    attempts=0
+    while [ "$attempts" -lt 240 ]; do
+        write_osc_events "$raw_output" "$provider" "$events"
+        if jq -s -e --arg provider "$provider" --argjson before "$before" \
+            'any(.[]; .provider == $provider and .event == "Stop" and .state == "idle"
+                and (.sessionId // "") != "" and .sessionId != $before.sessionId)' "$events" >/dev/null 2>&1; then
+            break
+        fi
+        attempts=$((attempts + 1))
+        sleep 0.25
+    done
+    if [ "$attempts" -ge 240 ]; then
+        printf '%s finished no turn in a new conversation after /clear\n' "$provider" >&2
+        tail -40 "$events" >&2
+        return 1
+    fi
+    wait_for_screen_occurrences "$target" 'TESSERA_CLEARED_OK' 2 "$provider response after /clear"
+    if ! jq -s -e --arg provider "$provider" --argjson before "$before" '
+        [.[] | select(.provider == $provider and (.sessionId // "") != "" and .sessionId != $before.sessionId)] as $after
+        | ($before.agentPid | type == "number") and ($after | length) > 0
+            and all($after[]; .agentPid == $before.agentPid)
+    ' "$events" >/dev/null; then
+        printf '%s /clear did not keep one agent process across the new conversation (before=%s)\n' \
+            "$provider" "$before" >&2
+        tail -40 "$events" >&2
+        return 1
+    fi
+    jq -s --arg provider "$provider" --argjson before "$before" '
+        [.[] | select(.provider == $provider) | {
+            event, state, reason,
+            conversation: (if .sessionId == $before.sessionId then "before" elif (.sessionId // "") == "" then "none" else "after" end),
+            samePid: (.agentPid == $before.agentPid)
+        }] | .[-8:]
+    ' "$events" >"$probe_dir/clear-trace.json"
+    capture_screen "$target" "$probe_dir/clear-screen.txt"
+}
+
 run_codex() {
     probe_dir="$RUN_DIR/codex"
     mkdir -p "$probe_dir"
     target="codex:0.0"
     start_gate="$probe_dir/start-provider"
-    command="while [ ! -f '$start_gate' ]; do sleep 0.01; done; exec env HOME='$PRODUCTION_HOME' SHELL=/bin/zsh CODEX_HOME='$PRODUCTION_HOME/.codex' CLAUDE_CONFIG_DIR='$PRODUCTION_HOME/.claude' /bin/zsh -f -c '. \"\$HOME/.config/tessera/agent-lifecycle.sh\"; exec codex --ask-for-approval untrusted --sandbox workspace-write -C \"$REPO_ROOT\"'"
+    command="while [ ! -f '$start_gate' ]; do sleep 0.01; done; exec env -u NO_COLOR HOME='$PRODUCTION_HOME' SHELL=/bin/zsh COLORTERM=truecolor CODEX_HOME='$PRODUCTION_HOME/.codex' CLAUDE_CONFIG_DIR='$PRODUCTION_HOME/.claude' /bin/zsh -f -c '. \"\$HOME/.config/tessera/agent-lifecycle.sh\"; exec codex --model gpt-6.1-sol --config tui.animations=true --ask-for-approval on-request --sandbox read-only -C \"$REPO_ROOT\"'"
     # The disposable provider home intentionally has no copied runtime state.
     # Accept this known repository's real workspace-trust dialog explicitly;
     # only the subsequent provider hook may establish availability.
     "$TMUX_BIN" -L "$SOCKET" new-session -d -s codex -x 120 -y 40 -c "$REPO_ROOT" "$command"
-    "$TMUX_BIN" -L "$SOCKET" pipe-pane -t "$target" "/bin/cat > '$probe_dir/raw-output.bin'"
+    start_codex_output_capture "$target" "$probe_dir/raw-output.bin"
     : > "$start_gate"
 
     raw_output="$probe_dir/raw-output.bin"
@@ -692,7 +1160,7 @@ run_codex() {
         rm -f "$start_gate"
         "$TMUX_BIN" -L "$SOCKET" pipe-pane -t "$target"
         "$TMUX_BIN" -L "$SOCKET" respawn-pane -k -t "$target" "$command"
-        "$TMUX_BIN" -L "$SOCKET" pipe-pane -t "$target" "/bin/cat > '$raw_output'"
+        start_codex_output_capture "$target" "$raw_output"
         : > "$start_gate"
     fi
     # A fresh isolated home must review the exact hooks.json definitions
@@ -703,7 +1171,7 @@ run_codex() {
     "$TMUX_BIN" -L "$SOCKET" pipe-pane -t "$target"
     : > "$raw_output"
     "$TMUX_BIN" -L "$SOCKET" respawn-pane -k -t "$target" "$command"
-    "$TMUX_BIN" -L "$SOCKET" pipe-pane -t "$target" "/bin/cat > '$raw_output'"
+    start_codex_output_capture "$target" "$raw_output"
     : > "$start_gate"
     verify_codex_hooks_active_after_relaunch "$target" "$probe_dir/hook-active-after-relaunch-screen.txt"
     wait_for_event "$raw_output" "$events" codex SessionStart idle 1 "Codex SessionStart idle state"
@@ -711,15 +1179,23 @@ run_codex() {
     assert_session_pid_is_live_provider "$events" codex
     wait_for_retained_state "$target" codex SessionStart idle "Codex initial idle"
     wait_for_composer "$target" 'OpenAI Codex|codex' "Codex"
-    send_staged_prompt "$target" "Reply exactly TESSERA_CODEX_E2E_OK. Do not use tools."
+    send_staged_prompt "$target" "Reply exactly TESSERA_CODEX_E2E_OK. Do not use tools." '›'
     wait_for_event "$raw_output" "$events" codex UserPromptSubmit working 1 "Codex working state"
     wait_for_successful_event "$raw_output" "$events" "$target" codex Stop idle 1 \
         "Codex completed idle state" "$probe_dir/provider-failure-screen.txt"
     wait_for_screen_occurrences "$target" 'TESSERA_CODEX_E2E_OK' 2 "Codex response"
     wait_for_retained_state "$target" codex Stop idle "Codex completed idle"
 
+    if [ "${TESSERA_REAL_CODEX_SEND_MATRIX_ONLY:-0}" = 1 ]; then
+        run_codex_effort_matrix
+        write_state_trace "$events" codex "$probe_dir/state-trace.json"
+        "$TMUX_BIN" -L "$SOCKET" pipe-pane -t "$target"
+        capture_screen "$target" "$probe_dir/final-screen.txt"
+        return
+    fi
+
     wait_for_composer "$target" 'OpenAI Codex|codex' "Codex before permission turn"
-    send_staged_prompt "$target" "Use the shell tool to run exactly: python3 -c 'print(\"TESSERA_CODEX_PERMISSION_OK\")'. Do not do anything else."
+    send_staged_prompt "$target" "Use the shell tool to run exactly: python3 -c 'from pathlib import Path; p=Path(\"$CODEX_PERMISSION_PROBE\"); p.parent.mkdir(parents=True, exist_ok=True); p.write_text(\"ok\"); print(\"TESSERA_CODEX_PERMISSION_OK\")'. You must request approval to run it outside the read-only sandbox before invoking it; do not attempt it without approval and do not do anything else."
     wait_for_event "$raw_output" "$events" codex UserPromptSubmit working 2 "Codex permission-turn working state"
     wait_for_event "$raw_output" "$events" codex PermissionRequest waitingForInput 1 "Codex waiting-for-permission state"
     wait_for_retained_state "$target" codex PermissionRequest waitingForInput "Codex waiting-for-permission"
@@ -734,15 +1210,20 @@ run_codex() {
     wait_for_retained_state "$target" codex Stop idle "Codex post-approval idle"
     assert_state_sequence "$events" codex
     capture_screen "$target" "$probe_dir/final-screen.txt"
+    clear_conversation "$raw_output" "$events" "$target" codex 'OpenAI Codex|codex' "$probe_dir"
+    run_codex_effort_matrix
 
     # Codex does not currently expose its final plan-approval dialog as a
     # distinct lifecycle hook. Exercise the real supported /plan flow and
     # preserve both sides of the correlation Agent Center relies on: the Stop
     # boundary and the cursor-owned approval menu painted immediately after it.
     wait_for_composer "$target" 'OpenAI Codex|codex' "Codex before plan turn"
+    write_osc_events "$raw_output" codex "$events"
+    plan_turn=$(( $(count_events "$events" codex UserPromptSubmit working) + 1 ))
+    plan_stop=$(( $(count_events "$events" codex Stop idle) + 1 ))
     send_staged_prompt "$target" "/plan Propose a concise two-step plan to add a harmless comment to README.md. The request is fully specified: do not ask questions, do not use tools, and return a final plan ready for approval."
-    wait_for_event "$raw_output" "$events" codex UserPromptSubmit working 3 "Codex plan-turn working state"
-    wait_for_successful_event "$raw_output" "$events" "$target" codex Stop idle 3 \
+    wait_for_event "$raw_output" "$events" codex UserPromptSubmit working "$plan_turn" "Codex plan-turn working state"
+    wait_for_successful_event "$raw_output" "$events" "$target" codex Stop idle "$plan_stop" \
         "Codex plan-turn Stop boundary" "$probe_dir/provider-failure-screen.txt"
     wait_for_screen_pattern "$target" 'Yes, implement this plan|stay in Plan mode' "Codex plan approval UI"
     assert_permission_cursor_row "$target" "Codex plan approval UI"
@@ -757,7 +1238,15 @@ run_claude() {
     mkdir -p "$probe_dir"
     target="claude:0.0"
     start_gate="$probe_dir/start-provider"
-    command="while [ ! -f '$start_gate' ]; do sleep 0.01; done; exec env HOME='$PRODUCTION_HOME' SHELL=/bin/zsh CODEX_HOME='$PRODUCTION_HOME/.codex' /bin/zsh -f -c 'unset CLAUDE_CONFIG_DIR; . \"\$HOME/.config/tessera/agent-lifecycle.sh\"; exec claude --permission-mode manual --tools Bash'"
+    claude_home=$PRODUCTION_HOME
+    if [ "${TESSERA_REAL_CLAUDE_USE_AUTHENTICATED_HOME:-0}" = 1 ]; then
+        # Claude may keep the renewed OAuth grant in the login-profile
+        # keychain while its legacy copied credential file is revoked. This
+        # explicit local-only mode exercises that real grant and therefore
+        # records the disposable E2E session in the authenticated profile.
+        claude_home=$AUTHENTICATED_HOME
+    fi
+    command="while [ ! -f '$start_gate' ]; do sleep 0.01; done; exec env HOME='$claude_home' SHELL=/bin/zsh CODEX_HOME='$PRODUCTION_HOME/.codex' /bin/zsh -f -c 'unset CLAUDE_CONFIG_DIR; . \"\$HOME/.config/tessera/agent-lifecycle.sh\"; exec claude --permission-mode manual --tools Bash'"
     # Use a known repository and explicitly accept a real workspace-trust
     # dialog if the copied authentication input does not carry that choice.
     "$TMUX_BIN" -L "$SOCKET" new-session -d -s claude -x 120 -y 40 -c "$REPO_ROOT" "$command"
@@ -811,6 +1300,7 @@ run_claude() {
         "Claude post-approval idle after late subagent cleanup"
     assert_state_sequence "$events" claude
     capture_screen "$target" "$probe_dir/final-screen.txt"
+    clear_conversation "$raw_output" "$events" "$target" claude 'Claude Code|claude' "$probe_dir"
     write_state_trace "$events" claude "$probe_dir/state-trace.json"
     finish_osc_capture "$target" claude "$probe_dir"
 }
@@ -825,13 +1315,17 @@ if [ -z "$ran_providers" ]; then
 fi
 
 FINAL_STATUS_COMMAND=$("$DUMPER" status-command)
-HOME="$PRODUCTION_HOME" SHELL=/bin/zsh \
-    CODEX_HOME="$PRODUCTION_HOME/.codex" \
-    CLAUDE_CONFIG_DIR="$PRODUCTION_HOME/.claude" \
+FINAL_STATUS_HOME=$PRODUCTION_HOME
+if [ "${TESSERA_REAL_CLAUDE_USE_AUTHENTICATED_HOME:-0}" = 1 ]; then
+    FINAL_STATUS_HOME=$AUTHENTICATED_HOME
+fi
+HOME="$FINAL_STATUS_HOME" SHELL=/bin/zsh \
+    CODEX_HOME="$FINAL_STATUS_HOME/.codex" \
+    CLAUDE_CONFIG_DIR="$FINAL_STATUS_HOME/.claude" \
     /bin/sh -c "$FINAL_STATUS_COMMAND" \
     > "$RUN_DIR/final-host-status.txt"
 if ! grep -Eq \
-        'TESSERA_AGENT_HOST_DIAG readiness=(trusted|none) lifecycleProvider=(codex|claude) lifecycleEvent=(SessionStart|Stop) lifecycleState=idle lifecycleReason=(verified-trusted-empty-composer|session-start|turn-stopped) lifecyclePhase=resolved agentPid=present pane=present terminal=present tmuxState=written terminalEmission=written' \
+        'TESSERA_AGENT_HOST_DIAG readiness=(trusted|none|deferred-to-provider-hook) lifecycleProvider=(codex|claude) lifecycleEvent=(SessionStart|Stop) lifecycleState=idle lifecycleReason=(verified-trusted-empty-composer|session-start|turn-stopped) lifecyclePhase=resolved agentPid=present pane=present terminal=present tmuxState=written terminalEmission=written' \
     "$RUN_DIR/final-host-status.txt"; then
     printf 'final content-free host diagnostic was incomplete:\n' >&2
     cat "$RUN_DIR/final-host-status.txt" >&2
@@ -842,3 +1336,4 @@ printf 'real Agent Center E2E passed: codex=%s claude=%s artifacts=%s\n' \
     "$("$CODEX_BIN" --version 2>/dev/null | head -1)" \
     "$("$CLAUDE_BIN" --version 2>/dev/null | head -1)" \
     "$RUN_DIR"
+script_completed=1

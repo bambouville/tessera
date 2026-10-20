@@ -1,0 +1,42 @@
+{
+  "New pane": {
+    "de": "Neuer Bereich",
+    "es": "Panel nuevo",
+    "fr": "Nouveau volet",
+    "ja": "新規ペイン",
+    "zh-Hans": "新建窗格",
+    "zh-Hant": "新增窗格"
+  },
+  "Split Right": {
+    "de": "Rechts teilen",
+    "es": "Dividir a la derecha",
+    "fr": "Diviser à droite",
+    "ja": "右に分割",
+    "zh-Hans": "向右分割",
+    "zh-Hant": "向右分割"
+  },
+  "Split Left": {
+    "de": "Links teilen",
+    "es": "Dividir a la izquierda",
+    "fr": "Diviser à gauche",
+    "ja": "左に分割",
+    "zh-Hans": "向左分割",
+    "zh-Hant": "向左分割"
+  },
+  "Split Down": {
+    "de": "Nach unten teilen",
+    "es": "Dividir abajo",
+    "fr": "Diviser vers le bas",
+    "ja": "下に分割",
+    "zh-Hans": "向下分割",
+    "zh-Hant": "向下分割"
+  },
+  "Split Up": {
+    "de": "Nach oben teilen",
+    "es": "Dividir arriba",
+    "fr": "Diviser vers le haut",
+    "ja": "上に分割",
+    "zh-Hans": "向上分割",
+    "zh-Hant": "向上分割"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "%lld items": {
+    "en": {
+      "one": "%lld item",
+      "other": "%lld items"
+    },
+    "de": {
+      "one": "%lld Objekt",
+      "other": "%lld Objekte"
+    },
+    "es": {
+      "one": "%lld elemento",
+      "other": "%lld elementos"
+    },
+    "fr": {
+      "one": "%lld élément",
+      "other": "%lld éléments"
+    },
+    "ja": {
+      "other": "%lld 項目"
+    },
+    "zh-Hans": {
+      "other": "%lld 项"
+    },
+    "zh-Hant": {
+      "other": "%lld 個項目"
+    }
+  }
+}

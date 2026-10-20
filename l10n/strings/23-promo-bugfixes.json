@@ -1,0 +1,123 @@
+{
+  "Mosh connection interrupted. Reconnecting.": {
+    "de": "Mosh-Verbindung unterbrochen. Verbindung wird wiederhergestellt.",
+    "es": "Conexión Mosh interrumpida. Reconectando.",
+    "fr": "Connexion Mosh interrompue. Reconnexion en cours.",
+    "ja": "Mosh の接続が中断されました。再接続しています。",
+    "zh-Hans": "Mosh 连接中断。正在重新连接。",
+    "zh-Hant": "Mosh 連線中斷。正在重新連線。"
+  },
+  "last contact %lld s ago": {
+    "de": "letzter Kontakt vor %lld s",
+    "es": "último contacto hace %lld s",
+    "fr": "dernier contact il y a %lld s",
+    "ja": "最後の受信から %lld 秒",
+    "zh-Hans": "距上次联系 %lld 秒",
+    "zh-Hant": "距上次聯絡 %lld 秒"
+  },
+  "last reply %lld s ago": {
+    "de": "letzte Antwort vor %lld s",
+    "es": "última respuesta hace %lld s",
+    "fr": "dernière réponse il y a %lld s",
+    "ja": "最後の応答から %lld 秒",
+    "zh-Hans": "距上次回复 %lld 秒",
+    "zh-Hant": "距上次回覆 %lld 秒"
+  },
+  "pane %@": {
+    "de": "Bereich %@",
+    "en": "pane %@",
+    "es": "panel %@",
+    "fr": "volet %@",
+    "ja": "ペイン %@",
+    "zh-Hans": "窗格 %@",
+    "zh-Hant": "窗格 %@"
+  },
+  "without ⌘, the terminal and the programs in it keep this key.": {
+    "de": "Ohne ⌘ bleibt diese Taste dem Terminal und den darin laufenden Programmen vorbehalten.",
+    "es": "sin ⌘, la terminal y los programas que se ejecutan en ella conservan esta tecla.",
+    "fr": "sans ⌘, le terminal et les programmes qui y tournent conservent cette touche.",
+    "ja": "⌘ がなければ、このキーはターミナルとその中で動くプログラムに渡されます。",
+    "zh-Hans": "不按 ⌘ 时，此按键仍由终端及其中运行的程序使用。",
+    "zh-Hant": "未按 ⌘ 時，此按鍵仍由終端機及其中執行的程式使用。"
+  },
+  "File": {
+    "de": "Datei",
+    "es": "Archivo",
+    "fr": "Fichier",
+    "ja": "ファイル",
+    "zh-Hans": "文件",
+    "zh-Hant": "檔案"
+  },
+  "Photo": {
+    "de": "Foto",
+    "es": "Foto",
+    "fr": "Photo",
+    "ja": "写真",
+    "zh-Hans": "照片",
+    "zh-Hant": "照片"
+  },
+  "add attachment": {
+    "de": "Anhang hinzufügen",
+    "es": "añadir adjunto",
+    "fr": "ajouter une pièce jointe",
+    "ja": "添付ファイルを追加",
+    "zh-Hans": "添加附件",
+    "zh-Hant": "加入附件"
+  },
+  "uploading attachment": {
+    "de": "Anhang wird hochgeladen",
+    "es": "subiendo adjunto",
+    "fr": "envoi de la pièce jointe",
+    "ja": "添付ファイルをアップロード中",
+    "zh-Hans": "正在上传附件",
+    "zh-Hant": "正在上傳附件"
+  },
+  "Preparing to share": {
+    "de": "Teilen wird vorbereitet",
+    "es": "Preparando para compartir",
+    "fr": "Préparation du partage",
+    "ja": "共有を準備中",
+    "zh-Hans": "正在准备共享",
+    "zh-Hant": "正在準備共享"
+  },
+  "%@, preparing to share": {
+    "de": "%@, Teilen wird vorbereitet",
+    "es": "%@, preparando para compartir",
+    "fr": "%@, préparation du partage",
+    "ja": "%@、共有を準備中",
+    "zh-Hans": "%@，正在准备共享",
+    "zh-Hant": "%@，正在準備共享"
+  },
+  "continued elsewhere": {
+    "de": "Anderswo fortgesetzt",
+    "es": "continuada en otro lugar",
+    "fr": "poursuivie ailleurs",
+    "ja": "別の場所で継続中",
+    "zh-Hans": "已在别处继续",
+    "zh-Hant": "已在別處繼續"
+  },
+  "Session continued elsewhere. Double-tap to take back control.": {
+    "de": "Sitzung wird anderswo fortgesetzt. Doppeltippe, um die Steuerung zurückzuholen.",
+    "es": "la sesión continúa en otro lugar. Toca dos veces para recuperar el control.",
+    "fr": "la session se poursuit ailleurs. Touchez deux fois pour reprendre le contrôle.",
+    "ja": "セッションは別の場所で継続中です。ダブルタップで操作権を取り戻します。",
+    "zh-Hans": "会话已在别处继续。轻点两下可取回控制权。",
+    "zh-Hant": "工作階段已在別處繼續。輕點兩下可取回控制權。"
+  },
+  "Send anyway": {
+    "de": "Trotzdem senden",
+    "es": "Enviar de todos modos",
+    "fr": "Envoyer quand même",
+    "ja": "このまま送信",
+    "zh-Hans": "仍然发送",
+    "zh-Hant": "仍然傳送"
+  },
+  "elsewhere": {
+    "de": "anderswo",
+    "es": "en otro lugar",
+    "fr": "ailleurs",
+    "ja": "別の場所で",
+    "zh-Hans": "在别处",
+    "zh-Hant": "在別處"
+  }
+}

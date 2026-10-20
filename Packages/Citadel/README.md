@@ -1,5 +1,23 @@
 Citadel is a high level API around [NIOSSH](https://github.com/apple/swift-nio-ssh). It makes NIOSSH accessible and easy to adopt, while providing tools otherwise out-of-scope for NIOSSH.
 
+## Tessera vendored variant
+
+This copy depends directly on **Apple swift-nio-ssh 0.15.0**, not the Wellz26
+fork. See [the migration and regression-test notes](../../docs/ssh-upstream-migration-20260911.md).
+Tessera uses upstream's default algorithms and supports password, Ed25519,
+software P256, and Secure Enclave P256 authentication. Its custom authentication
+delegates remain intact; they do not require custom cryptographic registration.
+Unused fork-only RSA, AES-CTR and group14 implementations/registration APIs have
+been removed, along with BigInt. RSA import/authentication was already disabled
+in Tessera. This vendored API is not a drop-in replacement for arbitrary Citadel
+consumers using those removed algorithms.
+
+Run the dependency crash reproduction and adapter tests with:
+
+```sh
+swift test --package-path Packages/Citadel
+```
+
 Citadel is in active development by our team or Swift experts. Get in touch with our [Discord Community](https://discord.gg/H6799jh).
 
 ## Client Usage
@@ -318,55 +336,33 @@ When you implement SFTP in Citadel, you're responsible for taking care of logist
 
 ## Helpers
 
-The most important helper most people need is OpenSSH key parsing. We support extensions on PrivateKey types such as our own `Insecure.RSA.PrivateKey`, as well as existing SwiftCrypto types like `Curve25519.Signing.PrivateKey`:
+The vendored key helpers support OpenSSH Ed25519 private keys, including encrypted imports:
 
 ```swift
-// Parse an OpenSSH RSA private key. This is the same format as the one used by OpenSSH
+// Parse an OpenSSH Ed25519 private key.
 let sshFile = try String(contentsOf: ..)
-let privateKey = try Insecure.RSA.PrivateKey(sshRsa: sshFile)
+let privateKey = try Curve25519.Signing.PrivateKey(sshEd25519: sshFile)
 ```
 
 ## FAQ
 
-If you can't connect to a server, it's likely that your server uses a deprecated set of algorithms that NIOSSH doesn't support. No worries though, as Citadel does implement these! Don't use these if you don't have to, as they're deprecated for good (security) reasons.
+Legacy-only servers need a server-side modern algorithm configuration. This
+variant does not register additional key-exchange or public-key algorithms.
+`SSHAlgorithms()` preserves upstream defaults. Protocol options remain available:
 
 ```swift
-// Create a new set of algorithms
-var algorithms = SSHAlgorithms()
-
-algorithms.transportProtectionSchemes = .add([
-    AES128CTR.self
-])
-
-algorithms.keyExchangeAlgorithms = .add([
-    DiffieHellmanGroup14Sha1.self,
-    DiffieHellmanGroup14Sha256.self
-])
-```
-
-You can then use these in an SSHClient, together with any other potential protocol configuration options:
-
-```swift
-// Connect to the server using the new algorithms and a password-based authentication method
+// Connect with upstream default algorithms and password-based authentication.
 let client = try await SSHClient.connect(
     host: "example.com",
     authenticationMethod: .passwordBased(username: "joannis", password: "s3cr3t"),
     hostKeyValidator: .acceptAnything(), // Please use another validator if at all possible, it's insecure
     reconnect: .never,
-    algorithms: algorithms,
+    algorithms: SSHAlgorithms(),
     protocolOptions: [
         .maximumPacketSize(1 << 20)
     ]
 )
 ```
-
-You can also use `SSHAlgorithms.all` to enable all supported algorithms.
-
-## TODO
-
-A couple of code is held back until further work in SwiftNIO SSH is completed. We're currently working with Apple to resolve these.
-
-- [ ] RSA Authentication (implemented & supported, but in a [fork of NIOSSH](https://github.com/Joannis/swift-nio-ssh-1/pull/1))
 
 ## Contributing
 

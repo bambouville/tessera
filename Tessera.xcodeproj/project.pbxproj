@@ -7,6 +7,34 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A61900000000000000000003 /* AgentHostBundlePackagingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61900000000000000000002 /* AgentHostBundlePackagingTests.swift */; };
+		AB2026101200000000000001 /* ProgramStatusCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB2026101200000000000002 /* ProgramStatusCenter.swift */; };
+		AB2026092000000000000001 /* SessionTmuxChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB2026092000000000000002 /* SessionTmuxChrome.swift */; };
+		D8AD00000000000000000001 /* AgentCenterV2Coordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AC00000000000000000001 /* AgentCenterV2Coordinator.swift */; };
+		D8AD00000000000000000002 /* AgentCenterV2Fixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AC00000000000000000002 /* AgentCenterV2Fixture.swift */; };
+		D8AD00000000000000000C01 /* AgentColdPageFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AC00000000000000000C01 /* AgentColdPageFixture.swift */; };
+		D8AD00000000000000000003 /* AgentCenterV2PresentationModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AC00000000000000000003 /* AgentCenterV2PresentationModel.swift */; };
+		E6AD09090000000000000001 /* AgentComposerAttachments.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6AC09090000000000000001 /* AgentComposerAttachments.swift */; };
+		D8AD00000000000000000004 /* AppleAgentMetadataRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AC00000000000000000004 /* AppleAgentMetadataRepository.swift */; };
+		D8AD00000000000000000005 /* AppleAgentNotificationAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AC00000000000000000005 /* AppleAgentNotificationAdapter.swift */; };
+		D8AD00000000000000000006 /* AppleAgentSpeechToDraftAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AC00000000000000000006 /* AppleAgentSpeechToDraftAdapter.swift */; };
+		D8AD00000000000000000007 /* AppleAgentCenterRuntimeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AC00000000000000000007 /* AppleAgentCenterRuntimeBridge.swift */; };
+		D8AD00000000000000000A11 /* AppleAgentTitleGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AC00000000000000000A11 /* AppleAgentTitleGenerator.swift */; };
+		D8AD00000000000000000008 /* AppleAgentStreamingDataChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AC00000000000000000008 /* AppleAgentStreamingDataChannel.swift */; };
+		D8AD00000000000000000009 /* AppleAgentTerminalAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AC00000000000000000009 /* AppleAgentTerminalAdapter.swift */; };
+		D8AD0000000000000000000A /* AppleCitadelAgentExec.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AC0000000000000000000A /* AppleCitadelAgentExec.swift */; };
+		EAAD20260912000000000001 /* AppleAgentIngestionConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAAC20260912000000000001 /* AppleAgentIngestionConnection.swift */; };
+		D8AD0000000000000000000B /* AgentCenterV2RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AC0000000000000000000B /* AgentCenterV2RootView.swift */; };
+		D8AD0000000000000000000C /* AgentComposerAndLaunch.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AC0000000000000000000C /* AgentComposerAndLaunch.swift */; };
+		D8AD0000000000000000000D /* AgentThreadBlocks.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AC0000000000000000000D /* AgentThreadBlocks.swift */; };
+		D8AD0000000000000000000E /* AgentThreadDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AC0000000000000000000E /* AgentThreadDetailView.swift */; };
+		D8AD0000000000000000000F /* AgentThreadListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AC0000000000000000000F /* AgentThreadListView.swift */; };
+		F1A7000000000000000000B1 /* AgentAttentionPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A7000000000000000000A1 /* AgentAttentionPopover.swift */; };
+		AB2026101200000000000004 /* ProgramStatusCenterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB2026101200000000000003 /* ProgramStatusCenterTests.swift */; };
+		D8AD00000000000000000010 /* AgentCenterV2CoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AC00000000000000000010 /* AgentCenterV2CoordinatorTests.swift */; };
+		D8AD00000000000000000011 /* AppleAgentServicesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AC00000000000000000011 /* AppleAgentServicesTests.swift */; };
+		D8AD00000000000000000012 /* AppleAgentSessionEndpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AC00000000000000000012 /* AppleAgentSessionEndpoint.swift */; };
+		D8AD00000000000000000013 /* AgentCenterV2IntegrationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AC00000000000000000013 /* AgentCenterV2IntegrationCoordinator.swift */; };
 		1AFF0000000000000000001E /* AppShortcutDispatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFF0000000000000000001D /* AppShortcutDispatcher.swift */; };
 		1AFF00000000000000000020 /* StoredKeyboardShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFF0000000000000000001F /* StoredKeyboardShortcut.swift */; };
 		1AFF00000000000000000A12 /* TerminalKeyboardCaretPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFF00000000000000000A11 /* TerminalKeyboardCaretPolicyTests.swift */; };
@@ -69,17 +97,26 @@
 		1A000400000000000000001D /* SSHAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000300000000000000001A /* SSHAuth.swift */; };
 		1A0004000000000000000020 /* MoshBridge in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A000000000000000005 /* MoshBridge */; };
 		1A0004000000000000000021 /* MoshSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000300000000000000001B /* MoshSession.swift */; };
+		7E5502000000000000000001 /* MoshServerLivenessWatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E5501000000000000000001 /* MoshServerLivenessWatch.swift */; };
+		7E5502000000000000000000 /* ConnectivityRetryWake.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E5501000000000000000000 /* ConnectivityRetryWake.swift */; };
 		1A0004000000000000000022 /* MoshBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000300000000000000001C /* MoshBootstrap.swift */; };
 		1A0004000000000000000023 /* MoshBootstrapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000300000000000000001E /* MoshBootstrapTests.swift */; };
+		7E5502000000000000000002 /* MoshServerLivenessWatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E5501000000000000000002 /* MoshServerLivenessWatchTests.swift */; };
 		1A0004000000000000000024 /* KnownHostsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000300000000000000001F /* KnownHostsStoreTests.swift */; };
 		1A00A0000000000000000002 /* RealHostTransportIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00A0000000000000000001 /* RealHostTransportIntegrationTests.swift */; };
+		1A00A0000000000000000072 /* ForwardedServiceStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00A0000000000000000071 /* ForwardedServiceStateTests.swift */; };
 		1AFE00000000000000000002 /* AutoTmuxLaunchRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFE00000000000000000001 /* AutoTmuxLaunchRegressionTests.swift */; };
 		1AFE00000000000000000004 /* AutoTmuxSessionViewLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFE00000000000000000003 /* AutoTmuxSessionViewLaunchTests.swift */; };
 		1A00A0000000000000000004 /* VisualCaptureProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00A0000000000000000003 /* VisualCaptureProbe.swift */; };
 		1A00A0000000000000000008 /* FilesContextMenuProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00A0000000000000000007 /* FilesContextMenuProbe.swift */; };
+		1A00C5000000000000000004 /* PasteAutoPeriodProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00C5000000000000000003 /* PasteAutoPeriodProbe.swift */; };
+		1A00A0000000000000000108 /* TunnelBrowserProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00A0000000000000000107 /* TunnelBrowserProbe.swift */; };
+		1A00A0000000000000000702 /* SessionRestoreLifecycleProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00A0000000000000000701 /* SessionRestoreLifecycleProbe.swift */; };
 		1A00A000000000000000000C /* MarkdownScrollProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00A000000000000000000B /* MarkdownScrollProbe.swift */; };
 		D7B911000000000000000001 /* UploadIngressProgressProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7B910000000000000000001 /* UploadIngressProgressProbe.swift */; };
 		1A00A0000000000000000006 /* TerminalScrollbackOracleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00A0000000000000000005 /* TerminalScrollbackOracleTests.swift */; };
+		1A00C5000000000000000002 /* TerminalPasteInputMirrorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00C5000000000000000001 /* TerminalPasteInputMirrorTests.swift */; };
+		BEEF00000000000000000001 /* TerminalBoxOwnershipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEF10000000000000000001 /* TerminalBoxOwnershipTests.swift */; };
 		1A0004000000000000000033 /* HostKeyVerificationRequestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000033 /* HostKeyVerificationRequestTests.swift */; };
 		1A0004000000000000000025 /* OSDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000025 /* OSDetector.swift */; };
 		1A0004000000000000000026 /* HostOSDetectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000026 /* HostOSDetectionState.swift */; };
@@ -87,13 +124,32 @@
 		1A0004000000000000000028 /* OSDetectionProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000028 /* OSDetectionProbe.swift */; };
 		1A0004000000000000000029 /* RemoteAuthorizedKeysInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000029 /* RemoteAuthorizedKeysInstallerTests.swift */; };
 		1A0004000000000000000030 /* PortForwarding in Frameworks */ = {isa = PBXBuildFile; productRef = 1A000A000000000000000006 /* PortForwarding */; };
+		C30004000000000000000001 /* TesseraCore in Frameworks */ = {isa = PBXBuildFile; productRef = C3000A000000000000000001 /* TesseraCore */; };
+		C50004000000000000000001 /* TesseraAppleContinuity in Frameworks */ = {isa = PBXBuildFile; productRef = C5000A000000000000000001 /* TesseraAppleContinuity */; };
+		C40004000000000000000001 /* AppleSessionCommandFacade.swift in Sources */ = {isa = PBXBuildFile; fileRef = C40003000000000000000001 /* AppleSessionCommandFacade.swift */; };
+		5E0A04000000000000000001 /* SessionShowEdges.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0A03000000000000000001 /* SessionShowEdges.swift */; };
+		5E0A04000000000000000002 /* SessionShowEdgeTrackerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0A03000000000000000002 /* SessionShowEdgeTrackerTests.swift */; };
+		C40004000000000000000002 /* AppleSessionCommandFacadeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C40003000000000000000002 /* AppleSessionCommandFacadeTests.swift */; };
+		C400040000000000000000F1 /* KeyboardFocusRetentionReproTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C400030000000000000000F1 /* KeyboardFocusRetentionReproTests.swift */; };
 		1A00040000000000000000F0 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 1A00030000000000000000F0 /* PrivacyInfo.xcprivacy */; };
 		1A00040000000000000000F1 /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = 1A00030000000000000000F1 /* LICENSE */; };
 		1A00040000000000000000F2 /* COPYING.iOS in Resources */ = {isa = PBXBuildFile; fileRef = 1A00030000000000000000F2 /* COPYING.iOS */; };
 		1A00040000000000000000F3 /* ThirdPartyNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = 1A00030000000000000000F3 /* ThirdPartyNotices.txt */; };
 		1A0014000000000000000001 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000001 /* DesignTokens.swift */; };
+		1A0014000000000000000C01 /* ContinuousMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000C01 /* ContinuousMotion.swift */; };
 		1A0014000000000000000002 /* AppearancePreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000002 /* AppearancePreferences.swift */; };
 		1A0014000000000000000003 /* Typography.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000003 /* Typography.swift */; };
+		1A00140000000000000B0001 /* cascadia_mono.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1A00130000000000000B0001 /* cascadia_mono.ttf */; };
+		1A00140000000000000B0002 /* dejavu_sans_mono.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1A00130000000000000B0002 /* dejavu_sans_mono.ttf */; };
+		1A00140000000000000B0003 /* fira_code.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1A00130000000000000B0003 /* fira_code.ttf */; };
+		1A00140000000000000B0004 /* geist_mono.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1A00130000000000000B0004 /* geist_mono.ttf */; };
+		1A00140000000000000B0005 /* hack.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1A00130000000000000B0005 /* hack.ttf */; };
+		1A00140000000000000B0006 /* ibm_plex_mono.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1A00130000000000000B0006 /* ibm_plex_mono.ttf */; };
+		1A00140000000000000B0007 /* inconsolata.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1A00130000000000000B0007 /* inconsolata.ttf */; };
+		1A00140000000000000B0008 /* jetbrains_mono.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1A00130000000000000B0008 /* jetbrains_mono.ttf */; };
+		1A00140000000000000B0009 /* source_code_pro.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1A00130000000000000B0009 /* source_code_pro.ttf */; };
+		1A00140000000000000B000A /* ubuntu_mono.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1A00130000000000000B000A /* ubuntu_mono.ttf */; };
+		1A0014000000000000000C10 /* TerminalFontCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000C10 /* TerminalFontCatalog.swift */; };
 		1A0014000000000000000004 /* Field.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000004 /* Field.swift */; };
 		1A0014000000000000000005 /* Input.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000005 /* Input.swift */; };
 		1A0014000000000000000006 /* Btn.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000006 /* Btn.swift */; };
@@ -101,7 +157,6 @@
 		1A0014000000000000000008 /* Tag.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000008 /* Tag.swift */; };
 		1A0014000000000000000009 /* StatusDot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000009 /* StatusDot.swift */; };
 		1A001400000000000000000A /* ToggleRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000000A /* ToggleRow.swift */; };
-		1A001400000000000000000B /* JetBrainsMono.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000000B /* JetBrainsMono.ttf */; };
 		1A001400000000000000000C /* HostsLandingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000000C /* HostsLandingView.swift */; };
 		1A001400000000000000000D /* OSBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000000D /* OSBadge.swift */; };
 		1A001400000000000000000E /* HostCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A001300000000000000000E /* HostCard.swift */; };
@@ -169,6 +224,9 @@
 		1A0028000000000000000006 /* TunnelsRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0027000000000000000006 /* TunnelsRegistry.swift */; };
 		1A0028000000000000000007 /* ForwardingTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0027000000000000000007 /* ForwardingTabView.swift */; };
 		1A0028000000000000000009 /* ForwardingStatusChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0027000000000000000009 /* ForwardingStatusChip.swift */; };
+		1A0028000000000000000109 /* TunnelWebBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0027000000000000000109 /* TunnelWebBrowser.swift */; };
+		1A0028000000000000000111 /* ForwardedServiceProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0027000000000000000111 /* ForwardedServiceProbe.swift */; };
+		1A0028000000000000000110 /* TunnelBrowserHarnessView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0027000000000000000110 /* TunnelBrowserHarnessView.swift */; };
 		1A002800000000000000000A /* TunnelsPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002700000000000000000A /* TunnelsPageView.swift */; };
 		1A002C000000000000000001 /* SwipePadProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B000000000000000001 /* SwipePadProfile.swift */; };
 		1A002C000000000000000002 /* MacroEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B000000000000000002 /* MacroEncoder.swift */; };
@@ -179,16 +237,17 @@
 		1A002C000000000000000007 /* SwipePadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B000000000000000007 /* SwipePadView.swift */; };
 		1A002C000000000000000008 /* MacroEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B000000000000000008 /* MacroEncoderTests.swift */; };
 		1A002C000000000000000009 /* SwipePadProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B000000000000000009 /* SwipePadProfileTests.swift */; };
+		C1000000000000000000B7E2 /* BrokenPipeGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000B7E2 /* BrokenPipeGuardTests.swift */; };
 		1A002C00000000000000000C /* SwipePadPetalLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B00000000000000000C /* SwipePadPetalLayoutTests.swift */; };
 		1A002C00000000000000000A /* ExperimentalSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B00000000000000000A /* ExperimentalSettingsView.swift */; };
 		1A002C00000000000000000B /* SwipePadPetalLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A002B00000000000000000B /* SwipePadPetalLayout.swift */; };
-		1A00B1000000000000000001 /* AgentCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00B0000000000000000001 /* AgentCenter.swift */; };
-		1A00B1000000000000000002 /* AgentSessionSourceFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00B0000000000000000002 /* AgentSessionSourceFactory.swift */; };
-		1A00B1000000000000000003 /* AgentCenterPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00B0000000000000000003 /* AgentCenterPage.swift */; };
+		1A00B1000000000000000001 /* AppleAgentLegacyPrimitives.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00B0000000000000000001 /* AppleAgentLegacyPrimitives.swift */; };
+		1A00B1000000000000000002 /* AppleAgentSessionSourceFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00B0000000000000000002 /* AppleAgentSessionSourceFactory.swift */; };
 		1A00B1000000000000000004 /* RemoteAgentLifecycleIntegrationInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00B0000000000000000004 /* RemoteAgentLifecycleIntegrationInstaller.swift */; };
 		1A00B1000000000000000005 /* SwipePadAgentContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00B0000000000000000005 /* SwipePadAgentContext.swift */; };
 		1A00B1000000000000000006 /* AgentRegexCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00B0000000000000000006 /* AgentRegexCache.swift */; };
 		1A0034000000000000000001 /* SessionRestoreStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0033000000000000000001 /* SessionRestoreStore.swift */; };
+		1A0034000000000000000701 /* SessionRestoreDebugHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0033000000000000000701 /* SessionRestoreDebugHarness.swift */; };
 		1A0034000000000000000091 /* SessionRestoreCohort.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0033000000000000000091 /* SessionRestoreCohort.swift */; };
 		1A0034000000000000000002 /* SessionRestoreSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0033000000000000000002 /* SessionRestoreSheet.swift */; };
 		1A0034000000000000000003 /* SessionRestoreStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0033000000000000000003 /* SessionRestoreStoreTests.swift */; };
@@ -201,6 +260,8 @@
 		1A0061000000000000000007 /* QuickLookPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0060000000000000000007 /* QuickLookPresenter.swift */; };
 		1A00A000000000000000000A /* FilesUIDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00A0000000000000000009 /* FilesUIDiagnostics.swift */; };
 		1A00A0000000000000000010 /* TerminalResizeCoalescer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00A000000000000000000F /* TerminalResizeCoalescer.swift */; };
+		1A00C0000000000000000002 /* InlineTmuxHistoryRequestState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00C0000000000000000001 /* InlineTmuxHistoryRequestState.swift */; };
+		1A00C0000000000000000004 /* InlineTmuxHistoryRequestStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00C0000000000000000003 /* InlineTmuxHistoryRequestStateTests.swift */; };
 		1A00A000000000000000000E /* FileRowInteraction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00A000000000000000000D /* FileRowInteraction.swift */; };
 		F4D2A2000000000000000001 /* QuickLookPresenterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4D2A1000000000000000001 /* QuickLookPresenterTests.swift */; };
 		D7A500000000000000000025 /* ShareItemTypePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A500000000000000000024 /* ShareItemTypePolicyTests.swift */; };
@@ -229,12 +290,17 @@
 		1A0041000000000000000006 /* OnboardingControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0040000000000000000006 /* OnboardingControllerTests.swift */; };
 		1A0050000000000000000002 /* KittyWindowModeStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0050000000000000000001 /* KittyWindowModeStoreTests.swift */; };
 		1A0050000000000000000004 /* PaneLayoutMathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0050000000000000000003 /* PaneLayoutMathTests.swift */; };
+		7E4B0A1D0000000000000002 /* TerminalKeyboardHandoffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E4B0A1D0000000000000001 /* TerminalKeyboardHandoffTests.swift */; };
 		1A0091000000000000000001 /* KeyStoreSecurityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0090000000000000000001 /* KeyStoreSecurityTests.swift */; };
 		1A0091000000000000000002 /* BiometricRevocationRaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0090000000000000000002 /* BiometricRevocationRaceTests.swift */; };
 		1A0091000000000000000003 /* SSHAuthenticationPolicyRaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0090000000000000000003 /* SSHAuthenticationPolicyRaceTests.swift */; };
 		D7A500000000000000000006 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A500000000000000000002 /* ShareViewController.swift */; };
 		D7A500000000000000000022 /* ShareItemTypePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A500000000000000000021 /* ShareItemTypePolicy.swift */; };
 		D7A500000000000000000023 /* ShareItemTypePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A500000000000000000021 /* ShareItemTypePolicy.swift */; };
+		D7A524000000000000000001 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000001 /* DesignTokens.swift */; };
+		D7A524000000000000000002 /* Typography.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000003 /* Typography.swift */; };
+		D7A524000000000000000003 /* Btn.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0013000000000000000006 /* Btn.swift */; };
+		D7A524000000000000000004 /* jetbrains_mono.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1A00130000000000000B0008 /* jetbrains_mono.ttf */; };
 		D7A500000000000000000026 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 1A0003000000000000000F10 /* Localizable.xcstrings */; };
 		D7A500000000000000000007 /* TesseraShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = D7A500000000000000000005 /* TesseraShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		4E85A5F67DAFF1329C6E2D52 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5930AA51D944F5C5F0C84F3C /* Foundation.framework */; };
@@ -249,6 +315,7 @@
 		C10000000000000000000009 /* ContinuitySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000009 /* ContinuitySettingsView.swift */; };
 		C1000000000000000000000A /* ContinuityFoundationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000A /* ContinuityFoundationTests.swift */; };
 		C1000000000000000000000B /* SyncClassificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000B /* SyncClassificationTests.swift */; };
+		C1000000000000000000FF01 /* TerminalFontCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000FF01 /* TerminalFontCatalogTests.swift */; };
 		C1000000000000000000000C /* BootstrapManifestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000C /* BootstrapManifestTests.swift */; };
 		C1000000000000000000000D /* BootstrapNearbyHandshakeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000D /* BootstrapNearbyHandshakeTests.swift */; };
 		C1000000000000000000000E /* BootstrapNearbyTransferServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000E /* BootstrapNearbyTransferServiceTests.swift */; };
@@ -263,6 +330,7 @@
 		C10000000000000000000017 /* BootstrapManifestAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000017 /* BootstrapManifestAdapterTests.swift */; };
 		C10000000000000000000018 /* BootstrapCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000018 /* BootstrapCoordinator.swift */; };
 		C10000000000000000000019 /* BootstrapFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000019 /* BootstrapFlowView.swift */; };
+		C1000000000000000000BB01 /* BootstrapGrantSelectionViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000BB01 /* BootstrapGrantSelectionViews.swift */; };
 		C1000000000000000000001A /* BootstrapCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000001A /* BootstrapCoordinatorTests.swift */; };
 		C1000000000000000000001B /* EnrollmentContinuationStreamTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000001B /* EnrollmentContinuationStreamTransport.swift */; };
 		C1000000000000000000001C /* EnrollmentCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000001C /* EnrollmentCoordinator.swift */; };
@@ -272,7 +340,15 @@
 		C10000000000000000000020 /* EnrollmentCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000020 /* EnrollmentCoordinatorTests.swift */; };
 		C10000000000000000000021 /* NearbyBootstrapCompatibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000021 /* NearbyBootstrapCompatibility.swift */; };
 		C10000000000000000000022 /* AppVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000022 /* AppVersion.swift */; };
+		C1000000000000000000B7E1 /* BrokenPipeGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000B7E1 /* BrokenPipeGuard.swift */; };
 		C10000000000000000000023 /* BootstrapWireSchemaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000023 /* BootstrapWireSchemaTests.swift */; };
+		C60000000000000000000001 /* PairingLocalTCPTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = C60000000000000000000011 /* PairingLocalTCPTransport.swift */; };
+		C60000000000000000000002 /* PairingQRCodeAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = C60000000000000000000012 /* PairingQRCodeAdapters.swift */; };
+		C60000000000000000000003 /* PairingLocalTCPTransportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C60000000000000000000013 /* PairingLocalTCPTransportTests.swift */; };
+		C60000000000000000000004 /* CrossDevicePairingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C60000000000000000000014 /* CrossDevicePairingCoordinator.swift */; };
+		C60000000000000000000005 /* CrossDevicePairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C60000000000000000000015 /* CrossDevicePairingView.swift */; };
+		D71000000000000000000001 /* PairingReviewHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = D71000000000000000000002 /* PairingReviewHarness.swift */; };
+		C60000000000000000000006 /* CrossDevicePairingCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C60000000000000000000016 /* CrossDevicePairingCoordinatorTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -314,6 +390,34 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A61900000000000000000002 /* AgentHostBundlePackagingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentHostBundlePackagingTests.swift; sourceTree = "<group>"; };
+		AB2026101200000000000002 /* ProgramStatusCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramStatusCenter.swift; sourceTree = "<group>"; };
+		AB2026092000000000000002 /* SessionTmuxChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTmuxChrome.swift; sourceTree = "<group>"; };
+		D8AC00000000000000000001 /* AgentCenterV2Coordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCenterV2Coordinator.swift; sourceTree = "<group>"; };
+		D8AC00000000000000000002 /* AgentCenterV2Fixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCenterV2Fixture.swift; sourceTree = "<group>"; };
+		D8AC00000000000000000C01 /* AgentColdPageFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentColdPageFixture.swift; sourceTree = "<group>"; };
+		D8AC00000000000000000003 /* AgentCenterV2PresentationModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCenterV2PresentationModel.swift; sourceTree = "<group>"; };
+		E6AC09090000000000000001 /* AgentComposerAttachments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentComposerAttachments.swift; sourceTree = "<group>"; };
+		D8AC00000000000000000004 /* AppleAgentMetadataRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleServices/AppleAgentMetadataRepository.swift; sourceTree = "<group>"; };
+		D8AC00000000000000000005 /* AppleAgentNotificationAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleServices/AppleAgentNotificationAdapter.swift; sourceTree = "<group>"; };
+		D8AC00000000000000000006 /* AppleAgentSpeechToDraftAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleServices/AppleAgentSpeechToDraftAdapter.swift; sourceTree = "<group>"; };
+		D8AC00000000000000000007 /* AppleAgentCenterRuntimeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Platform/AppleAgentCenterRuntimeBridge.swift; sourceTree = "<group>"; };
+		D8AC00000000000000000A11 /* AppleAgentTitleGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Platform/AppleAgentTitleGenerator.swift; sourceTree = "<group>"; };
+		D8AC00000000000000000008 /* AppleAgentStreamingDataChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Platform/AppleAgentStreamingDataChannel.swift; sourceTree = "<group>"; };
+		D8AC00000000000000000009 /* AppleAgentTerminalAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Platform/AppleAgentTerminalAdapter.swift; sourceTree = "<group>"; };
+		D8AC0000000000000000000A /* AppleCitadelAgentExec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Platform/AppleCitadelAgentExec.swift; sourceTree = "<group>"; };
+		EAAC20260912000000000001 /* AppleAgentIngestionConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Platform/AppleAgentIngestionConnection.swift; sourceTree = "<group>"; };
+		D8AC0000000000000000000B /* AgentCenterV2RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/AgentCenterV2RootView.swift; sourceTree = "<group>"; };
+		D8AC0000000000000000000C /* AgentComposerAndLaunch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/AgentComposerAndLaunch.swift; sourceTree = "<group>"; };
+		D8AC0000000000000000000D /* AgentThreadBlocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/AgentThreadBlocks.swift; sourceTree = "<group>"; };
+		D8AC0000000000000000000E /* AgentThreadDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/AgentThreadDetailView.swift; sourceTree = "<group>"; };
+		D8AC0000000000000000000F /* AgentThreadListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/AgentThreadListView.swift; sourceTree = "<group>"; };
+		F1A7000000000000000000A1 /* AgentAttentionPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/AgentAttentionPopover.swift; sourceTree = "<group>"; };
+		AB2026101200000000000003 /* ProgramStatusCenterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramStatusCenterTests.swift; sourceTree = "<group>"; };
+		D8AC00000000000000000010 /* AgentCenterV2CoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCenterV2CoordinatorTests.swift; sourceTree = "<group>"; };
+		D8AC00000000000000000011 /* AppleAgentServicesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleAgentServicesTests.swift; sourceTree = "<group>"; };
+		D8AC00000000000000000012 /* AppleAgentSessionEndpoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Platform/AppleAgentSessionEndpoint.swift; sourceTree = "<group>"; };
+		D8AC00000000000000000013 /* AgentCenterV2IntegrationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCenterV2IntegrationCoordinator.swift; sourceTree = "<group>"; };
 		1AFF0000000000000000001D /* AppShortcutDispatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShortcutDispatcher.swift; sourceTree = "<group>"; };
 		1AFF0000000000000000001F /* StoredKeyboardShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoredKeyboardShortcut.swift; sourceTree = "<group>"; };
 		1AFF00000000000000000A11 /* TerminalKeyboardCaretPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalKeyboardCaretPolicyTests.swift; sourceTree = "<group>"; };
@@ -370,18 +474,32 @@
 		1A0003000000000000000019 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
 		1A000300000000000000001A /* SSHAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHAuth.swift; sourceTree = "<group>"; };
 		1A000300000000000000001B /* MoshSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoshSession.swift; sourceTree = "<group>"; };
+		7E5501000000000000000001 /* MoshServerLivenessWatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoshServerLivenessWatch.swift; sourceTree = "<group>"; };
+		7E5501000000000000000000 /* ConnectivityRetryWake.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectivityRetryWake.swift; sourceTree = "<group>"; };
 		1A000300000000000000001C /* MoshBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoshBootstrap.swift; sourceTree = "<group>"; };
+		C40003000000000000000001 /* AppleSessionCommandFacade.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSessionCommandFacade.swift; sourceTree = "<group>"; };
+		5E0A03000000000000000001 /* SessionShowEdges.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionShowEdges.swift; sourceTree = "<group>"; };
+		5E0A03000000000000000002 /* SessionShowEdgeTrackerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionShowEdgeTrackerTests.swift; sourceTree = "<group>"; };
+		C40003000000000000000002 /* AppleSessionCommandFacadeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSessionCommandFacadeTests.swift; sourceTree = "<group>"; };
+		C400030000000000000000F1 /* KeyboardFocusRetentionReproTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardFocusRetentionReproTests.swift; sourceTree = "<group>"; };
 		1A000300000000000000001D /* TesseraTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TesseraTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A000300000000000000001E /* MoshBootstrapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoshBootstrapTests.swift; sourceTree = "<group>"; };
+		7E5501000000000000000002 /* MoshServerLivenessWatchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoshServerLivenessWatchTests.swift; sourceTree = "<group>"; };
 		1A000300000000000000001F /* KnownHostsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnownHostsStoreTests.swift; sourceTree = "<group>"; };
 		1A00A0000000000000000001 /* RealHostTransportIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealHostTransportIntegrationTests.swift; sourceTree = "<group>"; };
+		1A00A0000000000000000071 /* ForwardedServiceStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForwardedServiceStateTests.swift; sourceTree = "<group>"; };
 		1AFE00000000000000000001 /* AutoTmuxLaunchRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoTmuxLaunchRegressionTests.swift; sourceTree = "<group>"; };
 		1AFE00000000000000000003 /* AutoTmuxSessionViewLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoTmuxSessionViewLaunchTests.swift; sourceTree = "<group>"; };
 		1A00A0000000000000000003 /* VisualCaptureProbe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VisualCaptureProbe.swift; sourceTree = "<group>"; };
 		1A00A0000000000000000007 /* FilesContextMenuProbe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FilesContextMenuProbe.swift; sourceTree = "<group>"; };
+		1A00C5000000000000000003 /* PasteAutoPeriodProbe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PasteAutoPeriodProbe.swift; sourceTree = "<group>"; };
+		1A00A0000000000000000107 /* TunnelBrowserProbe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TunnelBrowserProbe.swift; sourceTree = "<group>"; };
+		1A00A0000000000000000701 /* SessionRestoreLifecycleProbe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionRestoreLifecycleProbe.swift; sourceTree = "<group>"; };
 		1A00A000000000000000000B /* MarkdownScrollProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownScrollProbe.swift; sourceTree = "<group>"; };
 		D7B910000000000000000001 /* UploadIngressProgressProbe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UploadIngressProgressProbe.swift; sourceTree = "<group>"; };
 		1A00A0000000000000000005 /* TerminalScrollbackOracleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalScrollbackOracleTests.swift; sourceTree = "<group>"; };
+		1A00C5000000000000000001 /* TerminalPasteInputMirrorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalPasteInputMirrorTests.swift; sourceTree = "<group>"; };
+		BEEF10000000000000000001 /* TerminalBoxOwnershipTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalBoxOwnershipTests.swift; sourceTree = "<group>"; };
 		1A0003000000000000000033 /* HostKeyVerificationRequestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostKeyVerificationRequestTests.swift; sourceTree = "<group>"; };
 		1A0003000000000000000025 /* OSDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSDetector.swift; sourceTree = "<group>"; };
 		1A0003000000000000000026 /* HostOSDetectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostOSDetectionState.swift; sourceTree = "<group>"; };
@@ -393,8 +511,20 @@
 		1A00030000000000000000F2 /* COPYING.iOS */ = {isa = PBXFileReference; lastKnownFileType = text; name = COPYING.iOS; path = COPYING.iOS; sourceTree = SOURCE_ROOT; };
 		1A00030000000000000000F3 /* ThirdPartyNotices.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = ThirdPartyNotices.txt; sourceTree = "<group>"; };
 		1A0013000000000000000001 /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
+		1A0013000000000000000C01 /* ContinuousMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinuousMotion.swift; sourceTree = "<group>"; };
 		1A0013000000000000000002 /* AppearancePreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearancePreferences.swift; sourceTree = "<group>"; };
 		1A0013000000000000000003 /* Typography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Typography.swift; sourceTree = "<group>"; };
+		1A00130000000000000B0001 /* cascadia_mono.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = cascadia_mono.ttf; path = SharedAssets/fonts/font/cascadia_mono.ttf; sourceTree = SOURCE_ROOT; };
+		1A00130000000000000B0002 /* dejavu_sans_mono.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = dejavu_sans_mono.ttf; path = SharedAssets/fonts/font/dejavu_sans_mono.ttf; sourceTree = SOURCE_ROOT; };
+		1A00130000000000000B0003 /* fira_code.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = fira_code.ttf; path = SharedAssets/fonts/font/fira_code.ttf; sourceTree = SOURCE_ROOT; };
+		1A00130000000000000B0004 /* geist_mono.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = geist_mono.ttf; path = SharedAssets/fonts/font/geist_mono.ttf; sourceTree = SOURCE_ROOT; };
+		1A00130000000000000B0005 /* hack.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = hack.ttf; path = SharedAssets/fonts/font/hack.ttf; sourceTree = SOURCE_ROOT; };
+		1A00130000000000000B0006 /* ibm_plex_mono.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = ibm_plex_mono.ttf; path = SharedAssets/fonts/font/ibm_plex_mono.ttf; sourceTree = SOURCE_ROOT; };
+		1A00130000000000000B0007 /* inconsolata.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = inconsolata.ttf; path = SharedAssets/fonts/font/inconsolata.ttf; sourceTree = SOURCE_ROOT; };
+		1A00130000000000000B0008 /* jetbrains_mono.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = jetbrains_mono.ttf; path = SharedAssets/fonts/font/jetbrains_mono.ttf; sourceTree = SOURCE_ROOT; };
+		1A00130000000000000B0009 /* source_code_pro.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = source_code_pro.ttf; path = SharedAssets/fonts/font/source_code_pro.ttf; sourceTree = SOURCE_ROOT; };
+		1A00130000000000000B000A /* ubuntu_mono.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = ubuntu_mono.ttf; path = SharedAssets/fonts/font/ubuntu_mono.ttf; sourceTree = SOURCE_ROOT; };
+		1A0013000000000000000C10 /* TerminalFontCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalFontCatalog.swift; sourceTree = "<group>"; };
 		1A0013000000000000000004 /* Field.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Field.swift; sourceTree = "<group>"; };
 		1A0013000000000000000005 /* Input.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Input.swift; sourceTree = "<group>"; };
 		1A0013000000000000000006 /* Btn.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Btn.swift; sourceTree = "<group>"; };
@@ -402,7 +532,6 @@
 		1A0013000000000000000008 /* Tag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tag.swift; sourceTree = "<group>"; };
 		1A0013000000000000000009 /* StatusDot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusDot.swift; sourceTree = "<group>"; };
 		1A001300000000000000000A /* ToggleRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToggleRow.swift; sourceTree = "<group>"; };
-		1A001300000000000000000B /* JetBrainsMono.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = JetBrainsMono.ttf; sourceTree = "<group>"; };
 		1A001300000000000000000C /* HostsLandingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostsLandingView.swift; sourceTree = "<group>"; };
 		1A001300000000000000000D /* OSBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSBadge.swift; sourceTree = "<group>"; };
 		1A001300000000000000000E /* HostCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostCard.swift; sourceTree = "<group>"; };
@@ -443,6 +572,8 @@
 		1A0060000000000000000007 /* QuickLookPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickLookPresenter.swift; sourceTree = "<group>"; };
 		1A00A0000000000000000009 /* FilesUIDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesUIDiagnostics.swift; sourceTree = "<group>"; };
 		1A00A000000000000000000F /* TerminalResizeCoalescer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalResizeCoalescer.swift; sourceTree = "<group>"; };
+		1A00C0000000000000000001 /* InlineTmuxHistoryRequestState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InlineTmuxHistoryRequestState.swift; sourceTree = "<group>"; };
+		1A00C0000000000000000003 /* InlineTmuxHistoryRequestStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InlineTmuxHistoryRequestStateTests.swift; sourceTree = "<group>"; };
 		1A00A000000000000000000D /* FileRowInteraction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileRowInteraction.swift; sourceTree = "<group>"; };
 		1A0060000000000000000099 /* RemotePathResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePathResolver.swift; sourceTree = "<group>"; };
 		1A0060000000000000000008 /* RemoteFileItemProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteFileItemProvider.swift; sourceTree = "<group>"; };
@@ -499,6 +630,9 @@
 		1A0027000000000000000006 /* TunnelsRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelsRegistry.swift; sourceTree = "<group>"; };
 		1A0027000000000000000007 /* ForwardingTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForwardingTabView.swift; sourceTree = "<group>"; };
 		1A0027000000000000000009 /* ForwardingStatusChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForwardingStatusChip.swift; sourceTree = "<group>"; };
+		1A0027000000000000000109 /* TunnelWebBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelWebBrowser.swift; sourceTree = "<group>"; };
+		1A0027000000000000000111 /* ForwardedServiceProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForwardedServiceProbe.swift; sourceTree = "<group>"; };
+		1A0027000000000000000110 /* TunnelBrowserHarnessView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelBrowserHarnessView.swift; sourceTree = "<group>"; };
 		1A002700000000000000000A /* TunnelsPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelsPageView.swift; sourceTree = "<group>"; };
 		1A002B000000000000000001 /* SwipePadProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipePadProfile.swift; sourceTree = "<group>"; };
 		1A002B000000000000000002 /* MacroEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroEncoder.swift; sourceTree = "<group>"; };
@@ -509,10 +643,12 @@
 		1A002B000000000000000007 /* SwipePadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipePadView.swift; sourceTree = "<group>"; };
 		1A002B000000000000000008 /* MacroEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroEncoderTests.swift; sourceTree = "<group>"; };
 		1A002B000000000000000009 /* SwipePadProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipePadProfileTests.swift; sourceTree = "<group>"; };
+		C2000000000000000000B7E2 /* BrokenPipeGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrokenPipeGuardTests.swift; sourceTree = "<group>"; };
 		1A002B00000000000000000C /* SwipePadPetalLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipePadPetalLayoutTests.swift; sourceTree = "<group>"; };
 		1A002B00000000000000000A /* ExperimentalSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExperimentalSettingsView.swift; sourceTree = "<group>"; };
 		1A002B00000000000000000B /* SwipePadPetalLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipePadPetalLayout.swift; sourceTree = "<group>"; };
 		1A0033000000000000000001 /* SessionRestoreStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRestoreStore.swift; sourceTree = "<group>"; };
+		1A0033000000000000000701 /* SessionRestoreDebugHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRestoreDebugHarness.swift; sourceTree = "<group>"; };
 		1A0033000000000000000091 /* SessionRestoreCohort.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRestoreCohort.swift; sourceTree = "<group>"; };
 		1A0033000000000000000002 /* SessionRestoreSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRestoreSheet.swift; sourceTree = "<group>"; };
 		1A0033000000000000000003 /* SessionRestoreStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRestoreStoreTests.swift; sourceTree = "<group>"; };
@@ -525,15 +661,15 @@
 		1A0040000000000000000006 /* OnboardingControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingControllerTests.swift; sourceTree = "<group>"; };
 		1A0050000000000000000001 /* KittyWindowModeStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KittyWindowModeStoreTests.swift; sourceTree = "<group>"; };
 		1A0050000000000000000003 /* PaneLayoutMathTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneLayoutMathTests.swift; sourceTree = "<group>"; };
+		7E4B0A1D0000000000000001 /* TerminalKeyboardHandoffTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalKeyboardHandoffTests.swift; sourceTree = "<group>"; };
 		1A0090000000000000000001 /* KeyStoreSecurityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyStoreSecurityTests.swift; sourceTree = "<group>"; };
 		1A0090000000000000000002 /* BiometricRevocationRaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BiometricRevocationRaceTests.swift; sourceTree = "<group>"; };
 		1A0090000000000000000003 /* SSHAuthenticationPolicyRaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHAuthenticationPolicyRaceTests.swift; sourceTree = "<group>"; };
-		1A00B0000000000000000001 /* AgentCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCenter.swift; sourceTree = "<group>"; };
-		1A00B0000000000000000002 /* AgentSessionSourceFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionSourceFactory.swift; sourceTree = "<group>"; };
-		1A00B0000000000000000003 /* AgentCenterPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCenterPage.swift; sourceTree = "<group>"; };
-		1A00B0000000000000000004 /* RemoteAgentLifecycleIntegrationInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAgentLifecycleIntegrationInstaller.swift; sourceTree = "<group>"; };
-		1A00B0000000000000000005 /* SwipePadAgentContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipePadAgentContext.swift; sourceTree = "<group>"; };
-		1A00B0000000000000000006 /* AgentRegexCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRegexCache.swift; sourceTree = "<group>"; };
+		1A00B0000000000000000001 /* AppleAgentLegacyPrimitives.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Adapters/AppleAgentLegacyPrimitives.swift; sourceTree = "<group>"; };
+		1A00B0000000000000000002 /* AppleAgentSessionSourceFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Adapters/AppleAgentSessionSourceFactory.swift; sourceTree = "<group>"; };
+		1A00B0000000000000000004 /* RemoteAgentLifecycleIntegrationInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Adapters/RemoteAgentLifecycleIntegrationInstaller.swift; sourceTree = "<group>"; };
+		1A00B0000000000000000005 /* SwipePadAgentContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Adapters/SwipePadAgentContext.swift; sourceTree = "<group>"; };
+		1A00B0000000000000000006 /* AgentRegexCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Adapters/AgentRegexCache.swift; sourceTree = "<group>"; };
 		5930AA51D944F5C5F0C84F3C /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		D6F0936D127F28EC4A75489D /* TesseraUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TesseraUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D7A500000000000000000002 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
@@ -554,6 +690,7 @@
 		C20000000000000000000009 /* ContinuitySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinuitySettingsView.swift; sourceTree = "<group>"; };
 		C2000000000000000000000A /* ContinuityFoundationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinuityFoundationTests.swift; sourceTree = "<group>"; };
 		C2000000000000000000000B /* SyncClassificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncClassificationTests.swift; sourceTree = "<group>"; };
+		C2000000000000000000FF01 /* TerminalFontCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalFontCatalogTests.swift; sourceTree = "<group>"; };
 		C2000000000000000000000C /* BootstrapManifestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapManifestTests.swift; sourceTree = "<group>"; };
 		C2000000000000000000000D /* BootstrapNearbyHandshakeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapNearbyHandshakeTests.swift; sourceTree = "<group>"; };
 		C2000000000000000000000E /* BootstrapNearbyTransferServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapNearbyTransferServiceTests.swift; sourceTree = "<group>"; };
@@ -568,6 +705,7 @@
 		C20000000000000000000017 /* BootstrapManifestAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapManifestAdapterTests.swift; sourceTree = "<group>"; };
 		C20000000000000000000018 /* BootstrapCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapCoordinator.swift; sourceTree = "<group>"; };
 		C20000000000000000000019 /* BootstrapFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapFlowView.swift; sourceTree = "<group>"; };
+		C2000000000000000000BB01 /* BootstrapGrantSelectionViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapGrantSelectionViews.swift; sourceTree = "<group>"; };
 		C2000000000000000000001A /* BootstrapCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapCoordinatorTests.swift; sourceTree = "<group>"; };
 		C2000000000000000000001B /* EnrollmentContinuationStreamTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrollmentContinuationStreamTransport.swift; sourceTree = "<group>"; };
 		C2000000000000000000001C /* EnrollmentCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrollmentCoordinator.swift; sourceTree = "<group>"; };
@@ -577,7 +715,15 @@
 		C20000000000000000000020 /* EnrollmentCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrollmentCoordinatorTests.swift; sourceTree = "<group>"; };
 		C20000000000000000000021 /* NearbyBootstrapCompatibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyBootstrapCompatibility.swift; sourceTree = "<group>"; };
 		C20000000000000000000022 /* AppVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppVersion.swift; sourceTree = "<group>"; };
+		C2000000000000000000B7E1 /* BrokenPipeGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrokenPipeGuard.swift; sourceTree = "<group>"; };
 		C20000000000000000000023 /* BootstrapWireSchemaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BootstrapWireSchemaTests.swift; sourceTree = "<group>"; };
+		C60000000000000000000011 /* PairingLocalTCPTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingLocalTCPTransport.swift; sourceTree = "<group>"; };
+		C60000000000000000000012 /* PairingQRCodeAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingQRCodeAdapters.swift; sourceTree = "<group>"; };
+		C60000000000000000000013 /* PairingLocalTCPTransportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingLocalTCPTransportTests.swift; sourceTree = "<group>"; };
+		C60000000000000000000014 /* CrossDevicePairingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossDevicePairingCoordinator.swift; sourceTree = "<group>"; };
+		C60000000000000000000015 /* CrossDevicePairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossDevicePairingView.swift; sourceTree = "<group>"; };
+		D71000000000000000000002 /* PairingReviewHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingReviewHarness.swift; sourceTree = "<group>"; };
+		C60000000000000000000016 /* CrossDevicePairingCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossDevicePairingCoordinatorTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -592,6 +738,8 @@
 				1A0004000000000000000008 /* Citadel in Frameworks */,
 				1A0004000000000000000020 /* MoshBridge in Frameworks */,
 				1A0004000000000000000030 /* PortForwarding in Frameworks */,
+				C30004000000000000000001 /* TesseraCore in Frameworks */,
+				C50004000000000000000001 /* TesseraAppleContinuity in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -641,7 +789,9 @@
 				1A0003000000000000000002 /* ContentView.swift */,
 				C30000000000000000000001 /* Continuity */,
 				C30000000000000000000002 /* Bootstrap */,
+				C60000000000000000000010 /* Pairing */,
 				C30000000000000000000003 /* Enrollment */,
+				C40002000000000000000001 /* SessionCore */,
 				1A0003000000000000000006 /* Host.swift */,
 				1A0013000000000000000025 /* HostLaunchPrologue.swift */,
 				1A0003000000000000000007 /* SSHSession.swift */,
@@ -662,12 +812,14 @@
 				7E4A0002AA00000000000002 /* SSHConnectionChain.swift */,
 				1A000300000000000000000E /* LiveSession.swift */,
 				1A0033000000000000000001 /* SessionRestoreStore.swift */,
+				1A0033000000000000000701 /* SessionRestoreDebugHarness.swift */,
 				1A0033000000000000000091 /* SessionRestoreCohort.swift */,
 				1A0033000000000000000002 /* SessionRestoreSheet.swift */,
 				1A000300000000000000000F /* SessionSidebar.swift */,
 				1A0003000000000000000010 /* HostDetailView.swift */,
 				1A0003000000000000000012 /* KeychainHelper.swift */,
 				C20000000000000000000022 /* AppVersion.swift */,
+				C2000000000000000000B7E1 /* BrokenPipeGuard.swift */,
 				1A0003000000000000000013 /* StoredKey.swift */,
 				1A0003000000000000000014 /* KeyStore.swift */,
 				1A0003000000000000000016 /* KnownHostsStore.swift */,
@@ -676,13 +828,15 @@
 				1A0003000000000000000019 /* Session.swift */,
 				1A000300000000000000001A /* SSHAuth.swift */,
 				1A000300000000000000001B /* MoshSession.swift */,
+				7E5501000000000000000001 /* MoshServerLivenessWatch.swift */,
+				7E5501000000000000000000 /* ConnectivityRetryWake.swift */,
 				1A000300000000000000001C /* MoshBootstrap.swift */,
 				1A001200000000000000000A /* Security */,
 				1A0040000000000000000001 /* Onboarding */,
 				1A001200000000000000000B /* Find */,
 				1A001200000000000000000C /* Notifications */,
 				1A001200000000000000000D /* Navigation */,
-				1A00B0000000000000000100 /* AgentCenter */,
+				D8AE00000000000000000001 /* AgentCenterV2 */,
 				1A0026000000000000000001 /* Forwarding */,
 				1A0022000000000000000001 /* Keyboard */,
 				1A002A000000000000000001 /* SwipePad */,
@@ -722,8 +876,16 @@
 		1A0002000000000000000004 /* TesseraTests */ = {
 			isa = PBXGroup;
 			children = (
+				A61900000000000000000002 /* AgentHostBundlePackagingTests.swift */,
+				D8AC00000000000000000010 /* AgentCenterV2CoordinatorTests.swift */,
+				AB2026101200000000000003 /* ProgramStatusCenterTests.swift */,
+				D8AC00000000000000000011 /* AppleAgentServicesTests.swift */,
+				C40003000000000000000002 /* AppleSessionCommandFacadeTests.swift */,
+				5E0A03000000000000000002 /* SessionShowEdgeTrackerTests.swift */,
+				C400030000000000000000F1 /* KeyboardFocusRetentionReproTests.swift */,
 				C2000000000000000000000A /* ContinuityFoundationTests.swift */,
 				C2000000000000000000000B /* SyncClassificationTests.swift */,
+				C2000000000000000000FF01 /* TerminalFontCatalogTests.swift */,
 				C2000000000000000000000C /* BootstrapManifestTests.swift */,
 				C2000000000000000000000D /* BootstrapNearbyHandshakeTests.swift */,
 				C2000000000000000000000E /* BootstrapNearbyTransferServiceTests.swift */,
@@ -734,13 +896,19 @@
 				C20000000000000000000017 /* BootstrapManifestAdapterTests.swift */,
 				C2000000000000000000001A /* BootstrapCoordinatorTests.swift */,
 				C20000000000000000000023 /* BootstrapWireSchemaTests.swift */,
+				C60000000000000000000013 /* PairingLocalTCPTransportTests.swift */,
+				C60000000000000000000016 /* CrossDevicePairingCoordinatorTests.swift */,
 				C2000000000000000000001E /* EnrollmentContinuationStreamTransportTests.swift */,
 				C20000000000000000000020 /* EnrollmentCoordinatorTests.swift */,
 				1A00A0000000000000000001 /* RealHostTransportIntegrationTests.swift */,
+				1A00A0000000000000000071 /* ForwardedServiceStateTests.swift */,
 				1AFE00000000000000000001 /* AutoTmuxLaunchRegressionTests.swift */,
 				1AFE00000000000000000003 /* AutoTmuxSessionViewLaunchTests.swift */,
 				1A00A0000000000000000005 /* TerminalScrollbackOracleTests.swift */,
+				1A00C5000000000000000001 /* TerminalPasteInputMirrorTests.swift */,
+				BEEF10000000000000000001 /* TerminalBoxOwnershipTests.swift */,
 				1A000300000000000000001E /* MoshBootstrapTests.swift */,
+				7E5501000000000000000002 /* MoshServerLivenessWatchTests.swift */,
 				1A000300000000000000001F /* KnownHostsStoreTests.swift */,
 				1A0003000000000000000033 /* HostKeyVerificationRequestTests.swift */,
 				1A0025000000000000000011 /* TesseraMigrationTests.swift */,
@@ -752,6 +920,7 @@
 				1A0023000000000000000005 /* ModifierStateTests.swift */,
 				1A002B000000000000000008 /* MacroEncoderTests.swift */,
 				1A002B000000000000000009 /* SwipePadProfileTests.swift */,
+				C2000000000000000000B7E2 /* BrokenPipeGuardTests.swift */,
 				1A002B00000000000000000C /* SwipePadPetalLayoutTests.swift */,
 				1A0023000000000000000009 /* SessionRegistryTests.swift */,
 				1A002300000000000000000A /* CommandPaletteTests.swift */,
@@ -762,11 +931,13 @@
 				1A0040000000000000000006 /* OnboardingControllerTests.swift */,
 				1A0050000000000000000001 /* KittyWindowModeStoreTests.swift */,
 				1A0050000000000000000003 /* PaneLayoutMathTests.swift */,
+				7E4B0A1D0000000000000001 /* TerminalKeyboardHandoffTests.swift */,
 				1A006000000000000000000E /* FileBridgeTests.swift */,
 				1A00600000000000000000A0 /* RemotePathResolverTests.swift */,
 				F4D2A1000000000000000001 /* QuickLookPresenterTests.swift */,
 				D7A500000000000000000024 /* ShareItemTypePolicyTests.swift */,
 				1A00A0000000000000000011 /* TerminalResizeCoalescerTests.swift */,
+				1A00C0000000000000000003 /* InlineTmuxHistoryRequestStateTests.swift */,
 				1A006000000000000000000F /* TransferQueueTests.swift */,
 				D7B902000000000000000001 /* BackgroundUploadCoordinatorTests.swift */,
 				1A0060000000000000000010 /* RemoteShellIntegrationInstallerTests.swift */,
@@ -828,8 +999,10 @@
 			isa = PBXGroup;
 			children = (
 				1A0013000000000000000001 /* DesignTokens.swift */,
+				1A0013000000000000000C01 /* ContinuousMotion.swift */,
 				1A0013000000000000000002 /* AppearancePreferences.swift */,
 				1A0013000000000000000003 /* Typography.swift */,
+				1A0013000000000000000C10 /* TerminalFontCatalog.swift */,
 				1A0012000000000000000002 /* Components */,
 			);
 			path = Design;
@@ -849,10 +1022,27 @@
 			path = Components;
 			sourceTree = "<group>";
 		};
+		1A00120000000000000B0000 /* SharedFonts */ = {
+			isa = PBXGroup;
+			children = (
+				1A00130000000000000B0001 /* cascadia_mono.ttf */,
+				1A00130000000000000B0002 /* dejavu_sans_mono.ttf */,
+				1A00130000000000000B0003 /* fira_code.ttf */,
+				1A00130000000000000B0004 /* geist_mono.ttf */,
+				1A00130000000000000B0005 /* hack.ttf */,
+				1A00130000000000000B0006 /* ibm_plex_mono.ttf */,
+				1A00130000000000000B0007 /* inconsolata.ttf */,
+				1A00130000000000000B0008 /* jetbrains_mono.ttf */,
+				1A00130000000000000B0009 /* source_code_pro.ttf */,
+				1A00130000000000000B000A /* ubuntu_mono.ttf */,
+			);
+			name = SharedFonts;
+			sourceTree = "<group>";
+		};
 		1A0012000000000000000003 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-				1A001300000000000000000B /* JetBrainsMono.ttf */,
+				1A00120000000000000B0000 /* SharedFonts */,
 				1A00030000000000000000F3 /* ThirdPartyNotices.txt */,
 				1A0012000000000000000009 /* Logo */,
 			);
@@ -953,10 +1143,23 @@
 				C20000000000000000000011 /* BootstrapManifestAdapter.swift */,
 				C20000000000000000000018 /* BootstrapCoordinator.swift */,
 				C20000000000000000000019 /* BootstrapFlowView.swift */,
+				C2000000000000000000BB01 /* BootstrapGrantSelectionViews.swift */,
 				C2000000000000000000001F /* BootstrapNetworkHarness.swift */,
 				C20000000000000000000021 /* NearbyBootstrapCompatibility.swift */,
 			);
 			path = Bootstrap;
+			sourceTree = "<group>";
+		};
+		C60000000000000000000010 /* Pairing */ = {
+			isa = PBXGroup;
+			children = (
+				C60000000000000000000011 /* PairingLocalTCPTransport.swift */,
+				C60000000000000000000012 /* PairingQRCodeAdapters.swift */,
+				C60000000000000000000014 /* CrossDevicePairingCoordinator.swift */,
+				C60000000000000000000015 /* CrossDevicePairingView.swift */,
+				D71000000000000000000002 /* PairingReviewHarness.swift */,
+			);
+			path = Pairing;
 			sourceTree = "<group>";
 		};
 		C30000000000000000000003 /* Enrollment */ = {
@@ -971,11 +1174,21 @@
 			path = Enrollment;
 			sourceTree = "<group>";
 		};
+		C40002000000000000000001 /* SessionCore */ = {
+			isa = PBXGroup;
+			children = (
+				C40003000000000000000001 /* AppleSessionCommandFacade.swift */,
+				5E0A03000000000000000001 /* SessionShowEdges.swift */,
+			);
+			path = SessionCore;
+			sourceTree = "<group>";
+		};
 		1A0012000000000000000008 /* Terminal */ = {
 			isa = PBXGroup;
 			children = (
 				1A001300000000000000001C /* TerminalTheme.swift */,
 				1A00A000000000000000000F /* TerminalResizeCoalescer.swift */,
+				1A00C0000000000000000001 /* InlineTmuxHistoryRequestState.swift */,
 				1A0070000000000000000001 /* TerminalBackground.swift */,
 				1A0070000000000000000002 /* TerminalBackdropView.swift */,
 			);
@@ -1029,22 +1242,45 @@
 				1A001300000000000000002C /* SessionRegistry.swift */,
 				1A001300000000000000002D /* CommandPalette.swift */,
 				1A001300000000000000002E /* CommandPaletteView.swift */,
+				AB2026092000000000000002 /* SessionTmuxChrome.swift */,
+				AB2026101200000000000002 /* ProgramStatusCenter.swift */,
 				1A001300000000000000002F /* SessionSwitcher.swift */,
 			);
 			path = Navigation;
 			sourceTree = "<group>";
 		};
-		1A00B0000000000000000100 /* AgentCenter */ = {
+		D8AE00000000000000000001 /* AgentCenterV2 */ = {
 			isa = PBXGroup;
 			children = (
-				1A00B0000000000000000001 /* AgentCenter.swift */,
-				1A00B0000000000000000002 /* AgentSessionSourceFactory.swift */,
-				1A00B0000000000000000003 /* AgentCenterPage.swift */,
+				D8AC00000000000000000001 /* AgentCenterV2Coordinator.swift */,
+				D8AC00000000000000000013 /* AgentCenterV2IntegrationCoordinator.swift */,
+				D8AC00000000000000000002 /* AgentCenterV2Fixture.swift */,
+				D8AC00000000000000000C01 /* AgentColdPageFixture.swift */,
+				D8AC00000000000000000003 /* AgentCenterV2PresentationModel.swift */,
+				E6AC09090000000000000001 /* AgentComposerAttachments.swift */,
+				D8AC00000000000000000004 /* AppleAgentMetadataRepository.swift */,
+				D8AC00000000000000000005 /* AppleAgentNotificationAdapter.swift */,
+				D8AC00000000000000000006 /* AppleAgentSpeechToDraftAdapter.swift */,
+				D8AC00000000000000000007 /* AppleAgentCenterRuntimeBridge.swift */,
+				D8AC00000000000000000A11 /* AppleAgentTitleGenerator.swift */,
+				D8AC00000000000000000008 /* AppleAgentStreamingDataChannel.swift */,
+				D8AC00000000000000000009 /* AppleAgentTerminalAdapter.swift */,
+				D8AC0000000000000000000A /* AppleCitadelAgentExec.swift */,
+				EAAC20260912000000000001 /* AppleAgentIngestionConnection.swift */,
+				D8AC0000000000000000000B /* AgentCenterV2RootView.swift */,
+				D8AC0000000000000000000C /* AgentComposerAndLaunch.swift */,
+				D8AC0000000000000000000D /* AgentThreadBlocks.swift */,
+				D8AC0000000000000000000E /* AgentThreadDetailView.swift */,
+				D8AC0000000000000000000F /* AgentThreadListView.swift */,
+				F1A7000000000000000000A1 /* AgentAttentionPopover.swift */,
+				D8AC00000000000000000012 /* AppleAgentSessionEndpoint.swift */,
+				1A00B0000000000000000001 /* AppleAgentLegacyPrimitives.swift */,
+				1A00B0000000000000000002 /* AppleAgentSessionSourceFactory.swift */,
 				1A00B0000000000000000004 /* RemoteAgentLifecycleIntegrationInstaller.swift */,
 				1A00B0000000000000000005 /* SwipePadAgentContext.swift */,
 				1A00B0000000000000000006 /* AgentRegexCache.swift */,
 			);
-			path = AgentCenter;
+			path = AgentCenterV2;
 			sourceTree = "<group>";
 		};
 		1A0022000000000000000001 /* Keyboard */ = {
@@ -1079,6 +1315,9 @@
 				1A0027000000000000000006 /* TunnelsRegistry.swift */,
 				1A0027000000000000000007 /* ForwardingTabView.swift */,
 				1A0027000000000000000009 /* ForwardingStatusChip.swift */,
+				1A0027000000000000000111 /* ForwardedServiceProbe.swift */,
+				1A0027000000000000000109 /* TunnelWebBrowser.swift */,
+				1A0027000000000000000110 /* TunnelBrowserHarnessView.swift */,
 				1A002700000000000000000A /* TunnelsPageView.swift */,
 			);
 			path = Forwarding;
@@ -1133,6 +1372,9 @@
 			children = (
 				1A00A0000000000000000003 /* VisualCaptureProbe.swift */,
 				1A00A0000000000000000007 /* FilesContextMenuProbe.swift */,
+				1A00C5000000000000000003 /* PasteAutoPeriodProbe.swift */,
+				1A00A0000000000000000107 /* TunnelBrowserProbe.swift */,
+				1A00A0000000000000000701 /* SessionRestoreLifecycleProbe.swift */,
 				1A00A000000000000000000B /* MarkdownScrollProbe.swift */,
 				D7B910000000000000000001 /* UploadIngressProgressProbe.swift */,
 				F258CE6A611C425C97F1A49C /* TerminalScrollHarnessTests.swift */,
@@ -1150,6 +1392,7 @@
 			buildPhases = (
 				1A0006000000000000000001 /* Sources */,
 				1A0006000000000000000002 /* Frameworks */,
+				A61900000000000000000001 /* Package Agent Host helpers */,
 				1A0006000000000000000003 /* Resources */,
 				D7A50000000000000000000B /* Embed App Extensions */,
 			);
@@ -1166,6 +1409,8 @@
 				1A000A000000000000000004 /* Citadel */,
 				1A000A000000000000000005 /* MoshBridge */,
 				1A000A000000000000000006 /* PortForwarding */,
+				C3000A000000000000000001 /* TesseraCore */,
+				C5000A000000000000000001 /* TesseraAppleContinuity */,
 			);
 			productName = Tessera;
 			productReference = 1A0003000000000000000004 /* Tessera.app */;
@@ -1270,6 +1515,7 @@
 				1A000B000000000000000003 /* XCLocalSwiftPackageReference "MoshBridge" */,
 				1A000B000000000000000004 /* XCLocalSwiftPackageReference "PortForwarding" */,
 				1A000B000000000000000005 /* XCLocalSwiftPackageReference "Citadel" */,
+				C3000B000000000000000001 /* XCLocalSwiftPackageReference "TesseraCore" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1A0002000000000000000003 /* Products */;
@@ -1300,7 +1546,16 @@
 				1A0004000000000000000003 /* Assets.xcassets in Resources */,
 				1A0004000000000000000F10 /* Localizable.xcstrings in Resources */,
 				1A0004000000000000000F11 /* InfoPlist.xcstrings in Resources */,
-				1A001400000000000000000B /* JetBrainsMono.ttf in Resources */,
+				1A00140000000000000B0001 /* cascadia_mono.ttf in Resources */,
+				1A00140000000000000B0002 /* dejavu_sans_mono.ttf in Resources */,
+				1A00140000000000000B0003 /* fira_code.ttf in Resources */,
+				1A00140000000000000B0004 /* geist_mono.ttf in Resources */,
+				1A00140000000000000B0005 /* hack.ttf in Resources */,
+				1A00140000000000000B0006 /* ibm_plex_mono.ttf in Resources */,
+				1A00140000000000000B0007 /* inconsolata.ttf in Resources */,
+				1A00140000000000000B0008 /* jetbrains_mono.ttf in Resources */,
+				1A00140000000000000B0009 /* source_code_pro.ttf in Resources */,
+				1A00140000000000000B000A /* ubuntu_mono.ttf in Resources */,
 				1A00040000000000000000F0 /* PrivacyInfo.xcprivacy in Resources */,
 				1A00040000000000000000F1 /* LICENSE in Resources */,
 				1A00040000000000000000F2 /* COPYING.iOS in Resources */,
@@ -1320,16 +1575,70 @@
 			buildActionMask = 2147483647;
 			files = (
 				D7A500000000000000000026 /* Localizable.xcstrings in Resources */,
+				D7A524000000000000000004 /* jetbrains_mono.ttf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A61900000000000000000001 /* Package Agent Host helpers */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 0;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/scripts/package-agent-host.sh",
+				"$(SRCROOT)/SharedAssets/agent-host/manifest.json",
+				"$(SRCROOT)/SharedAssets/agent-host/THIRD-PARTY-NOTICES.txt",
+				"$(SRCROOT)/SharedAssets/agent-host/tessera-agent-host-darwin-arm64",
+				"$(SRCROOT)/SharedAssets/agent-host/tessera-agent-host-darwin-x86_64",
+				"$(SRCROOT)/SharedAssets/agent-host/tessera-agent-host-linux-aarch64",
+				"$(SRCROOT)/SharedAssets/agent-host/tessera-agent-host-linux-x86_64",
+			);
+			name = "Package Agent Host helpers";
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/agent-host/manifest.json",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/agent-host/THIRD-PARTY-NOTICES.txt",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/agent-host/tessera-agent-host-darwin-arm64.lzfse",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/agent-host/tessera-agent-host-darwin-x86_64.lzfse",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/agent-host/tessera-agent-host-linux-aarch64.lzfse",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/agent-host/tessera-agent-host-linux-x86_64.lzfse",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "/bin/bash \"${SRCROOT}/scripts/package-agent-host.sh\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		1A0006000000000000000001 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D8AD00000000000000000001 /* AgentCenterV2Coordinator.swift in Sources */,
+				D8AD00000000000000000013 /* AgentCenterV2IntegrationCoordinator.swift in Sources */,
+				D8AD00000000000000000002 /* AgentCenterV2Fixture.swift in Sources */,
+				D8AD00000000000000000C01 /* AgentColdPageFixture.swift in Sources */,
+				D8AD00000000000000000003 /* AgentCenterV2PresentationModel.swift in Sources */,
+				E6AD09090000000000000001 /* AgentComposerAttachments.swift in Sources */,
+				D8AD00000000000000000004 /* AppleAgentMetadataRepository.swift in Sources */,
+				D8AD00000000000000000005 /* AppleAgentNotificationAdapter.swift in Sources */,
+				D8AD00000000000000000006 /* AppleAgentSpeechToDraftAdapter.swift in Sources */,
+				D8AD00000000000000000007 /* AppleAgentCenterRuntimeBridge.swift in Sources */,
+				D8AD00000000000000000A11 /* AppleAgentTitleGenerator.swift in Sources */,
+				D8AD00000000000000000008 /* AppleAgentStreamingDataChannel.swift in Sources */,
+				D8AD00000000000000000009 /* AppleAgentTerminalAdapter.swift in Sources */,
+				D8AD0000000000000000000A /* AppleCitadelAgentExec.swift in Sources */,
+				EAAD20260912000000000001 /* AppleAgentIngestionConnection.swift in Sources */,
+				D8AD0000000000000000000B /* AgentCenterV2RootView.swift in Sources */,
+				D8AD0000000000000000000C /* AgentComposerAndLaunch.swift in Sources */,
+				D8AD0000000000000000000D /* AgentThreadBlocks.swift in Sources */,
+				D8AD0000000000000000000E /* AgentThreadDetailView.swift in Sources */,
+				D8AD0000000000000000000F /* AgentThreadListView.swift in Sources */,
+				F1A7000000000000000000B1 /* AgentAttentionPopover.swift in Sources */,
+				D8AD00000000000000000012 /* AppleAgentSessionEndpoint.swift in Sources */,
 				1A0004000000000000000001 /* TesseraApp.swift in Sources */,
 				1A0004000000000000000002 /* ContentView.swift in Sources */,
 				C10000000000000000000001 /* SessionActivityDescriptor.swift in Sources */,
@@ -1340,6 +1649,11 @@
 				C10000000000000000000006 /* BootstrapManifest.swift in Sources */,
 				C10000000000000000000007 /* NearbyHandshake.swift in Sources */,
 				C10000000000000000000008 /* NearbyTransferService.swift in Sources */,
+				C60000000000000000000001 /* PairingLocalTCPTransport.swift in Sources */,
+				C60000000000000000000002 /* PairingQRCodeAdapters.swift in Sources */,
+				C60000000000000000000004 /* CrossDevicePairingCoordinator.swift in Sources */,
+				C60000000000000000000005 /* CrossDevicePairingView.swift in Sources */,
+				D71000000000000000000001 /* PairingReviewHarness.swift in Sources */,
 				C10000000000000000000009 /* ContinuitySettingsView.swift in Sources */,
 				C1000000000000000000000F /* CredentialCardView.swift in Sources */,
 				C10000000000000000000011 /* BootstrapManifestAdapter.swift in Sources */,
@@ -1347,15 +1661,16 @@
 				C10000000000000000000013 /* EnrollmentService.swift in Sources */,
 				C10000000000000000000018 /* BootstrapCoordinator.swift in Sources */,
 				C10000000000000000000019 /* BootstrapFlowView.swift in Sources */,
+				C1000000000000000000BB01 /* BootstrapGrantSelectionViews.swift in Sources */,
 				C1000000000000000000001F /* BootstrapNetworkHarness.swift in Sources */,
 				C10000000000000000000021 /* NearbyBootstrapCompatibility.swift in Sources */,
 				C10000000000000000000022 /* AppVersion.swift in Sources */,
+				C1000000000000000000B7E1 /* BrokenPipeGuard.swift in Sources */,
 				C1000000000000000000001B /* EnrollmentContinuationStreamTransport.swift in Sources */,
 				C1000000000000000000001C /* EnrollmentCoordinator.swift in Sources */,
 				C1000000000000000000001D /* EnrollmentApprovalView.swift in Sources */,
-				1A00B1000000000000000001 /* AgentCenter.swift in Sources */,
-				1A00B1000000000000000002 /* AgentSessionSourceFactory.swift in Sources */,
-				1A00B1000000000000000003 /* AgentCenterPage.swift in Sources */,
+				1A00B1000000000000000001 /* AppleAgentLegacyPrimitives.swift in Sources */,
+				1A00B1000000000000000002 /* AppleAgentSessionSourceFactory.swift in Sources */,
 				1A00B1000000000000000004 /* RemoteAgentLifecycleIntegrationInstaller.swift in Sources */,
 				1A00B1000000000000000005 /* SwipePadAgentContext.swift in Sources */,
 				1A00B1000000000000000006 /* AgentRegexCache.swift in Sources */,
@@ -1363,6 +1678,8 @@
 				1A000400000000000000000A /* SSHSession.swift in Sources */,
 				1A000400000000000000000B /* HostEntryView.swift in Sources */,
 				1A000400000000000000000C /* SessionView.swift in Sources */,
+				C40004000000000000000001 /* AppleSessionCommandFacade.swift in Sources */,
+				5E0A04000000000000000001 /* SessionShowEdges.swift in Sources */,
 				1A0014000000000000000030 /* SessionLaunchOverlay.swift in Sources */,
 				1A0041000000000000000002 /* OnboardingController.swift in Sources */,
 				1A0041000000000000000003 /* OnboardingStep.swift in Sources */,
@@ -1379,6 +1696,7 @@
 				1A0004000000000000000010 /* Identity.swift in Sources */,
 				1A0004000000000000000011 /* LiveSession.swift in Sources */,
 				1A0034000000000000000001 /* SessionRestoreStore.swift in Sources */,
+				1A0034000000000000000701 /* SessionRestoreDebugHarness.swift in Sources */,
 				1A0034000000000000000091 /* SessionRestoreCohort.swift in Sources */,
 				1A0034000000000000000002 /* SessionRestoreSheet.swift in Sources */,
 				1A0004000000000000000012 /* SessionSidebar.swift in Sources */,
@@ -1395,6 +1713,8 @@
 				1A000400000000000000001C /* Session.swift in Sources */,
 				1A000400000000000000001D /* SSHAuth.swift in Sources */,
 				1A0004000000000000000021 /* MoshSession.swift in Sources */,
+				7E5502000000000000000001 /* MoshServerLivenessWatch.swift in Sources */,
+				7E5502000000000000000000 /* ConnectivityRetryWake.swift in Sources */,
 				1A0004000000000000000022 /* MoshBootstrap.swift in Sources */,
 				1A0024000000000000000001 /* AccessoryChip.swift in Sources */,
 				1A0024000000000000000002 /* AccessoryChipEncoder.swift in Sources */,
@@ -1402,8 +1722,10 @@
 				1A0024000000000000000007 /* SessionAccessoryBar.swift in Sources */,
 				1A0024000000000000000008 /* DraggableChipBar.swift in Sources */,
 				1A0014000000000000000001 /* DesignTokens.swift in Sources */,
+				1A0014000000000000000C01 /* ContinuousMotion.swift in Sources */,
 				1A0014000000000000000002 /* AppearancePreferences.swift in Sources */,
 				1A0014000000000000000003 /* Typography.swift in Sources */,
+				1A0014000000000000000C10 /* TerminalFontCatalog.swift in Sources */,
 				1A0014000000000000000004 /* Field.swift in Sources */,
 				1A0014000000000000000005 /* Input.swift in Sources */,
 				1A0014000000000000000006 /* Btn.swift in Sources */,
@@ -1453,6 +1775,9 @@
 				1A0028000000000000000006 /* TunnelsRegistry.swift in Sources */,
 				1A0028000000000000000007 /* ForwardingTabView.swift in Sources */,
 				1A0028000000000000000009 /* ForwardingStatusChip.swift in Sources */,
+				1A0028000000000000000109 /* TunnelWebBrowser.swift in Sources */,
+				1A0028000000000000000111 /* ForwardedServiceProbe.swift in Sources */,
+				1A0028000000000000000110 /* TunnelBrowserHarnessView.swift in Sources */,
 				1A002800000000000000000A /* TunnelsPageView.swift in Sources */,
 				1A002C000000000000000001 /* SwipePadProfile.swift in Sources */,
 				1A002C000000000000000002 /* MacroEncoder.swift in Sources */,
@@ -1466,6 +1791,8 @@
 				1A001400000000000000002C /* SessionRegistry.swift in Sources */,
 				1A001400000000000000002D /* CommandPalette.swift in Sources */,
 				1A001400000000000000002E /* CommandPaletteView.swift in Sources */,
+				AB2026092000000000000001 /* SessionTmuxChrome.swift in Sources */,
+				AB2026101200000000000001 /* ProgramStatusCenter.swift in Sources */,
 				1A001400000000000000002F /* SessionSwitcher.swift in Sources */,
 				1A0061000000000000000001 /* FilesContracts.swift in Sources */,
 				1A0061000000000000000002 /* FileBridge.swift in Sources */,
@@ -1476,6 +1803,7 @@
 				1A0061000000000000000007 /* QuickLookPresenter.swift in Sources */,
 				1A00A000000000000000000A /* FilesUIDiagnostics.swift in Sources */,
 				1A00A0000000000000000010 /* TerminalResizeCoalescer.swift in Sources */,
+				1A00C0000000000000000002 /* InlineTmuxHistoryRequestState.swift in Sources */,
 				1A00A000000000000000000E /* FileRowInteraction.swift in Sources */,
 				1A0061000000000000000099 /* RemotePathResolver.swift in Sources */,
 				1A0061000000000000000008 /* RemoteFileItemProvider.swift in Sources */,
@@ -1511,12 +1839,22 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A61900000000000000000003 /* AgentHostBundlePackagingTests.swift in Sources */,
+				D8AD00000000000000000010 /* AgentCenterV2CoordinatorTests.swift in Sources */,
+				AB2026101200000000000004 /* ProgramStatusCenterTests.swift in Sources */,
+				D8AD00000000000000000011 /* AppleAgentServicesTests.swift in Sources */,
+				C40004000000000000000002 /* AppleSessionCommandFacadeTests.swift in Sources */,
+				5E0A04000000000000000002 /* SessionShowEdgeTrackerTests.swift in Sources */,
+				C400040000000000000000F1 /* KeyboardFocusRetentionReproTests.swift in Sources */,
 				1AFF00000000000000000A12 /* TerminalKeyboardCaretPolicyTests.swift in Sources */,
 				C1000000000000000000000A /* ContinuityFoundationTests.swift in Sources */,
 				C1000000000000000000000B /* SyncClassificationTests.swift in Sources */,
+				C1000000000000000000FF01 /* TerminalFontCatalogTests.swift in Sources */,
 				C1000000000000000000000C /* BootstrapManifestTests.swift in Sources */,
 				C1000000000000000000000D /* BootstrapNearbyHandshakeTests.swift in Sources */,
 				C1000000000000000000000E /* BootstrapNearbyTransferServiceTests.swift in Sources */,
+				C60000000000000000000003 /* PairingLocalTCPTransportTests.swift in Sources */,
+				C60000000000000000000006 /* CrossDevicePairingCoordinatorTests.swift in Sources */,
 				C10000000000000000000010 /* RemoteInstallationLedgerTests.swift in Sources */,
 				C10000000000000000000014 /* EnrollmentMessagesTests.swift in Sources */,
 				C10000000000000000000015 /* EnrollmentServiceTests.swift in Sources */,
@@ -1527,10 +1865,14 @@
 				C1000000000000000000001E /* EnrollmentContinuationStreamTransportTests.swift in Sources */,
 				C10000000000000000000020 /* EnrollmentCoordinatorTests.swift in Sources */,
 				1A00A0000000000000000002 /* RealHostTransportIntegrationTests.swift in Sources */,
+				1A00A0000000000000000072 /* ForwardedServiceStateTests.swift in Sources */,
 				1AFE00000000000000000002 /* AutoTmuxLaunchRegressionTests.swift in Sources */,
 				1AFE00000000000000000004 /* AutoTmuxSessionViewLaunchTests.swift in Sources */,
 				1A00A0000000000000000006 /* TerminalScrollbackOracleTests.swift in Sources */,
+				1A00C5000000000000000002 /* TerminalPasteInputMirrorTests.swift in Sources */,
+				BEEF00000000000000000001 /* TerminalBoxOwnershipTests.swift in Sources */,
 				1A0004000000000000000023 /* MoshBootstrapTests.swift in Sources */,
+				7E5502000000000000000002 /* MoshServerLivenessWatchTests.swift in Sources */,
 				1A0004000000000000000024 /* KnownHostsStoreTests.swift in Sources */,
 				1A0004000000000000000033 /* HostKeyVerificationRequestTests.swift in Sources */,
 				1A0024000000000000000011 /* TesseraMigrationTests.swift in Sources */,
@@ -1542,6 +1884,7 @@
 				1A0024000000000000000005 /* ModifierStateTests.swift in Sources */,
 				1A002C000000000000000008 /* MacroEncoderTests.swift in Sources */,
 				1A002C000000000000000009 /* SwipePadProfileTests.swift in Sources */,
+				C1000000000000000000B7E2 /* BrokenPipeGuardTests.swift in Sources */,
 				1A002C00000000000000000C /* SwipePadPetalLayoutTests.swift in Sources */,
 				1A0024000000000000000009 /* SessionRegistryTests.swift in Sources */,
 				1A002400000000000000000A /* CommandPaletteTests.swift in Sources */,
@@ -1552,11 +1895,13 @@
 				1A0041000000000000000006 /* OnboardingControllerTests.swift in Sources */,
 				1A0050000000000000000002 /* KittyWindowModeStoreTests.swift in Sources */,
 				1A0050000000000000000004 /* PaneLayoutMathTests.swift in Sources */,
+				7E4B0A1D0000000000000002 /* TerminalKeyboardHandoffTests.swift in Sources */,
 				1A006100000000000000000E /* FileBridgeTests.swift in Sources */,
 				1A00610000000000000000A0 /* RemotePathResolverTests.swift in Sources */,
 				F4D2A2000000000000000001 /* QuickLookPresenterTests.swift in Sources */,
 				D7A500000000000000000025 /* ShareItemTypePolicyTests.swift in Sources */,
 				1A00A0000000000000000012 /* TerminalResizeCoalescerTests.swift in Sources */,
+				1A00C0000000000000000004 /* InlineTmuxHistoryRequestStateTests.swift in Sources */,
 				D7A500000000000000000023 /* ShareItemTypePolicy.swift in Sources */,
 				1A006100000000000000000F /* TransferQueueTests.swift in Sources */,
 				D7B903000000000000000001 /* BackgroundUploadCoordinatorTests.swift in Sources */,
@@ -1584,6 +1929,9 @@
 			files = (
 				1A00A0000000000000000004 /* VisualCaptureProbe.swift in Sources */,
 				1A00A0000000000000000008 /* FilesContextMenuProbe.swift in Sources */,
+				1A00C5000000000000000004 /* PasteAutoPeriodProbe.swift in Sources */,
+				1A00A0000000000000000108 /* TunnelBrowserProbe.swift in Sources */,
+				1A00A0000000000000000702 /* SessionRestoreLifecycleProbe.swift in Sources */,
 				1A00A000000000000000000C /* MarkdownScrollProbe.swift in Sources */,
 				D7B911000000000000000001 /* UploadIngressProgressProbe.swift in Sources */,
 				0852B22FF60AF0B5F713D29B /* TerminalScrollHarnessTests.swift in Sources */,
@@ -1596,6 +1944,9 @@
 			files = (
 				D7A500000000000000000006 /* ShareViewController.swift in Sources */,
 				D7A500000000000000000022 /* ShareItemTypePolicy.swift in Sources */,
+				D7A524000000000000000001 /* DesignTokens.swift in Sources */,
+				D7A524000000000000000002 /* Typography.swift in Sources */,
+				D7A524000000000000000003 /* Btn.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1747,7 +2098,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Tessera/Tessera.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1766,7 +2117,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.3.6;
+				MARKETING_VERSION = 0.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -1782,7 +2133,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Tessera/Tessera.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1801,7 +2152,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.3.6;
+				MARKETING_VERSION = 0.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -1815,7 +2166,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1823,7 +2174,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.3.6;
+				MARKETING_VERSION = 0.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -1839,7 +2190,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1847,7 +2198,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.3.6;
+				MARKETING_VERSION = 0.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -1899,7 +2250,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = TesseraShareExtension/TesseraShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1911,7 +2262,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.6;
+				MARKETING_VERSION = 0.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraApp.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1927,7 +2278,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = TesseraShareExtension/TesseraShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1939,7 +2290,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.6;
+				MARKETING_VERSION = 0.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraApp.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -2020,6 +2371,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/Citadel;
 		};
+		C3000B000000000000000001 /* XCLocalSwiftPackageReference "TesseraCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/TesseraCore;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -2028,7 +2383,7 @@
 			repositoryURL = "https://github.com/bambouville/SwiftTerm";
 			requirement = {
 				kind = revision;
-				revision = 2e7665f3852cd1082a59dd9e4f1585c8ccb8bbcb;
+				revision = 177748f1313591e2c8c00309f5ff74e8ee6077f7;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -2058,6 +2413,14 @@
 		1A000A000000000000000006 /* PortForwarding */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = PortForwarding;
+		};
+		C3000A000000000000000001 /* TesseraCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TesseraCore;
+		};
+		C5000A000000000000000001 /* TesseraAppleContinuity */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TesseraAppleContinuity;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -16,6 +16,13 @@ UDID_FILE="${TESSERA_INTEGRATION_SIMULATOR_UDID_FILE:-$SIMULATOR_STATE/simulator
 OWNER_FILE="${UDID_FILE}.owned"
 RUN_ID_FILE="${UDID_FILE}.run-id"
 RUN_ID="${TESSERA_INTEGRATION_SIMULATOR_RUN_ID:-standalone-$(date -u +%Y%m%dT%H%M%SZ)-$PPID-$RANDOM}"
+# A simulator that never finishes booting must fail the lane, not hang the
+# suite. CoreSimulator has stalled a fresh device for minutes under load; the
+# bound is generous because two devices may be booting at once.
+BOOT_TIMEOUT="${TESSERA_INTEGRATION_SIMULATOR_BOOT_TIMEOUT:-300}"
+case "$BOOT_TIMEOUT" in
+  ''|0|*[!0-9]*) die "TESSERA_INTEGRATION_SIMULATOR_BOOT_TIMEOUT must be positive integer seconds" ;;
+esac
 mkdir -p "$(dirname "$UDID_FILE")"
 
 udid=''
@@ -29,7 +36,7 @@ cleanup_failed_creation() {
     xcrun simctl delete "$created_udid" >/dev/null 2>&1 || true
   fi
 }
-trap cleanup_failed_creation EXIT
+trap 'fail_closed_trap cleanup_failed_creation' EXIT
 recorded_run_id=''
 if [[ -f "$RUN_ID_FILE" ]]; then
   IFS= read -r recorded_run_id <"$RUN_ID_FILE"
@@ -63,8 +70,20 @@ if [[ -z "$udid" ]]; then
 fi
 
 printf '%s\n' "$udid" >"$UDID_FILE"
+if [[ "${TESSERA_INTEGRATION_SOFTWARE_KEYBOARD:-0}" == 1 ]]; then
+  # This run's device only; the Simulator-wide setting and persistent devices
+  # are untouched. UIKit's native Hide behaves differently with Mac input attached.
+  defaults write com.apple.iphonesimulator DevicePreferences -dict-add "$udid" \
+    '{ConnectHardwareKeyboard = 0;}'
+  touch "${UDID_FILE}.software-keyboard"
+fi
 xcrun simctl boot "$udid" >/dev/null 2>&1 || true
-xcrun simctl bootstatus "$udid" -b
+if ! simctl_bounded "$((10#$BOOT_TIMEOUT * 1000))" bootstatus "$udid" -b; then
+  # The EXIT trap deletes a device this invocation created; a reused device
+  # remains recorded so the owning lane's cleanup still removes it.
+  die "simulator $udid did not finish booting within ${BOOT_TIMEOUT}s"
+fi
 created_udid=''
 trap - EXIT
 printf '%s\n' "$udid"
+script_completed=1

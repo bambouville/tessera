@@ -55,19 +55,28 @@ public enum ExecCommandOutput {
 @available(macOS 15.0, *)
 public struct TTYOutput: AsyncSequence {
     internal let sequence: AsyncThrowingStream<ExecCommandOutput, Error>
+    internal var diagnostics: TTYOutputDiagnostics? = nil
     public typealias Element = ExecCommandOutput
 
     public struct AsyncIterator: AsyncIteratorProtocol {
         public typealias Element = ExecCommandOutput
         var iterator: AsyncThrowingStream<ExecCommandOutput, Error>.AsyncIterator
+        var diagnostics: TTYOutputDiagnostics?
 
         public mutating func next() async throws -> ExecCommandOutput? {
-            try await iterator.next()
+            let result = try await iterator.next()
+            if let result {
+                switch result {
+                case .stdout(let buffer), .stderr(let buffer):
+                    diagnostics?.consumed(bytes: buffer.readableBytes)
+                }
+            }
+            return result
         }
     }
 
     public func makeAsyncIterator() -> AsyncIterator {
-        AsyncIterator(iterator: sequence.makeAsyncIterator())
+        AsyncIterator(iterator: sequence.makeAsyncIterator(), diagnostics: diagnostics)
     }
 }
 
@@ -75,10 +84,29 @@ public struct TTYOutput: AsyncSequence {
 public struct TTYStdinWriter {
     internal let channel: Channel
 
+    /// Diagnostic heartbeat on the existing channel executor. This sends no
+    /// bytes and does not flush, open another channel, or await the UI actor.
+    public func whenEventLoopAvailable(_ callback: @escaping @Sendable () -> Void) {
+        channel.eventLoop.execute(callback)
+    }
+
     /// Write raw bytes to the TTY's standard input
     /// - Parameter buffer: The bytes to write
     public func write(_ buffer: ByteBuffer) async throws {
         try await channel.writeAndFlush(SSHChannelData(type: .channel, data: .byteBuffer(buffer)))
+    }
+
+    /// Close only this interactive child channel while keeping the owning SSH
+    /// client authenticated. Terminal clients use this to replace a wedged PTY
+    /// without tearing down unrelated exec channels or port forwards.
+    public func close() async throws {
+        try await channel.close()
+    }
+
+    /// Send SSH EOF for stdin while preserving stdout/stderr until the remote
+    /// command exits. Closing the whole child here would discard its response.
+    public func closeInput() async throws {
+        try await channel.close(mode: .output)
     }
 
     public func changeSize(cols: Int, rows: Int, pixelWidth:Int, pixelHeight:Int) async throws {
@@ -268,7 +296,8 @@ extension SSHClient {
 
     internal func _executeCommandStream(
         environment: [SSHChannelRequestEvent.EnvironmentRequest] = [],
-        mode: CommandMode
+        mode: CommandMode,
+        outputDiagnostics: TTYOutputDiagnostics? = nil
     ) async throws -> (channel: Channel, output: AsyncThrowingStream<ExecCommandOutput, Error>) {
         let (stream, streamContinuation) = AsyncThrowingStream<ExecCommandOutput, Error>.makeStream()
 
@@ -278,8 +307,10 @@ extension SSHClient {
         let handler = ExecCommandHandler(logger: logger) { channel, output in
             switch output {
             case .stdout(let stdout):
+                outputDiagnostics?.received(bytes: stdout.readableBytes)
                 streamContinuation.yield(.stdout(stdout))
             case .stderr(let stderr):
+                outputDiagnostics?.received(bytes: stderr.readableBytes)
                 streamContinuation.yield(.stderr(stderr))
             case .eof(let error):
                 self.logger.debug("EOF triggered, ending the command stream.")
@@ -350,11 +381,13 @@ extension SSHClient {
     public func withPTY(
         _ request: SSHChannelRequestEvent.PseudoTerminalRequest,
         environment: [SSHChannelRequestEvent.EnvironmentRequest] = [],
+        outputDiagnostics: TTYOutputDiagnostics? = nil,
         perform: (_ inbound: TTYOutput, _ outbound: TTYStdinWriter) async throws -> Void
     ) async throws {
         let (channel, output) = try await _executeCommandStream(
             environment: environment,
-            mode: .pty(request)
+            mode: .pty(request),
+            outputDiagnostics: outputDiagnostics
         )
 
         func close() async throws {
@@ -362,7 +395,7 @@ extension SSHClient {
         }
 
         do {
-            let inbound = TTYOutput(sequence: output)
+            let inbound = TTYOutput(sequence: output, diagnostics: outputDiagnostics)
             try await perform(inbound, TTYStdinWriter(channel: channel))
             try await close()
         } catch {
@@ -464,7 +497,12 @@ extension SSHClient {
         )
 
         func close() async throws {
-            try await channel.close()
+            do {
+                try await channel.close()
+            } catch ChannelError.alreadyClosed {
+                // A command can close its channel after stdin EOF and before
+                // the consumer finishes draining its buffered output.
+            }
         }
 
         do {
@@ -472,7 +510,7 @@ extension SSHClient {
             try await perform(inbound, TTYStdinWriter(channel: channel))
             try await close()
         } catch {
-            try await close()
+            try? await close()
             throw error
         }
     }

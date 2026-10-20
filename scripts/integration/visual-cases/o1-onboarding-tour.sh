@@ -26,9 +26,9 @@ for step in {0..8}; do
   sleep 2
   xcrun simctl io "$UDID" screenshot \
     "$CASE_DIR/step-${display_step}.raw.png" >/dev/null
-  sips -r 270 \
+  "$HERE/normalize-landscape-screenshot.sh" \
     "$CASE_DIR/step-${display_step}.raw.png" \
-    --out "$CASE_DIR/step-${display_step}.png" >/dev/null
+    "$CASE_DIR/step-${display_step}.png" >/dev/null
   rm "$CASE_DIR/step-${display_step}.raw.png"
 done
 

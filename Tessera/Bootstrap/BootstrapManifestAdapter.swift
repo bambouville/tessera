@@ -18,6 +18,8 @@ struct BootstrapImportReceipt: Equatable, Sendable {
     /// includes unchanged hosts durably imported by an interrupted prior
     /// attempt, while `insertedHostIDs` remains the truthful count source.
     let acceptedHostIDs: Set<UUID>
+    /// Deferred UI work; never await notification authorization during import.
+    let enabledAgentCenter: Bool
 
     init(
         insertedHosts: Int,
@@ -28,7 +30,8 @@ struct BootstrapImportReceipt: Equatable, Sendable {
         skippedKnownHosts: Int = 0,
         conflictingKnownHosts: Int = 0,
         insertedHostIDs: Set<UUID> = [],
-        acceptedHostIDs: Set<UUID>? = nil
+        acceptedHostIDs: Set<UUID>? = nil,
+        enabledAgentCenter: Bool = false
     ) {
         self.insertedHosts = insertedHosts
         self.skippedExistingHosts = skippedExistingHosts
@@ -39,6 +42,39 @@ struct BootstrapImportReceipt: Equatable, Sendable {
         self.conflictingKnownHosts = conflictingKnownHosts
         self.insertedHostIDs = insertedHostIDs
         self.acceptedHostIDs = acceptedHostIDs ?? insertedHostIDs
+        self.enabledAgentCenter = enabledAgentCenter
+    }
+}
+
+/// Imports persist device-local UI work before returning. Release only after
+/// both setup flows have ended and the app can present permission UI.
+@MainActor
+final class BootstrapNotificationPermissionDeferral {
+    static let pendingKey = "tessera.bootstrap.pendingAgentNotificationPermission"
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+
+    var isPending: Bool { defaults.bool(forKey: Self.pendingKey) }
+
+    func recordImport(enabledAgentCenter: Bool) {
+        if enabledAgentCenter { defaults.set(true, forKey: Self.pendingKey) }
+    }
+
+    func releaseIfReady(
+        nearbyPresented: Bool,
+        pairingPhase: CrossDevicePairingPresentationPhase,
+        isAppActive: Bool,
+        requestPermission: () async -> Void
+    ) async {
+        guard isPending, isAppActive, !nearbyPresented else { return }
+        switch pairingPhase {
+        case .idle, .completed, .failed: break
+        default: return
+        }
+        // Consume before suspension, including denied/disabled requests.
+        defaults.removeObject(forKey: Self.pendingKey)
+        await requestPermission()
     }
 }
 
@@ -238,7 +274,8 @@ enum BootstrapManifestAdapter {
     static func export(
         from modelContext: ModelContext,
         appearance: AppearancePreferences,
-        knownHosts: KnownHostsStore = .shared
+        knownHosts: KnownHostsStore = .shared,
+        peerSupportsAgentCenterEnabled: Bool = false
     ) async throws -> BootstrapManifest {
         let persistedHosts = try modelContext.fetch(FetchDescriptor<PersistedHost>())
         let identities = try modelContext.fetch(FetchDescriptor<Identity>())
@@ -312,17 +349,26 @@ enum BootstrapManifestAdapter {
                 credentialHint = canAuthenticate ? .publicKey : .none
             case .some(.none), nil: credentialHint = .none
             }
-            let forwards = RuleCodec.decode(host.portForwardRulesData).map {
-                BootstrapPortForwardRule(
-                    id: $0.id,
-                    enabled: $0.enabled,
-                    autoStart: $0.autoStart,
-                    localPort: $0.localPort,
-                    remoteHost: $0.remoteHost,
-                    remotePort: $0.remotePort,
-                    label: $0.label
-                )
-            }
+            // `BootstrapPortForwardRule` predates the shared direction/endpoint
+            // model and can only describe a loopback local forward, so the
+            // manifest carries the portable local-rule subset. Dynamic and
+            // remote rules are dropped rather than flattened into a wrong local
+            // rule on the peer — `PortForwardRule.portableLocalSubset` is the
+            // single definition of that filter, pinned in TesseraDomainCoreTests.
+            let forwards = PortForwardRule
+                .portableLocalSubset(of: RuleCodec.decode(host.portForwardRulesData))
+                .compactMap { rule -> BootstrapPortForwardRule? in
+                    guard let target = rule.target else { return nil }
+                    return BootstrapPortForwardRule(
+                        id: rule.id,
+                        enabled: rule.enabled,
+                        autoStart: rule.autoStart,
+                        localPort: rule.bind.port,
+                        remoteHost: target.host,
+                        remotePort: target.port,
+                        label: rule.label
+                    )
+                }
             let portableIdentityID: UUID?
             if let identityID = host.identity?.id,
                validIdentitiesByID[identityID] != nil {
@@ -433,7 +479,7 @@ enum BootstrapManifestAdapter {
                 colorScheme: appearance.mode.rawValue,
                 accent: appearance.accent.rawValue,
                 customAccentRGB: appearance.customAccentRGB,
-                monospacedFontName: appearance.monoFontName,
+                monospacedFontName: appearance.terminalFontID,
                 terminalFontSize: appearance.fontSize,
                 chromeMaterial: appearance.chromeMaterial.rawValue,
                 cursorStyle: appearance.cursorStyle.rawValue,
@@ -448,7 +494,10 @@ enum BootstrapManifestAdapter {
                 bellNotificationEnabled: appearance.bellNotificationEnabled,
                 accessoryBarKeys: appearance.accessoryBarKeys,
                 filesReaperDays: appearance.filesReaperDays,
-                filesDefaultDestination: appearance.filesDefaultDestination
+                filesDefaultDestination: appearance.filesDefaultDestination,
+                // Released receivers reject unknown settings. Opt in only after
+                // the transport has established support for this extension.
+                agentCenterEnabled: peerSupportsAgentCenterEnabled ? appearance.agentCenterEnabled : nil
             )
         )
         try manifest.validate()
@@ -510,7 +559,8 @@ enum BootstrapManifestAdapter {
         knownHosts: KnownHostsStore = .shared,
         save: (ModelContext) throws -> Void = { try $0.save() },
         restrictTo hostIDs: Set<UUID>? = nil,
-        finalAdmissionValidator: BootstrapFinalAdmissionValidator? = nil
+        finalAdmissionValidator: BootstrapFinalAdmissionValidator? = nil,
+        notificationPermissionDefaults: UserDefaults = .standard
     ) async throws -> BootstrapImportReceipt {
         let eligibility = try importEligibility(
             for: manifest,
@@ -601,8 +651,10 @@ enum BootstrapManifestAdapter {
             host.notes = descriptor.notes ?? ""
             host.envVars = descriptor.envVars ?? ""
             host.startupSnippet = descriptor.startupSnippet ?? ""
+            // The inverse of the portable subset above: every rule the manifest
+            // can carry is a loopback local forward.
             host.setPortForwardRules(descriptor.portForwards.map {
-                PortForwardRule(
+                PortForwardRule.localForward(
                     id: $0.id,
                     enabled: $0.enabled,
                     autoStart: $0.autoStart,
@@ -681,6 +733,10 @@ enum BootstrapManifestAdapter {
                 conflictingKnownHosts += 1
             }
         }
+        let wasAgentCenterEnabled = appearance.agentCenterEnabled
+        let enabledAgentCenter = !wasAgentCenterEnabled && manifest.settings.agentCenterEnabled == true
+        BootstrapNotificationPermissionDeferral(defaults: notificationPermissionDefaults)
+            .recordImport(enabledAgentCenter: enabledAgentCenter)
         apply(manifest.appearance, manifest.settings, to: appearance)
         let savedHostsByID = eligibility.existingHostsByID.merging(
             Dictionary(uniqueKeysWithValues: insertedHosts.map { ($0.id, $0) })
@@ -699,7 +755,8 @@ enum BootstrapManifestAdapter {
             skippedKnownHosts: skippedKnownHosts,
             conflictingKnownHosts: conflictingKnownHosts,
             insertedHostIDs: newlyAcceptedHostIDs,
-            acceptedHostIDs: acceptedHostIDs
+            acceptedHostIDs: acceptedHostIDs,
+            enabledAgentCenter: enabledAgentCenter
         )
     }
 
@@ -858,7 +915,7 @@ enum BootstrapManifestAdapter {
             appearance.accent = accent
         }
         appearance.customAccentRGB = portableAppearance.customAccentRGB
-        appearance.monoFontName = portableAppearance.monospacedFontName
+        appearance.terminalFontID = portableAppearance.monospacedFontName
         appearance.fontSize = portableAppearance.terminalFontSize
         if let material = ChromeMaterial(rawValue: portableAppearance.chromeMaterial),
            material.isAvailable {
@@ -871,6 +928,11 @@ enum BootstrapManifestAdapter {
         appearance.terminalThemeID = portableAppearance.terminalThemeID
         appearance.scrollbackLines = settings.scrollbackLines
         appearance.modifierBehavior = settings.modifierBehavior
+        // Enabling Agent Center performs one-time bell coordination. The
+        // explicit imported bell settings must win over that local default.
+        if let enabled = settings.agentCenterEnabled {
+            appearance.agentCenterEnabled = enabled
+        }
         appearance.bellSoundEnabled = settings.bellSoundEnabled
         appearance.bellVisualEnabled = settings.bellVisualEnabled
         appearance.bellNotificationEnabled = settings.bellNotificationEnabled

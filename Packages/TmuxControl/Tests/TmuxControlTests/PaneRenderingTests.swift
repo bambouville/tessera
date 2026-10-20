@@ -22,9 +22,13 @@ final class PaneRenderingTests: XCTestCase {
         var chunk: [UInt8] = [0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70]
         chunk.append(contentsOf: Array("%begin 0 1 0\r\n%end 0 1 0\r\n".utf8))
         controller.ingest(chunk)
-        for number in 2...8 {
+        // Drain the actual attach FIFO: per-pane subscriptions are deferred
+        // and no longer occupy the old bell/metadata attach-init slots.
+        for number in 2..<42 {
+            guard !controller._debugPendingCommands.isEmpty else { break }
             controller.ingest(Array("%begin 0 \(number) 1\r\n%end 0 \(number) 1\r\n".utf8))
         }
+        XCTAssertTrue(controller._debugPendingCommands.isEmpty, "attach fixture did not drain its FIFO")
         // Order matters: add @1 (latches active), make it a 2-pane GRID via
         // %layout-change BEFORE any focus notification fires a shared refresh.
         // Once @1 is a grid, refreshRenderedWindow is gated off, so no stray
@@ -40,6 +44,37 @@ final class PaneRenderingTests: XCTestCase {
         controller.ingest(Array("%window-pane-changed @1 %10\r\n".utf8))
         controller.ingest(Array("%session-window-changed $0 @1\r\n".utf8))
         return (controller, sharedFeed, sent)
+    }
+
+    private func waitForSubscriptionFlush(_ controller: TmuxController) async {
+        for _ in 0..<20 where !controller._debugPendingCommands.contains(where: {
+            $0.hasPrefix("refresh-client -B ")
+        }) {
+            await Task.yield()
+        }
+    }
+
+    private func acknowledgePendingSubscriptions(_ controller: TmuxController) {
+        while controller._debugPendingCommands.first?.hasPrefix("refresh-client -B ") == true {
+            controller.ingest(Array("%begin 0 100 1\r\n%end 0 100 1\r\n".utf8))
+        }
+    }
+
+    /// Async render tests let the deferred registrations reach the wire.
+    /// Reply before starting render requests so each later response keeps its
+    /// original owner in the shared FIFO.
+    private func acknowledgeGridSubscriptions(_ controller: TmuxController) async {
+        await waitForSubscriptionFlush(controller)
+        let commands = controller._debugPendingCommands
+        XCTAssertEqual(commands.count, 2, "\(commands)")
+        for pane in [10, 11] {
+            XCTAssertTrue(commands.contains(
+                "refresh-client -B 'tessera-pane-meta.\(pane):%\(pane):\(TmuxPaneMetadataSubscription.format)'"
+                    + " -B 'tessera-bell.\(pane):%\(pane):#{window_bell_flag}'"
+            ), "\(commands)")
+        }
+        acknowledgePendingSubscriptions(controller)
+        XCTAssertTrue(controller._debugPendingCommands.isEmpty)
     }
 
     func test_paneSink_routesOutputAndBypassesSharedTerminal() {
@@ -132,6 +167,7 @@ final class PaneRenderingTests: XCTestCase {
 
     func test_gridForegroundRefreshSupersedesOlderPaneCaptureByRequestIdentity() async throws {
         let (controller, _, sent) = makeGridController()
+        await acknowledgeGridSubscriptions(controller)
         let paneFeed = ByteSink()
         controller.setPaneSink(PaneId(11)) { slice in paneFeed.append(contentsOf: slice) }
         sent.clear()
@@ -165,6 +201,7 @@ final class PaneRenderingTests: XCTestCase {
 
     func test_gridForegroundCaptureFailureRetriesWithoutReopeningLiveOutput() async throws {
         let (controller, _, sent) = makeGridController()
+        await acknowledgeGridSubscriptions(controller)
         controller.renderRefreshRetryDelay = 0.01
         let paneFeed = ByteSink()
         controller.setPaneSink(PaneId(11)) { slice in paneFeed.append(contentsOf: slice) }
@@ -211,6 +248,7 @@ final class PaneRenderingTests: XCTestCase {
 
     func test_gridForegroundRenderWaitsForOlderBackgroundQuery() async throws {
         let (controller, _, sent) = makeGridController()
+        await acknowledgeGridSubscriptions(controller)
         let paneFeed = ByteSink()
         controller.setPaneSink(PaneId(10)) { paneFeed.append(contentsOf: $0) }
         sent.clear()
@@ -264,6 +302,7 @@ final class PaneRenderingTests: XCTestCase {
 
     func test_gridForegroundCompletionCannotReleaseReplacementSharedRefresh() async throws {
         let (controller, sharedFeed, sent) = makeGridController()
+        await acknowledgeGridSubscriptions(controller)
         controller.setPaneSink(PaneId(10)) { _ in }
         sent.clear()
 
@@ -283,6 +322,10 @@ final class PaneRenderingTests: XCTestCase {
         // Removing the last old pane must not release the replacement shared
         // refresh owner before its authoritative capture lands.
         controller.setPaneSink(PaneId(10), nil)
+        await waitForSubscriptionFlush(controller)
+        XCTAssertTrue(controller._debugPendingCommands.contains(
+            "refresh-client -B 'tessera-bell.11' -B 'tessera-pane-meta.11'"
+        ))
 
         // First response belongs to the obsolete grid request. It must not
         // release the replacement shared owner or let incremental output paint.
@@ -294,6 +337,8 @@ final class PaneRenderingTests: XCTestCase {
         // the barrier only after the full viewport has painted.
         sent.clear()
         controller.ingest(Array("%begin 0 21 1\r\n%end 0 21 1\r\n".utf8)) // refresh-client -C
+        controller.ingest(Array("%begin 0 26 1\r\n%end 0 26 1\r\n".utf8)) // select-window fence
+        acknowledgePendingSubscriptions(controller)
         try await Task.sleep(nanoseconds: 100_000_000)
         XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).contains("display-message -p -t @1"))
         sent.clear()

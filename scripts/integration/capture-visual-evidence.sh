@@ -22,7 +22,7 @@ cleanup_visual_environment() {
   fi
   delete_owned_test_simulator "$SIMULATOR_STATE/visual_simulator_udid" || true
 }
-trap cleanup_visual_environment EXIT
+trap 'fail_closed_trap cleanup_visual_environment' EXIT
 
 "$HERE/prepare-visual-simulator.sh" "$RUN_DIR"
 UDID="$(jq -r .udid "$VISUAL_ROOT/runtime.json")"
@@ -44,3 +44,4 @@ done
 python3 "$HERE/finalize-visual-evidence.py" "$VISUAL_ROOT"
 cleanup_visual_environment
 trap - EXIT
+script_completed=1

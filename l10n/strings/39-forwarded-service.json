@@ -1,0 +1,50 @@
+{
+  "serving · 0 active": {
+    "de": "antwortet · 0 aktiv",
+    "es": "responde · 0 activas",
+    "fr": "répond · 0 active",
+    "ja": "応答あり · アクティブ 0",
+    "zh-Hans": "有服务响应 · 0 个活动连接",
+    "zh-Hant": "有服務回應 · 0 個作用中連線"
+  },
+  "listening · nothing serving on remote port %@": {
+    "de": "lauscht · auf dem entfernten Port %@ antwortet nichts",
+    "es": "escuchando · nada responde en el puerto remoto %@",
+    "fr": "à l'écoute · rien ne répond sur le port distant %@",
+    "ja": "待ち受け中 · リモートのポート %@ で応答なし",
+    "zh-Hans": "监听中 · 远程端口 %@ 无服务响应",
+    "zh-Hant": "監聽中 · 遠端連接埠 %@ 無服務回應"
+  },
+  "listening · checking…": {
+    "de": "lauscht · wird geprüft…",
+    "es": "escuchando · comprobando…",
+    "fr": "à l'écoute · vérification…",
+    "ja": "待ち受け中 · 確認中…",
+    "zh-Hans": "监听中 · 正在检查…",
+    "zh-Hant": "監聽中 · 正在檢查…"
+  },
+  "serving": {
+    "de": "antwortet",
+    "es": "responde",
+    "fr": "répond",
+    "ja": "応答あり",
+    "zh-Hans": "有服务响应",
+    "zh-Hant": "有服務回應"
+  },
+  "nothing serving": {
+    "de": "nichts antwortet",
+    "es": "nada responde",
+    "fr": "rien ne répond",
+    "ja": "応答なし",
+    "zh-Hans": "无服务响应",
+    "zh-Hant": "無服務回應"
+  },
+  "error": {
+    "de": "Fehler",
+    "es": "error",
+    "fr": "erreur",
+    "ja": "エラー",
+    "zh-Hans": "错误",
+    "zh-Hant": "錯誤"
+  }
+}

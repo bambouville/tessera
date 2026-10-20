@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark light">
+<title>Tessera program status</title>
+<link rel="stylesheet" href="mockup.css"><script src="mockup.js" defer></script>
+</head>
+<body data-theme="dark" data-platform="ios" data-layout="tablet">
+<header class="preview-bar">
+<h1>tessera <span>program status</span></h1>
+<div class="preview-controls">
+<label>appearance <select id="appearance"><option value="dark">dark</option><option value="light">light</option></select></label>
+<label>device <select id="layout"><option value="tablet">iPad landscape</option><option value="phone">iPhone</option></select></label>
+<label>platform tokens <select id="platform"><option value="ios">iOS</option><option value="android">Android</option></select></label>
+<label>transport <select id="transport"><option value="ssh-tmux">ssh + tmux</option><option value="mosh-tmux">mosh + tmux</option><option value="ssh">ssh</option></select></label>
+<label>Claude state <select id="scenario"><option value="approval">needs approval</option><option value="question">needs an answer</option><option value="auth">sign-in needed</option><option value="working">working</option><option value="done">finished</option><option value="error">failed</option><option value="idle">ready</option><option value="offline">status unavailable</option></select></label>
+<label>other programs <select id="programs"><option value="shown">shown</option><option value="hidden">hidden</option></select></label>
+<label>agent center <select id="agentcenter"><option value="on">on</option><option value="off">off (app default)</option></select></label>
+<label class="check-control"><input id="keyboard" type="checkbox"> keyboard (phone)</label>
+<label class="check-control"><input id="highlight" type="checkbox"> highlight proposed</label>
+</div>
+<p>Proposed OSC 7501 program status · sample data · existing cues reused</p>
+</header>
+<div class="stage" id="stage"><div class="device-viewport" id="device-viewport"><div class="device" id="device">
+<main class="app-content">
+<section id="terminal-view" class="terminal-view" aria-label="session terminal">
+<div class="chrome-space"><div class="terminal-bar">
+<button id="sidebar-toggle" class="bar-icon tablet-only" aria-label="Show sidebar" aria-expanded="false"><span class="icon-face">≡</span></button>
+<button id="session-back" class="bar-icon phone-only" aria-label="Back — session keeps running">‹</button>
+<button id="session-picker-button" class="host-pill" aria-label="Show sessions and windows" aria-expanded="false"><span class="connection-dot"></span><span id="connection-label">devbox</span><span class="tmux-tag tablet-only" id="tmux-tag"><span>·</span> TMUX</span><span class="phone-only down">⌄</span></button>
+<nav class="window-strip tablet-only" id="window-strip" aria-label="tmux windows"></nav>
+<button id="new-window" class="bar-icon" aria-label="New tmux window">+</button>
+<div class="bar-spacer tablet-only"></div>
+<button id="find-button" class="bar-icon" aria-label="Find in terminal"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="m12 12 5 5"/></svg></button>
+<button id="files-button" class="bar-icon" aria-label="Remote files"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 3h6l2 3h6v11H3z"/><path d="M3 8h14"/></svg></button>
+<button id="activity-button" class="activity-button tablet-only" aria-expanded="false" hidden><span id="chip-face" class="chip-face"><span id="chip-icon" aria-hidden="true">✧</span><span id="activity-summary"></span></span></button>
+<button id="home-button" class="bar-icon tablet-only" aria-label="Hosts home">⌂</button>
+<button id="disconnect-button" class="bar-icon phone-only red" aria-label="Disconnect">×</button>
+</div></div>
+<div id="terminal-location" class="terminal-location"></div>
+<pre class="terminal-output" id="terminal-output" tabindex="0" aria-label="sample terminal output"></pre>
+<div class="terminal-footer"><span id="transport-label"></span><span id="terminal-status"></span><span class="footer-grid tablet-only">120 × 40</span></div>
+</section>
+<section id="root-view" class="root-view" aria-label="sessions" hidden>
+<h1>sessions</h1><div id="segment-control" class="segment-control" aria-label="sessions view"><button id="segment-sessions" aria-pressed="true">sessions</button><button id="segment-agents" aria-pressed="false">agents</button></div>
+<div id="root-sessions" class="root-sessions"><div class="kicker">active · <span id="session-total">2</span></div><div id="root-session-rows"></div></div>
+<div id="root-agent-slot"></div>
+<nav class="bottom-tabs" aria-label="main navigation"><button data-utility="hosts"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="2" width="14" height="5" rx="1"/><rect x="3" y="8" width="14" height="5" rx="1"/><rect x="3" y="14" width="14" height="4" rx="1"/><path d="M6 4.5h1m-1 6h1m-1 5.5h1"/></svg>hosts</button><button id="root-sessions-tab" aria-current="page"><span class="tab-glyph" aria-hidden="true"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="5" y="7" width="13" height="10" rx="2"/><path d="M14 4H5a3 3 0 0 0-3 3v6m12-12H5"/></svg><span id="sessions-badge" class="ios-badge" hidden></span></span>sessions</button><button data-utility="keys"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="6" cy="7" r="3.5"/><path d="m9 10 7 7m-3-3 2-2m-5-1 2-2"/></svg>keys</button><button data-utility="settings"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="5.5"/><circle cx="10" cy="10" r="2"/><path d="M10 2v2m0 12v2M2 10h2m12 0h2M4.3 4.3l1.5 1.5m8.4 8.4 1.5 1.5m0-11.4-1.5 1.5m-8.4 8.4-1.5 1.5"/></svg>settings</button></nav>
+</section>
+<section id="agents-view" class="agents-view" aria-label="agent center" hidden>
+<aside class="thread-list"><div class="agents-title"><h1>agents</h1><button id="agents-back" class="bar-icon" aria-label="Return to session">‹</button></div><div id="thread-groups"></div></aside>
+<article class="conversation"><header class="conversation-heading"><button id="back-to-threads" class="bar-icon phone-only" aria-label="Back to agents">‹</button><div><h2 id="conversation-title"></h2><p id="conversation-meta"></p></div><button id="conversation-pane" class="open-button"><span class="open-face">▸_ open pane</span></button></header>
+<div id="conversation-status" class="conversation-status"></div>
+<div class="conversation-body"><div id="user-message" class="user-message"></div><p id="agent-message" class="agent-message"></p><div id="tool-summary" class="tool-summary"></div><p id="conversation-hint" class="conversation-hint" hidden>respond in the terminal — conversation actions need a verified prompt</p></div>
+</article></section>
+</main>
+<aside id="sidebar" class="sidebar tablet-only" aria-label="session sidebar">
+<div class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i><i></i></span>tessera<button id="sidebar-close" class="bar-icon" aria-label="Hide sidebar">‹</button></div>
+<div class="kicker">sessions</div><div id="sidebar-sessions"></div>
+<div class="sidebar-bottom"><button id="sidebar-agents" class="nav-row"><span aria-hidden="true">✧</span><span>agents</span><span id="agent-badges" class="agent-badges"></span></button><button class="nav-row" data-utility="keys"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="6" cy="7" r="3.5"/><path d="m9 10 7 7m-3-3 2-2m-5-1 2-2"/></svg>keys</button><button class="nav-row" data-utility="known hosts"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2 3 5v5c0 4 7 8 7 8s7-4 7-8V5z"/><rect x="7" y="8" width="6" height="5" rx="1"/><path d="M8 8V6a2 2 0 0 1 4 0v2"/></svg>known hosts</button><button class="nav-row" data-utility="tunnels"><span aria-hidden="true">⇄</span>tunnels</button><button class="nav-row" data-utility="settings"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="5.5"/><circle cx="10" cy="10" r="2"/><path d="M10 2v2m0 12v2M2 10h2m12 0h2M4.3 4.3l1.5 1.5m8.4 8.4 1.5 1.5m0-11.4-1.5 1.5m-8.4 8.4-1.5 1.5"/></svg>settings</button></div>
+</aside>
+<div id="mock-keyboard" class="mock-keyboard" aria-label="software keyboard preview" hidden><div class="accessory"><span>esc</span><span>ctrl</span><span>alt</span><span>tab</span><span>←</span><span>↓</span><span>↑</span><span>→</span></div><div class="key-row">q w e r t y u i o p</div><div class="key-row">a s d f g h j k l</div><div class="key-row">⇧ z x c v b n m ⌫</div><div class="key-row key-bottom"><span>123</span><span>space</span><span>return</span></div></div>
+<button id="backdrop" class="backdrop" aria-label="Dismiss overlay" tabindex="-1" hidden></button>
+<section id="activity" class="activity-panel" role="dialog" aria-labelledby="activity-title" hidden><h2 id="activity-title">needs attention</h2><p id="activity-caption">visiting a pane marks it checked</p><div id="activity-rows" class="activity-rows"></div><button id="activity-agent-center" class="panel-footer">✧ open agent center</button></section>
+<section id="session-picker" class="palette" role="dialog" aria-label="switch session, window or agent" hidden><div class="palette-input" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5"/></svg><span>switch session, window or agent</span></div><div id="palette-results" class="palette-results"></div><div id="palette-footer" class="palette-footer"></div></section>
+<section id="status-popover" class="status-popover" role="dialog" aria-labelledby="status-title" hidden><h2 id="status-title">connection</h2><div id="status-connection" class="status-connection"></div><div id="status-programs" class="status-programs"><h2>programs</h2><div id="program-rows" class="program-rows"></div></div></section>
+<section id="utility-panel" class="utility-panel" role="dialog" aria-labelledby="utility-title" hidden><div class="panel-heading"><h2 id="utility-title"></h2><button id="close-utility" class="bar-icon" aria-label="Close preview panel">×</button></div><p id="utility-copy"></p></section>
+</div></div></div>
+<p id="preview-feedback" class="preview-feedback" role="status" aria-live="polite">viewing window 4 “logs”</p>
+</body></html>

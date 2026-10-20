@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import TesseraCore
 
 /// Full-screen presentation surface for first-open receive, existing-device
 /// offer, SAS comparison, origin approval, and the credential checklist.
@@ -8,6 +9,7 @@ import UIKit
 struct BootstrapFlowView: View {
     @Bindable var coordinator: BootstrapCoordinator
     var onConfigureHost: (BootstrapCredentialChecklistItem) -> Void = { _ in }
+    var onReceivedSetupFinished: () -> Void = {}
 
     @Environment(\.designTokens) private var T
 
@@ -15,15 +17,9 @@ struct BootstrapFlowView: View {
         ZStack {
             T.presentationBg.ignoresSafeArea()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    header
-                    content
-                }
-                .frame(maxWidth: 620, alignment: .leading)
-                .padding(.horizontal, 28)
-                .padding(.vertical, 32)
-                .frame(maxWidth: .infinity)
+            SetupFlowShell(title: "TESSERA · NEARBY SETUP", presentation: presentation,
+                           identifier: "bootstrap", canCancel: canCancel, cancel: coordinator.cancel) {
+                content
             }
             .allowsHitTesting(coordinator.peerRejectionNotice == nil)
             .accessibilityHidden(coordinator.peerRejectionNotice != nil)
@@ -38,23 +34,23 @@ struct BootstrapFlowView: View {
         .accessibilityIdentifier("bootstrap.flow")
     }
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "iphone.and.arrow.forward")
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(T.fg)
-            Text("TESSERA · NEARBY SETUP")
-                .font(Typography.tesseraMono(size: 12, weight: .semibold))
-                .foregroundStyle(T.fgMuted)
-            Spacer()
-            if canCancel {
-                Button("cancel") { coordinator.cancel() }
-                    .buttonStyle(.plain)
-                    .font(Typography.tesseraMono(size: 12))
-                    .foregroundStyle(T.fgMuted)
-                    .accessibilityIdentifier("bootstrap.cancel")
-            }
+    private var presentation: SetupFlowPresentationV1.Output {
+        let phase: SetupFlowPresentationV1.Phase
+        switch coordinator.phase {
+        case .inactive, .welcome, .browsing, .offering: phase = .entry
+        case .negotiating: phase = .connecting
+        case .compareCode: phase = .compareCode
+        case .waitingForPeerCode: phase = .waitingForPeerCode
+        case .notifyingCodeRejection: phase = .rejecting
+        case .awaitingRecipientPublicKey, .authorizingRecipientKey: phase = .preparingKey
+        case .selectingGrants: phase = .choosing
+        case .waitingForOriginApproval: phase = .waitingForSelection
+        case .authorizingOrigin: phase = .authorizing
+        case .transferring: phase = .transferring
+        case .completed: phase = .completed
+        case .failed: phase = .failed
         }
+        return SetupFlowPresentationV1.project(.init(entry: .nearby, phase: phase))
     }
 
     @ViewBuilder
@@ -67,51 +63,48 @@ struct BootstrapFlowView: View {
         case .browsing:
             browser
         case .offering:
-            progress(
+            SetupFlowProgress(
                 title: "Waiting for your other device",
                 detail: "Keep this screen open. Tessera is visible only while this setup flow is in the foreground."
             )
         case .negotiating(_, let peerName):
-            progress(
+            SetupFlowProgress(
                 title: "Opening an encrypted channel",
                 detail: "Connecting to \(peerName). Device names are labels only; the code on the next screen verifies the channel."
             )
-        case .compareCode(_, let peerName, let code):
-            codeComparison(peerName: peerName, code: code)
-        case .waitingForPeerCode(_, let peerName, let code):
-            progress(
-                title: "Waiting for the other device",
-                detail: "You confirmed code \(code). \(peerName) must confirm the same code before setup can continue."
-            )
+        case .compareCode(_, _, let code):
+            verification(code: code, waiting: false)
+        case .waitingForPeerCode(_, _, let code):
+            verification(code: code, waiting: true)
         case .notifyingCodeRejection(let peerName):
-            progress(
+            SetupFlowProgress(
                 title: "Stopping nearby setup",
                 detail: "Telling \(peerName) that this pairing attempt was rejected."
             )
         case .awaitingRecipientPublicKey(let peerName, let code):
-            progress(
+            SetupFlowProgress(
                 title: "Waiting for the device key",
                 detail: "Code \(code) matched. Waiting for \(peerName) to create or reuse its device public key."
             )
         case .authorizingRecipientKey:
-            progress(
+            SetupFlowProgress(
                 title: "Prepare this device key",
                 detail: "Tessera is creating or loading this device’s Secure Enclave key. If your key-use setting requires authentication, confirm Face ID or device passcode. You can change it later in Keys."
             )
         case .selectingGrants(let selection):
             originApproval(selection: selection)
         case .waitingForOriginApproval(let peerName, let code):
-            progress(
+            SetupFlowProgress(
                 title: "Approve on the other device",
                 detail: "Code \(code) matched. \(peerName) must approve before any setup data can be sent."
             )
         case .authorizingOrigin(let selection):
-            progress(
+            SetupFlowProgress(
                 title: "Confirm on this device",
                 detail: "Authorizing \(selection.peerDisplayName) with code \(selection.code)."
             )
         case .transferring(let role, let peerName):
-            progress(
+            SetupFlowProgress(
                 title: role == .origin ? "Sending setup" : "Importing setup",
                 detail: role == .origin
                     ? "Sending the approved, encrypted manifest to \(peerName)."
@@ -126,14 +119,14 @@ struct BootstrapFlowView: View {
 
     private var welcome: some View {
         VStack(alignment: .leading, spacing: 22) {
-            title(
+            SetupFlowHeading(
                 "Bring your setup with you",
                 detail: "Copy hosts, jump routes, port forwards, and portable appearance settings from a nearby iPhone or iPad. The sending device separately chooses whether sensitive host text and trusted host keys move. Passwords and private keys never move."
             )
 
-            card {
+            BootstrapConsentCard {
                 VStack(alignment: .leading, spacing: 14) {
-                    label("INHERIT FROM NEARBY")
+                    BootstrapConsentLabel("INHERIT FROM NEARBY")
                     Text("You’ll compare a six-digit code on both devices before the origin can approve the transfer.")
                         .tesseraSansScaled(size: 14)
                         .foregroundStyle(T.fgMuted)
@@ -155,13 +148,13 @@ struct BootstrapFlowView: View {
 
     private var browser: some View {
         VStack(alignment: .leading, spacing: 18) {
-            title(
+            SetupFlowHeading(
                 "Choose your other device",
                 detail: "On that device, open Settings → Continuity and tap “send setup to nearby device.”"
             )
 
             if coordinator.discoveredPeers.isEmpty {
-                progress(
+                SetupFlowProgress(
                     title: "Looking nearby",
                     detail: "No devices found yet. Both devices must keep Tessera open on the setup screen."
                 )
@@ -219,178 +212,18 @@ struct BootstrapFlowView: View {
         }
     }
 
-    private func codeComparison(peerName: String, code: String) -> some View {
-        VStack(alignment: .leading, spacing: 22) {
-            title(
-                "Compare this code",
-                detail: "Confirm only if the same code is visible on \(peerName). If either device rejects the code, both devices stop this attempt; retrying creates fresh encryption keys."
-            )
-            codeCard(code)
-            Btn("codes match", style: .primary, full: true) {
-                coordinator.confirmCodeMatches()
-            }
-            .accessibilityIdentifier("bootstrap.code.match")
-            Btn("codes don’t match", style: .danger, full: true) {
-                coordinator.rejectCode()
-            }
-            .accessibilityIdentifier("bootstrap.code.reject")
-        }
+    private func verification(code: String, waiting: Bool) -> some View {
+        SetupCodeVerification(code: code, waiting: waiting, codeIdentifier: "bootstrap.code",
+            matchIdentifier: "bootstrap.code.match", rejectIdentifier: "bootstrap.code.reject",
+            confirm: coordinator.confirmCodeMatches, reject: coordinator.rejectCode)
     }
 
     private func originApproval(selection: BootstrapGrantSelectionState) -> some View {
-        VStack(alignment: .leading, spacing: 22) {
-            title(
-                "Choose what to copy",
-                detail: "Code \(selection.code) matched. Optional host text and trust start off. Review this exact setup transfer and where to install \(selection.publicKeyName)."
-            )
-            card {
-                VStack(alignment: .leading, spacing: 12) {
-                    label("RECIPIENT PUBLIC KEY")
-                    Text(selection.publicKeyFingerprint)
-                        .font(Typography.tesseraMono(size: 11))
-                        .foregroundStyle(T.fgMuted)
-                        .textSelection(.enabled)
-                    if selection.publicKeyProtection == .software {
-                        HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: "exclamationmark.triangle")
-                                .foregroundStyle(T.amber)
-                            Text("Software-backed simulator key. It is not protected by Secure Enclave; grant access only to test hosts you intend this simulator to use.")
-                                .tesseraSansScaled(size: 13)
-                                .foregroundStyle(T.fgMuted)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .accessibilityIdentifier("bootstrap.software-key-warning")
-                    }
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                label("OPTIONAL HOST DATA · OFF BY DEFAULT")
-                Text("These fields may contain secrets or change first-connect trust. Select only what you intend to copy to \(selection.peerDisplayName).")
-                    .tesseraSansScaled(size: 13)
-                    .foregroundStyle(T.fgMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-                ForEach(BootstrapOptionalTransfer.allCases) { transfer in
-                    Button {
-                        coordinator.setOptionalTransfer(
-                            transfer,
-                            selected: !selection.selectedOptionalTransfers.contains(transfer)
-                        )
-                    } label: {
-                        HStack(alignment: .top, spacing: 12) {
-                            Image(systemName: selection.selectedOptionalTransfers.contains(transfer)
-                                ? "checkmark.square.fill" : "square")
-                                .frame(width: 18)
-                                .foregroundStyle(T.fg)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(optionalTransferTitle(transfer))
-                                    .font(Typography.tesseraMono(size: 13, weight: .medium))
-                                    .foregroundStyle(T.fg)
-                                Text(optionalTransferDetail(transfer))
-                                    .tesseraSansScaled(size: 13)
-                                    .foregroundStyle(T.fgMuted)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            Spacer()
-                        }
-                        .padding(14)
-                        .background(T.inputBg)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(T.border, lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("bootstrap.optional.\(transfer.rawValue)")
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                label("HOST GRANTS")
-                ForEach(selection.checklist) { item in
-                    Button {
-                        guard item.isGrantEligible else { return }
-                        coordinator.setGrantSelected(
-                            hostID: item.id,
-                            selected: !selection.selectedHostIDs.contains(item.id)
-                        )
-                    } label: {
-                        HStack(alignment: .top, spacing: 12) {
-                            Image(systemName: grantSelectionSymbol(item, selection: selection))
-                                .frame(width: 18)
-                                .foregroundStyle(item.isGrantEligible ? T.fg : T.fgFaint)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(item.hostName)
-                                    .font(Typography.tesseraMono(size: 13, weight: .medium))
-                                    .foregroundStyle(T.fg)
-                                Text(item.detail)
-                                    .tesseraSansScaled(size: 13)
-                                    .foregroundStyle(T.fgMuted)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            Spacer()
-                        }
-                        .padding(14)
-                        .background(T.inputBg)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(T.border, lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!item.isGrantEligible)
-                    .accessibilityIdentifier("bootstrap.grant.\(item.id.uuidString)")
-                }
-            }
-
-            card {
-                VStack(alignment: .leading, spacing: 10) {
-                    receiptLine("hosts, jump routes, port forwards, and portable appearance", symbol: "server.rack")
-                    receiptLine(
-                        resolved: String(
-                            localized: "\(selection.selectedOptionalTransfers.count) optional data categories selected",
-                            comment: "Bootstrap receipt line. Pluralized on the category count."
-                        ),
-                        symbol: "checklist"
-                    )
-                    receiptLine("no passwords or private keys move", symbol: "lock.fill", color: T.green)
-                    receiptLine(
-                        resolved: String(
-                            localized: "\(selection.selectedCount) public-key grants selected",
-                            comment: "Bootstrap receipt line. Pluralized on the grant count."
-                        ),
-                        symbol: "key",
-                        color: T.green
-                    )
-                }
-            }
-            Btn("approve selected batch", style: .primary, full: true) {
-                coordinator.approveOriginTransfer()
-            }
-            .accessibilityIdentifier("bootstrap.approve")
-            Text("Sending to \(selection.peerDisplayName). Its displayed name is never used as a security decision.")
-                .font(Typography.tesseraMono(size: 11))
-                .foregroundStyle(T.fgDim)
-        }
-    }
-
-    private func progress(title: LocalizedStringKey, detail: LocalizedStringKey) -> some View {
-        card {
-            HStack(alignment: .top, spacing: 14) {
-                ProgressView().tint(T.fg)
-                VStack(alignment: .leading, spacing: 7) {
-                    Text(title)
-                        .font(Typography.tesseraMono(size: 15, weight: .medium))
-                        .foregroundStyle(T.fg)
-                    Text(detail)
-                        .tesseraSansScaled(size: 14)
-                        .foregroundStyle(T.fgMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
+        SetupSelectionReview(selection: selection, mode: .grants, identifier: "bootstrap",
+            softwareKeyWarning: "Software-backed simulator key. It is not protected by Secure Enclave; grant access only to test hosts you intend this simulator to use.",
+            onHost: { coordinator.setGrantSelected(hostID: $0, selected: $1) },
+            onOptional: { coordinator.setOptionalTransfer($0, selected: $1) },
+            approve: coordinator.approveOriginTransfer)
     }
 
     private func receiptView(_ receipt: BootstrapFlowReceipt) -> some View {
@@ -398,7 +231,7 @@ struct BootstrapFlowView: View {
             switch receipt.direction {
             case .sent(let hostCount):
                 // Receipt heading on the sending device.
-                title(
+                SetupFlowHeading(
                     "Setup sent",
                     resolvedDetail: String(
                         localized: "\(hostCount) hosts sent securely. Credentials remain local to each device.",
@@ -409,7 +242,7 @@ struct BootstrapFlowView: View {
                 // Receipt heading on the receiving device. Three
                 // independently pluralized counts share one sentence — the
                 // catalog carries a substitution for each.
-                title(
+                SetupFlowHeading(
                     "Setup inherited",
                     resolvedDetail: String(
                         localized: "Imported \(imported.insertedHosts) hosts, \(imported.insertedJumpLinks) jump routes, and \(imported.insertedKnownHosts) trusted host keys.",
@@ -430,36 +263,17 @@ struct BootstrapFlowView: View {
 
             if !receipt.grantReceipt.results.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
-                    label("HOST ACCESS RECEIPT")
+                    BootstrapConsentLabel("HOST ACCESS RECEIPT")
                     Text("This is the acknowledged result for every host. Failed, skipped, and credential-ineligible hosts are never reported as authorized.")
                         .tesseraSansScaled(size: 14)
                         .foregroundStyle(T.fgMuted)
 
                     ForEach(receipt.grantReceipt.results) { result in
-                        card {
-                            VStack(alignment: .leading, spacing: 10) {
-                                HStack {
-                                    Image(systemName: grantResultSymbol(result.status))
-                                        .foregroundStyle(grantResultColor(result.status))
-                                    Text(result.hostName)
-                                        .font(Typography.tesseraMono(size: 13, weight: .medium))
-                                        .foregroundStyle(T.fg)
-                                    Spacer()
-                                    Text(grantResultLabel(result.status))
-                                        .font(Typography.tesseraMono(size: 10, weight: .semibold))
-                                        .foregroundStyle(grantResultColor(result.status))
-                                }
-                                grantResultDetailText(result)
-                                    .tesseraSansScaled(size: 13)
-                                    .foregroundStyle(T.fgMuted)
-                                if result.status.offersConfigureLater,
-                                   let item = receipt.credentialChecklist.first(where: { $0.id == result.hostID }) {
-                                    Btn("configure later", compact: true) {
-                                        onConfigureHost(item)
-                                    }
-                                    .accessibilityIdentifier("bootstrap.configure.\(result.id.uuidString)")
-                                }
-                            }
+                        BootstrapConsentCard {
+                            SetupHostAccessRow(name: result.hostName, outcome: grantOutcome(result),
+                                detail: grantResultDetailText(result),
+                                configureIdentifier: "bootstrap.configure.\(result.id.uuidString)",
+                                configure: configureAction(result, receipt: receipt))
                         }
                     }
                 }
@@ -467,6 +281,9 @@ struct BootstrapFlowView: View {
 
             Btn("done", style: .primary, full: true) {
                 coordinator.finish()
+                if case .received = receipt.direction {
+                    onReceivedSetupFinished()
+                }
             }
             .accessibilityIdentifier("bootstrap.done")
         }
@@ -474,11 +291,11 @@ struct BootstrapFlowView: View {
 
     private func failure(_ message: String) -> some View {
         VStack(alignment: .leading, spacing: 22) {
-            title(
+            SetupFlowHeading(
                 "Nearby setup stopped",
                 resolvedDetail: message
             )
-            card {
+            BootstrapConsentCard {
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: "exclamationmark.triangle")
                         .foregroundStyle(T.amber)
@@ -538,151 +355,24 @@ struct BootstrapFlowView: View {
         .zIndex(10)
     }
 
-    /// Both halves are literals — the common case, and the one string
-    /// extraction can see.
-    private func title(_ value: LocalizedStringKey, detail: LocalizedStringKey) -> some View {
-        titleView(Text(value), detail: Text(detail))
+    private func configureAction(_ result: BootstrapHostGrantResult, receipt: BootstrapFlowReceipt) -> (() -> Void)? {
+        guard result.status.offersConfigureLater,
+              let item = receipt.credentialChecklist.first(where: { $0.id == result.hostID }) else { return nil }
+        return { onConfigureHost(item) }
     }
 
-    /// The detail is already resolved: a thrown error's message, or a count
-    /// sentence whose plural form the catalog already picked.
-    private func title(_ value: LocalizedStringKey, resolvedDetail: String) -> some View {
-        titleView(Text(value), detail: Text(verbatim: resolvedDetail))
-    }
-
-    private func titleView(_ value: Text, detail: Text) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            value
-                .font(Typography.pageTitle)
-                .foregroundStyle(T.fg)
-            detail
-                .tesseraSansScaled(size: 15)
-                .foregroundStyle(T.fgMuted)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private func codeCard(_ code: String) -> some View {
-        Text(verbatim: code)
-            .font(Typography.tesseraMono(size: 38, weight: .semibold))
-            .tracking(4)
-            .foregroundStyle(T.fg)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 28)
-            .background(T.inputBg)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(T.borderStrong, lineWidth: 1)
-            )
-            .accessibilityIdentifier("bootstrap.code")
-    }
-
-    private func card<Content: View>(
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        content()
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(T.panelBg)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(T.border, lineWidth: 1)
-            )
-    }
-
-    private func label(_ value: LocalizedStringKey) -> some View {
-        Text(value)
-            .font(Typography.kicker)
-            .tracking(0.6)
-            .foregroundStyle(T.fgDim)
-    }
-
-    private func receiptLine(
-        _ value: LocalizedStringKey,
-        symbol: String,
-        color: Color? = nil
-    ) -> some View {
-        receiptLine(Text(value), symbol: symbol, color: color)
-    }
-
-    /// A count sentence the catalog already pluralized and resolved.
-    private func receiptLine(
-        resolved value: String,
-        symbol: String,
-        color: Color? = nil
-    ) -> some View {
-        receiptLine(Text(verbatim: value), symbol: symbol, color: color)
-    }
-
-    private func receiptLine(
-        _ value: Text,
-        symbol: String,
-        color: Color? = nil
-    ) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: symbol)
-                .frame(width: 18)
-                .foregroundStyle(color ?? T.fgMuted)
-            value
-                .tesseraSansScaled(size: 14)
-                .foregroundStyle(T.fgMuted)
-        }
-    }
-
-    private func grantSelectionSymbol(
-        _ item: BootstrapCredentialChecklistItem,
-        selection: BootstrapGrantSelectionState
-    ) -> String {
-        guard item.isGrantEligible else { return "minus.square" }
-        return selection.selectedHostIDs.contains(item.id)
-            ? "checkmark.square.fill" : "square"
-    }
-
-    private func optionalTransferTitle(_ transfer: BootstrapOptionalTransfer) -> LocalizedStringResource {
-        switch transfer {
-        case .launchCommands: "launch commands"
-        case .notes: "notes"
-        case .environmentVariables: "environment variables"
-        case .startupSnippets: "startup snippets"
-        case .trustedHostKeys: "trusted host keys"
-        }
-    }
-
-    private func optionalTransferDetail(_ transfer: BootstrapOptionalTransfer) -> LocalizedStringResource {
-        switch transfer {
-        case .launchCommands:
-            "Custom shell commands. These may contain secrets."
-        case .notes:
-            "Free-form host notes. These may contain sensitive text."
-        case .environmentVariables:
-            "Environment variables. These commonly contain tokens or credentials."
-        case .startupSnippets:
-            "Shell text run at startup. This may contain secrets."
-        case .trustedHostKeys:
-            "The receiving device will trust the same server keys without prompting again. Existing conflicts are preserved for review."
-        }
-    }
-
-    private func grantResultSymbol(_ status: BootstrapHostGrantStatus) -> String {
+    private func grantOutcome(_ result: BootstrapHostGrantResult) -> SetupFlowPresentationV1.Outcome {
+        let status = result.status
+        let access: SetupFlowPresentationV1.Access
         switch status {
-        case .installed: return "checkmark.circle.fill"
-        case .failed: return "xmark.circle.fill"
-        case .notSelected: return "minus.circle"
-        case .rejectedImport: return "exclamationmark.triangle"
-        case .excludedAuthentication: return "lock.circle"
+        case .installed: access = .installed
+        case .failed: access = .failed
+        case .notSelected: access = .notSelected
+        case .excludedAuthentication: access = .excluded
+        case .rejectedImport: access = .unknown
         }
-    }
-
-    private func grantResultLabel(_ status: BootstrapHostGrantStatus) -> LocalizedStringResource {
-        switch status {
-        case .installed: return "AUTHORIZED"
-        case .failed: return "FAILED"
-        case .notSelected: return "NOT SELECTED"
-        case .rejectedImport: return "NOT IMPORTED"
-        case .excludedAuthentication: return "EXCLUDED"
-        }
+        return SetupFlowPresentationV1.outcome(.init(id: result.hostID, access: access,
+            wasAccepted: status == .rejectedImport ? false : nil))
     }
 
     private func grantResultDetail(_ status: BootstrapHostGrantStatus) -> LocalizedStringResource {
@@ -707,14 +397,6 @@ struct BootstrapFlowView: View {
             return Text(verbatim: detail)
         }
         return Text(grantResultDetail(result.status))
-    }
-
-    private func grantResultColor(_ status: BootstrapHostGrantStatus) -> Color {
-        switch status {
-        case .installed: return T.green
-        case .failed: return T.red
-        case .notSelected, .rejectedImport, .excludedAuthentication: return T.fgDim
-        }
     }
 
     private var canCancel: Bool {

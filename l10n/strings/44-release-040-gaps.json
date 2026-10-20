@@ -1,0 +1,1874 @@
+{
+  "%@ | panes=%lld | focus=%@": {
+    "de": "%@ | panes=%lld | focus=%@",
+    "es": "%@ | panes=%lld | focus=%@",
+    "fr": "%@ | panes=%lld | focus=%@",
+    "ja": "%@ | panes=%lld | focus=%@",
+    "zh-Hans": "%@ | panes=%lld | focus=%@",
+    "zh-Hant": "%@ | panes=%lld | focus=%@"
+  },
+  "%@ · %@": {
+    "de": "%@ · %@",
+    "es": "%@ · %@",
+    "fr": "%@ · %@",
+    "ja": "%@ · %@",
+    "zh-Hans": "%@ · %@",
+    "zh-Hant": "%@ · %@"
+  },
+  "%lld": {
+    "de": "%lld",
+    "es": "%lld",
+    "fr": "%lld",
+    "ja": "%lld",
+    "zh-Hans": "%lld",
+    "zh-Hant": "%lld"
+  },
+  "%lld connected source%@ unavailable": {
+    "de": "%lld verbundene Quelle%@ nicht verfügbar",
+    "es": "%lld fuente%@ conectada no disponible",
+    "fr": "%lld source%@ connectée indisponible",
+    "ja": "接続済みソース %lld 件%@を利用できません",
+    "zh-Hans": "%lld 个已连接的来源%@不可用",
+    "zh-Hant": "%lld 個已連線的來源%@無法使用"
+  },
+  "%lld queued": {
+    "de": "%lld eingereiht",
+    "es": "%lld en cola",
+    "fr": "%lld en file",
+    "ja": "%lld 件待機中",
+    "zh-Hans": "%lld 条排队中",
+    "zh-Hant": "%lld 則排入佇列"
+  },
+  "%lld%%": {
+    "de": "%lld%%",
+    "es": "%lld%%",
+    "fr": "%lld%%",
+    "ja": "%lld%%",
+    "zh-Hans": "%lld%%",
+    "zh-Hant": "%lld%%"
+  },
+  "+%lld": {
+    "de": "+%lld",
+    "es": "+%lld",
+    "fr": "+%lld",
+    "ja": "+%lld",
+    "zh-Hans": "+%lld",
+    "zh-Hant": "+%lld"
+  },
+  "1 question waiting": {
+    "de": "1 Frage wartet",
+    "es": "1 pregunta pendiente",
+    "fr": "1 question en attente",
+    "ja": "1 件の質問が回答待ち",
+    "zh-Hans": "1 个问题等待回答",
+    "zh-Hant": "1 個問題等待回答"
+  },
+  "A continuation descriptor is required for this pairing action.": {
+    "de": "Für diese Kopplungsaktion ist ein Fortsetzungsdeskriptor erforderlich.",
+    "es": "Se necesita un descriptor de continuación para esta acción de emparejamiento.",
+    "fr": "Un descripteur de reprise est requis pour cette action d'association.",
+    "ja": "このペアリング操作には継続記述子が必要です。",
+    "zh-Hans": "此配对操作需要接力描述符。",
+    "zh-Hant": "此配對操作需要接續描述元。"
+  },
+  "Adds one guarded activation line to this exact shell's startup file, then loads it here. Continue only at an empty bash or zsh prompt.": {
+    "de": "Fügt der Startdatei genau dieser Shell eine abgesicherte Aktivierungszeile hinzu und lädt sie hier. Fahre nur an einer leeren bash- oder zsh-Eingabeaufforderung fort.",
+    "es": "Añade una línea de activación protegida al archivo de inicio de este shell y la carga aquí. Continúa solo en un prompt vacío de bash o zsh.",
+    "fr": "Ajoute une ligne d'activation protégée au fichier de démarrage de ce shell précis, puis la charge ici. Continuez uniquement depuis une invite bash ou zsh vide.",
+    "ja": "このシェルの起動ファイルにガード付きの有効化行を1行追加し、ここで読み込みます。bash または zsh の空のプロンプトでのみ続行してください。",
+    "zh-Hans": "在此 shell 的启动文件中添加一行带保护的激活命令，然后在此加载。请仅在空白的 bash 或 zsh 提示符下继续。",
+    "zh-Hant": "在此 shell 的啟動檔案中加入一行附保護的啟用指令，然後在此載入。請僅在空白的 bash 或 zsh 提示字元下繼續。"
+  },
+  "Advance fixture": {
+    "de": "Nächster Fixture-Schritt",
+    "es": "Avanzar el escenario de prueba",
+    "fr": "Avancer le scénario de test",
+    "ja": "テストフィクスチャを進める",
+    "zh-Hans": "推进测试场景",
+    "zh-Hant": "推進測試情境"
+  },
+  "Agent Center": {
+    "de": "Agent Center",
+    "es": "Agent Center",
+    "fr": "Agent Center",
+    "ja": "Agent Center",
+    "zh-Hans": "Agent Center",
+    "zh-Hant": "Agent Center"
+  },
+  "Agent lifecycle not yet confirmed": {
+    "de": "Agenten-Lebenszyklus noch nicht bestätigt",
+    "es": "Ciclo de vida del agente aún sin confirmar",
+    "fr": "Cycle de vie de l'agent pas encore confirmé",
+    "ja": "エージェントのライフサイクルは未確認です",
+    "zh-Hans": "尚未确认智能体生命周期",
+    "zh-Hant": "尚未確認智慧體生命週期"
+  },
+  "All hosts are copied. Choose which hosts also receive this device’s public key for access.": {
+    "de": "Alle Hosts werden kopiert. Wähle, welche Hosts auch den Public Key dieses Geräts für den Zugriff erhalten.",
+    "es": "Se copian todos los hosts. Elige cuáles recibirán también la clave pública de este dispositivo para permitir el acceso.",
+    "fr": "Tous les hôtes sont copiés. Choisissez lesquels recevront aussi la clé publique de cet appareil pour autoriser l'accès.",
+    "ja": "すべてのホストがコピーされます。アクセス用にこのデバイスの公開鍵も受け取るホストを選んでください。",
+    "zh-Hans": "所有主机都会被复制。请选择还要接收此设备公钥以授予访问权限的主机。",
+    "zh-Hant": "所有主機都會被複製。請選擇還要接收此裝置公開金鑰以授予存取權限的主機。"
+  },
+  "Answer": {
+    "de": "Antworten",
+    "es": "Responder",
+    "fr": "Répondre",
+    "ja": "回答",
+    "zh-Hans": "回答",
+    "zh-Hant": "回答"
+  },
+  "Approve setup transfer to this paired device": {
+    "de": "Übertragung der Einrichtung an dieses gekoppelte Gerät genehmigen",
+    "es": "Aprobar la transferencia de configuración a este dispositivo emparejado",
+    "fr": "Approuver le transfert de configuration vers cet appareil associé",
+    "ja": "このペアリング済みデバイスへのセットアップ転送を承認",
+    "zh-Hans": "批准向此已配对设备传输设置",
+    "zh-Hant": "核准向此已配對裝置傳輸設定"
+  },
+  "Authorize this device on this host": {
+    "de": "Dieses Gerät auf diesem Host autorisieren",
+    "es": "Autorizar este dispositivo en este host",
+    "fr": "Autoriser cet appareil sur cet hôte",
+    "ja": "このホストでこのデバイスを承認",
+    "zh-Hans": "在此主机上授权此设备",
+    "zh-Hant": "在此主機上授權此裝置"
+  },
+  "Background cleanup": {
+    "de": "Hintergrundbereinigung",
+    "es": "Limpieza en segundo plano",
+    "fr": "Nettoyage en arrière-plan",
+    "ja": "バックグラウンドのクリーンアップ",
+    "zh-Hans": "后台清理",
+    "zh-Hant": "背景清理"
+  },
+  "COPIED TO THE PAIRED DEVICE": {
+    "de": "AUF DAS GEKOPPELTE GERÄT KOPIERT",
+    "es": "COPIADO AL DISPOSITIVO EMPAREJADO",
+    "fr": "COPIÉ VERS L'APPAREIL ASSOCIÉ",
+    "ja": "ペアリング済みデバイスにコピー済み",
+    "zh-Hans": "已复制到配对设备",
+    "zh-Hant": "已複製到配對裝置"
+  },
+  "Camera unavailable? Paste the code instead.": {
+    "de": "Kamera nicht verfügbar? Füge stattdessen den Code ein.",
+    "es": "¿Cámara no disponible? Pega el código.",
+    "fr": "Caméra indisponible ? Collez le code à la place.",
+    "ja": "カメラを使えませんか？代わりにコードをペーストしてください。",
+    "zh-Hans": "无法使用相机？请改为粘贴配对码。",
+    "zh-Hant": "無法使用相機？請改為貼上配對碼。"
+  },
+  "Choose on the sending device": {
+    "de": "Auf dem sendenden Gerät auswählen",
+    "es": "Elegir en el dispositivo emisor",
+    "fr": "Choisir sur l'appareil émetteur",
+    "ja": "送信側のデバイスで選択",
+    "zh-Hans": "在发送设备上选择",
+    "zh-Hant": "在傳送裝置上選擇"
+  },
+  "Choose which hosts to copy. Required jump hosts are included with their routes.": {
+    "de": "Wähle die zu kopierenden Hosts. Erforderliche Jump-Hosts werden mit ihren Routen einbezogen.",
+    "es": "Elige los hosts que quieres copiar. Los hosts de salto necesarios se incluyen con sus rutas.",
+    "fr": "Choisissez les hôtes à copier. Les hôtes de rebond nécessaires sont inclus avec leurs routes.",
+    "ja": "コピーするホストを選んでください。必要な踏み台ホストは、そのルートとともに含まれます。",
+    "zh-Hans": "选择要复制的主机。所需的跳板主机及其路由会一并包含。",
+    "zh-Hant": "選擇要複製的主機。所需的跳板主機及其路由會一併包含。"
+  },
+  "Choose your hosts": {
+    "de": "Hosts auswählen",
+    "es": "Elige tus hosts",
+    "fr": "Choisissez vos hôtes",
+    "ja": "ホストを選択",
+    "zh-Hans": "选择主机",
+    "zh-Hant": "選擇主機"
+  },
+  "Codex keeps working while they wait": {
+    "de": "Codex arbeitet weiter, während die Fragen warten",
+    "es": "Codex sigue trabajando mientras las preguntas esperan",
+    "fr": "Codex continue de travailler pendant que les questions attendent",
+    "ja": "質問が回答待ちの間も Codex は作業を続けます",
+    "zh-Hans": "问题等待回答时，Codex 会继续工作",
+    "zh-Hant": "問題等待回答時，Codex 會繼續工作"
+  },
+  "Compare all six digits on both screens before continuing. No setup has been sent yet.": {
+    "de": "Vergleiche alle sechs Ziffern auf beiden Bildschirmen, bevor du fortfährst. Es wurde noch keine Einrichtung gesendet.",
+    "es": "Compara los seis dígitos en ambas pantallas antes de continuar. Aún no se ha enviado ninguna configuración.",
+    "fr": "Comparez les six chiffres sur les deux écrans avant de continuer. Aucune configuration n'a encore été envoyée.",
+    "ja": "続ける前に両方の画面で6桁すべてを比較してください。セットアップはまだ送信されていません。",
+    "zh-Hans": "继续前，请比对两个屏幕上的全部六位数字。尚未发送任何设置。",
+    "zh-Hant": "繼續前，請比對兩個螢幕上的全部六位數字。尚未傳送任何設定。"
+  },
+  "Configuration only": {
+    "de": "Nur Konfiguration",
+    "es": "Solo configuración",
+    "fr": "Configuration uniquement",
+    "ja": "設定のみ",
+    "zh-Hans": "仅配置",
+    "zh-Hant": "僅設定"
+  },
+  "Configuration was copied. No public-key access was selected.": {
+    "de": "Die Konfiguration wurde kopiert. Zugriff per Public Key wurde nicht ausgewählt.",
+    "es": "Se copió la configuración. No se seleccionó el acceso con clave pública.",
+    "fr": "La configuration a été copiée. Aucun accès par clé publique n'a été sélectionné.",
+    "ja": "設定をコピーしました。公開鍵によるアクセスは選択されていません。",
+    "zh-Hans": "配置已复制。未选择公钥访问权限。",
+    "zh-Hant": "設定已複製。未選擇公開金鑰存取權限。"
+  },
+  "Confirm authentication on this device": {
+    "de": "Authentifizierung auf diesem Gerät bestätigen",
+    "es": "Confirma la autenticación en este dispositivo",
+    "fr": "Confirmez l'authentification sur cet appareil",
+    "ja": "このデバイスで認証を確認",
+    "zh-Hans": "在此设备上确认认证",
+    "zh-Hant": "在此裝置上確認驗證"
+  },
+  "Confirm on your other device": {
+    "de": "Auf dem anderen Gerät bestätigen",
+    "es": "Confirma en tu otro dispositivo",
+    "fr": "Confirmez sur votre autre appareil",
+    "ja": "もう一方のデバイスで確認",
+    "zh-Hans": "在另一台设备上确认",
+    "zh-Hant": "在另一台裝置上確認"
+  },
+  "Connected hosts with agent transcripts appear here.": {
+    "de": "Verbundene Hosts mit Agenten-Transkripten erscheinen hier.",
+    "es": "Aquí aparecen los hosts conectados con transcripciones de agentes.",
+    "fr": "Les hôtes connectés disposant de transcriptions d'agents apparaissent ici.",
+    "ja": "エージェントのトランスクリプトがある接続済みホストがここに表示されます。",
+    "zh-Hans": "此处显示具有智能体会话记录的已连接主机。",
+    "zh-Hant": "此處顯示具有智慧體對話記錄的已連線主機。"
+  },
+  "Connecting your devices": {
+    "de": "Deine Geräte werden verbunden",
+    "es": "Conectando tus dispositivos",
+    "fr": "Connexion de vos appareils",
+    "ja": "デバイスを接続中",
+    "zh-Hans": "正在连接设备",
+    "zh-Hant": "正在連接裝置"
+  },
+  "Continue on another device": {
+    "de": "Auf einem anderen Gerät fortsetzen",
+    "es": "Continuar en otro dispositivo",
+    "fr": "Continuer sur un autre appareil",
+    "ja": "別のデバイスで続ける",
+    "zh-Hans": "在另一台设备上继续",
+    "zh-Hant": "在另一台裝置上繼續"
+  },
+  "Continuity action result": {
+    "de": "Ergebnis der Kontinuitätsaktion",
+    "es": "Resultado de la acción de continuidad",
+    "fr": "Résultat de l'action de continuité",
+    "ja": "連係操作の結果",
+    "zh-Hans": "接力操作结果",
+    "zh-Hant": "接續互通操作結果"
+  },
+  "Copied, and the paired device's key is installed using this device's existing access.": {
+    "de": "Kopiert. Der Key des gekoppelten Geräts wird mit dem bestehenden Zugriff dieses Geräts installiert.",
+    "es": "Copiado. La clave del dispositivo emparejado se instala usando el acceso existente de este dispositivo.",
+    "fr": "Copié. La clé de l'appareil associé est installée à l'aide de l'accès existant de cet appareil.",
+    "ja": "コピー済み。このデバイスの既存のアクセス権を使って、ペアリング済みデバイスのキーをインストールします。",
+    "zh-Hans": "已复制，并使用此设备现有的访问权限安装配对设备的密钥。",
+    "zh-Hant": "已複製，並使用此裝置現有的存取權限安裝配對裝置的金鑰。"
+  },
+  "Copied. A credential is requested on first connect.": {
+    "de": "Kopiert. Beim ersten Verbinden werden Zugangsdaten angefordert.",
+    "es": "Copiado. Se solicitará una credencial en la primera conexión.",
+    "fr": "Copié. Un identifiant sera demandé à la première connexion.",
+    "ja": "コピー済み。初回接続時に認証情報を求められます。",
+    "zh-Hans": "已复制。首次连接时会要求提供凭据。",
+    "zh-Hant": "已複製。首次連線時會要求提供憑證。"
+  },
+  "Copied. Its password never leaves this device and is requested on first connect.": {
+    "de": "Kopiert. Das Passwort verlässt dieses Gerät nie und wird beim ersten Verbinden angefordert.",
+    "es": "Copiado. Su contraseña nunca sale de este dispositivo y se solicitará en la primera conexión.",
+    "fr": "Copié. Son mot de passe ne quitte jamais cet appareil et sera demandé à la première connexion.",
+    "ja": "コピー済み。パスワードがこのデバイスの外に出ることはなく、初回接続時に入力を求められます。",
+    "zh-Hans": "已复制。密码绝不会离开此设备，首次连接时会要求输入。",
+    "zh-Hant": "已複製。密碼絕不會離開此裝置，首次連線時會要求輸入。"
+  },
+  "Copy code": {
+    "de": "Code kopieren",
+    "es": "Copiar código",
+    "fr": "Copier le code",
+    "ja": "コードをコピー",
+    "zh-Hans": "复制代码",
+    "zh-Hant": "複製程式碼"
+  },
+  "Cross-device pairing is not configured.": {
+    "de": "Die geräteübergreifende Kopplung ist nicht konfiguriert.",
+    "es": "El emparejamiento entre dispositivos no está configurado.",
+    "fr": "L'association entre appareils n'est pas configurée.",
+    "ja": "デバイス間のペアリングが設定されていません。",
+    "zh-Hans": "尚未配置跨设备配对。",
+    "zh-Hant": "尚未設定跨裝置配對。"
+  },
+  "Dismiss": {
+    "de": "Schließen",
+    "es": "Cerrar",
+    "fr": "Fermer",
+    "ja": "閉じる",
+    "zh-Hans": "关闭",
+    "zh-Hant": "關閉"
+  },
+  "Do the codes match?": {
+    "de": "Stimmen die Codes überein?",
+    "es": "¿Coinciden los códigos?",
+    "fr": "Les codes correspondent-ils ?",
+    "ja": "コードは一致していますか？",
+    "zh-Hans": "配对码是否一致？",
+    "zh-Hant": "配對碼是否一致？"
+  },
+  "Enable here": {
+    "de": "Hier aktivieren",
+    "es": "Activar aquí",
+    "fr": "Activer ici",
+    "ja": "ここで有効にする",
+    "zh-Hans": "在此启用",
+    "zh-Hant": "在此啟用"
+  },
+  "Enrollment authorization is no longer current.": {
+    "de": "Die Registrierungsautorisierung ist nicht mehr aktuell.",
+    "es": "La autorización de inscripción ya no está vigente.",
+    "fr": "L'autorisation d'inscription n'est plus valide.",
+    "ja": "登録の承認は有効ではなくなりました。",
+    "zh-Hans": "注册授权已失效。",
+    "zh-Hant": "註冊授權已失效。"
+  },
+  "Enter a pairing code instead": {
+    "de": "Stattdessen einen Kopplungscode eingeben",
+    "es": "Introducir un código de emparejamiento",
+    "fr": "Saisir un code d'association à la place",
+    "ja": "代わりにペアリングコードを入力",
+    "zh-Hans": "改为输入配对码",
+    "zh-Hant": "改為輸入配對碼"
+  },
+  "Focus terminal": {
+    "de": "Terminal fokussieren",
+    "es": "Enfocar el terminal",
+    "fr": "Donner le focus au terminal",
+    "ja": "ターミナルにフォーカス",
+    "zh-Hans": "聚焦终端",
+    "zh-Hant": "聚焦終端機"
+  },
+  "Follow the current instruction below. Both devices must stay open until the transfer finishes.": {
+    "de": "Befolge die aktuelle Anweisung unten. Beide Geräte müssen bis zum Ende der Übertragung geöffnet bleiben.",
+    "es": "Sigue la instrucción actual de abajo. Ambos dispositivos deben permanecer abiertos hasta que termine la transferencia.",
+    "fr": "Suivez l'instruction ci-dessous. Les deux appareils doivent rester ouverts jusqu'à la fin du transfert.",
+    "ja": "以下の指示に従ってください。転送が完了するまで、両方のデバイスで開いたままにしてください。",
+    "zh-Hans": "请按下方当前指示操作。传输完成前，两台设备都必须保持打开状态。",
+    "zh-Hant": "請依照下方目前的指示操作。傳輸完成前，兩台裝置都必須保持開啟狀態。"
+  },
+  "HOSTS BEING IMPORTED": {
+    "de": "HOSTS WERDEN IMPORTIERT",
+    "es": "HOSTS QUE SE ESTÁN IMPORTANDO",
+    "fr": "HÔTES EN COURS D'IMPORT",
+    "ja": "読み込み中のホスト",
+    "zh-Hans": "正在导入的主机",
+    "zh-Hant": "正在輸入的主機"
+  },
+  "HOSTS TO COPY": {
+    "de": "ZU KOPIERENDE HOSTS",
+    "es": "HOSTS PARA COPIAR",
+    "fr": "HÔTES À COPIER",
+    "ja": "コピーするホスト",
+    "zh-Hans": "要复制的主机",
+    "zh-Hant": "要複製的主機"
+  },
+  "Hide terminal": {
+    "de": "Terminal ausblenden",
+    "es": "Ocultar terminal",
+    "fr": "Masquer le terminal",
+    "ja": "ターミナルを非表示",
+    "zh-Hans": "隐藏终端",
+    "zh-Hant": "隱藏終端機"
+  },
+  "Host addresses, jump routes, port forwards, and portable appearance settings are included. Choose any additional data below.": {
+    "de": "Host-Adressen, Jump-Routen, Portweiterleitungen und übertragbare Darstellungseinstellungen sind enthalten. Wähle unten zusätzliche Daten.",
+    "es": "Se incluyen las direcciones de hosts, rutas de salto, reenvíos de puertos y ajustes de apariencia portables. Elige los datos adicionales abajo.",
+    "fr": "Les adresses des hôtes, les routes de rebond, les redirections de ports et les réglages d'apparence transférables sont inclus. Choisissez les données supplémentaires ci-dessous.",
+    "ja": "ホストのアドレス、踏み台ルート、ポート転送、持ち運べる外観設定が含まれます。追加のデータを以下で選んでください。",
+    "zh-Hans": "包含主机地址、跳板路由、端口转发和可迁移的外观设置。请在下方选择其他数据。",
+    "zh-Hant": "包含主機位址、跳板路由、連接埠轉發和可遷移的外觀設定。請在下方選擇其他資料。"
+  },
+  "Host configuration requested": {
+    "de": "Host-Konfiguration angefordert",
+    "es": "Configuración del host solicitada",
+    "fr": "Configuration de l'hôte demandée",
+    "ja": "ホスト設定を要求済み",
+    "zh-Hans": "已请求主机配置",
+    "zh-Hant": "已請求主機設定"
+  },
+  "Hosts": {
+    "de": "Hosts",
+    "es": "Hosts",
+    "fr": "Hôtes",
+    "ja": "ホスト",
+    "zh-Hans": "主机",
+    "zh-Hant": "主機"
+  },
+  "Hosts home": {
+    "de": "Host-Übersicht",
+    "es": "Inicio de hosts",
+    "fr": "Accueil des hôtes",
+    "ja": "ホスト一覧",
+    "zh-Hans": "主机主页",
+    "zh-Hant": "主機首頁"
+  },
+  "IMPORTED FROM THE PAIRED DEVICE": {
+    "de": "VOM GEKOPPELTEN GERÄT IMPORTIERT",
+    "es": "IMPORTADO DEL DISPOSITIVO EMPAREJADO",
+    "fr": "IMPORTÉ DEPUIS L'APPAREIL ASSOCIÉ",
+    "ja": "ペアリング済みデバイスから読み込み済み",
+    "zh-Hans": "已从配对设备导入",
+    "zh-Hant": "已從配對裝置輸入"
+  },
+  "Importing approved setup": {
+    "de": "Genehmigte Einrichtung wird importiert",
+    "es": "Importando la configuración aprobada",
+    "fr": "Import de la configuration approuvée",
+    "ja": "承認済みセットアップを読み込み中",
+    "zh-Hans": "正在导入已批准的设置",
+    "zh-Hant": "正在輸入已核准的設定"
+  },
+  "In the terminal: %@": {
+    "de": "Im Terminal: %@",
+    "es": "En el terminal: %@",
+    "fr": "Dans le terminal : %@",
+    "ja": "ターミナル内：%@",
+    "zh-Hans": "终端中：%@",
+    "zh-Hant": "終端機中：%@"
+  },
+  "Include": {
+    "de": "Einbeziehen",
+    "es": "Incluir",
+    "fr": "Inclure",
+    "ja": "含める",
+    "zh-Hans": "包含",
+    "zh-Hant": "包含"
+  },
+  "Install the paired device key": {
+    "de": "Key des gekoppelten Geräts installieren",
+    "es": "Instalar la clave del dispositivo emparejado",
+    "fr": "Installer la clé de l'appareil associé",
+    "ja": "ペアリング済みデバイスのキーをインストール",
+    "zh-Hans": "安装配对设备的密钥",
+    "zh-Hant": "安裝配對裝置的金鑰"
+  },
+  "Installing and verifying the recipient key": {
+    "de": "Key des Empfängers wird installiert und geprüft",
+    "es": "Instalando y verificando la clave del destinatario",
+    "fr": "Installation et vérification de la clé du destinataire",
+    "ja": "受信側のキーをインストールして確認中",
+    "zh-Hans": "正在安装并验证接收方密钥",
+    "zh-Hant": "正在安裝並驗證接收方金鑰"
+  },
+  "Installs Tessera's Agent Center helpers. OpenCode or Pi inventory refreshes automatically when installation completes.": {
+    "de": "Installiert die Agent Center-Helfer von Tessera. Das OpenCode- oder Pi-Inventar wird nach Abschluss der Installation automatisch aktualisiert.",
+    "es": "Instala los componentes auxiliares de Agent Center de Tessera. El inventario de OpenCode o Pi se actualiza automáticamente al terminar la instalación.",
+    "fr": "Installe les utilitaires Agent Center de Tessera. L'inventaire d'OpenCode ou de Pi s'actualise automatiquement à la fin de l'installation.",
+    "ja": "Tessera の Agent Center ヘルパーをインストールします。インストールが完了すると、OpenCode または Pi の一覧が自動的に更新されます。",
+    "zh-Hans": "安装 Tessera 的 Agent Center 辅助程序。安装完成后，OpenCode 或 Pi 清单会自动刷新。",
+    "zh-Hant": "安裝 Tessera 的 Agent Center 輔助程式。安裝完成後，OpenCode 或 Pi 清單會自動重新整理。"
+  },
+  "Installs Tessera's helpers now. If this agent has not loaded the lifecycle hooks, relaunch it to enable status reporting.": {
+    "de": "Installiert jetzt die Helfer von Tessera. Wenn dieser Agent die Lebenszyklus-Hooks noch nicht geladen hat, starte ihn neu, um Statusmeldungen zu aktivieren.",
+    "es": "Instala ahora los componentes auxiliares de Tessera. Si este agente no ha cargado los hooks del ciclo de vida, reinícialo para activar los informes de estado.",
+    "fr": "Installe maintenant les utilitaires de Tessera. Si cet agent n'a pas chargé les hooks de cycle de vie, relancez-le pour activer les rapports d'état.",
+    "ja": "Tessera のヘルパーを今すぐインストールします。このエージェントがライフサイクルフックを読み込んでいない場合は、再起動して状態の報告を有効にしてください。",
+    "zh-Hans": "立即安装 Tessera 的辅助程序。如果此智能体尚未加载生命周期钩子，请重新启动它以启用状态报告。",
+    "zh-Hant": "立即安裝 Tessera 的輔助程式。如果此智慧體尚未載入生命週期掛鉤，請重新啟動它以啟用狀態回報。"
+  },
+  "Keep Tessera open on both devices. A security code will appear when the encrypted channel is ready.": {
+    "de": "Lass Tessera auf beiden Geräten geöffnet. Ein Sicherheitscode erscheint, sobald der verschlüsselte Kanal bereit ist.",
+    "es": "Mantén Tessera abierto en ambos dispositivos. Aparecerá un código de seguridad cuando el canal cifrado esté listo.",
+    "fr": "Gardez Tessera ouvert sur les deux appareils. Un code de sécurité apparaîtra lorsque le canal chiffré sera prêt.",
+    "ja": "両方のデバイスで Tessera を開いたままにしてください。暗号化されたチャネルの準備ができると、セキュリティコードが表示されます。",
+    "zh-Hans": "请在两台设备上保持 Tessera 打开。加密通道就绪后会显示安全码。",
+    "zh-Hant": "請在兩台裝置上保持 Tessera 開啟。加密通道就緒後會顯示安全碼。"
+  },
+  "Keep both devices open": {
+    "de": "Beide Geräte geöffnet lassen",
+    "es": "Mantén ambos dispositivos abiertos",
+    "fr": "Gardez les deux appareils ouverts",
+    "ja": "両方のデバイスで開いたままにする",
+    "zh-Hans": "保持两台设备打开",
+    "zh-Hant": "保持兩台裝置開啟"
+  },
+  "Live updates paused while this history view is retained.": {
+    "de": "Live-Updates sind pausiert, solange diese Verlaufsansicht beibehalten wird.",
+    "es": "Las actualizaciones en directo están en pausa mientras se conserva esta vista del historial.",
+    "fr": "Les mises à jour en direct sont en pause tant que cette vue de l'historique est conservée.",
+    "ja": "この履歴表示を保持している間、ライブ更新は一時停止されます。",
+    "zh-Hans": "保留此历史记录视图时，实时更新已暂停。",
+    "zh-Hant": "保留此歷史記錄檢視時，即時更新已暫停。"
+  },
+  "Local input": {
+    "de": "Lokale Eingabe",
+    "es": "Entrada local",
+    "fr": "Saisie locale",
+    "ja": "ローカル入力",
+    "zh-Hans": "本地输入",
+    "zh-Hant": "本機輸入"
+  },
+  "Make it feel familiar": {
+    "de": "Vertraute Umgebung einrichten",
+    "es": "Haz que se sienta familiar",
+    "fr": "Retrouvez vos repères",
+    "ja": "使い慣れた環境にする",
+    "zh-Hans": "延续熟悉的使用体验",
+    "zh-Hant": "延續熟悉的使用體驗"
+  },
+  "Next": {
+    "de": "Weiter",
+    "es": "Siguiente",
+    "fr": "Suivant",
+    "ja": "次へ",
+    "zh-Hans": "下一步",
+    "zh-Hant": "下一步"
+  },
+  "Next, compare a six-digit code on both screens.": {
+    "de": "Vergleiche als Nächstes einen sechsstelligen Code auf beiden Bildschirmen.",
+    "es": "A continuación, compara un código de seis dígitos en ambas pantallas.",
+    "fr": "Comparez ensuite un code à six chiffres sur les deux écrans.",
+    "ja": "次に、両方の画面で6桁のコードを比較してください。",
+    "zh-Hans": "接下来，比对两个屏幕上的六位数配对码。",
+    "zh-Hant": "接下來，比對兩個螢幕上的六位數配對碼。"
+  },
+  "No passwords or private keys were transferred.": {
+    "de": "Es wurden keine Passwörter oder privaten Keys übertragen.",
+    "es": "No se transfirieron contraseñas ni claves privadas.",
+    "fr": "Aucun mot de passe ni aucune clé privée n'ont été transférés.",
+    "ja": "パスワードや秘密鍵は転送されていません。",
+    "zh-Hans": "未传输任何密码或私钥。",
+    "zh-Hant": "未傳輸任何密碼或私密金鑰。"
+  },
+  "No usable local address is available for pairing.": {
+    "de": "Keine nutzbare lokale Adresse für die Kopplung verfügbar.",
+    "es": "No hay ninguna dirección local utilizable para el emparejamiento.",
+    "fr": "Aucune adresse locale utilisable n'est disponible pour l'association.",
+    "ja": "ペアリングに使用できるローカルアドレスがありません。",
+    "zh-Hans": "没有可用于配对的本地地址。",
+    "zh-Hant": "沒有可用於配對的本機位址。"
+  },
+  "No validated remote location is available for this session.": {
+    "de": "Für diese Sitzung ist kein validierter entfernter Speicherort verfügbar.",
+    "es": "No hay ninguna ubicación remota validada disponible para esta sesión.",
+    "fr": "Aucun emplacement distant validé n'est disponible pour cette session.",
+    "ja": "このセッションで利用できる検証済みのリモートの場所がありません。",
+    "zh-Hans": "此会话没有可用的已验证远程位置。",
+    "zh-Hant": "此工作階段沒有可用的已驗證遠端位置。"
+  },
+  "Open Markdown": {
+    "de": "Markdown öffnen",
+    "es": "Abrir Markdown",
+    "fr": "Ouvrir Markdown",
+    "ja": "Markdown を開く",
+    "zh-Hans": "打开 Markdown",
+    "zh-Hant": "開啟 Markdown"
+  },
+  "Open Terminal to answer after the live agent binding is verified.": {
+    "de": "Öffne das Terminal zum Antworten, sobald die Live-Agenten-Zuordnung verifiziert ist.",
+    "es": "Abre el terminal para responder una vez verificado el vínculo con el agente activo.",
+    "fr": "Ouvrez le terminal pour répondre une fois la liaison avec l'agent actif vérifiée.",
+    "ja": "稼働中のエージェントとの紐付けが検証されたら、ターミナルを開いて回答してください。",
+    "zh-Hans": "验证与运行中智能体的绑定后，打开终端以回答。",
+    "zh-Hant": "驗證與執行中智慧體的繫結後，開啟終端機以回答。"
+  },
+  "Open Tessera → Settings → sync & continuity on the other device. On Apple, tap “scan pairing code.” On Android, tap “pair another device,” then “scan pairing code.” Keep both devices on the same network.": {
+    "de": "Öffne auf dem anderen Gerät Tessera → Einstellungen → Sync & Continuity. Tippe auf Apple-Geräten auf „Kopplungscode scannen“. Tippe auf Android auf „anderes Gerät koppeln“ und dann auf „Kopplungscode scannen“. Beide Geräte müssen im selben Netzwerk bleiben.",
+    "es": "Abre Tessera → Ajustes → sincronización y continuidad en el otro dispositivo. En Apple, toca «escanear código de emparejamiento». En Android, toca «emparejar otro dispositivo» y luego «escanear código de emparejamiento». Mantén ambos dispositivos en la misma red.",
+    "fr": "Ouvrez Tessera → Réglages → synchronisation et continuité sur l'autre appareil. Sur Apple, touchez « scanner le code d'association ». Sur Android, touchez « associer un autre appareil », puis « scanner le code d'association ». Gardez les deux appareils sur le même réseau.",
+    "ja": "もう一方のデバイスで Tessera → 設定 → 同期と Handoff を開いてください。Apple では「ペアリングコードをスキャン」をタップします。Android では「別のデバイスをペアリング」、続いて「ペアリングコードをスキャン」をタップします。両方のデバイスを同じネットワークに接続したままにしてください。",
+    "zh-Hans": "在另一台设备上打开 Tessera → 设置 → 同步与接力。在 Apple 设备上，轻点“扫描配对码”。在 Android 上，轻点“配对另一台设备”，再轻点“扫描配对码”。请让两台设备保持在同一网络中。",
+    "zh-Hant": "在另一台裝置上開啟 Tessera → 設定 → 同步與接力。在 Apple 裝置上，點一下「掃描配對碼」。在 Android 上，點一下「配對另一台裝置」，再點一下「掃描配對碼」。請讓兩台裝置保持在同一網路中。"
+  },
+  "Open terminal to answer": {
+    "de": "Terminal zum Antworten öffnen",
+    "es": "Abrir terminal para responder",
+    "fr": "Ouvrir le terminal pour répondre",
+    "ja": "ターミナルを開いて回答",
+    "zh-Hans": "打开终端以回答",
+    "zh-Hant": "開啟終端機以回答"
+  },
+  "PASSWORD ON FIRST CONNECT": {
+    "de": "PASSWORT BEIM ERSTEN VERBINDEN",
+    "es": "CONTRASEÑA EN LA PRIMERA CONEXIÓN",
+    "fr": "MOT DE PASSE À LA PREMIÈRE CONNEXION",
+    "ja": "初回接続時にパスワード",
+    "zh-Hans": "首次连接时输入密码",
+    "zh-Hant": "首次連線時輸入密碼"
+  },
+  "Pairing QR code": {
+    "de": "QR-Code für die Kopplung",
+    "es": "Código QR de emparejamiento",
+    "fr": "Code QR d'association",
+    "ja": "ペアリング用 QR コード",
+    "zh-Hans": "配对 QR 码",
+    "zh-Hant": "配對 QR 碼"
+  },
+  "Pairing did not finish. Review any copied hosts before starting again.": {
+    "de": "Die Kopplung wurde nicht abgeschlossen. Prüfe alle kopierten Hosts, bevor du erneut beginnst.",
+    "es": "El emparejamiento no terminó. Revisa los hosts copiados antes de volver a empezar.",
+    "fr": "L'association n'a pas abouti. Vérifiez les hôtes copiés avant de recommencer.",
+    "ja": "ペアリングが完了しませんでした。やり直す前に、コピーされたホストを確認してください。",
+    "zh-Hans": "配对未完成。重新开始前，请检查已复制的主机。",
+    "zh-Hant": "配對未完成。重新開始前，請檢查已複製的主機。"
+  },
+  "Pairing stopped": {
+    "de": "Kopplung gestoppt",
+    "es": "Emparejamiento detenido",
+    "fr": "Association arrêtée",
+    "ja": "ペアリングを停止しました",
+    "zh-Hans": "配对已停止",
+    "zh-Hant": "配對已停止"
+  },
+  "Pairing stopped because a device locked. Unlock both devices and start again.": {
+    "de": "Die Kopplung wurde gestoppt, weil ein Gerät gesperrt wurde. Entsperre beide Geräte und beginne erneut.",
+    "es": "El emparejamiento se detuvo porque un dispositivo se bloqueó. Desbloquea ambos dispositivos y vuelve a empezar.",
+    "fr": "L'association s'est arrêtée car un appareil s'est verrouillé. Déverrouillez les deux appareils et recommencez.",
+    "ja": "デバイスがロックされたため、ペアリングを停止しました。両方のデバイスのロックを解除してやり直してください。",
+    "zh-Hans": "某台设备已锁定，配对因此停止。请解锁两台设备并重新开始。",
+    "zh-Hant": "某台裝置已鎖定，配對因此停止。請解鎖兩台裝置並重新開始。"
+  },
+  "Pairing transport is already running.": {
+    "de": "Der Kopplungstransport läuft bereits.",
+    "es": "El transporte de emparejamiento ya está en marcha.",
+    "fr": "Le transport d'association est déjà en cours.",
+    "ja": "ペアリング用のトランスポートはすでに実行中です。",
+    "zh-Hans": "配对传输已在运行。",
+    "zh-Hant": "配對傳輸已在執行。"
+  },
+  "Pairing transport is not running.": {
+    "de": "Der Kopplungstransport läuft nicht.",
+    "es": "El transporte de emparejamiento no está en marcha.",
+    "fr": "Le transport d'association n'est pas en cours.",
+    "ja": "ペアリング用のトランスポートは実行されていません。",
+    "zh-Hans": "配对传输未在运行。",
+    "zh-Hant": "配對傳輸未在執行。"
+  },
+  "Pairing transport was cancelled.": {
+    "de": "Der Kopplungstransport wurde abgebrochen.",
+    "es": "Se canceló el transporte de emparejamiento.",
+    "fr": "Le transport d'association a été annulé.",
+    "ja": "ペアリング用のトランスポートはキャンセルされました。",
+    "zh-Hans": "配对传输已取消。",
+    "zh-Hant": "配對傳輸已取消。"
+  },
+  "Point the camera at the QR code in Tessera on your other device.": {
+    "de": "Richte die Kamera auf den QR-Code in Tessera auf deinem anderen Gerät.",
+    "es": "Apunta la cámara al código QR de Tessera en tu otro dispositivo.",
+    "fr": "Dirigez la caméra vers le code QR dans Tessera sur votre autre appareil.",
+    "ja": "もう一方のデバイスの Tessera に表示された QR コードにカメラを向けてください。",
+    "zh-Hans": "将相机对准另一台设备上 Tessera 中的 QR 码。",
+    "zh-Hant": "將相機對準另一台裝置上 Tessera 中的 QR 碼。"
+  },
+  "Public-key access selected": {
+    "de": "Zugriff per Public Key ausgewählt",
+    "es": "Acceso con clave pública seleccionado",
+    "fr": "Accès par clé publique sélectionné",
+    "ja": "公開鍵によるアクセスを選択済み",
+    "zh-Hans": "已选择公钥访问权限",
+    "zh-Hant": "已選擇公開金鑰存取權限"
+  },
+  "QR pairing works only while this foreground screen remains open. It uses local Wi-Fi addresses, compares a six-digit code, and never transfers passwords or private keys.": {
+    "de": "Die QR-Kopplung funktioniert nur, solange dieser Bildschirm im Vordergrund geöffnet bleibt. Sie verwendet lokale WLAN-Adressen, vergleicht einen sechsstelligen Code und überträgt nie Passwörter oder private Keys.",
+    "es": "El emparejamiento QR solo funciona mientras esta pantalla permanece abierta en primer plano. Usa direcciones Wi-Fi locales, compara un código de seis dígitos y nunca transfiere contraseñas ni claves privadas.",
+    "fr": "L'association QR fonctionne uniquement tant que cet écran reste ouvert au premier plan. Elle utilise les adresses Wi-Fi locales, compare un code à six chiffres et ne transfère jamais de mots de passe ni de clés privées.",
+    "ja": "QR ペアリングは、この画面をフォアグラウンドで開いている間のみ機能します。ローカルの Wi-Fi アドレスを使用し、6桁のコードを比較します。パスワードや秘密鍵が転送されることはありません。",
+    "zh-Hans": "QR 配对仅在此前台屏幕保持打开时有效。它使用本地 Wi-Fi 地址，比对六位数配对码，绝不传输密码或私钥。",
+    "zh-Hant": "QR 配對僅在此前景畫面保持開啟時有效。它使用本機 Wi-Fi 位址，比對六位數配對碼，絕不傳輸密碼或私密金鑰。"
+  },
+  "Queue message": {
+    "de": "Nachricht einreihen",
+    "es": "Poner mensaje en cola",
+    "fr": "Mettre le message en file",
+    "ja": "メッセージをキューに追加",
+    "zh-Hans": "将消息加入队列",
+    "zh-Hant": "將訊息加入佇列"
+  },
+  "Ready to copy": {
+    "de": "Bereit zum Kopieren",
+    "es": "Listo para copiar",
+    "fr": "Prêt à copier",
+    "ja": "コピーの準備完了",
+    "zh-Hans": "准备好复制",
+    "zh-Hant": "準備好複製"
+  },
+  "Recording verified access on both devices": {
+    "de": "Verifizierter Zugriff wird auf beiden Geräten gespeichert",
+    "es": "Registrando el acceso verificado en ambos dispositivos",
+    "fr": "Enregistrement de l'accès vérifié sur les deux appareils",
+    "ja": "両方のデバイスに検証済みのアクセス権を記録中",
+    "zh-Hans": "正在两台设备上记录已验证的访问权限",
+    "zh-Hant": "正在兩台裝置上記錄已驗證的存取權限"
+  },
+  "Refresh %lld": {
+    "de": "Aktualisieren %lld",
+    "es": "Actualizar %lld",
+    "fr": "Actualiser %lld",
+    "ja": "再描画 %lld",
+    "zh-Hans": "刷新 %lld",
+    "zh-Hant": "重新整理 %lld"
+  },
+  "Release focus": {
+    "de": "Fokus freigeben",
+    "es": "Liberar el foco",
+    "fr": "Libérer le focus",
+    "ja": "フォーカスを解除",
+    "zh-Hans": "释放焦点",
+    "zh-Hant": "釋放焦點"
+  },
+  "Return to latest": {
+    "de": "Zum neuesten Stand zurückkehren",
+    "es": "Volver a lo más reciente",
+    "fr": "Revenir au plus récent",
+    "ja": "最新に戻る",
+    "zh-Hans": "返回最新内容",
+    "zh-Hant": "返回最新內容"
+  },
+  "Review": {
+    "de": "Prüfen",
+    "es": "Revisar",
+    "fr": "Vérifier",
+    "ja": "確認",
+    "zh-Hans": "检查",
+    "zh-Hant": "檢查"
+  },
+  "Review setup": {
+    "de": "Einrichtung prüfen",
+    "es": "Revisar configuración",
+    "fr": "Vérifier la configuration",
+    "ja": "セットアップを確認",
+    "zh-Hans": "检查设置",
+    "zh-Hant": "檢查設定"
+  },
+  "Review this transfer to %@. Passwords and private keys never leave this device.": {
+    "de": "Prüfe diese Übertragung an %@. Passwörter und private Keys verlassen dieses Gerät nie.",
+    "es": "Revisa esta transferencia a %@. Las contraseñas y las claves privadas nunca salen de este dispositivo.",
+    "fr": "Vérifiez ce transfert vers %@. Les mots de passe et les clés privées ne quittent jamais cet appareil.",
+    "ja": "%@ への転送内容を確認してください。パスワードや秘密鍵がこのデバイスの外に出ることはありません。",
+    "zh-Hans": "请检查此次向 %@ 的传输。密码和私钥绝不会离开此设备。",
+    "zh-Hant": "請檢查此次向 %@ 的傳輸。密碼和私密金鑰絕不會離開此裝置。"
+  },
+  "Runs a read-only host check to verify the integration state for this terminal.": {
+    "de": "Prüft den Host ohne Änderungen, um den Integrationszustand dieses Terminals zu verifizieren.",
+    "es": "Realiza una comprobación de solo lectura del host para verificar el estado de la integración de este terminal.",
+    "fr": "Effectue une vérification en lecture seule de l'hôte pour vérifier l'état de l'intégration de ce terminal.",
+    "ja": "このターミナルの連携状態を検証するため、ホストを読み取り専用で確認します。",
+    "zh-Hans": "以只读方式检查主机，验证此终端的集成状态。",
+    "zh-Hant": "以唯讀方式檢查主機，驗證此終端機的整合狀態。"
+  },
+  "SENT BYTES (newest first)": {
+    "de": "GESENDETE BYTES (neueste zuerst)",
+    "es": "BYTES ENVIADOS (más recientes primero)",
+    "fr": "OCTETS ENVOYÉS (plus récents en premier)",
+    "ja": "送信バイト（新しい順）",
+    "zh-Hans": "已发送的字节（最新在前）",
+    "zh-Hant": "已傳送的位元組（最新在前）"
+  },
+  "SKIPPED": {
+    "de": "ÜBERSPRUNGEN",
+    "es": "OMITIDO",
+    "fr": "IGNORÉ",
+    "ja": "スキップ済み",
+    "zh-Hans": "已跳过",
+    "zh-Hant": "已略過"
+  },
+  "Scan with your other device": {
+    "de": "Mit deinem anderen Gerät scannen",
+    "es": "Escanea con tu otro dispositivo",
+    "fr": "Scannez avec votre autre appareil",
+    "ja": "もう一方のデバイスでスキャン",
+    "zh-Hans": "使用另一台设备扫描",
+    "zh-Hant": "使用另一台裝置掃描"
+  },
+  "Security settings changed during pairing. Review the settings and start again.": {
+    "de": "Die Sicherheitseinstellungen haben sich während der Kopplung geändert. Prüfe die Einstellungen und beginne erneut.",
+    "es": "Los ajustes de seguridad cambiaron durante el emparejamiento. Revisa los ajustes y vuelve a empezar.",
+    "fr": "Les réglages de sécurité ont changé pendant l'association. Vérifiez-les et recommencez.",
+    "ja": "ペアリング中にセキュリティ設定が変更されました。設定を確認してやり直してください。",
+    "zh-Hans": "配对期间安全设置发生了更改。请检查设置并重新开始。",
+    "zh-Hant": "配對期間安全設定發生了變更。請檢查設定並重新開始。"
+  },
+  "Send": {
+    "de": "Senden",
+    "es": "Enviar",
+    "fr": "Envoyer",
+    "ja": "送信",
+    "zh-Hans": "发送",
+    "zh-Hant": "傳送"
+  },
+  "Setup copied": {
+    "de": "Einrichtung kopiert",
+    "es": "Configuración copiada",
+    "fr": "Configuration copiée",
+    "ja": "セットアップをコピーしました",
+    "zh-Hans": "设置已复制",
+    "zh-Hant": "設定已複製"
+  },
+  "Setup copied. Waiting for the sender to authorize access.": {
+    "de": "Einrichtung kopiert. Warte auf die Zugriffsautorisierung durch den Sender.",
+    "es": "Configuración copiada. Esperando a que el emisor autorice el acceso.",
+    "fr": "Configuration copiée. En attente de l'autorisation d'accès par l'émetteur.",
+    "ja": "セットアップをコピーしました。送信側によるアクセスの承認を待っています。",
+    "zh-Hans": "设置已复制。正在等待发送方授权访问。",
+    "zh-Hant": "設定已複製。正在等待傳送方授權存取。"
+  },
+  "Show": {
+    "de": "Anzeigen",
+    "es": "Mostrar",
+    "fr": "Afficher",
+    "ja": "表示",
+    "zh-Hans": "显示",
+    "zh-Hant": "顯示"
+  },
+  "Show terminal": {
+    "de": "Terminal anzeigen",
+    "es": "Mostrar terminal",
+    "fr": "Afficher le terminal",
+    "ja": "ターミナルを表示",
+    "zh-Hans": "显示终端",
+    "zh-Hant": "顯示終端機"
+  },
+  "Skip": {
+    "de": "überspringen",
+    "es": "Omitir",
+    "fr": "Passer",
+    "ja": "スキップ",
+    "zh-Hans": "跳过",
+    "zh-Hant": "跳過"
+  },
+  "Software-backed key. It is not hardware protected.": {
+    "de": "Softwarebasierter Key. Er ist nicht durch Hardware geschützt.",
+    "es": "Clave basada en software. No está protegida por hardware.",
+    "fr": "Clé logicielle. Elle n'est pas protégée par le matériel.",
+    "ja": "ソフトウェアベースのキーです。ハードウェアでは保護されていません。",
+    "zh-Hans": "软件密钥，未受硬件保护。",
+    "zh-Hant": "軟體金鑰，未受硬體保護。"
+  },
+  "Some hosts still need access setup. Review the results below before connecting.": {
+    "de": "Für einige Hosts muss der Zugriff noch eingerichtet werden. Prüfe die Ergebnisse unten, bevor du dich verbindest.",
+    "es": "Aún hay que configurar el acceso a algunos hosts. Revisa los resultados de abajo antes de conectarte.",
+    "fr": "L'accès à certains hôtes reste à configurer. Vérifiez les résultats ci-dessous avant de vous connecter.",
+    "ja": "一部のホストではアクセスの設定が必要です。接続する前に、以下の結果を確認してください。",
+    "zh-Hans": "部分主机仍需设置访问权限。连接前，请检查下方结果。",
+    "zh-Hant": "部分主機仍需設定存取權限。連線前，請檢查下方結果。"
+  },
+  "Some hosts still need attention.": {
+    "de": "Einige Hosts brauchen noch Aufmerksamkeit.",
+    "es": "Algunos hosts aún necesitan atención.",
+    "fr": "Certains hôtes demandent encore votre attention.",
+    "ja": "一部のホストでまだ対応が必要です。",
+    "zh-Hans": "部分主机仍需处理。",
+    "zh-Hant": "部分主機仍需處理。"
+  },
+  "Terminal actions require a current, PID-proven agent binding.": {
+    "de": "Terminalaktionen erfordern eine aktuelle, per PID verifizierte Agenten-Zuordnung.",
+    "es": "Las acciones del terminal requieren un vínculo vigente con el agente, verificado por PID.",
+    "fr": "Les actions du terminal nécessitent une liaison actuelle avec l'agent, vérifiée par PID.",
+    "ja": "ターミナル操作には、PID で検証された現在有効なエージェントとの紐付けが必要です。",
+    "zh-Hans": "终端操作需要当前有效且经 PID 验证的智能体绑定。",
+    "zh-Hant": "終端機操作需要目前有效且經 PID 驗證的智慧體繫結。"
+  },
+  "Tessera": {
+    "de": "Tessera",
+    "es": "Tessera",
+    "fr": "Tessera",
+    "ja": "Tessera",
+    "zh-Hans": "Tessera",
+    "zh-Hant": "Tessera"
+  },
+  "The agent keeps working while this waits": {
+    "de": "Der Agent arbeitet weiter, während dies wartet",
+    "es": "El agente sigue trabajando mientras esto espera",
+    "fr": "L'agent continue de travailler pendant cette attente",
+    "ja": "回答待ちの間もエージェントは作業を続けます",
+    "zh-Hans": "等待回答时，智能体会继续工作",
+    "zh-Hant": "等待回答時，智慧體會繼續工作"
+  },
+  "The continuation channel could not be authenticated.": {
+    "de": "Der Fortsetzungskanal konnte nicht authentifiziert werden.",
+    "es": "No se pudo autenticar el canal de continuación.",
+    "fr": "L'authentification du canal de reprise a échoué.",
+    "ja": "継続用チャネルを認証できませんでした。",
+    "zh-Hans": "无法认证接力通道。",
+    "zh-Hant": "無法驗證接續通道。"
+  },
+  "The continuation could not be completed safely.": {
+    "de": "Die Fortsetzung konnte nicht sicher abgeschlossen werden.",
+    "es": "No se pudo completar la continuación de forma segura.",
+    "fr": "La reprise n'a pas pu être effectuée en toute sécurité.",
+    "ja": "継続を安全に完了できませんでした。",
+    "zh-Hans": "无法安全完成接力。",
+    "zh-Hant": "無法安全完成接續。"
+  },
+  "The continuation could not be completed.": {
+    "de": "Die Fortsetzung konnte nicht abgeschlossen werden.",
+    "es": "No se pudo completar la continuación.",
+    "fr": "La reprise n'a pas pu être effectuée.",
+    "ja": "継続を完了できませんでした。",
+    "zh-Hans": "无法完成接力。",
+    "zh-Hant": "無法完成接續。"
+  },
+  "The continuation could not be resumed after unlock.": {
+    "de": "Die Fortsetzung konnte nach dem Entsperren nicht wieder aufgenommen werden.",
+    "es": "No se pudo reanudar la continuación después del desbloqueo.",
+    "fr": "La reprise n'a pas pu être relancée après le déverrouillage.",
+    "ja": "ロック解除後に継続を再開できませんでした。",
+    "zh-Hans": "解锁后无法恢复接力。",
+    "zh-Hant": "解鎖後無法恢復接續。"
+  },
+  "The continuation descriptor is invalid.": {
+    "de": "Der Fortsetzungsdeskriptor ist ungültig.",
+    "es": "El descriptor de continuación no es válido.",
+    "fr": "Le descripteur de reprise n'est pas valide.",
+    "ja": "継続記述子が無効です。",
+    "zh-Hans": "接力描述符无效。",
+    "zh-Hant": "接續描述元無效。"
+  },
+  "The continuation is no longer current.": {
+    "de": "Die Fortsetzung ist nicht mehr aktuell.",
+    "es": "La continuación ya no está vigente.",
+    "fr": "La reprise n'est plus valide.",
+    "ja": "継続は有効ではなくなりました。",
+    "zh-Hans": "接力已失效。",
+    "zh-Hant": "接續已失效。"
+  },
+  "The helpers are installed, but no trusted lifecycle event has arrived from this agent yet. Tessera rechecks as you use it. If status remains unavailable, relaunch the agent to load its hooks.": {
+    "de": "Die Helfer sind installiert, aber von diesem Agenten ist noch kein vertrauenswürdiges Lebenszyklusereignis eingetroffen. Tessera prüft dies während der Nutzung erneut. Falls der Status weiterhin nicht verfügbar ist, starte den Agenten neu, damit er seine Hooks lädt.",
+    "es": "Los componentes auxiliares están instalados, pero aún no ha llegado ningún evento de ciclo de vida de confianza de este agente. Tessera vuelve a comprobarlo mientras lo usas. Si el estado sigue sin estar disponible, reinicia el agente para que cargue sus hooks.",
+    "fr": "Les utilitaires sont installés, mais aucun événement de cycle de vie fiable n'a encore été reçu de cet agent. Tessera revérifie pendant l'utilisation. Si l'état reste indisponible, relancez l'agent pour charger ses hooks.",
+    "ja": "ヘルパーはインストール済みですが、このエージェントから信頼できるライフサイクルイベントがまだ届いていません。Tessera は使用中に再確認します。状態を引き続き取得できない場合は、エージェントを再起動してフックを読み込んでください。",
+    "zh-Hans": "辅助程序已安装，但尚未收到此智能体发来的可信生命周期事件。Tessera 会在你使用时重新检查。如果状态仍不可用，请重新启动智能体以加载其钩子。",
+    "zh-Hant": "輔助程式已安裝，但尚未收到此智慧體傳來的可信任生命週期事件。Tessera 會在你使用時重新檢查。如果狀態仍無法使用，請重新啟動智慧體以載入其掛鉤。"
+  },
+  "The other device disconnected. Keep both devices open on the same network and start again.": {
+    "de": "Das andere Gerät hat die Verbindung getrennt. Lass beide Geräte im selben Netzwerk geöffnet und beginne erneut.",
+    "es": "El otro dispositivo se desconectó. Mantén ambos dispositivos abiertos en la misma red y vuelve a empezar.",
+    "fr": "L'autre appareil s'est déconnecté. Gardez les deux appareils ouverts sur le même réseau et recommencez.",
+    "ja": "もう一方のデバイスが切断されました。両方のデバイスを同じネットワークに接続し、開いたままにしてやり直してください。",
+    "zh-Hans": "另一台设备已断开连接。请让两台设备在同一网络中保持打开状态，然后重新开始。",
+    "zh-Hant": "另一台裝置已中斷連線。請讓兩台裝置在同一網路中保持開啟狀態，然後重新開始。"
+  },
+  "The pairing connection closed.": {
+    "de": "Die Kopplungsverbindung wurde geschlossen.",
+    "es": "Se cerró la conexión de emparejamiento.",
+    "fr": "La connexion d'association a été fermée.",
+    "ja": "ペアリング接続が閉じられました。",
+    "zh-Hans": "配对连接已关闭。",
+    "zh-Hant": "配對連線已關閉。"
+  },
+  "The pairing connection timed out.": {
+    "de": "Zeitüberschreitung der Kopplungsverbindung.",
+    "es": "Se agotó el tiempo de espera de la conexión de emparejamiento.",
+    "fr": "Le délai de la connexion d'association a expiré.",
+    "ja": "ペアリング接続がタイムアウトしました。",
+    "zh-Hans": "配对连接已超时。",
+    "zh-Hant": "配對連線已逾時。"
+  },
+  "The pairing endpoint is invalid.": {
+    "de": "Der Kopplungsendpunkt ist ungültig.",
+    "es": "El extremo de emparejamiento no es válido.",
+    "fr": "Le point de terminaison de l'association n'est pas valide.",
+    "ja": "ペアリングのエンドポイントが無効です。",
+    "zh-Hans": "配对端点无效。",
+    "zh-Hant": "配對端點無效。"
+  },
+  "The pairing network connection failed.": {
+    "de": "Die Netzwerkverbindung für die Kopplung ist fehlgeschlagen.",
+    "es": "Falló la conexión de red del emparejamiento.",
+    "fr": "La connexion réseau d'association a échoué.",
+    "ja": "ペアリング用のネットワーク接続に失敗しました。",
+    "zh-Hans": "配对网络连接失败。",
+    "zh-Hant": "配對網路連線失敗。"
+  },
+  "The password stays on this device. Configure it when you connect.": {
+    "de": "Das Passwort bleibt auf diesem Gerät. Richte es beim Verbinden ein.",
+    "es": "La contraseña permanece en este dispositivo. Configúrala al conectarte.",
+    "fr": "Le mot de passe reste sur cet appareil. Configurez-le lors de la connexion.",
+    "ja": "パスワードはこのデバイスに残ります。接続時に設定してください。",
+    "zh-Hans": "密码保留在此设备上。请在连接时配置。",
+    "zh-Hant": "密碼保留在此裝置上。請在連線時設定。"
+  },
+  "The recipient public key was installed and verified.": {
+    "de": "Der Public Key des Empfängers wurde installiert und geprüft.",
+    "es": "Se instaló y verificó la clave pública del destinatario.",
+    "fr": "La clé publique du destinataire a été installée et vérifiée.",
+    "ja": "受信側の公開鍵をインストールして確認しました。",
+    "zh-Hans": "接收方公钥已安装并验证。",
+    "zh-Hant": "接收方公開金鑰已安裝並驗證。"
+  },
+  "The security codes were rejected. Start again and compare the new code on both devices.": {
+    "de": "Die Sicherheitscodes wurden abgelehnt. Beginne erneut und vergleiche den neuen Code auf beiden Geräten.",
+    "es": "Se rechazaron los códigos de seguridad. Vuelve a empezar y compara el código nuevo en ambos dispositivos.",
+    "fr": "Les codes de sécurité ont été refusés. Recommencez et comparez le nouveau code sur les deux appareils.",
+    "ja": "セキュリティコードが拒否されました。やり直して、両方のデバイスで新しいコードを比較してください。",
+    "zh-Hans": "安全码被拒绝。请重新开始，并在两台设备上比对新的配对码。",
+    "zh-Hant": "安全碼遭拒絕。請重新開始，並在兩台裝置上比對新的配對碼。"
+  },
+  "The terminal changed before integration could be verified.": {
+    "de": "Das Terminal hat sich geändert, bevor die Integration verifiziert werden konnte.",
+    "es": "El terminal cambió antes de que se pudiera verificar la integración.",
+    "fr": "Le terminal a changé avant que l'intégration puisse être vérifiée.",
+    "ja": "連携を検証する前にターミナルが変更されました。",
+    "zh-Hans": "验证集成前，终端已发生变化。",
+    "zh-Hant": "驗證整合前，終端機已發生變化。"
+  },
+  "The transfer could not be verified. Start a fresh pairing attempt.": {
+    "de": "Die Übertragung konnte nicht verifiziert werden. Starte einen neuen Kopplungsversuch.",
+    "es": "No se pudo verificar la transferencia. Inicia un nuevo intento de emparejamiento.",
+    "fr": "Le transfert n'a pas pu être vérifié. Lancez une nouvelle tentative d'association.",
+    "ja": "転送を検証できませんでした。新しくペアリングをやり直してください。",
+    "zh-Hans": "无法验证传输。请重新尝试配对。",
+    "zh-Hant": "無法驗證傳輸。請重新嘗試配對。"
+  },
+  "These hosts were approved by the other device. You will use this device's own key; passwords and private keys are not imported.": {
+    "de": "Diese Hosts wurden vom anderen Gerät genehmigt. Du verwendest den eigenen Key dieses Geräts; Passwörter und private Keys werden nicht importiert.",
+    "es": "El otro dispositivo aprobó estos hosts. Usarás la clave propia de este dispositivo; no se importan contraseñas ni claves privadas.",
+    "fr": "Ces hôtes ont été approuvés par l'autre appareil. Vous utiliserez la propre clé de cet appareil ; les mots de passe et les clés privées ne sont pas importés.",
+    "ja": "これらのホストはもう一方のデバイスで承認されています。このデバイス固有のキーを使用します。パスワードや秘密鍵は読み込まれません。",
+    "zh-Hans": "这些主机已由另一台设备批准。你将使用此设备自己的密钥，不会导入密码或私钥。",
+    "zh-Hant": "這些主機已由另一台裝置核准。你將使用此裝置自己的金鑰，不會輸入密碼或私密金鑰。"
+  },
+  "This code is invalid or expired. Ask the other device to show a new pairing code.": {
+    "de": "Dieser Code ist ungültig oder abgelaufen. Lass auf dem anderen Gerät einen neuen Kopplungscode anzeigen.",
+    "es": "Este código no es válido o ha caducado. Pide al otro dispositivo que muestre un código de emparejamiento nuevo.",
+    "fr": "Ce code n'est pas valide ou a expiré. Affichez un nouveau code d'association sur l'autre appareil.",
+    "ja": "このコードは無効か、有効期限が切れています。もう一方のデバイスで新しいペアリングコードを表示してください。",
+    "zh-Hans": "此配对码无效或已过期。请在另一台设备上显示新的配对码。",
+    "zh-Hant": "此配對碼無效或已過期。請在另一台裝置上顯示新的配對碼。"
+  },
+  "This device confirmed the code. Confirm the same code on the other screen to continue.": {
+    "de": "Dieses Gerät hat den Code bestätigt. Bestätige denselben Code auf dem anderen Bildschirm, um fortzufahren.",
+    "es": "Este dispositivo confirmó el código. Confirma el mismo código en la otra pantalla para continuar.",
+    "fr": "Cet appareil a confirmé le code. Confirmez le même code sur l'autre écran pour continuer.",
+    "ja": "このデバイスではコードを確認済みです。もう一方の画面でも同じコードを確認して続けてください。",
+    "zh-Hans": "此设备已确认配对码。请在另一个屏幕上确认相同的配对码以继续。",
+    "zh-Hant": "此裝置已確認配對碼。請在另一個螢幕上確認相同的配對碼以繼續。"
+  },
+  "This device did not prove its key is hardware protected. Grant access only to hosts you intend the paired device to reach.": {
+    "de": "Dieses Gerät hat den Hardware-Schutz seines Keys nicht nachgewiesen. Gewähre nur Zugriff auf Hosts, die das gekoppelte Gerät erreichen soll.",
+    "es": "Este dispositivo no demostró que su clave esté protegida por hardware. Concede acceso solo a los hosts a los que quieras que acceda el dispositivo emparejado.",
+    "fr": "Cet appareil n'a pas prouvé que sa clé est protégée par le matériel. N'accordez l'accès qu'aux hôtes que l'appareil associé doit pouvoir atteindre.",
+    "ja": "このデバイスは、キーがハードウェアで保護されていることを証明していません。ペアリング済みデバイスからのアクセスを意図したホストにのみ、アクセスを許可してください。",
+    "zh-Hans": "此设备未能证明其密钥受硬件保护。请仅授予你希望配对设备能够访问的主机的权限。",
+    "zh-Hant": "此裝置未能證明其金鑰受硬體保護。請僅授予你希望配對裝置能夠存取的主機的權限。"
+  },
+  "This live agent has no proven provider conversation identity. Transcript history, search, cost, changes, spawn, and fork remain unavailable.": {
+    "de": "Dieser Live-Agent hat keine verifizierte Konversationsidentität beim Anbieter. Transkriptverlauf, Suche, Kosten, Änderungen sowie das Starten und Abzweigen bleiben nicht verfügbar.",
+    "es": "Este agente activo no tiene una identidad de conversación verificada del proveedor. El historial de transcripciones, la búsqueda, el coste, los cambios, la creación de agentes y la bifurcación siguen sin estar disponibles.",
+    "fr": "Cet agent actif n'a pas d'identité de conversation vérifiée auprès du fournisseur. L'historique des transcriptions, la recherche, le coût, les modifications, la création d'agents et la bifurcation restent indisponibles.",
+    "ja": "この稼働中のエージェントには、検証済みのプロバイダの会話識別情報がありません。トランスクリプト履歴、検索、コスト、変更、新規起動、分岐は引き続き利用できません。",
+    "zh-Hans": "此运行中的智能体没有经过验证的提供方对话标识。会话记录历史、搜索、费用、变更、启动和分支功能仍不可用。",
+    "zh-Hant": "此執行中的智慧體沒有經過驗證的提供者對話識別資訊。對話記錄歷程、搜尋、費用、變更、啟動和分支功能仍無法使用。"
+  },
+  "This pairing code expired. Show a new code on the sending device and scan it again.": {
+    "de": "Dieser Kopplungscode ist abgelaufen. Zeige auf dem sendenden Gerät einen neuen Code an und scanne ihn erneut.",
+    "es": "Este código de emparejamiento ha caducado. Muestra un código nuevo en el dispositivo emisor y vuelve a escanearlo.",
+    "fr": "Ce code d'association a expiré. Affichez un nouveau code sur l'appareil émetteur et scannez-le à nouveau.",
+    "ja": "このペアリングコードの有効期限が切れています。送信側のデバイスで新しいコードを表示し、もう一度スキャンしてください。",
+    "zh-Hans": "此配对码已过期。请在发送设备上显示新的配对码并重新扫描。",
+    "zh-Hant": "此配對碼已過期。請在傳送裝置上顯示新的配對碼並重新掃描。"
+  },
+  "Types one guarded source command so agents launched here report precise status. Continue only at an empty bash or zsh prompt.": {
+    "de": "Gibt einen abgesicherten source-Befehl ein, damit hier gestartete Agenten ihren Status präzise melden. Fahre nur an einer leeren bash- oder zsh-Eingabeaufforderung fort.",
+    "es": "Introduce un comando source protegido para que los agentes iniciados aquí informen de su estado con precisión. Continúa solo en un prompt vacío de bash o zsh.",
+    "fr": "Saisit une commande source protégée pour que les agents lancés ici rapportent leur état avec précision. Continuez uniquement depuis une invite bash ou zsh vide.",
+    "ja": "ここで起動するエージェントが正確な状態を報告するよう、ガード付きの source コマンドを1つ入力します。bash または zsh の空のプロンプトでのみ続行してください。",
+    "zh-Hans": "输入一条带保护的 source 命令，使在此启动的智能体能准确报告状态。请仅在空白的 bash 或 zsh 提示符下继续。",
+    "zh-Hant": "輸入一條附保護的 source 指令，使在此啟動的智慧體能準確回報狀態。請僅在空白的 bash 或 zsh 提示字元下繼續。"
+  },
+  "Updates Tessera's Agent Center helpers. OpenCode or Pi inventory refreshes automatically when installation completes.": {
+    "de": "Aktualisiert die Agent Center-Helfer von Tessera. Das OpenCode- oder Pi-Inventar wird nach Abschluss der Installation automatisch aktualisiert.",
+    "es": "Actualiza los componentes auxiliares de Agent Center de Tessera. El inventario de OpenCode o Pi se actualiza automáticamente al terminar la instalación.",
+    "fr": "Met à jour les utilitaires Agent Center de Tessera. L'inventaire d'OpenCode ou de Pi s'actualise automatiquement à la fin de l'installation.",
+    "ja": "Tessera の Agent Center ヘルパーを更新します。インストールが完了すると、OpenCode または Pi の一覧が自動的に更新されます。",
+    "zh-Hans": "更新 Tessera 的 Agent Center 辅助程序。安装完成后，OpenCode 或 Pi 清单会自动刷新。",
+    "zh-Hant": "更新 Tessera 的 Agent Center 輔助程式。安裝完成後，OpenCode 或 Pi 清單會自動重新整理。"
+  },
+  "Updates Tessera's helpers immediately without interrupting this agent. Existing hooks use the new scripts on their next event. If lifecycle status remains unavailable, relaunch the agent to load its hooks.": {
+    "de": "Aktualisiert die Helfer von Tessera sofort, ohne diesen Agenten zu unterbrechen. Vorhandene Hooks verwenden beim nächsten Ereignis die neuen Skripte. Falls der Lebenszyklusstatus weiterhin nicht verfügbar ist, starte den Agenten neu, damit er seine Hooks lädt.",
+    "es": "Actualiza los componentes auxiliares de Tessera de inmediato sin interrumpir a este agente. Los hooks existentes usarán los nuevos scripts en su próximo evento. Si el estado del ciclo de vida sigue sin estar disponible, reinicia el agente para que cargue sus hooks.",
+    "fr": "Met à jour immédiatement les utilitaires de Tessera sans interrompre cet agent. Les hooks existants utilisent les nouveaux scripts lors de leur prochain événement. Si l'état du cycle de vie reste indisponible, relancez l'agent pour charger ses hooks.",
+    "ja": "このエージェントを中断せずに、Tessera のヘルパーをすぐに更新します。既存のフックは次のイベントから新しいスクリプトを使用します。ライフサイクルの状態を引き続き取得できない場合は、エージェントを再起動してフックを読み込んでください。",
+    "zh-Hans": "立即更新 Tessera 的辅助程序，不会中断此智能体。现有钩子将在下次事件中使用新脚本。如果生命周期状态仍不可用，请重新启动智能体以加载其钩子。",
+    "zh-Hant": "立即更新 Tessera 的輔助程式，不會中斷此智慧體。現有掛鉤將在下次事件中使用新指令稿。如果生命週期狀態仍無法使用，請重新啟動智慧體以載入其掛鉤。"
+  },
+  "Waiting for the other device to connect": {
+    "de": "Warte auf die Verbindung des anderen Geräts",
+    "es": "Esperando a que se conecte el otro dispositivo",
+    "fr": "En attente de la connexion de l'autre appareil",
+    "ja": "もう一方のデバイスの接続を待機中",
+    "zh-Hans": "正在等待另一台设备连接",
+    "zh-Hant": "正在等待另一台裝置連接"
+  },
+  "Writes Tessera hook files and provider shims without typing into the running foreground program. Helper updates take effect immediately. Relaunch is only needed if the agent has not loaded its lifecycle hooks.": {
+    "de": "Schreibt Tessera-Hook-Dateien und Provider-Shims, ohne Eingaben an das laufende Vordergrundprogramm zu senden. Aktualisierte Helfer wirken sofort. Ein Neustart ist nur nötig, wenn der Agent seine Lebenszyklus-Hooks noch nicht geladen hat.",
+    "es": "Escribe los archivos de hook y los shims de proveedor de Tessera sin introducir texto en el programa que se ejecuta en primer plano. Las actualizaciones de los componentes auxiliares se aplican de inmediato. Solo hace falta reiniciar si el agente no ha cargado los hooks del ciclo de vida.",
+    "fr": "Écrit les fichiers de hook et les shims de fournisseur de Tessera sans saisir de texte dans le programme au premier plan. Les mises à jour des utilitaires prennent effet immédiatement. Une relance n'est nécessaire que si l'agent n'a pas chargé ses hooks de cycle de vie.",
+    "ja": "実行中のフォアグラウンドプログラムに入力せずに、Tessera のフックファイルとプロバイダのシムを書き込みます。ヘルパーの更新はすぐに反映されます。再起動が必要なのは、エージェントがライフサイクルフックを読み込んでいない場合のみです。",
+    "zh-Hans": "写入 Tessera 的钩子文件和提供方垫片，不会向前台运行的程序输入文本。辅助程序更新会立即生效。只有在智能体尚未加载生命周期钩子时，才需要重新启动。",
+    "zh-Hant": "寫入 Tessera 的掛鉤檔案和提供者墊片，不會向前景執行的程式輸入文字。輔助程式更新會立即生效。只有在智慧體尚未載入生命週期掛鉤時，才需要重新啟動。"
+  },
+  "Writes Tessera hook files and provider shims, then loads them when this exact terminal is at an empty bash or zsh prompt. It never types into a running agent or another program.": {
+    "de": "Schreibt Tessera-Hook-Dateien und Provider-Shims und lädt sie, sobald genau dieses Terminal an einer leeren bash- oder zsh-Eingabeaufforderung steht. Gibt nie Text in einen laufenden Agenten oder ein anderes Programm ein.",
+    "es": "Escribe los archivos de hook y los shims de proveedor de Tessera y los carga cuando este terminal está en un prompt vacío de bash o zsh. Nunca introduce texto en un agente en ejecución ni en otro programa.",
+    "fr": "Écrit les fichiers de hook et les shims de fournisseur de Tessera, puis les charge lorsque ce terminal précis affiche une invite bash ou zsh vide. Ne saisit jamais de texte dans un agent en cours d'exécution ni dans un autre programme.",
+    "ja": "Tessera のフックファイルとプロバイダのシムを書き込み、このターミナルが bash または zsh の空のプロンプトになったときに読み込みます。実行中のエージェントや他のプログラムに入力することはありません。",
+    "zh-Hans": "写入 Tessera 的钩子文件和提供方垫片，待此终端处于空白的 bash 或 zsh 提示符时再加载。绝不会向运行中的智能体或其他程序输入文本。",
+    "zh-Hant": "寫入 Tessera 的掛鉤檔案和提供者墊片，待此終端機處於空白的 bash 或 zsh 提示字元時再載入。絕不會向執行中的智慧體或其他程式輸入文字。"
+  },
+  "Your answer": {
+    "de": "Deine Antwort",
+    "es": "Tu respuesta",
+    "fr": "Votre réponse",
+    "ja": "回答を入力",
+    "zh-Hans": "你的回答",
+    "zh-Hant": "你的回答"
+  },
+  "Your devices are verified. Choose the hosts and data to copy on the device sending setup; the receiving device will review them next.": {
+    "de": "Deine Geräte sind verifiziert. Wähle auf dem Gerät, das die Einrichtung sendet, die zu kopierenden Hosts und Daten; anschließend prüft sie das empfangende Gerät.",
+    "es": "Tus dispositivos están verificados. Elige los hosts y los datos que quieres copiar en el dispositivo que envía la configuración; el receptor los revisará después.",
+    "fr": "Vos appareils sont vérifiés. Choisissez les hôtes et les données à copier sur l'appareil qui envoie la configuration ; l'appareil destinataire les vérifiera ensuite.",
+    "ja": "デバイスの検証が完了しました。セットアップを送信するデバイスで、コピーするホストとデータを選んでください。その後、受信側のデバイスで内容を確認します。",
+    "zh-Hans": "设备已验证。请在发送设置的设备上选择要复制的主机和数据，接收设备随后会检查这些内容。",
+    "zh-Hant": "裝置已驗證。請在傳送設定的裝置上選擇要複製的主機和資料，接收裝置隨後會檢查這些內容。"
+  },
+  "Your devices have finished this transfer.": {
+    "de": "Deine Geräte haben diese Übertragung abgeschlossen.",
+    "es": "Tus dispositivos han terminado esta transferencia.",
+    "fr": "Vos appareils ont terminé ce transfert.",
+    "ja": "デバイス間の転送が完了しました。",
+    "zh-Hans": "设备已完成此次传输。",
+    "zh-Hant": "裝置已完成此次傳輸。"
+  },
+  "Your devices have finished this transfer. Review the results below.": {
+    "de": "Deine Geräte haben diese Übertragung abgeschlossen. Prüfe die Ergebnisse unten.",
+    "es": "Tus dispositivos han terminado esta transferencia. Revisa los resultados de abajo.",
+    "fr": "Vos appareils ont terminé ce transfert. Vérifiez les résultats ci-dessous.",
+    "ja": "デバイス間の転送が完了しました。以下の結果を確認してください。",
+    "zh-Hans": "设备已完成此次传输。请检查下方结果。",
+    "zh-Hant": "裝置已完成此次傳輸。請檢查下方結果。"
+  },
+  "You’re ready": {
+    "de": "Alles bereit",
+    "es": "Todo listo",
+    "fr": "Tout est prêt",
+    "ja": "準備完了",
+    "zh-Hans": "一切就绪",
+    "zh-Hant": "一切就緒"
+  },
+  "answer %@": {
+    "de": "mit %@ antworten",
+    "es": "responder %@",
+    "fr": "répondre %@",
+    "ja": "%@ と回答",
+    "zh-Hans": "回答 %@",
+    "zh-Hant": "回答 %@"
+  },
+  "approve transfer": {
+    "de": "Übertragung genehmigen",
+    "es": "aprobar transferencia",
+    "fr": "approuver le transfert",
+    "ja": "転送を承認",
+    "zh-Hans": "批准传输",
+    "zh-Hant": "核准傳輸"
+  },
+  "attention": {
+    "de": "Aufmerksamkeit",
+    "es": "atención",
+    "fr": "attention",
+    "ja": "要対応",
+    "zh-Hans": "待处理",
+    "zh-Hant": "待處理"
+  },
+  "automatic": {
+    "de": "automatisch",
+    "es": "automático",
+    "fr": "automatique",
+    "ja": "自動",
+    "zh-Hans": "自动",
+    "zh-Hant": "自動"
+  },
+  "branch name": {
+    "de": "Branch-Name",
+    "es": "nombre de la rama",
+    "fr": "nom de la branche",
+    "ja": "ブランチ名",
+    "zh-Hans": "分支名称",
+    "zh-Hant": "分支名稱"
+  },
+  "bring your setup with you": {
+    "de": "nimm deine Einrichtung mit",
+    "es": "llévate tu configuración contigo",
+    "fr": "emportez votre configuration avec vous",
+    "ja": "セットアップをそのまま引き継ぐ",
+    "zh-Hans": "把你的配置带过来",
+    "zh-Hant": "把你的設定帶過來"
+  },
+  "clear wire": {
+    "de": "Übertragungsanzeige leeren",
+    "es": "borrar registro de transmisión",
+    "fr": "effacer la trace de transmission",
+    "ja": "通信記録を消去",
+    "zh-Hans": "清空传输记录",
+    "zh-Hant": "清空傳輸記錄"
+  },
+  "collapsed": {
+    "de": "eingeklappt",
+    "es": "contraído",
+    "fr": "réduit",
+    "ja": "折りたたみ",
+    "zh-Hans": "已折叠",
+    "zh-Hant": "已收合"
+  },
+  "command return": {
+    "de": "Befehlstaste und Return",
+    "es": "Comando y Retorno",
+    "fr": "Commande et Retour",
+    "ja": "コマンドと Return",
+    "zh-Hans": "Command 加回车",
+    "zh-Hant": "Command 加 Return"
+  },
+  "context compacted · tap to expand": {
+    "de": "Kontext komprimiert · zum Aufklappen tippen",
+    "es": "contexto compactado · toca para expandir",
+    "fr": "contexte compacté · touchez pour développer",
+    "ja": "コンテキストを圧縮済み · タップで展開",
+    "zh-Hans": "上下文已压缩 · 轻点展开",
+    "zh-Hant": "上下文已壓縮 · 點一下展開"
+  },
+  "continue focused session with QR": {
+    "de": "fokussierte Sitzung per QR fortsetzen",
+    "es": "continuar la sesión enfocada con QR",
+    "fr": "continuer la session ciblée avec QR",
+    "ja": "フォーカス中のセッションを QR で続ける",
+    "zh-Hans": "通过 QR 继续当前聚焦的会话",
+    "zh-Hant": "透過 QR 繼續目前聚焦的工作階段"
+  },
+  "continue on another device": {
+    "de": "auf einem anderen Gerät fortsetzen",
+    "es": "continuar en otro dispositivo",
+    "fr": "continuer sur un autre appareil",
+    "ja": "別のデバイスで続ける",
+    "zh-Hans": "在另一台设备上继续",
+    "zh-Hant": "在另一台裝置上繼續"
+  },
+  "copy": {
+    "de": "kopieren",
+    "es": "copiar",
+    "fr": "copier",
+    "ja": "コピー",
+    "zh-Hans": "复制",
+    "zh-Hant": "複製"
+  },
+  "current branch": {
+    "de": "aktueller Branch",
+    "es": "rama actual",
+    "fr": "branche actuelle",
+    "ja": "現在のブランチ",
+    "zh-Hans": "当前分支",
+    "zh-Hant": "目前分支"
+  },
+  "describe the task…": {
+    "de": "Aufgabe beschreiben…",
+    "es": "describe la tarea…",
+    "fr": "décrivez la tâche…",
+    "ja": "タスクの内容…",
+    "zh-Hans": "描述任务…",
+    "zh-Hant": "描述任務…"
+  },
+  "dictate message": {
+    "de": "Nachricht diktieren",
+    "es": "dictar mensaje",
+    "fr": "dicter un message",
+    "ja": "メッセージを音声入力",
+    "zh-Hans": "口述消息",
+    "zh-Hant": "口述訊息"
+  },
+  "diff": {
+    "de": "Diff",
+    "es": "diff",
+    "fr": "diff",
+    "ja": "差分",
+    "zh-Hans": "差异",
+    "zh-Hant": "差異"
+  },
+  "dismissed": {
+    "de": "geschlossen",
+    "es": "cerrado",
+    "fr": "fermé",
+    "ja": "閉じた状態",
+    "zh-Hans": "已关闭",
+    "zh-Hant": "已關閉"
+  },
+  "does not match": {
+    "de": "stimmt nicht überein",
+    "es": "no coincide",
+    "fr": "ne correspond pas",
+    "ja": "一致しない",
+    "zh-Hans": "不一致",
+    "zh-Hant": "不一致"
+  },
+  "expanded": {
+    "de": "aufgeklappt",
+    "es": "expandido",
+    "fr": "développé",
+    "ja": "展開済み",
+    "zh-Hans": "已展开",
+    "zh-Hant": "已展開"
+  },
+  "finishing the approved transfer": {
+    "de": "genehmigte Übertragung wird abgeschlossen",
+    "es": "finalizando la transferencia aprobada",
+    "fr": "finalisation du transfert approuvé",
+    "ja": "承認済みの転送を完了中",
+    "zh-Hans": "正在完成已批准的传输",
+    "zh-Hant": "正在完成已核准的傳輸"
+  },
+  "fork": {
+    "de": "Abzweigung",
+    "es": "bifurcación",
+    "fr": "bifurcation",
+    "ja": "分岐",
+    "zh-Hans": "分支",
+    "zh-Hant": "分支"
+  },
+  "fork thread": {
+    "de": "Thread abzweigen",
+    "es": "bifurcar hilo",
+    "fr": "bifurquer le fil",
+    "ja": "スレッドを分岐",
+    "zh-Hans": "创建对话分支",
+    "zh-Hant": "建立對話分支"
+  },
+  "group threads": {
+    "de": "Threads gruppieren",
+    "es": "agrupar hilos",
+    "fr": "regrouper les fils",
+    "ja": "スレッドをグループ化",
+    "zh-Hans": "分组对话",
+    "zh-Hant": "將對話分組"
+  },
+  "import paired setup": {
+    "de": "gekoppelte Einrichtung importieren",
+    "es": "importar configuración emparejada",
+    "fr": "importer la configuration de l'appareil associé",
+    "ja": "ペアリング済みデバイスのセットアップを読み込む",
+    "zh-Hans": "导入配对设备的设置",
+    "zh-Hant": "輸入配對裝置的設定"
+  },
+  "import setup": {
+    "de": "Einrichtung importieren",
+    "es": "importar configuración",
+    "fr": "importer la configuration",
+    "ja": "セットアップを読み込む",
+    "zh-Hans": "导入设置",
+    "zh-Hant": "輸入設定"
+  },
+  "isolation": {
+    "de": "Isolierung",
+    "es": "aislamiento",
+    "fr": "isolation",
+    "ja": "分離",
+    "zh-Hans": "隔离",
+    "zh-Hant": "隔離"
+  },
+  "less": {
+    "de": "weniger",
+    "es": "menos",
+    "fr": "moins",
+    "ja": "表示を減らす",
+    "zh-Hans": "收起",
+    "zh-Hant": "收合"
+  },
+  "live": {
+    "de": "live",
+    "es": "en directo",
+    "fr": "en direct",
+    "ja": "ライブ",
+    "zh-Hans": "实时",
+    "zh-Hant": "即時"
+  },
+  "live preview · awaiting missing text": {
+    "de": "Live-Vorschau · warte auf fehlenden Text",
+    "es": "vista previa en directo · esperando el texto que falta",
+    "fr": "aperçu en direct · en attente du texte manquant",
+    "ja": "ライブプレビュー · 不足しているテキストを待機中",
+    "zh-Hans": "实时预览 · 等待缺失文本",
+    "zh-Hant": "即時預覽 · 等待缺漏文字"
+  },
+  "live preview · syncing transcript": {
+    "de": "Live-Vorschau · Transkript wird synchronisiert",
+    "es": "vista previa en directo · sincronizando la transcripción",
+    "fr": "aperçu en direct · synchronisation de la transcription",
+    "ja": "ライブプレビュー · トランスクリプトを同期中",
+    "zh-Hans": "实时预览 · 正在同步会话记录",
+    "zh-Hant": "即時預覽 · 正在同步對話記錄"
+  },
+  "live terminals": {
+    "de": "Live-Terminals",
+    "es": "terminales activos",
+    "fr": "terminaux actifs",
+    "ja": "稼働中のターミナル",
+    "zh-Hans": "运行中的终端",
+    "zh-Hant": "執行中的終端機"
+  },
+  "loading messages": {
+    "de": "Nachrichten werden geladen",
+    "es": "cargando mensajes",
+    "fr": "chargement des messages",
+    "ja": "メッセージを読み込み中",
+    "zh-Hans": "正在加载消息",
+    "zh-Hant": "正在載入訊息"
+  },
+  "mac mini  ·  tmux": {
+    "de": "mac mini  ·  tmux",
+    "es": "mac mini  ·  tmux",
+    "fr": "mac mini  ·  tmux",
+    "ja": "mac mini  ·  tmux",
+    "zh-Hans": "mac mini  ·  tmux",
+    "zh-Hant": "mac mini  ·  tmux"
+  },
+  "mac-mini · build": {
+    "de": "mac-mini · build",
+    "es": "mac-mini · build",
+    "fr": "mac-mini · build",
+    "ja": "mac-mini · build",
+    "zh-Hans": "mac-mini · build",
+    "zh-Hant": "mac-mini · build"
+  },
+  "name this fork…": {
+    "de": "Abzweigung benennen…",
+    "es": "nombra esta bifurcación…",
+    "fr": "nommez cette bifurcation…",
+    "ja": "分岐に名前を付ける…",
+    "zh-Hans": "为此分支命名…",
+    "zh-Hant": "為此分支命名…"
+  },
+  "name this thread…": {
+    "de": "Thread benennen…",
+    "es": "nombra este hilo…",
+    "fr": "nommez ce fil…",
+    "ja": "スレッドに名前を付ける…",
+    "zh-Hans": "为此对话命名…",
+    "zh-Hant": "為此對話命名…"
+  },
+  "needs you · transcript identity unavailable": {
+    "de": "braucht dich · Transkriptidentität nicht verfügbar",
+    "es": "te necesita · identidad de la transcripción no disponible",
+    "fr": "a besoin de vous · identité de la transcription indisponible",
+    "ja": "対応が必要 · トランスクリプトの識別情報を取得できません",
+    "zh-Hans": "需要你处理 · 会话记录标识不可用",
+    "zh-Hant": "需要你處理 · 對話記錄識別資訊無法使用"
+  },
+  "new": {
+    "de": "neu",
+    "es": "nuevo",
+    "fr": "nouveau",
+    "ja": "新規",
+    "zh-Hans": "新建",
+    "zh-Hant": "新增"
+  },
+  "new agent": {
+    "de": "neuer Agent",
+    "es": "nuevo agente",
+    "fr": "nouvel agent",
+    "ja": "新規エージェント",
+    "zh-Hans": "新建智能体",
+    "zh-Hant": "新增智慧體"
+  },
+  "new pane": {
+    "de": "neuer Bereich",
+    "es": "panel nuevo",
+    "fr": "nouveau volet",
+    "ja": "新規ペイン",
+    "zh-Hans": "新建窗格",
+    "zh-Hant": "新增窗格"
+  },
+  "new worktree + branch": {
+    "de": "neuer Worktree + Branch",
+    "es": "nuevo worktree + rama",
+    "fr": "nouveau worktree + branche",
+    "ja": "新規 worktree + ブランチ",
+    "zh-Hans": "新建 worktree + 分支",
+    "zh-Hant": "新增 worktree + 分支"
+  },
+  "next: choose data": {
+    "de": "weiter: Daten auswählen",
+    "es": "siguiente: elegir datos",
+    "fr": "suivant : choisir les données",
+    "ja": "次へ：データを選択",
+    "zh-Hans": "下一步：选择数据",
+    "zh-Hant": "下一步：選擇資料"
+  },
+  "next: review transfer": {
+    "de": "weiter: Übertragung prüfen",
+    "es": "siguiente: revisar transferencia",
+    "fr": "suivant : vérifier le transfert",
+    "ja": "次へ：転送内容を確認",
+    "zh-Hans": "下一步：检查传输",
+    "zh-Hant": "下一步：檢查傳輸"
+  },
+  "no file changes in this thread yet.": {
+    "de": "noch keine Dateiänderungen in diesem Thread.",
+    "es": "aún no hay cambios de archivos en este hilo.",
+    "fr": "aucune modification de fichier dans ce fil pour le moment.",
+    "ja": "このスレッドにはまだファイルの変更がありません。",
+    "zh-Hans": "此对话中尚无文件变更。",
+    "zh-Hant": "此對話中尚無檔案變更。"
+  },
+  "no threads": {
+    "de": "keine Threads",
+    "es": "no hay hilos",
+    "fr": "aucun fil",
+    "ja": "スレッドなし",
+    "zh-Hans": "没有对话",
+    "zh-Hant": "沒有對話"
+  },
+  "no transcript matches on connected sources": {
+    "de": "keine Transkripttreffer auf verbundenen Quellen",
+    "es": "sin coincidencias en las transcripciones de las fuentes conectadas",
+    "fr": "aucune correspondance dans les transcriptions des sources connectées",
+    "ja": "接続済みのソースに一致するトランスクリプトがありません",
+    "zh-Hans": "已连接的来源中没有匹配的会话记录",
+    "zh-Hant": "已連線的來源中沒有相符的對話記錄"
+  },
+  "open terminal": {
+    "de": "Terminal öffnen",
+    "es": "abrir terminal",
+    "fr": "ouvrir le terminal",
+    "ja": "ターミナルを開く",
+    "zh-Hans": "打开终端",
+    "zh-Hant": "開啟終端機"
+  },
+  "open terminal to answer": {
+    "de": "Terminal zum Antworten öffnen",
+    "es": "abrir terminal para responder",
+    "fr": "ouvrir le terminal pour répondre",
+    "ja": "ターミナルを開いて回答",
+    "zh-Hans": "打开终端以回答",
+    "zh-Hant": "開啟終端機以回答"
+  },
+  "pair with Android or another Apple Account": {
+    "de": "mit Android oder einem anderen Apple Account koppeln",
+    "es": "emparejar con Android u otra cuenta de Apple",
+    "fr": "associer avec Android ou un autre compte Apple",
+    "ja": "Android または別の Apple Account とペアリング",
+    "zh-Hans": "与 Android 或其他 Apple 账户配对",
+    "zh-Hant": "與 Android 或其他 Apple 帳號配對"
+  },
+  "pairing stopped": {
+    "de": "Kopplung gestoppt",
+    "es": "emparejamiento detenido",
+    "fr": "association arrêtée",
+    "ja": "ペアリングを停止しました",
+    "zh-Hans": "配对已停止",
+    "zh-Hant": "配對已停止"
+  },
+  "pane": {
+    "de": "Bereich",
+    "es": "panel",
+    "fr": "volet",
+    "ja": "ペイン",
+    "zh-Hans": "窗格",
+    "zh-Hant": "窗格"
+  },
+  "paste": {
+    "de": "einfügen",
+    "es": "pegar",
+    "fr": "coller",
+    "ja": "ペースト",
+    "zh-Hans": "粘贴",
+    "zh-Hant": "貼上"
+  },
+  "paste pairing text": {
+    "de": "Kopplungstext einfügen",
+    "es": "pegar texto de emparejamiento",
+    "fr": "coller le texte d'association",
+    "ja": "ペアリングテキストをペースト",
+    "zh-Hans": "粘贴配对文本",
+    "zh-Hant": "貼上配對文字"
+  },
+  "placement": {
+    "de": "Platzierung",
+    "es": "ubicación",
+    "fr": "emplacement",
+    "ja": "配置",
+    "zh-Hans": "放置位置",
+    "zh-Hant": "放置位置"
+  },
+  "preparing a local pairing channel": {
+    "de": "lokaler Kopplungskanal wird vorbereitet",
+    "es": "preparando un canal local de emparejamiento",
+    "fr": "préparation d'un canal d'association local",
+    "ja": "ローカルのペアリング用チャネルを準備中",
+    "zh-Hans": "正在准备本地配对通道",
+    "zh-Hant": "正在準備本機配對通道"
+  },
+  "provider totals": {
+    "de": "Gesamtsummen des Anbieters",
+    "es": "totales del proveedor",
+    "fr": "totaux du fournisseur",
+    "ja": "プロバイダの集計",
+    "zh-Hans": "提供方汇总",
+    "zh-Hant": "提供者彙總"
+  },
+  "scan pairing code": {
+    "de": "Kopplungscode scannen",
+    "es": "escanear código de emparejamiento",
+    "fr": "scanner le code d'association",
+    "ja": "ペアリングコードをスキャン",
+    "zh-Hans": "扫描配对码",
+    "zh-Hant": "掃描配對碼"
+  },
+  "search all transcripts": {
+    "de": "alle Transkripte durchsuchen",
+    "es": "buscar en todas las transcripciones",
+    "fr": "rechercher dans toutes les transcriptions",
+    "ja": "すべてのトランスクリプトを検索",
+    "zh-Hans": "搜索所有会话记录",
+    "zh-Hant": "搜尋所有對話記錄"
+  },
+  "select a thread": {
+    "de": "Thread auswählen",
+    "es": "selecciona un hilo",
+    "fr": "sélectionnez un fil",
+    "ja": "スレッドを選択",
+    "zh-Hans": "选择对话",
+    "zh-Hant": "選擇對話"
+  },
+  "send": {
+    "de": "senden",
+    "es": "enviar",
+    "fr": "envoyer",
+    "ja": "送信",
+    "zh-Hans": "发送",
+    "zh-Hant": "傳送"
+  },
+  "send setup and continue focused session": {
+    "de": "Einrichtung senden und fokussierte Sitzung fortsetzen",
+    "es": "enviar configuración y continuar la sesión enfocada",
+    "fr": "envoyer la configuration et continuer la session ciblée",
+    "ja": "セットアップを送信してフォーカス中のセッションを続ける",
+    "zh-Hans": "发送设置并继续当前聚焦的会话",
+    "zh-Hant": "傳送設定並繼續目前聚焦的工作階段"
+  },
+  "send setup with QR": {
+    "de": "Einrichtung per QR senden",
+    "es": "enviar configuración con QR",
+    "fr": "envoyer la configuration avec QR",
+    "ja": "QR でセットアップを送信",
+    "zh-Hans": "通过 QR 发送设置",
+    "zh-Hant": "透過 QR 傳送設定"
+  },
+  "sending message": {
+    "de": "Nachricht wird gesendet",
+    "es": "enviando mensaje",
+    "fr": "envoi du message",
+    "ja": "メッセージを送信中",
+    "zh-Hans": "正在发送消息",
+    "zh-Hant": "正在傳送訊息"
+  },
+  "set up & continue": {
+    "de": "einrichten & fortsetzen",
+    "es": "configurar y continuar",
+    "fr": "configurer et continuer",
+    "ja": "セットアップして続ける",
+    "zh-Hans": "设置并继续",
+    "zh-Hant": "設定並繼續"
+  },
+  "set up and continue": {
+    "de": "einrichten und fortsetzen",
+    "es": "configurar y continuar",
+    "fr": "configurer et continuer",
+    "ja": "セットアップして続ける",
+    "zh-Hans": "设置并继续",
+    "zh-Hant": "設定並繼續"
+  },
+  "shape": {
+    "de": "Ausrichtung",
+    "es": "orientación",
+    "fr": "orientation",
+    "ja": "分割方向",
+    "zh-Hans": "分割方向",
+    "zh-Hant": "分割方向"
+  },
+  "split a pane": {
+    "de": "Bereich teilen",
+    "es": "dividir un panel",
+    "fr": "diviser un volet",
+    "ja": "ペインを分割",
+    "zh-Hans": "分割窗格",
+    "zh-Hant": "分割窗格"
+  },
+  "split down": {
+    "de": "nach unten teilen",
+    "es": "dividir abajo",
+    "fr": "diviser vers le bas",
+    "ja": "下に分割",
+    "zh-Hans": "向下分割",
+    "zh-Hant": "向下分割"
+  },
+  "split right": {
+    "de": "Rechts teilen",
+    "es": "dividir a la derecha",
+    "fr": "diviser à droite",
+    "ja": "右に分割",
+    "zh-Hans": "向右分割",
+    "zh-Hant": "向右分割"
+  },
+  "status unavailable · transcript identity unavailable": {
+    "de": "Status nicht verfügbar · Transkriptidentität nicht verfügbar",
+    "es": "estado no disponible · identidad de la transcripción no disponible",
+    "fr": "état indisponible · identité de la transcription indisponible",
+    "ja": "状態を取得できません · トランスクリプトの識別情報を取得できません",
+    "zh-Hans": "状态不可用 · 会话记录标识不可用",
+    "zh-Hant": "狀態無法使用 · 對話記錄識別資訊無法使用"
+  },
+  "subagents · %lld": {
+    "de": "Unteragenten · %lld",
+    "es": "subagentes · %lld",
+    "fr": "sous-agents · %lld",
+    "ja": "サブエージェント · %lld",
+    "zh-Hans": "子智能体 · %lld",
+    "zh-Hant": "子智慧體 · %lld"
+  },
+  "summary": {
+    "de": "Zusammenfassung",
+    "es": "resumen",
+    "fr": "résumé",
+    "ja": "概要",
+    "zh-Hans": "摘要",
+    "zh-Hant": "摘要"
+  },
+  "switch session": {
+    "de": "Sitzung wechseln",
+    "es": "cambiar sesión",
+    "fr": "changer de session",
+    "ja": "セッションを切り替え",
+    "zh-Hans": "切换会话",
+    "zh-Hant": "切換工作階段"
+  },
+  "thinking · tap to expand": {
+    "de": "denkt nach · zum Aufklappen tippen",
+    "es": "pensando · toca para expandir",
+    "fr": "réflexion · touchez pour développer",
+    "ja": "思考中 · タップで展開",
+    "zh-Hans": "正在思考 · 轻点展开",
+    "zh-Hant": "正在思考 · 點一下展開"
+  },
+  "threads": {
+    "de": "Threads",
+    "es": "hilos",
+    "fr": "fils",
+    "ja": "スレッド",
+    "zh-Hans": "对话",
+    "zh-Hant": "對話"
+  },
+  "tmux %lld": {
+    "de": "tmux %lld",
+    "es": "tmux %lld",
+    "fr": "tmux %lld",
+    "ja": "tmux %lld",
+    "zh-Hans": "tmux %lld",
+    "zh-Hant": "tmux %lld"
+  },
+  "transcript matches": {
+    "de": "Transkripttreffer",
+    "es": "coincidencias en transcripciones",
+    "fr": "correspondances dans les transcriptions",
+    "ja": "トランスクリプトの検索結果",
+    "zh-Hans": "会话记录匹配结果",
+    "zh-Hant": "對話記錄相符結果"
+  },
+  "ubuntu-prod · dev": {
+    "de": "ubuntu-prod · dev",
+    "es": "ubuntu-prod · dev",
+    "fr": "ubuntu-prod · dev",
+    "ja": "ubuntu-prod · dev",
+    "zh-Hans": "ubuntu-prod · dev",
+    "zh-Hant": "ubuntu-prod · dev"
+  },
+  "use code": {
+    "de": "Code verwenden",
+    "es": "usar código",
+    "fr": "utiliser le code",
+    "ja": "コードを使用",
+    "zh-Hans": "使用配对码",
+    "zh-Hant": "使用配對碼"
+  },
+  "waiting for setup selection": {
+    "de": "warte auf die Auswahl der Einrichtung",
+    "es": "esperando la selección de configuración",
+    "fr": "en attente du choix de configuration",
+    "ja": "セットアップの選択を待機中",
+    "zh-Hans": "正在等待选择设置",
+    "zh-Hant": "正在等待選擇設定"
+  },
+  "waiting for the other device": {
+    "de": "warte auf das andere Gerät",
+    "es": "esperando al otro dispositivo",
+    "fr": "en attente de l'autre appareil",
+    "ja": "もう一方のデバイスを待っています",
+    "zh-Hans": "正在等待另一台设备",
+    "zh-Hant": "正在等待另一台裝置"
+  },
+  "what should this branch do differently…": {
+    "de": "was soll diese Abzweigung anders machen…",
+    "es": "qué debería hacer diferente esta rama…",
+    "fr": "que doit faire cette branche différemment…",
+    "ja": "この分岐では何を変えますか…",
+    "zh-Hans": "这个分支应该有哪些不同做法…",
+    "zh-Hant": "這個分支應該有哪些不同做法…"
+  },
+  "window": {
+    "de": "Fenster",
+    "es": "ventana",
+    "fr": "fenêtre",
+    "ja": "ウインドウ",
+    "zh-Hans": "窗口",
+    "zh-Hant": "視窗"
+  },
+  "window %@ · %@": {
+    "de": "Fenster %@ · %@",
+    "es": "ventana %@ · %@",
+    "fr": "fenêtre %@ · %@",
+    "ja": "ウインドウ %@ · %@",
+    "zh-Hans": "窗口 %@ · %@",
+    "zh-Hant": "視窗 %@ · %@"
+  },
+  "workflow": {
+    "de": "Ablauf",
+    "es": "flujo de trabajo",
+    "fr": "flux de travail",
+    "ja": "ワークフロー",
+    "zh-Hans": "工作流",
+    "zh-Hant": "工作流程"
+  },
+  "…": {
+    "de": "…",
+    "es": "…",
+    "fr": "…",
+    "ja": "…",
+    "zh-Hans": "…",
+    "zh-Hant": "…"
+  },
+  "−%lld": {
+    "de": "−%lld",
+    "es": "−%lld",
+    "fr": "−%lld",
+    "ja": "−%lld",
+    "zh-Hans": "−%lld",
+    "zh-Hant": "−%lld"
+  },
+  "⌘↩︎": {
+    "de": "⌘↩︎",
+    "es": "⌘↩︎",
+    "fr": "⌘↩︎",
+    "ja": "⌘↩︎",
+    "zh-Hans": "⌘↩︎",
+    "zh-Hant": "⌘↩︎"
+  }
+}

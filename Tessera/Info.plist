@@ -13,6 +13,16 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<!-- A forwarded port is reached at http://127.0.0.1:<port>, and the
+	     in-app tunnel browser is a WKWebView, so ATS applies to it. Local
+	     networking is the narrow exemption that covers exactly that:
+	     loopback, .local, and dotless hostnames. No arbitrary-loads
+	     escape hatch — a tunnel to a public host still gets full ATS. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.bambouville.TesseraApp.upload.*</string>
@@ -26,7 +36,9 @@
 		<string>_tessera-bootstrap._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Find a nearby iPhone or iPad to transfer your Tessera setup securely.</string>
+	<string>Find a nearby device to transfer your Tessera setup securely.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Scan a Tessera pairing code from your nearby device.</string>
 	<key>NSUserActivityTypes</key>
 	<array>
 		<string>com.bambouville.tessera.session</string>
