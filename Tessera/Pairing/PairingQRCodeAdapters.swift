@@ -161,8 +161,14 @@ final class PairingQRCodeScannerModel: NSObject, ObservableObject {
             }
             session.addInput(input)
             session.addOutput(output)
+            guard Self.requestQRCodes(from: output) else {
+                session.removeOutput(output)
+                session.removeInput(input)
+                session.commitConfiguration()
+                publish(.unavailable, generation: generation)
+                return
+            }
             output.setMetadataObjectsDelegate(self, queue: sessionQueue)
-            output.metadataObjectTypes = [.qr]
             didConfigureSession = true
             session.commitConfiguration()
             guard lifecycle.isActive(generation) else {
@@ -174,6 +180,16 @@ final class PairingQRCodeScannerModel: NSObject, ObservableObject {
         } catch {
             publish(.unavailable, generation: generation)
         }
+    }
+
+    /// Asks `output` for QR codes if its camera can report them. Asking for a
+    /// type it cannot report raises an Objective-C exception that `catch`
+    /// cannot stop, and Mac cameras differ from the iPhone's; without QR the
+    /// scanner falls back to typing the code.
+    nonisolated static func requestQRCodes(from output: AVCaptureMetadataOutput) -> Bool {
+        guard output.availableMetadataObjectTypes.contains(.qr) else { return false }
+        output.metadataObjectTypes = [.qr]
+        return true
     }
 
     nonisolated private func publish(

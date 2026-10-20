@@ -399,11 +399,7 @@ struct FilesPanelView: View {
             .onChange(of: pathFieldFocused) { _, _ in syncTextEntryFlag() }
             .onChange(of: showingQuickOpen) { _, _ in syncTextEntryFlag() }
             .quickLookPreview(item: $controller.presentedPreview)
-            .sheet(item: $controller.presentedShare) { request in
-                ActivityShareSheet(items: request.items)
-                    .ignoresSafeArea()
-                    .presentationDetents([.medium, .large])
-            }
+            .systemShareSheet(item: $controller.presentedShare) { $0.items }
             .fileImporter(
                 isPresented: $controller.showingUploadPicker,
                 allowedContentTypes: [.item],

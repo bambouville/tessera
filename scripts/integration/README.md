@@ -522,12 +522,12 @@ so the deterministic lane is arranged to avoid both:
 - At most two run-scoped simulators are booted at once. XCTest-hosted unit
   lanes (offline oracles, sync/security units, live transports, jump hosts)
   share one iPad; UI harness lanes (scroll wiring, compact navigation,
-  continuity) share a second, fresh iPad while their private phones are
-  created and deleted inside each lane; the three Nearby-bootstrap
-  scenarios share one origin/recipient pair and reinstall the app between
-  scenarios. `TESSERA_KEEP_TEST_SIM_BOOTED=1` is how the runner asks a lane
-  to leave the shared iPad for the next one; the runner's exit trap still
-  deletes every recorded device.
+  continuity, system presentation) share a second, fresh iPad while their
+  private phones are created and deleted inside each lane; the three
+  Nearby-bootstrap scenarios share one origin/recipient pair and reinstall
+  the app between scenarios. `TESSERA_KEEP_TEST_SIM_BOOTED=1` is how the
+  runner asks a lane to leave the shared iPad for the next one; the
+  runner's exit trap still deletes every recorded device.
 - Simulator boots are bounded (`TESSERA_INTEGRATION_SIMULATOR_BOOT_TIMEOUT`,
   default 300 s); a device that never boots fails its lane instead of
   hanging the suite.
@@ -573,6 +573,7 @@ case fails review validation.
 | AG1 | visual + deterministic, host-free V2 fixture | The DEBUG Agent Center v2 fixture uses only shared-domain snapshots—no SSH, provider process, remote mutation, lifecycle install, notification delivery, command-palette route, or background assertion. Its primary iPad capture matches the V2 mockup’s existing navigation, grouped thread list, selected structured thread, prompt controls, and New/Fork entry. XCUITest verifies every fixture list group and displayed block kind, Live/Activity/Changes, loading search, source-changed error, degraded no-proven-transcript terminal fallback, compact list → detail → back with `Open terminal to answer`, and dark/light, Dynamic Type, and action/list/composer keyboard-focus states. The same case retains screenshots only for the stated three-option and idle SwipePad fan variants. Production installer/artifact checks run separately as `agent_integration_scripts`; real Claude/Codex transitions remain the opt-in `TESSERA_RUN_REAL_AGENT_E2E=1` lane. Composer hardware keys (Return/⇧Return newline with focus kept, ⌘Return/⌃Return send, empty ⌘Return ignored, ⌘↩ hint under the send glyph) need real simulator HID because XCUITest `typeKey` never delivers Return: run `scripts/uitest/run-agent-composer-hardware-keys.sh [ipad\|iphone]` (AXe from XcodeBuildMCP; about four minutes, including the new simulator's keyboard settling). |
 | AG4 | visual + deterministic, host-free iPad + iPhone (+ Android) | The DEBUG `prompt` scene renders the live prompt cards Core derives from real Claude Code, Codex and Kimi screens: question with a freeform row, text typed in the terminal, multi-select, review, text-only, Codex's deferred async questions and a permission. XCUITest asserts every option, control and text-field identifier and keeps the answer field inside the transcript and above the software keyboard on a disposable iPhone; answers are logged, never written to a terminal. With `TESSERA_RUN_ANDROID_NATIVE_SSH_GATE=1`, the case also runs `scripts/android/run-agent-prompt-gate.sh` on a disposable AVD at tablet and phone sizes, which asserts the exact answer each option, text and control sends. The real TUIs' keystroke grammar is the opt-in credential-free `TESSERA_RUN_AGENT_PROMPT_TUI=1` lane. Physical-device answering remains manual. |
 | MG1 | partial, high value | A disposable on-disk SwiftData store containing all three models and the `[String]` field is closed, reopened through the migration plan, and value-checked. Archived previous-release stores and physical upgrades remain release gates. |
+| System pickers and share sheets | hosted UIKit + programmatic UI, iPad + iPhone (Mac from Xcode) | `run-system-presentation-tests.sh` runs `SystemPresentationTests` in the app: key import, Agent Center attachments, diagnostics export, public-key, Markdown and Files sharing each reach the UIKit controller really presented, then replay the Mac's order (the picker leaves before it reports), anchor rebuilds, deferred presentations, requests cleared or replaced while their controller is up, share sheets reopened at once (the Mac cancels one opened while the last share session is closing), and the QR metadata guard. The picker UI tests choose a seeded key in Files. UI tests cannot run on the Mac, and a build launched from the shell stalls behind macOS's "damaged" dialog, so the Mac pass runs the same class from Xcode on My Mac (Designed for iPad); Save to Files itself remains manual there. |
 
 The ordinary ~660 unit/package tests remain the fast per-change lane. This
 suite runs only the new matrix-derived offline oracles plus the opt-in live and

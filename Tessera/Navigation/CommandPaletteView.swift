@@ -45,6 +45,10 @@ struct CommandPaletteView: View {
     @State private var edgeScrollDirection = 0
     @State private var edgeScrollTarget: WindowId?
     @State private var edgeScrollTask: Task<Void, Never>?
+    /// A dropped row keeps its lifted surface while it slides into the
+    /// committed order; bare, it slid over its own pane rows.
+    @State private var settlingWindowID: WindowId?
+    @State private var settleTask: Task<Void, Never>?
     @State private var pendingDropRevealWindowID: WindowId?
     @State private var dropRevealWindowID: WindowId?
     @State private var dropRevealToken = 0
@@ -331,6 +335,9 @@ struct CommandPaletteView: View {
                             .contextMenu {
                                 tmuxMenu(for: entry)
                             }
+                            // Only a direct child of the stack can draw above
+                            // the rows the dragged one slides over.
+                            .zIndex(isLiftedWindow(entry) ? 1 : 0)
                         }
                         if !palette.results.isEmpty {
                             sectionHeader("sessions")
@@ -693,6 +700,13 @@ struct CommandPaletteView: View {
                 Button(paletteMoveTitle(intent)) { moveWindow(window, intent: intent) }
             }
         }
+        // The lifted row slides over its neighbours; give it the panel's
+        // surface so their text doesn't show through it.
+        .background {
+            if isLiftedWindow(window.id) {
+                Rectangle().fill(.regularMaterial).overlay(T.inputBg)
+            }
+        }
         .offset(y: paletteDragOffset(for: window.id))
         .scaleEffect(draggingWindowID == window.id ? 1.02 : 1)
         .shadow(
@@ -700,7 +714,15 @@ struct CommandPaletteView: View {
             radius: draggingWindowID == window.id ? 7 : 0,
             y: draggingWindowID == window.id ? 3 : 0
         )
-        .zIndex(draggingWindowID == window.id ? 10 : 0)
+    }
+
+    private func isLiftedWindow(_ id: WindowId) -> Bool {
+        id == draggingWindowID || id == settlingWindowID
+    }
+
+    private func isLiftedWindow(_ entry: CommandPaletteEntry) -> Bool {
+        guard case .window(let window) = entry else { return false }
+        return isLiftedWindow(window.id)
     }
 
     private func paneRow(
@@ -875,6 +897,7 @@ struct CommandPaletteView: View {
             if windowDrag.isDragging { updatePaletteEdgeAutoScroll(pointerY: location.y) }
         case .ended(let cancelled):
             let baseline = windowDrag.baseline
+            if let lifted = draggingWindowID { holdLiftWhileSettling(lifted) }
             let destination = windowDrag.finish(cancelled: cancelled || !palette.canReorderTmuxWindows)
             stopPaletteEdgeAutoScroll()
             palette.restoreWindowOrder(baseline)
@@ -883,6 +906,17 @@ struct CommandPaletteView: View {
                 pendingDropRevealWindowID = window.id
                 onTmuxMutation(.moveWindow(sessionID: sessionID, windowID: window.id, move: .position(destination)))
             }
+        }
+    }
+
+    private func holdLiftWhileSettling(_ id: WindowId) {
+        settleTask?.cancel()
+        settlingWindowID = id
+        settleTask = Task { @MainActor in
+            // Outlasts the drop reveal's scroll and the row's slide.
+            try? await Task.sleep(for: .milliseconds(450))
+            guard !Task.isCancelled else { return }
+            settlingWindowID = nil
         }
     }
 
@@ -1086,6 +1120,7 @@ private struct TmuxPaletteReorderSurface: UIViewRepresentable {
         )
         press.minimumPressDuration = 0.28
         press.allowableMovement = 10
+        press.delegate = context.coordinator
         view.addGestureRecognizer(press)
         return view
     }
@@ -1096,9 +1131,20 @@ private struct TmuxPaletteReorderSurface: UIViewRepresentable {
         view.accessibilityIdentifier = accessibilityIdentifier
     }
 
-    final class Coordinator: NSObject {
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var surface: TmuxPaletteReorderSurface
         init(surface: TmuxPaletteReorderSurface) { self.surface = surface }
+
+        /// The row's context menu starts lifting it on this same hold, and
+        /// once the reorder took the touch the row stayed hidden for the
+        /// whole drag. Everything but the list's scroll pan waits for the
+        /// hold to fail, so a held handle reorders and never opens the menu.
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            !(otherGestureRecognizer.view is UIScrollView)
+        }
 
         @objc func handle(_ recognizer: UILongPressGestureRecognizer) {
             let location = recognizer.location(in: recognizer.view?.window)

@@ -54,8 +54,8 @@ final class FilesPanelController {
         let items: [URL]
     }
 
-    /// Set when a preview/share download completes; the panel view binds
-    /// `.sheet(item:)` to these. Plain Foundation values — the controller
+    /// Set when a preview/share download completes; the panel view presents
+    /// each as an item binding. Plain Foundation values — the controller
     /// stays UIKit-free.
     var presentedPreview: PreviewRequest?
     var presentedShare: ShareRequest?

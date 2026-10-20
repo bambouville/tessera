@@ -52,6 +52,7 @@ struct KeysPageView: View {
     @State private var selectedID: UUID?
     @State private var didDefaultSelection = false
     @State private var showCopyToHostSheet = false
+    @State private var publicKeyShareVisible = false
     @State private var toastText: String?
     @State private var recoveryPassphraseAction: RecoveryPassphraseAction?
     @State private var recoveryFilePurpose: RecoveryFilePurpose?
@@ -815,15 +816,19 @@ struct KeysPageView: View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
                 copyPublicKeyButton(for: key)
-                sharePublicKeyButton(for: key)
+                sharePublicKeyButton()
                 copyPublicKeyToHostButton(for: key)
             }
 
             VStack(alignment: .leading, spacing: 8) {
                 copyPublicKeyButton(for: key)
-                sharePublicKeyButton(for: key)
+                sharePublicKeyButton()
                 copyPublicKeyToHostButton(for: key)
             }
+        }
+        // Outside ViewThatFits, which builds both layouts of the row.
+        .systemShareSheet(isPresented: $publicKeyShareVisible) {
+            [PublicKeySharePayload(publicKey: key.authorizedKeysLine).shareValue]
         }
     }
 
@@ -845,10 +850,10 @@ struct KeysPageView: View {
         .accessibilityHint("Copies public material only")
     }
 
-    private func sharePublicKeyButton(for key: StoredKey) -> some View {
-        let payload = PublicKeySharePayload(publicKey: key.authorizedKeysLine)
-
-        return ShareLink(item: payload.shareValue) {
+    private func sharePublicKeyButton() -> some View {
+        Button {
+            publicKeyShareVisible = true
+        } label: {
             Text("share")
                 .font(Typography.tesseraMono(size: 13))
                 .foregroundStyle(T.fg)

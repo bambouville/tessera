@@ -27,11 +27,14 @@ export TESSERA_INTEGRATION_SIMULATOR_STATE_DIR="$RUN_DIR/simulator"
 export TESSERA_INTEGRATION_SIMULATOR_UDID_FILE="$RUN_DIR/simulator/simulator_udid"
 record_pid=''
 test_pid=''
+# The probe holds each milestone until its screenshot is acknowledged here.
+ack_dir="$RUN_DIR/acks"
 cleanup() {
   local status=$?
   fail_closed_status "$status" || status=1
   trap - EXIT
   if [[ -n "$test_pid" ]]; then
+    touch "$ack_dir/abort" 2>/dev/null || true
     pkill -TERM -P "$test_pid" 2>/dev/null || true
     kill "$test_pid" 2>/dev/null || true
     wait "$test_pid" 2>/dev/null || true
@@ -65,6 +68,9 @@ if [[ "${2:-}" != --phone ]]; then
     -only-testing:TesseraUITests/VisualCaptureProbe/testSetLandscapeOnly \
     > "$RUN_DIR/orientation.log" 2>&1
 fi
+rm -rf "$ack_dir"
+mkdir -p "$ack_dir"
+xcrun simctl spawn "$udid" launchctl setenv TESSERA_VISUAL_CAPTURE_ACK_DIR "$ack_dir"
 xcrun simctl io "$udid" recordVideo --codec=h264 "$RUN_DIR/interaction.mp4" > "$RUN_DIR/video.log" 2>&1 &
 record_pid=$!
 TESSERA_VISUAL_CAPTURE=1 integration_xcodebuild test-without-building \
@@ -84,6 +90,7 @@ while kill -0 "$test_pid" 2>/dev/null; do
       else
         "$HERE/normalize-landscape-screenshot.sh" "$RUN_DIR/screenshots/$milestone.raw.png" "$RUN_DIR/screenshots/$milestone.png" >/dev/null
       fi
+      touch "$ack_dir/$milestone.ack"
     fi
   done
   sleep 0.2
