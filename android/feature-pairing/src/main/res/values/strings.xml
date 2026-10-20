@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Semantic projection copy belongs to the native catalog, never the ABI. -->
+    <string name="setup_stage_scan">Scan</string>
+    <string name="setup_stage_discover">Discover</string>
+    <string name="setup_stage_verify">Verify</string>
+    <string name="setup_stage_choose">Choose</string>
+    <string name="setup_stage_transfer">Transfer</string>
+    <string name="setup_stage_connect">Connect</string>
+    <string name="setup_current_stage">%1$s · %2$d of %3$d</string>
+    <string name="setup_access_authorized">AUTHORIZED</string>
+    <string name="setup_access_already_authorized">ALREADY AUTHORIZED</string>
+    <string name="setup_access_copied">CONFIGURATION COPIED</string>
+    <string name="setup_access_password">PASSWORD ON FIRST CONNECT</string>
+    <string name="setup_access_failed">FAILED</string>
+    <string name="setup_access_skipped">SKIPPED</string>
+    <string name="setup_access_not_selected">NOT SELECTED</string>
+    <string name="setup_access_not_imported">NOT IMPORTED</string>
+    <string name="setup_access_excluded">EXCLUDED</string>
+    <string name="setup_access_uncertain">ACCESS NOT VERIFIED</string>
+    <string name="setup_failure_expired">This pairing code expired. Show a new code on the sending device and scan it again.</string>
+    <string name="setup_failure_mismatch">The security codes were rejected. Start again and compare the new code on both devices.</string>
+    <string name="setup_failure_disconnected">The other device disconnected. Keep both devices open on the same network and start again.</string>
+    <string name="setup_failure_locked">Pairing stopped because a device locked. Unlock both devices and start again.</string>
+    <string name="setup_failure_policy">Security settings changed during pairing. Review the settings and start again.</string>
+    <string name="setup_failure_protocol">The transfer could not be verified. Start a fresh pairing attempt.</string>
+    <string name="setup_failure_other">Pairing did not finish. Review any copied hosts before starting again.</string>
+    <plurals name="setup_grants_selected">
+        <item quantity="one">%d public-key grant selected</item>
+        <item quantity="other">%d public-key grants selected</item>
+    </plurals>
+    <plurals name="setup_categories_selected">
+        <item quantity="one">%d optional data category selected</item>
+        <item quantity="other">%d optional data categories selected</item>
+    </plurals>
+</resources>

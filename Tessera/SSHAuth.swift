@@ -347,6 +347,9 @@ final class SSHAuthenticationPolicyStore {
         _ = allocateGeneration()
         policies.removeAll()
         BiometricSessionCache.shared.revokeAll()
+        // Retry loops that answered `unknown` while the lock refused them
+        // (mosh liveness probes, reconnect backoffs) can succeed now.
+        ConnectivityRetryWake.shared.signal(reason: "unlock")
     }
 
     func setInitialLockState(_ locked: Bool) {

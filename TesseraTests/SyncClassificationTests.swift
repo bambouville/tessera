@@ -56,6 +56,7 @@ final class SyncClassificationTests: XCTestCase {
     func test_deviceLocalFieldsNeverSync() {
         for field in [
             "requireFaceIDToUnlock", "autoLockMinutes", "lockWhenBackgrounded",
+            "hideContentInAppSwitcher",
             "requireBiometricForKeyUse", "terminalBackgroundImageID",
             "sessionRestorePolicy", "hasSeenWelcome"
         ] {

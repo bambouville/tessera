@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import SwiftData
 import XCTest
@@ -163,6 +164,15 @@ final class EnrollmentCoordinatorTests: XCTestCase {
             authorizer: originAuthorizer,
             grantEngine: grantEngine
         )
+        var expectedHostIDsObservedDuringSave: [UUID?] = []
+        let saveObservation = NotificationCenter.default.publisher(for: ModelContext.didSave)
+            .filter { ($0.object as? ModelContext) === fixture.context }
+            .sink { _ in
+                expectedHostIDsObservedDuringSave.append(
+                    requester.expectedCredentialPolicyMutationHostID
+                )
+            }
+        defer { saveObservation.cancel() }
         requester.onRequesterEnrollmentCompleted = { completedHosts.append($0.id) }
 
         origin.acceptOriginStreams(
@@ -211,6 +221,15 @@ final class EnrollmentCoordinatorTests: XCTestCase {
         XCTAssertEqual(authCountSeenByInstaller, 1, "installer crossed the grant boundary before fresh auth")
         XCTAssertEqual(installedGrants.count, 1)
         XCTAssertEqual(completedHosts, [fixture.requesterHost.id])
+        XCTAssertEqual(
+            expectedHostIDsObservedDuringSave.last ?? nil,
+            fixture.requesterHost.id,
+            "the production did-save hook must see the exact expected requester host"
+        )
+        XCTAssertNil(
+            requester.expectedCredentialPolicyMutationHostID,
+            "the save-scoped credential capability must not survive terminal completion"
+        )
 
         let installed = try XCTUnwrap(installedGrants.first)
         XCTAssertEqual(installed.hostID, fixture.originHost.id)
@@ -329,12 +348,61 @@ final class EnrollmentCoordinatorTests: XCTestCase {
             return true
         }
         XCTAssertEqual(originAuthorizer.reasons.count, 1)
-        XCTAssertEqual(grantEngine.authorizationRequestCount, 1)
+        // The shared enrollment machine owns fresh owner authorization. A
+        // denial must stop before the legacy Apple installer capability is
+        // minted, so the grant engine cannot observe or authorize the request.
+        XCTAssertEqual(grantEngine.authorizationRequestCount, 0)
         XCTAssertEqual(grantEngine.installationAttemptCount, 0)
         XCTAssertEqual(installCount, 0)
         XCTAssertTrue(originMetadata.record(for: fixture.key.id).remoteInstallations.isEmpty)
         XCTAssertTrue(requesterMetadata.record(for: fixture.key.id).remoteInstallations.isEmpty)
         XCTAssertNil(fixture.requesterHost.identity)
+    }
+
+    func testSecurityPolicyChangeInvalidatesActiveSharedEnrollment() async throws {
+        let streams = makeDuplexPair()
+        let fixture = try makeFixture(
+            requesterInput: streams.firstInput,
+            requesterOutput: streams.firstOutput
+        )
+        let requester = EnrollmentCoordinator(
+            authorizer: Authorizer(decision: .denied),
+            deviceKeyProvider: { _ in fixture.key }
+        )
+        let origin = EnrollmentCoordinator(
+            authorizer: Authorizer(decision: .fresh),
+            grantEngine: SyncDeviceAccessGrantEngine(testInstaller: { _ in
+                XCTFail("policy-invalidated enrollment reached the installer")
+            })
+        )
+
+        origin.acceptOriginStreams(
+            input: streams.secondInput,
+            output: streams.secondOutput,
+            focusedHost: fixture.originHost
+        )
+        requester.requestAuthorization(
+            through: fixture.activity,
+            for: fixture.requesterHost,
+            authorizationHostID: fixture.originHost.id,
+            in: fixture.context,
+            defaultKeyUseOwnerAuthentication: false
+        )
+        await waitUntil("origin receives request before policy invalidation") {
+            if case .awaitingApproval = origin.phase { return true }
+            return false
+        }
+
+        origin.securityPolicyChanged()
+
+        await waitUntil("policy invalidation becomes terminal on both peers") {
+            guard case .failed = origin.phase,
+                  case .failed = requester.phase else { return false }
+            return true
+        }
+        guard case .failed(_, .authorizationFailed) = origin.serviceState else {
+            return XCTFail("origin did not project shared policy invalidation")
+        }
     }
 
     func testDelayedCallbackFromCancelledAttemptCannotOverwriteRetry() async throws {

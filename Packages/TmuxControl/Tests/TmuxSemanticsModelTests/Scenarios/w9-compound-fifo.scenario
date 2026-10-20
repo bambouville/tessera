@@ -1,0 +1,23 @@
+scenario w9-compound-fifo
+# cmdq_get_command / cmdq_fire_command: one guarded item per command.
+session O 80x24 w0
+control device O
+send device display -p a ; display -p b
+expect device a
+expect device b
+expect-not device %error 1
+# cmdq_next / cmdq_remove_group: the failed item drops its unguarded tail.
+send device display -p a ; select-window -t @999999 ; display -p c
+expect device a
+expect device can't find window: @999999
+expect device %error 1
+expect-not device c
+# cmd_parse_build_commands / control_error: parsing rejects the whole line.
+send device display -p a ; bogus-command ; display -p c
+expect device parse error: unknown command: bogus-command
+expect-not device a
+expect-not device c
+expect-not device %end 1
+send device display -p later
+expect device later
+expect-not device %error 1

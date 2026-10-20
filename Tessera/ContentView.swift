@@ -1,6 +1,9 @@
 import SwiftUI
 import SwiftData
 import Combine
+import TesseraCore
+import TesseraSessionCore
+import TmuxControl
 import UIKit
 #if DEBUG
 import CoreFoundation
@@ -143,13 +146,16 @@ struct ContentView: View {
     @Environment(AppLockController.self) private var appLockController
     @Environment(OnboardingController.self) private var onboarding
     @Environment(AppPhase.self) private var appPhase
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(SwipePadProfileStore.self) private var swipePadStore
     @Environment(BellController.self) private var bellController
     @Environment(ActivityBroadcaster.self) private var activityBroadcaster
     @Environment(ContinuationCoordinator.self) private var continuationCoordinator
+    @Environment(CrossDevicePairingCoordinator.self) private var crossDevicePairingCoordinator
     @Environment(BootstrapCoordinator.self) private var bootstrapCoordinator
     @Environment(EnrollmentCoordinator.self) private var enrollmentCoordinator
     @Environment(HostAccessStore.self) private var hostAccessStore
+    @Environment(SpeechDictationController.self) private var dictationController
     /// Optional so a view mounted outside `RootView` (previews, harnesses) falls
     /// back to the shipped chords instead of trapping on a missing store.
     @Environment(ShortcutStore.self) private var shortcutStore: ShortcutStore?
@@ -162,11 +168,22 @@ struct ContentView: View {
     /// orientation-dependent on iPadOS 26 (equal in portrait, distinct in
     /// landscape), which made the portrait reveal button a no-op.
     @State private var sidebarVisible = true
+    /// Measured before a browse page applies the sidebar inset. Agent Center
+    /// uses this parent-owned width to collapse the existing sidebar without
+    /// feeding its child layout decision back into the measurement.
+    @State private var regularShellWidth: CGFloat = 0
+    /// A narrow Agent Center normally borrows the sidebar's width, but the
+    /// existing reveal control must still let the user inspect navigation.
+    /// This override lasts only until the automatic-collapse boundary changes.
+    @State private var agentCenterSidebarTemporarilyRevealed = false
     @State private var restorePrompt: SessionRestorePrompt?
     @State private var restoreAlwaysReopen = false
     @State private var didEvaluateStartupRestore = false
     #if DEBUG
     @State private var onboardingMatrixTask: Task<Void, Never>?
+    /// `TESSERA_SHOW_EDGE_PROBE`: the show coordinator's app facts, read by
+    /// `SessionShowEdgeLaunchTests` on the production shell.
+    @State private var showEdgeProbe: String?
     #endif
     @State private var hasInactivePreservedRestoreSnapshots = false
     @State private var foregroundRestoreTickTask: Task<Void, Never>?
@@ -189,6 +206,15 @@ struct ContentView: View {
 
     /// Host key verification request from any connecting session.
     @State private var hostKeyRequest: HostKeyVerificationRequest?
+
+    /// Show/hide edges for the tmux grid authority (S2′, §6.9): only a show
+    /// or a veil tap may move control. Starts in the background and locked
+    /// (fail closed) until the scene phase and the lock state are mirrored
+    /// on appear.
+    @State private var showEdges = SessionShowCoordinator(
+        appForeground: false,
+        locked: true
+    )
 
     /// Share-in ("Copy to Tessera"): staged incoming file driving the
     /// Upload sheet. Requests always park first and present only when
@@ -222,6 +248,8 @@ struct ContentView: View {
     @State private var pendingUnlimitedHostsPrompt: UnlimitedHostsPromptItem?
     @State private var bootstrapQuotaDecision: BootstrapQuotaDecisionItem?
     @State private var pendingBootstrapQuotaDecision: BootstrapQuotaDecisionItem?
+    @State private var bootstrapAgentNotificationDenied = false
+    @State private var bootstrapNotifications = BootstrapNotificationPermissionDeferral()
     /// The single in-flight entitlement wait behind a manual add. Later taps
     /// coalesce onto it instead of spawning parallel retry chains.
     @State private var admissionWaitTask: Task<Void, Never>?
@@ -237,9 +265,11 @@ struct ContentView: View {
     /// palette via the environment.
     @State private var sessionRegistry = SessionRegistry()
     @State private var commandPalette = CommandPalette()
-    // Production starts inert. `onAppear` applies the persisted experimental
-    // preference before any registered session source is allowed to discover.
-    @State private var agentCenter = AgentCenter(isEnabled: false)
+    /// Production starts inert. `onAppear` applies the persisted experimental
+    /// preference before any registered session source is allowed to discover.
+    /// The shared runtime is the only Agent Center reducer in the app shell.
+    @State private var agentCenterV2 = AgentCenterV2Coordinator()
+    @State private var programStatusCenter = ProgramStatusCenter()
     @State private var agentCenterReturnItem: SidebarItem?
 
     /// One FileBridge (dedicated SSH + SFTP) per remote endpoint, shared
@@ -250,9 +280,16 @@ struct ContentView: View {
     @State private var compactPresentation = CompactNavigationPresentation()
     @State private var continuationOverlay: ContinuationOverlayPresentation?
     @State private var continuationLiveSessionID: UUID?
+    @State private var continuationConnectionHostID: UUID?
     @State private var continuationCompletionTask: Task<Void, Never>?
     @State private var continuityBroadcastTask: Task<Void, Never>?
     @State private var continuationDraft: ContinuationDraft?
+    @State private var continuationSecurityPolicySnapshot:
+        ContinuationSecurityPolicySnapshot?
+    @State private var crossDeviceSecurityPolicySnapshot:
+        ContinuationSecurityPolicySnapshot?
+    @State private var enrollmentSecurityPolicySnapshot:
+        ContinuationSecurityPolicySnapshot?
     @State private var continuityFailureBanner: ContinuityFailureBanner?
     @State private var continuityFailureDismissTask: Task<Void, Never>?
     @State private var keysPagePresentation = KeysPagePresentationState()
@@ -292,6 +329,24 @@ struct ContentView: View {
         )
     }
 
+    /// The V2 list + detail pair can use the post-sidebar width on a regular
+    /// iPad. Below this full-shell boundary, keep the current sidebar intent
+    /// but temporarily collapse its presentation so the child receives the
+    /// full width. This is deliberately independent of the child's own
+    /// list/detail breakpoint, avoiding an inset-width feedback loop.
+    private var agentCenterAutomaticallyCollapsesSidebar: Bool {
+        !isPhone
+            && selectedItem == .agents
+            && regularShellWidth > 0
+            && regularShellWidth < 920
+    }
+
+    private var effectiveRegularSidebarVisible: Bool {
+        sidebarVisible
+            && (!agentCenterAutomaticallyCollapsesSidebar
+                || agentCenterSidebarTemporarilyRevealed)
+    }
+
     private var contentShell: some View {
         ZStack(alignment: .leading) {
             // One detail tree survives the regular/compact shell boundary.
@@ -317,7 +372,7 @@ struct ContentView: View {
                 compactNavigationShell
             }
 
-            if !isPhone && sidebarVisible && isSessionSelected {
+            if !isPhone && effectiveRegularSidebarVisible && isSessionSelected {
                 // The regular terminal remains full-width beneath the floating
                 // sidebar. This scrim prevents input from reaching it while the
                 // sidebar is open and collapses navigation when tapped.
@@ -331,7 +386,7 @@ struct ContentView: View {
                     .zIndex(1)
             }
 
-            if !isPhone && sidebarVisible {
+            if !isPhone && effectiveRegularSidebarVisible {
                 SessionSidebar(
                     activeSessions: $activeSessions,
                     selectedItem: $selectedItem,
@@ -345,15 +400,28 @@ struct ContentView: View {
         }
         // Reveal affordance for regular browse pages when the sidebar is hidden.
         .overlay(alignment: .topLeading) {
-            if !isPhone && !sidebarVisible && !isSessionSelected {
+            if !isPhone && !effectiveRegularSidebarVisible && !isSessionSelected {
                 sidebarRevealButton
                     .transition(.opacity)
             }
         }
         .ignoresSafeArea(.container, edges: isPhone ? [] : .horizontal)
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { regularShellWidth = proxy.size.width }
+                    .onChange(of: proxy.size.width) { _, width in
+                        regularShellWidth = width
+                    }
+            }
+        }
         .background(T.bg)
         .animation(.easeInOut(duration: 0.18), value: isCompactOverlaySelected)
         .animation(.easeInOut(duration: 0.24), value: sidebarVisible)
+        .animation(.easeInOut(duration: 0.24), value: agentCenterAutomaticallyCollapsesSidebar)
+        .onChange(of: agentCenterAutomaticallyCollapsesSidebar) { _, collapses in
+            if collapses { agentCenterSidebarTemporarilyRevealed = false }
+        }
         // The four chords below come from the user's keymap, not from literals:
         // these hidden buttons are the *only* registration for ⌘N (the terminal
         // container has no selector for it), so a literal here means the editor
@@ -398,7 +466,16 @@ struct ContentView: View {
         )
         .environment(sessionRegistry)
         .environment(commandPalette)
-        .environment(agentCenter)
+        .environment(agentCenterV2)
+        .environment(programStatusCenter)
+        .environment(\.programStatusObscured, programStatusObscured)
+        .onChange(of: programStatusObscured, initial: true) { _, obscured in
+            programStatusCenter.setApplicationObscured(obscured)
+        }
+        .onChange(of: appPhase.isActive, initial: true) { _, active in
+            programStatusCenter.setApplicationObscured(programStatusObscured)
+            programStatusCenter.setApplicationActive(active)
+        }
         .environment(fileBridges)
         .overlay {
             if commandPalette.isOpen {
@@ -408,6 +485,9 @@ struct ContentView: View {
                     onTmuxMutation: sessionRegistry.requestTmuxMutation,
                     onCommit: handleCommandPaletteCommit
                 )
+                // The overlay sits outside this view's environment modifiers.
+                .environment(agentCenterV2)
+                .environment(programStatusCenter)
                 .transition(.opacity)
                 .zIndex(50)
             }
@@ -425,7 +505,7 @@ struct ContentView: View {
             CompactSessionsPage(
                 activeSessions: activeSessions,
                 selectedView: $compactPresentation.sessionsView,
-                agentCenter: agentCenter,
+                agentCenterV2: agentCenterV2,
                 agentCenterEnabled: appearance.agentCenterEnabled,
                 onSelectSession: selectSession,
                 onDisconnectSession: dismiss
@@ -510,8 +590,30 @@ struct ContentView: View {
         }
     }
 
+    private var programStatusObscured: Bool {
+        appLockController.isLocked
+            || !isSessionSelected
+            || (isPhone && !isCompactOverlaySelected)
+            || hostKeyRequest != nil
+            || restorePrompt != nil
+            || uploadRequest != nil
+            || unlimitedHostsPrompt != nil
+            || bootstrapQuotaDecision != nil
+            || continuationOverlay != nil
+            || bootstrapCoordinator.isPresented
+            || crossDevicePairingCoordinator.showsPresentation
+            || enrollmentCoordinator.phase.isPresented
+            || onboarding.phase != .inactive
+            || uploadFailureMessage != nil
+            || uploadCompletionMessage != nil
+            || hostAdmissionFailureMessage != nil
+            || commandPalette.isOpen
+    }
+
     private var compactSessionBadge: Int {
-        agentCenter.waitingCount + agentCenter.unreadJustFinishedCount
+        // The same records the iPad chip counts: agents (Agent Center on)
+        // and every program reporting its own status.
+        programStatusCenter.counts(agentCenter: agentCenterV2).total
     }
 
     /// Keep the compact shell ready for the authoritative regular route before
@@ -539,7 +641,12 @@ struct ContentView: View {
             }
             .ignoresSafeArea()
         }
-        .onChange(of: activeSessions.map(\.id)) { _, _ in
+        .onChange(of: activeSessions.map(\.id)) { oldIDs, newIDs in
+            // A closed session's controller is going away. A replaced one was
+            // already renamed in place by `replaceSlot`.
+            for removed in Set(oldIDs).subtracting(newIDs) {
+                showEdges.removeSlot(removed)
+            }
             sessionRegistry.syncActiveSessions(activeSessions)
             refreshCommandPaletteSnapshot()
             logRestoreDiag(
@@ -579,40 +686,25 @@ struct ContentView: View {
         .onChange(of: commandPalette.isOpen) { _, _ in
             updateAgentSurfaceDemand()
         }
-        .onChange(of: agentCenter.activityRevision) { _, _ in
+        .onChange(of: agentCenterV2.presentation.listSnapshot) { _, _ in
             refreshCommandPaletteSnapshot()
         }
-        .onChange(of: agentCenter.workingCount) { _, _ in
+        .onChange(of: agentCenterV2.liveAttentionCounts) { _, _ in
+            // Unfiltered: an agent hidden by the list's search still counts.
             updateAgentAttentionBackgroundKeepAlive(reason: "agent-activity")
         }
         .onChange(of: appearance.agentCenterEnabled) { _, enabled in
             if !enabled, selectedItem == .agents {
                 toggleAgentCenter()
             }
-            agentCenter.setEnabled(enabled)
-            if !enabled {
-                bellController.cancelAgentNotifications()
-            }
+            updateAgentV2Experiment(enabled: enabled)
             updateAgentAttentionBackgroundKeepAlive(reason: "agent-center-setting")
             refreshCommandPaletteSnapshot()
             updateAgentSurfaceDemand()
-            if enabled {
-                handlePendingAgentNotification()
-            }
         }
         .onChange(of: appearance.agentCenterNotificationsEnabled) { _, enabled in
-            if !enabled { bellController.cancelAgentNotifications() }
+            updateAgentV2NotificationDelivery(enabled: enabled)
             updateAgentAttentionBackgroundKeepAlive(reason: "notification-setting")
-        }
-        .onChange(of: appearance.agentScrollLockClaudeCodeEnabled) { _, _ in
-            syncAgentScrollLock()
-        }
-        .onChange(of: appearance.agentScrollLockCodexEnabled) { _, _ in
-            syncAgentScrollLock()
-        }
-        .onChange(of: swipePadStore.profiles) { _, profiles in
-            agentCenter.syncProfiles(profiles)
-            agentCenter.refreshAll()
         }
     }
 
@@ -632,6 +724,7 @@ struct ContentView: View {
                         continuationCompletionTask = nil
                         self.continuationOverlay = nil
                         continuationLiveSessionID = nil
+                        continuationConnectionHostID = nil
                         continuationCoordinator.finishActive()
                     }
                 )
@@ -640,6 +733,13 @@ struct ContentView: View {
         }
         .overlay {
             bootstrapFlowOverlay
+        }
+        .overlay {
+            if crossDevicePairingCoordinator.showsPresentation {
+                CrossDevicePairingView(coordinator: crossDevicePairingCoordinator,
+                                       onReceivedSetupFinished: showBootstrapHosts)
+                    .zIndex(115)
+            }
         }
         .overlay {
             if enrollmentCoordinator.phase.isPresented {
@@ -696,12 +796,30 @@ struct ContentView: View {
                 guard let pending else { return }
                 handleIncomingContinuation(pending)
             }
+            .onChange(of: enrollmentCoordinator.phase) { oldPhase, newPhase in
+                guard newPhase.requiresSecurityPolicyMonitoring else {
+                    enrollmentSecurityPolicySnapshot = nil
+                    return
+                }
+                if !oldPhase.requiresSecurityPolicyMonitoring
+                    || enrollmentSecurityPolicySnapshot == nil {
+                    enrollmentSecurityPolicySnapshot = makeContinuationSecurityPolicySnapshot()
+                }
+            }
+            .onChange(of: crossDevicePairingCoordinator.phase) { oldPhase, newPhase in
+                Task { await releaseBootstrapNotificationPermissionIfReady() }
+                if case .idle = newPhase {
+                    crossDeviceSecurityPolicySnapshot = nil
+                } else if case .idle = oldPhase {
+                    crossDeviceSecurityPolicySnapshot = makeContinuationSecurityPolicySnapshot()
+                }
+            }
             .onChange(of: sessionRegistry.renderReadyIDs) { oldReadyIDs, readyIDs in
                 for hostID in ConnectionActivityAttribution.newlyReadyHostIDs(
                     oldReadyIDs: oldReadyIDs,
                     newReadyIDs: readyIDs,
                     connectedSessionIDs: Set(activeSessions.compactMap { session in
-                        session.session.terminalSession.state == .connected ? session.id : nil
+                        sharedState(of: session) == .connected ? session.id : nil
                     }),
                     sessions: activeSessions
                 ) where fetchHost(hostID) != nil {
@@ -856,7 +974,32 @@ struct ContentView: View {
             }
     }
 
-    var body: some View {
+    private func refreshShowEdgeProbe() {
+        #if DEBUG
+        guard ProcessInfo.processInfo.environment["TESSERA_SHOW_EDGE_PROBE"] == "1" else { return }
+        showEdgeProbe = showEdges.appFactsForTesting
+        #endif
+    }
+
+    @ViewBuilder
+    private var showEdgeProbeOverlay: some View {
+        #if DEBUG
+        if let showEdgeProbe {
+            Text(showEdgeProbe)
+                .font(.system(size: 2))
+                .opacity(0.02)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("show-edges.app-facts")
+        }
+        #endif
+    }
+
+    /// Split the root modifier graph into two independently type-checked
+    /// expressions. ContentView already coordinates several app-wide flows;
+    /// keeping its lifecycle half separate prevents new Agent Center observers
+    /// from pushing the complete generic chain past the Swift type-checker's
+    /// complexity limit.
+    private var contentWithAppLifecycle: some View {
         presentedContent
         .onAppear {
             recoverAbandonedContinuationDraftIfNeeded()
@@ -866,6 +1009,7 @@ struct ContentView: View {
             presentContinuityHostKeyHarnessIfNeeded()
             #endif
             prepareBootstrapFlow()
+            configureCrossDevicePairing()
         }
         .onChange(of: selectedItem) { _, selection in
             abandonContinuationDraftIfNeeded(afterSelecting: selection)
@@ -885,14 +1029,32 @@ struct ContentView: View {
             presentContinuityFailure(failure, source: .outgoing)
         }
         .onChange(of: bootstrapCoordinator.isPresented) { wasPresented, isPresented in
-            if isPresented {
-                onboarding.phase = .inactive
+            switch OnboardingController.bootstrapPresentationAction(
+                wasPresented: wasPresented,
+                isPresented: isPresented,
+                hasCompletedFirstOpen: bootstrapCoordinator.hasCompletedFirstOpen
+            ) {
+            case .hideOnboarding: onboarding.phase = .inactive
+            case .completeWelcome: appearance.hasSeenWelcome = true
+            case .resumeOnboarding: maybeBeginOnboarding()
+            case .none: break
             }
-            if wasPresented && !isPresented {
-                // Nearby setup is the first-open choice. Keep the legacy tour
-                // replayable from Settings without stacking a second welcome.
-                appearance.hasSeenWelcome = true
+        }
+        .onChange(of: bootstrapCoordinator.isPresented) { _, _ in
+            Task { await releaseBootstrapNotificationPermissionIfReady() }
+        }
+        .onReceive(bootstrapNotificationPermissionRecorded) { _ in
+            Task { await releaseBootstrapNotificationPermissionIfReady() }
+        }
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            if phase == .active {
+                Task { await releaseBootstrapNotificationPermissionIfReady() }
             }
+        }
+        .sheet(isPresented: $bootstrapAgentNotificationDenied) {
+            NotificationPermissionDenialSheet(
+                detail: String(localized: "Tessera can't notify you when an off-screen agent finishes or needs input while the app is backgrounded. Turn notifications on in Settings, then come back.")
+            )
         }
         .onChange(of: appLockController.isLocked) { _, isLocked in
             logRestoreDiag("app-lock-changed locked=\(isLocked)")
@@ -912,9 +1074,18 @@ struct ContentView: View {
             }
             refreshContinuityBroadcast(reason: isLocked ? "lock" : "unlock")
         }
-        .onChange(of: appearance.requireBiometricForKeyUse) { _, _ in
+        .onChange(of: appearance.requireBiometricForKeyUse) { _, required in
             SSHAuthenticationPolicyStore.shared.observeGlobalKeyRequirement(
-                appearance.requireBiometricForKeyUse
+                required
+            )
+            reconcileContinuationSecurityPolicy(
+                requiresBiometricForKeyUse: required
+            )
+            reconcileEnrollmentSecurityPolicy(
+                requiresBiometricForKeyUse: required
+            )
+            reconcileCrossDevicePairingSecurityPolicy(
+                requiresBiometricForKeyUse: required
             )
         }
         .onReceive(
@@ -930,6 +1101,9 @@ struct ContentView: View {
             // them before invalidating, so unrelated SwiftData saves are cheap
             // and do not break a valid 30-second same-policy grant.
             SSHAuthenticationPolicyStore.shared.refreshCurrentPolicies()
+            reconcileContinuationSecurityPolicy()
+            reconcileEnrollmentSecurityPolicy()
+            reconcileCrossDevicePairingSecurityPolicy()
         }
         .onReceive(
             NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
@@ -943,6 +1117,15 @@ struct ContentView: View {
         ) { capturedValue in
             SSHAuthenticationPolicyStore.shared.observeGlobalKeyRequirement(
                 capturedValue
+            )
+            reconcileContinuationSecurityPolicy(
+                requiresBiometricForKeyUse: capturedValue
+            )
+            reconcileEnrollmentSecurityPolicy(
+                requiresBiometricForKeyUse: capturedValue
+            )
+            reconcileCrossDevicePairingSecurityPolicy(
+                requiresBiometricForKeyUse: capturedValue
             )
         }
         .onChange(of: onboarding.phase) { _, newPhase in
@@ -961,13 +1144,7 @@ struct ContentView: View {
             }
         }
         .onChange(of: appPhase.isActive) { _, isActive in
-            agentCenter.setApplicationActive(isActive)
-            if isActive {
-                // Foreground attention is represented by the exact-pane-aware
-                // top-bar chip. Withdraw stale background banners while
-                // preserving the independent unread attention records.
-                bellController.cancelAgentNotifications()
-            }
+            updateAgentV2ApplicationActive(isActive)
             logRestoreDiag(
                 "app-phase-changed active=\(isActive) didEvaluateStartupRestore=\(didEvaluateStartupRestore) activeCount=\(activeSessions.count) inactivePreserved=\(hasInactivePreservedRestoreSnapshots)"
             )
@@ -1009,6 +1186,44 @@ struct ContentView: View {
                 reason: "app-phase-\(state.rawValue)"
             )
         }
+    }
+
+    var body: some View {
+        contentWithAppLifecycle
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+            Task { await agentCenterV2.handleMemoryWarning() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .tesseraAgentV2NotificationTapped)) { notification in
+            handleAgentV2Notification(notification)
+        }
+        // Grid-authority show edges. Only background/foreground count:
+        // inactive (Control Center, a system alert, Face ID) is transparent,
+        // so `appPhase.isActive` does not feed the tracker. The scene phase,
+        // read on appear, rather than willEnterForeground: a cold launch
+        // never posts that notification, and `applicationState` still reads
+        // background while this view is built.
+        .environment(\.sessionShowCoordinator, showEdges)
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            showEdges.setAppForeground(phase != .background)
+            refreshShowEdgeProbe()
+        }
+        .onChange(of: appLockController.isLocked, initial: true) { _, locked in
+            // ContentView stays mounted under the lock: no show fires behind
+            // it, and its falling edge after authentication is the show.
+            showEdges.setLocked(locked)
+            refreshShowEdgeProbe()
+        }
+        .overlay(alignment: .topLeading) { showEdgeProbeOverlay }
+        .onChange(of: selectedItem, initial: true) { _, item in
+            if case .session(let id) = item {
+                showEdges.setSelectedSlot(id)
+            } else {
+                showEdges.setSelectedSlot(nil)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .tesseraHandshakePromptChanged)) { _ in
+            updateGridAuthorityPromptPause()
+        }
         .onAppear {
             if isPhone,
                UserDefaults.standard.object(
@@ -1024,27 +1239,69 @@ struct ContentView: View {
                 "content-appear locked=\(appLockController.isLocked) active=\(appPhase.isActive) activeCount=\(activeSessions.count) didEvaluateStartupRestore=\(didEvaluateStartupRestore)"
             )
             sessionRegistry.syncActiveSessions(activeSessions)
-            agentCenter.setEnabled(appearance.agentCenterEnabled)
-            syncAgentScrollLock()
-            agentCenter.setApplicationActive(appPhase.isActive)
+            agentCenterV2.configureSpeech(controller: dictationController)
+            agentCenterV2.onUploadAttachment = { binding, url in
+                guard let live = activeSessions.first(where: { $0.id == binding.liveSessionID }) else {
+                    throw CancellationError()
+                }
+                let bridge: FileBridge
+                switch live.session {
+                case .ssh(let session):
+                    bridge = fileBridges.bridge(for: session.host, requireBiometric: session.requireBiometric, isSecureEnclave: session.isSecureEnclave)
+                case .mosh(let session):
+                    bridge = fileBridges.bridge(for: session.host, requireBiometric: session.requireBiometric, isSecureEnclave: session.isSecureEnclave)
+                }
+                return try await fileBridges.transferQueue(for: bridge).uploadAgentAttachment(localURL: url)
+            }
+            agentCenterV2.onOpenExactTerminal = { binding in
+                selectSession(binding.liveSessionID)
+                // Agent Center's "open terminal" (and the agent notification
+                // routes that land there) is an explicit open: it shows the
+                // session even if it is already on screen.
+                showEdges.explicitOpen(binding.liveSessionID)
+                if let rawWindowID = binding.windowID,
+                   let windowID = WindowId(wireValue: "@\(rawWindowID)") {
+                    sessionRegistry.requestTmuxFocus(
+                        sessionID: binding.liveSessionID,
+                        windowID: windowID,
+                        paneID: binding.paneID.flatMap { PaneId(wireValue: "%\($0)") }
+                    )
+                }
+                if isPhone {
+                    compactPresentation.tab = .sessions
+                    compactPresentation.sessionsView = .sessions
+                }
+            }
+            programStatusCenter.onOpenTerminal = { sessionID, windowID, paneID in
+                selectSession(sessionID)
+                showEdges.explicitOpen(sessionID)
+                if let windowID {
+                    sessionRegistry.requestTmuxFocus(
+                        sessionID: sessionID,
+                        windowID: WindowId(windowID),
+                        paneID: paneID.map(PaneId.init)
+                    )
+                }
+                if isPhone {
+                    compactPresentation.tab = .sessions
+                    compactPresentation.sessionsView = .sessions
+                }
+            }
+            agentCenterV2.onNotificationThreadSelected = { _ in
+                // The coordinator calls this only after opaque-token
+                // resolution and a fresh exact binding. It also covers a
+                // delegate callback that arrived before SwiftUI subscribed.
+                revealAgentCenterOnSelectedThread()
+            }
+            agentCenterV2.onRevealThread = { _ in
+                // The attention chip's row, or its fallback when the agent's
+                // terminal is no longer live. The coordinator has already
+                // selected the thread.
+                revealAgentCenterOnSelectedThread()
+            }
+            updateAgentV2Experiment(enabled: appearance.agentCenterEnabled)
             updateAgentAttentionBackgroundKeepAlive(reason: "content-appear")
-            if !appearance.agentCenterEnabled {
-                bellController.cancelAgentNotifications()
-            }
-            agentCenter.syncProfiles(swipePadStore.profiles)
-            agentCenter.onJumpToSession = { id in selectSession(id) }
-            agentCenter.onAttention = { attention, agent in
-                bellController.agentAttention(attention, agent: agent)
-            }
-            agentCenter.onAttentionAcknowledged = { agentID in
-                bellController.cancelAgentNotification(for: agentID)
-            }
-            AgentNotificationRouter.shared.onRoute = { route in
-                guard appearance.agentCenterEnabled else { return }
-                agentCenter.jump(agentID: route)
-            }
             updateAgentSurfaceDemand()
-            handlePendingAgentNotification()
             if case .session(let id) = selectedItem {
                 sessionRegistry.markTouched(id)
             }
@@ -1063,11 +1320,11 @@ struct ContentView: View {
             HostKeyVerificationView(
                 request: request,
                 onTrust: {
-                    request.accept()
+                    respondToHostKeyRequest(request, decision: .approve)
                     hostKeyRequest = nil
                 },
                 onReject: {
-                    request.reject()
+                    respondToHostKeyRequest(request, decision: .reject)
                     hostKeyRequest = nil
                 }
             )
@@ -1095,6 +1352,7 @@ struct ContentView: View {
             presentQueuedShareForSelectedHostIfClear(reason: "restore-cleared")
         }
         .onChange(of: hostKeyRequest == nil) { _, _ in
+            updateGridAuthorityPromptPause()
             presentParkedUploadIfClear()
             presentParkedUnlimitedHostsPromptIfClear()
             presentParkedBootstrapQuotaDecisionIfClear()
@@ -1146,7 +1404,7 @@ struct ContentView: View {
             // connecting simultaneously), reject it so its continuation
             // doesn't leak. Only one prompt at a time.
             if let previous = hostKeyRequest {
-                previous.reject()
+                respondToHostKeyRequest(previous, decision: .cancel)
             }
             hostKeyRequest = request
         }
@@ -1159,6 +1417,7 @@ struct ContentView: View {
             )
             if event.transport == "mosh", case .failed = event.state {
                 attemptMoshJumpFallback(liveSessionID: event.liveSessionID)
+                attemptMoshServerLossReconnect(liveSessionID: event.liveSessionID)
             }
             updateContinuationOverlay(for: event)
             if case .session(event.liveSessionID) = selectedItem {
@@ -1251,7 +1510,8 @@ struct ContentView: View {
         if bootstrapCoordinator.isPresented {
             BootstrapFlowView(
                 coordinator: bootstrapCoordinator,
-                onConfigureHost: configureBootstrapHost
+                onConfigureHost: configureBootstrapHost,
+                onReceivedSetupFinished: showBootstrapHosts
             )
             .zIndex(110)
         }
@@ -1291,6 +1551,261 @@ struct ContentView: View {
         let descriptor = FetchDescriptor<PersistedHost>()
         let hasHosts = ((try? modelContext.fetchCount(descriptor)) ?? 0) > 0
         bootstrapCoordinator.beginIfFirstOpen(hasHosts: hasHosts)
+    }
+
+    /// Binds the portable Pairing-v1 runtime to the already-shipped iOS
+    /// persistence, biometric, continuation, and SSH services. Nothing in
+    /// these closures is serialized into a pairing record.
+    private func configureCrossDevicePairing() {
+        crossDevicePairingCoordinator.configure(
+            adapters: CrossDevicePairingPlatformAdapters(
+                receiveDescriptor: { descriptor, binding in
+                    guard let data = try? descriptor.encoded(),
+                          continuationCoordinator.receive(
+                            data: data,
+                            transportBinding: binding,
+                            isLocked: appLockController.isLocked
+                          )
+                    else { return nil }
+                    return continuationCoordinator.ready?.id
+                        ?? continuationCoordinator.stashedWhileLocked?.id
+                },
+                cancelDescriptor: { continuationID in
+                    continuationCoordinator.cancel(continuationID: continuationID)
+                },
+                recipientKey: {
+                    let key = try BootstrapCoordinator.liveRecipientKey(in: modelContext)
+                    return DevicePublicKeyDescriptorV2(legacy: key.publicKey.core)
+                },
+                exportManifest: { peerSupportsAgentCenterEnabled in
+                    try await BootstrapManifestAdapter.export(
+                        from: modelContext,
+                        appearance: appearance,
+                        peerSupportsAgentCenterEnabled: peerSupportsAgentCenterEnabled
+                    )
+                },
+                importManifest: { manifest, recipientKey in
+                    guard let mutationFence = crossDevicePairingCoordinator.mutationFence(),
+                          !appLockController.isLocked
+                    else { throw CancellationError() }
+                    let plan = try BootstrapManifestAdapter.plannedInsertions(
+                        manifest,
+                        to: modelContext
+                    )
+                    let restriction: Set<UUID>?
+                    switch await admitBootstrapImport(plan) {
+                    case .proceedFull: restriction = nil
+                    case .restrictTo(let ids): restriction = ids
+                    case .cancel: throw CancellationError()
+                    }
+                    try Task.checkCancellation()
+                    reconcileCrossDevicePairingSecurityPolicy()
+                    guard crossDevicePairingCoordinator.isMutationAuthorized(by: mutationFence),
+                          !appLockController.isLocked
+                    else { throw CancellationError() }
+                    let receipt = try await BootstrapManifestAdapter.apply(
+                        manifest,
+                        fromPeer: "paired device",
+                        to: modelContext,
+                        appearance: appearance,
+                        save: persistPairedBootstrapMutation,
+                        restrictTo: restriction,
+                        finalAdmissionValidator: { count in
+                            guard let existing = savedHostCountForAdmission() else { return false }
+                            return SavedHostAdmissionPolicy.decision(
+                                existingHostCount: existing,
+                                newRowCount: count,
+                                access: hostAccessStore.accessState
+                            ) == .allow
+                        }
+                    )
+                    try Task.checkCancellation()
+                    guard crossDevicePairingCoordinator.isMutationAuthorized(by: mutationFence),
+                          !appLockController.isLocked
+                    else { throw CancellationError() }
+                    let localKey = try legacyEnrollmentKey(recipientKey)
+                    let bootstrapKey = try BootstrapRecipientKey(
+                        storedKeyID: recipientKey.id,
+                        publicKey: localKey
+                    )
+                    for hostID in receipt.acceptedHostIDs {
+                        guard let descriptor = manifest.hosts.first(where: { $0.id == hostID }),
+                              descriptor.authenticationHint == .publicKey
+                        else { continue }
+                        BootstrapCoordinator.liveRecordRecipientGrantIntent(
+                            BootstrapRecipientGrantRecord(
+                                hostID: hostID,
+                                hostName: descriptor.name,
+                                endpoint: "\(descriptor.user)@\(descriptor.address):\(descriptor.port)",
+                                routeIdentity: try BootstrapTransactionV1.routeIdentity(for: hostID, in: manifest),
+                                peerDeviceName: "paired device",
+                                recipientKey: bootstrapKey
+                            )
+                        )
+                    }
+                    // This import is the explicitly approved mutation of the
+                    // recipient's baseline; subsequent unrelated edits still
+                    // invalidate the attempt before remote grant processing.
+                    crossDeviceSecurityPolicySnapshot = makeContinuationSecurityPolicySnapshot()
+                    return Array(receipt.acceptedHostIDs)
+                },
+                verifyGrants: { request in
+                    await verifyPairedBootstrapGrants(request)
+                },
+                recordAccess: { receipt, recipientKey, manifest in
+                    // A user may have edited a route/credential without saving
+                    // while the sender was installing the key. Never adopt that
+                    // unrelated edit as part of our approved key-link save.
+                    try PairedBootstrapPersistence.requireCurrentMutation(
+                        captureFence: { crossDevicePairingCoordinator.mutationFence() },
+                        reconcile: { reconcileCrossDevicePairingSecurityPolicy() },
+                        isAuthorized: { crossDevicePairingCoordinator.isMutationAuthorized(by: $0) },
+                        isLocked: { appLockController.isLocked }
+                    )
+                    let localKey = try legacyEnrollmentKey(recipientKey)
+                    let bootstrapKey = try BootstrapRecipientKey(storedKeyID: recipientKey.id, publicKey: localKey)
+                    for result in receipt.results {
+                        guard let descriptor = manifest.hosts.first(where: { $0.id == result.hostID }),
+                              descriptor.authenticationHint == .publicKey
+                        else { continue }
+                        let record = BootstrapRecipientGrantRecord(
+                            hostID: result.hostID,
+                            hostName: descriptor.name,
+                            endpoint: "\(descriptor.user)@\(descriptor.address):\(descriptor.port)",
+                            routeIdentity: try BootstrapTransactionV1.routeIdentity(for: result.hostID, in: manifest),
+                            peerDeviceName: "paired device",
+                            recipientKey: bootstrapKey
+                        )
+                        switch result.status {
+                        case .installed, .alreadyInstalled:
+                            try BootstrapCoordinator.liveRecordRecipientGrant(
+                                record, in: modelContext, save: persistPairedBootstrapMutation
+                            )
+                        case .failed, .skipped:
+                            BootstrapCoordinator.liveDiscardRecipientGrantIntent(record)
+                        }
+                    }
+                    try BootstrapManifestAdapter.refreshImportProvenance(for: manifest, in: modelContext)
+                    crossDeviceSecurityPolicySnapshot = makeContinuationSecurityPolicySnapshot()
+                },
+                freshOwnerApproval: { reason in
+                    switch await BiometricGate.evaluate(reason: reason) {
+                    case .authenticated: return Date()
+                    case .userCancelled: throw CancellationError()
+                    case .unavailable, .failed: throw PairingLocalTCPTransportError.network
+                    }
+                }
+            )
+        )
+        continuationCoordinator.onDurableAcceptance = { continuationID, hostID in
+            crossDevicePairingCoordinator.continuationDurablyAccepted(
+                continuationID: continuationID,
+                hostID: hostID
+            )
+        }
+        continuationCoordinator.onConnectionReceipt = { continuationID, hostID in
+            crossDevicePairingCoordinator.continuationConnectionCompleted(
+                continuationID: continuationID,
+                hostID: hostID
+            )
+        }
+    }
+
+    private func legacyEnrollmentKey(
+        _ descriptor: DevicePublicKeyDescriptorV2
+    ) throws -> EnrollmentPublicKey {
+        try descriptor.validate()
+        return EnrollmentPublicKey(
+            id: descriptor.id,
+            displayName: descriptor.displayName,
+            algorithm: descriptor.algorithm == .ed25519 ? .ed25519 : .secureEnclaveP256,
+            blob: descriptor.sshBlob,
+            fingerprint: descriptor.fingerprint,
+            protection: descriptor.protectionClaim == .softwareExportable ? .software : .secureEnclave
+        )
+    }
+
+    private func verifyPairedBootstrapGrants(
+        _ request: CrossDeviceBootstrapGrantRequestV1
+    ) async -> [BootstrapHostGrantResultV1] {
+        guard let mutationFence = crossDevicePairingCoordinator.mutationFence(),
+              !appLockController.isLocked
+        else {
+            return request.acceptance.acceptedHostIDs.map {
+                BootstrapHostGrantResultV1(hostID: $0, status: .failed, errorCode: "attempt_cancelled")
+            }
+        }
+        let accepted = Set(request.acceptance.acceptedHostIDs)
+        guard let publicKey = try? legacyEnrollmentKey(request.recipientKey),
+              let persisted = try? modelContext.fetch(FetchDescriptor<PersistedHost>())
+        else {
+            return request.acceptance.acceptedHostIDs.map {
+                BootstrapHostGrantResultV1(hostID: $0, status: .failed, errorCode: "local_state")
+            }
+        }
+        var requests: [SyncDeviceAccessGrantEngine.InstallRequest] = []
+        var immediate: [UUID: BootstrapHostGrantResultV1] = [:]
+        for hostID in request.acceptance.acceptedHostIDs where accepted.contains(hostID) {
+            guard let descriptor = request.approvedManifest.manifest.hosts.first(where: { $0.id == hostID }),
+                  descriptor.authenticationHint == .publicKey,
+                  let stored = persisted.first(where: { $0.id == hostID })
+            else {
+                immediate[hostID] = .init(hostID: hostID, status: .skipped)
+                continue
+            }
+            let host = Host(from: stored)
+            guard (try? BootstrapTransactionV1.routeIdentity(
+                for: hostID,
+                in: request.approvedManifest.manifest
+            )) == RemoteAccessRouteIdentity.value(for: host) else {
+                immediate[hostID] = .init(hostID: hostID, status: .failed, errorCode: "route_changed")
+                continue
+            }
+            requests.append(.init(
+                host: host,
+                hostLabel: host.name,
+                endpoint: "\(host.user)@\(host.address):\(host.port)",
+                peerDeviceName: "paired device",
+                flow: .bootstrap,
+                publicKey: publicKey
+            ))
+        }
+        guard !requests.isEmpty else {
+            return request.acceptance.acceptedHostIDs.map { immediate[$0] ?? .init(hostID: $0, status: .skipped) }
+        }
+        let grants = SyncDeviceAccessGrantEngine()
+        do {
+            let authorization = try await grants.authorize(
+                snapshots: requests.map(\.grantSnapshot),
+                authenticating: {
+                    guard case .authenticated = await BiometricGate.evaluate(
+                        reason: String(localized: "Install the paired device key")
+                    ) else { throw CancellationError() }
+                    try Task.checkCancellation()
+                    guard crossDevicePairingCoordinator.isMutationAuthorized(by: mutationFence),
+                          !appLockController.isLocked
+                    else { throw CancellationError() }
+                }
+            )
+            defer { grants.invalidate(authorization) }
+            for grant in requests {
+                do {
+                    try Task.checkCancellation()
+                    guard crossDevicePairingCoordinator.isMutationAuthorized(by: mutationFence),
+                          !appLockController.isLocked
+                    else { throw CancellationError() }
+                    try await grants.install(grant, authorization: authorization)
+                    immediate[grant.hostID] = .init(hostID: grant.hostID, status: .installed)
+                } catch {
+                    immediate[grant.hostID] = .init(hostID: grant.hostID, status: .failed, errorCode: "installation_failed")
+                }
+            }
+        } catch {
+            for grant in requests {
+                immediate[grant.hostID] = .init(hostID: grant.hostID, status: .failed, errorCode: "authorization_failed")
+            }
+        }
+        return request.acceptance.acceptedHostIDs.map { immediate[$0] ?? .init(hostID: $0, status: .skipped) }
     }
 
     /// Nearby setup persists real saved-host rows, so the accepted batch
@@ -1350,6 +1865,44 @@ struct ContentView: View {
         }
     }
 
+    /// Fires when a setup import records a pending permission request. Not
+    /// `@AppStorage`: that invalidates this body on every defaults write, and
+    /// the restore snapshot that each session-state replay persists is one, so
+    /// a launch with a live session re-rendered without end.
+    private var bootstrapNotificationPermissionRecorded: AnyPublisher<Void, Never> {
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .map { _ in
+                UserDefaults.standard.bool(forKey: BootstrapNotificationPermissionDeferral.pendingKey)
+            }
+            .removeDuplicates()
+            .filter { $0 }
+            .map { _ in () }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+
+    private func releaseBootstrapNotificationPermissionIfReady() async {
+        await bootstrapNotifications.releaseIfReady(
+            nearbyPresented: bootstrapCoordinator.isPresented,
+            pairingPhase: crossDevicePairingCoordinator.phase,
+            isAppActive: scenePhase == .active
+        ) {
+            await requestBootstrapAgentNotificationPermission()
+        }
+    }
+
+    private func requestBootstrapAgentNotificationPermission() async {
+        guard appearance.agentCenterEnabled, appearance.agentCenterNotificationsEnabled else { return }
+        if await bellController.requestPermissionIfNeeded() == .denied {
+            bootstrapAgentNotificationDenied = true
+        }
+    }
+
+    private func showBootstrapHosts() {
+        selectedItem = nil
+        compactPresentation.tab = .hosts
+    }
+
     private func configureBootstrapHost(_ item: BootstrapCredentialChecklistItem) {
         bootstrapCoordinator.finish()
         compactPresentation.tab = .hosts
@@ -1365,6 +1918,7 @@ struct ContentView: View {
               activity.supportsContinuationStreams
         else { return nil }
         return {
+            enrollmentSecurityPolicySnapshot = makeContinuationSecurityPolicySnapshot()
             enrollmentCoordinator.onRequesterEnrollmentCompleted = { completedHost in
                 guard continuationDraft?.rootHostID == completedHost.id else {
                     return
@@ -1373,14 +1927,13 @@ struct ContentView: View {
                 // this connection. It is deliberately delayed until the
                 // requester has persisted its identity/ledger and the origin
                 // has returned the final durable-record acknowledgement.
+                guard startContinuationConnection(
+                    to: completedHost,
+                    descriptor: draft.descriptor
+                ) else { return }
                 continuationDraft = nil
                 ContinuationDraftRecoveryStore().clear()
-                continuationCoordinator.finishActive()
                 enrollmentCoordinator.onRequesterEnrollmentCompleted = nil
-                connect(
-                    to: completedHost,
-                    continuationDescriptor: draft.descriptor
-                )
             }
             enrollmentCoordinator.requestAuthorization(
                 through: activity,
@@ -1393,23 +1946,40 @@ struct ContentView: View {
         }
     }
 
-    /// Merges `pendingHostKeyVerification` from all active SSH sessions
-    /// into a single publisher so the sheet triggers for any session.
-    /// Mosh sessions don't expose a host key verification channel
-    /// directly over UDP; their SSH bootstrap step feeds the same
-    /// request channel.
+    /// Merges the retained Apple adapters' shared challenge projections so
+    /// the existing one-at-a-time/coalesced sheet does not observe concrete
+    /// SSH or mosh policy state directly.
     private var hostKeyVerificationPublisher: some Publisher<HostKeyVerificationRequest?, Never> {
         Publishers.MergeMany(
-            activeSessions.compactMap { live -> AnyPublisher<HostKeyVerificationRequest?, Never>? in
+            activeSessions.map { live -> AnyPublisher<HostKeyVerificationRequest?, Never> in
                 switch live.session {
                 case .ssh(let session):
-                    return session.$pendingHostKeyVerification
-                        .eraseToAnyPublisher()
+                    return session.sessionCommands.challengeRequests
                 case .mosh(let session):
-                    return session.$pendingHostKeyVerification
-                        .eraseToAnyPublisher()
+                    return session.sessionCommands.challengeRequests
                 }
             }
+        )
+    }
+
+    /// The sheet remains the Apple presenter, but its decision enters the same
+    /// retained SessionEngine command path used by every other front end.
+    private func respondToHostKeyRequest(
+        _ request: HostKeyVerificationRequest,
+        decision: ChallengeDecision
+    ) {
+        for live in activeSessions {
+            let facade: AppleSessionCommandFacade
+            switch live.session {
+            case .ssh(let session): facade = session.sessionCommands
+            case .mosh(let session): facade = session.sessionCommands
+            }
+            if facade.respondToHostKeyChallenge(request.id, decision: decision) {
+                return
+            }
+        }
+        DiagnosticLogStore.appendSSH(
+            "hostkey shared challenge response dropped reason=no-active-context"
         )
     }
 
@@ -1449,14 +2019,11 @@ struct ContentView: View {
         }
         return Publishers.MergeMany(
             activeSessions.map { live -> AnyPublisher<Void, Never> in
-                switch live.session {
-                case .ssh(let session):
-                    return session.$remoteWorkingDirectory
-                        .dropFirst().map { _ in () }.eraseToAnyPublisher()
-                case .mosh(let session):
-                    return session.$remoteWorkingDirectory
-                        .dropFirst().map { _ in () }.eraseToAnyPublisher()
-                }
+                live.session.terminalSession.sessionCommands
+                    .workingDirectoryPublisher
+                    .dropFirst()
+                    .map { _ in () }
+                    .eraseToAnyPublisher()
             }
         ).eraseToAnyPublisher()
     }
@@ -1468,30 +2035,21 @@ struct ContentView: View {
 
         return Publishers.MergeMany(
             activeSessions.map { live -> AnyPublisher<RestoreStateEvent, Never> in
+                let transport: String
                 switch live.session {
-                case .ssh(let session):
-                    return session.$state
-                        .map {
-                            RestoreStateEvent(
-                                liveSessionID: live.id,
-                                persistedHostID: live.persistedHostID,
-                                transport: "ssh",
-                                state: $0
-                            )
-                        }
-                        .eraseToAnyPublisher()
-                case .mosh(let session):
-                    return session.$state
-                        .map {
-                            RestoreStateEvent(
-                                liveSessionID: live.id,
-                                persistedHostID: live.persistedHostID,
-                                transport: "mosh",
-                                state: $0
-                            )
-                        }
-                        .eraseToAnyPublisher()
+                case .ssh: transport = "ssh"
+                case .mosh: transport = "mosh"
                 }
+                return live.session.terminalSession.sessionCommands.statePublisher
+                    .map {
+                        RestoreStateEvent(
+                            liveSessionID: live.id,
+                            persistedHostID: live.persistedHostID,
+                            transport: transport,
+                            state: legacySessionState(from: $0)
+                        )
+                    }
+                    .eraseToAnyPublisher()
             }
         )
         .eraseToAnyPublisher()
@@ -1505,6 +2063,10 @@ struct ContentView: View {
             // but hidden so their TerminalView state is preserved.
             ForEach(activeSessions) { live in
                 let isSelected = selectedItem == .session(live.id)
+                let continuityActions = sessionContinuityActions(
+                    isSelected: isSelected,
+                    hostID: live.persistedHostID
+                )
                 // Branch on transport: each case wires a concrete
                 // session view that owns its `@StateObject` of the
                 // matching type. Existentials of `ObservableObject`
@@ -1547,18 +2109,21 @@ struct ContentView: View {
                         // is not read as a cohort death.
                         onEditHost: {
                             retireForegroundRestoreCohortEntry(live.id, reason: "edit-host")
+                            sshSession.sessionCommands.disconnect()
                             activeSessions.removeAll { $0.id == live.id }
-                            sshSession.disconnect()
                             selectedItem = .host(sshSession.host.id)
                             sidebarVisible = true
                         },
                         onRetry: {
                             retireForegroundRestoreCohortEntry(live.id, reason: "retry")
                             let hostID = sshSession.host.id
+                            sshSession.sessionCommands.disconnect()
                             activeSessions.removeAll { $0.id == live.id }
-                            sshSession.disconnect()
-                            if let persisted = fetchHost(hostID) {
-                                connect(to: persisted)
+                            if let persisted = fetchHost(hostID),
+                               let retried = connect(to: persisted) {
+                                // Retry is the user's step: the show it
+                                // leads to gets a full R3 window.
+                                showEdges.noteUserStep(for: retried.id)
                             }
                         },
                         onSessionEnded: {
@@ -1575,11 +2140,13 @@ struct ContentView: View {
                         onOpenSettings: openSettings,
                         onOpenAgentCenter: appearance.agentCenterEnabled
                             ? toggleAgentCenter : nil,
+                        continuityActions: continuityActions,
                         onEffectiveLaunchModeChanged: { mode in
                             updateEffectiveLaunchMode(for: live.id, to: mode)
                         }
                     )
                     .opacity(isSelected ? 1 : 0)
+                    .environment(\.terminalDrawingEnabled, isSelected)
                     .allowsHitTesting(isSelected)
                     .accessibilityHidden(!isSelected)
                     .ignoresSafeArea(.container, edges: .bottom)
@@ -1613,18 +2180,21 @@ struct ContentView: View {
                         // nothing left on screen can reach it.
                         onEditHost: {
                             retireForegroundRestoreCohortEntry(live.id, reason: "edit-host")
+                            moshSession.sessionCommands.disconnect()
                             activeSessions.removeAll { $0.id == live.id }
-                            moshSession.disconnect()
                             selectedItem = .host(moshSession.host.id)
                             sidebarVisible = true
                         },
                         onRetry: {
                             retireForegroundRestoreCohortEntry(live.id, reason: "retry")
                             let hostID = moshSession.host.id
+                            moshSession.sessionCommands.disconnect()
                             activeSessions.removeAll { $0.id == live.id }
-                            moshSession.disconnect()
-                            if let persisted = fetchHost(hostID) {
-                                connect(to: persisted)
+                            if let persisted = fetchHost(hostID),
+                               let retried = connect(to: persisted) {
+                                // Retry is the user's step: the show it
+                                // leads to gets a full R3 window.
+                                showEdges.noteUserStep(for: retried.id)
                             }
                         },
                         onSessionEnded: {
@@ -1640,9 +2210,11 @@ struct ContentView: View {
                         },
                         onOpenSettings: openSettings,
                         onOpenAgentCenter: appearance.agentCenterEnabled
-                            ? toggleAgentCenter : nil
+                            ? toggleAgentCenter : nil,
+                        continuityActions: continuityActions
                     )
                     .opacity(isSelected ? 1 : 0)
+                    .environment(\.terminalDrawingEnabled, isSelected)
                     .allowsHitTesting(isSelected)
                     .accessibilityHidden(!isSelected)
                     .ignoresSafeArea(.container, edges: .bottom)
@@ -1673,7 +2245,14 @@ struct ContentView: View {
                         }
                     case .agents:
                         if !isPhone && appearance.agentCenterEnabled {
-                            AgentCenterPage(center: agentCenter)
+                            // The surrounding ContentView already owns the
+                            // single regular SessionSidebar. Supplying an
+                            // empty embedded sidebar here avoids duplicating
+                            // it while preserving V2's 300pt list + detail.
+                            AgentCenterV2RootView(
+                                model: agentCenterV2.presentation,
+                                includesNavigationSidebar: false
+                            ) { EmptyView() }
                         } else if isPhone {
                             Color.clear
                         } else {
@@ -1699,29 +2278,60 @@ struct ContentView: View {
                         if isPhone { Color.clear } else { landing }
                     }
                 }
-                .padding(.leading, !isPhone && sidebarVisible ? SessionSidebar.width : 0)
+                .padding(.leading, !isPhone && effectiveRegularSidebarVisible ? SessionSidebar.width : 0)
                 .padding(.top, !isPhone && !sidebarVisible ? 50 : 0)
             }
         }
+    }
+
+    private func sessionContinuityActions(
+        isSelected: Bool,
+        hostID: UUID?
+    ) -> SessionContinuityActions? {
+        guard isSelected,
+              !crossDevicePairingCoordinator.isPresented,
+              let hostID,
+              let descriptor = activityBroadcaster.currentDescriptor?.core,
+              descriptor.hostID == hostID
+        else { return nil }
+
+        return SessionContinuityActions(
+            continueSession: {
+                crossDevicePairingCoordinator.beginOrigin(
+                    purpose: .continueSession,
+                    descriptor: descriptor
+                )
+            },
+            setUpAndContinue: {
+                crossDevicePairingCoordinator.beginOrigin(
+                    purpose: .setUpAndContinue,
+                    descriptor: descriptor
+                )
+            }
+        )
     }
 
     private func hostEditor(_ host: PersistedHost) -> some View {
         HostDetailView(
             host: host,
             onConnect: { persistedHost, password, jumpPasswords in
-                let continuation = continuationDraft?.rootHostID == persistedHost.id
-                    ? continuationDraft?.descriptor : nil
-                if continuation != nil {
+                if let draft = continuationDraft,
+                   draft.rootHostID == persistedHost.id {
+                    guard startContinuationConnection(
+                        to: persistedHost,
+                        password: password,
+                        jumpPasswords: jumpPasswords,
+                        descriptor: draft.descriptor
+                    ) else { return }
                     continuationDraft = nil
                     ContinuationDraftRecoveryStore().clear()
                     enrollmentCoordinator.onRequesterEnrollmentCompleted = nil
-                    continuationCoordinator.finishActive()
+                    return
                 }
                 connect(
                     to: persistedHost,
                     password: password,
-                    jumpPasswords: jumpPasswords,
-                    continuationDescriptor: continuation
+                    jumpPasswords: jumpPasswords
                 )
             },
             onCancel: {
@@ -1734,11 +2344,13 @@ struct ContentView: View {
             onSave: {
                 try? modelContext.save()
                 if let draft = continuationDraft, draft.rootHostID == host.id {
+                    guard startContinuationConnection(
+                        to: host,
+                        descriptor: draft.descriptor
+                    ) else { return }
                     continuationDraft = nil
                     ContinuationDraftRecoveryStore().clear()
                     enrollmentCoordinator.onRequesterEnrollmentCompleted = nil
-                    connect(to: host, continuationDescriptor: draft.descriptor)
-                    continuationCoordinator.finishActive()
                 } else {
                     selectedItem = nil
                 }
@@ -1754,6 +2366,40 @@ struct ContentView: View {
                 ? "add & connect" : "save",
             onAuthorizeFromPeer: continuationEnrollmentAction(for: host)
         )
+    }
+
+    private func startContinuationConnection(
+        to host: PersistedHost,
+        password: String = "",
+        jumpPasswords: [UUID: String] = [:],
+        descriptor: SessionActivityDescriptor
+    ) -> Bool {
+        // Creating or selecting a local credential is the expected mutation
+        // while this receipt is stopped at `needsCredential`. Adopt only that
+        // class of change; endpoint, route, command, forwarding, and global
+        // owner-presence changes remain invalidating.
+        reconcileContinuationSecurityPolicy(allowingCredentialCompletion: true)
+        guard let continuationID = continuationCoordinator.active?.id,
+              continuationCoordinator.credentialEnrollmentCompleted(
+                continuationID: continuationID,
+                hostID: host.id
+              )
+        else { return false }
+        continuationConnectionHostID = host.id
+        guard let live = connect(
+            to: host,
+            password: password,
+            jumpPasswords: jumpPasswords,
+            continuationDescriptor: descriptor
+        ) else {
+            continuationCoordinator.connectionFailed()
+            return false
+        }
+        continuationLiveSessionID = live.id
+        if sessionRegistry.isRenderReady(live.id) {
+            finishContinuationAfterRenderReady()
+        }
+        return true
     }
 
     private var isSessionSelected: Bool {
@@ -1772,6 +2418,9 @@ struct ContentView: View {
     private func revealSidebar() {
         withAnimation(.easeInOut(duration: 0.24)) {
             sidebarVisible = true
+            if agentCenterAutomaticallyCollapsesSidebar {
+                agentCenterSidebarTemporarilyRevealed = true
+            }
         }
     }
 
@@ -2409,7 +3058,7 @@ struct ContentView: View {
     private func resolveSessionCwdIfNeeded(for candidateID: UUID) {
         guard let live = activeSessions.first(where: {
             $0.persistedHostID == candidateID
-                && $0.session.terminalSession.state == .connected
+                && sharedState(of: $0) == .connected
         }) else {
             DiagnosticLogStore.appendApp(
                 "upload-cwd resolve skipped host=\(String(candidateID.uuidString.prefix(8))) reason=no-connected-session"
@@ -2417,7 +3066,7 @@ struct ContentView: View {
             return
         }
         let terminal = live.session.terminalSession
-        if terminal.remoteWorkingDirectory != nil {
+        if terminal.sessionCommands.workingDirectory != nil {
             // Mirror already knows (e.g. it filled after the sheet
             // presented) — just get the row updated.
             DiagnosticLogStore.appendApp("upload-cwd resolve mirror-already-set")
@@ -2483,7 +3132,7 @@ struct ContentView: View {
                 )
                 // Don't stomp a value that arrived organically (pane
                 // metadata / OSC 7) while the probe was in flight.
-                if terminal.remoteWorkingDirectory == nil, let path {
+                if terminal.sessionCommands.workingDirectory == nil, let path {
                     terminal.remoteWorkingDirectory = path
                 }
             } catch {
@@ -2507,16 +3156,16 @@ struct ContentView: View {
         return fetchHosts().map { host in
             let sessions = activeSessions.filter { $0.persistedHostID == host.id }
             let connected = sessions.filter {
-                $0.session.terminalSession.state == .connected
+                sharedState(of: $0) == .connected
             }
             let connecting = sessions.contains {
-                switch $0.session.terminalSession.state {
+                switch sharedState(of: $0) {
                 case .idle, .connecting: return true
                 default: return false
                 }
             }
             let failed = sessions.contains {
-                if case .failed = $0.session.terminalSession.state { return true }
+                if case .failed = sharedState(of: $0) { return true }
                 return false
             }
             let cwdSource = connected.first { $0.id == selectedSessionID }
@@ -2528,7 +3177,7 @@ struct ContentView: View {
                 isConnecting: connected.isEmpty && connecting,
                 isActiveSession: connected.contains { $0.id == selectedSessionID },
                 isFailed: connected.isEmpty && !connecting && failed,
-                sessionCwd: cwdSource?.session.terminalSession.remoteWorkingDirectory
+                sessionCwd: cwdSource?.session.terminalSession.sessionCommands.workingDirectory
             )
         }
     }
@@ -2696,9 +3345,13 @@ struct ContentView: View {
     /// outrun restore and silently swallow the promised path.
     private func uploadTargetSession(for hostID: UUID) -> (any TerminalSession)? {
         let sessions = activeSessions.filter {
-            $0.persistedHostID == hostID
-                && ($0.session.terminalSession.state == .connected
-                    || $0.session.terminalSession.state == .connecting)
+            guard $0.persistedHostID == hostID else { return false }
+            switch sharedState(of: $0) {
+            case .connecting, .connected:
+                return true
+            case .idle, .disconnected, .failed:
+                return false
+            }
         }
         if case .session(let id) = selectedItem,
            let selected = sessions.first(where: { $0.id == id }) {
@@ -3012,57 +3665,133 @@ struct ContentView: View {
         }
         didEvaluateStartupRestore = true
 
-        // If this process survived and still has sessions, this is an
-        // ordinary foreground transition, not a fresh launch restore.
-        guard activeSessions.isEmpty else {
+        // A tab that is already open is not a session to restore, but it says
+        // nothing about the others. Refusing to run at all whenever any session
+        // existed meant every launch that opens a host before restore evaluates
+        // — a share target, an agent notification tap, a continuity handoff, a
+        // URL open — silently took restore with it, and then cleared the
+        // document it had never read.
+        //
+        // The shared lift (`ce403609`) was supposed to make this impossible,
+        // and it did make the *rule* shared: the core has excluded live hosts
+        // entry by entry since. iOS was the caller that declined to ask.
+        let liveHostIDs = Set(activeSessions.compactMap(\.persistedHostID))
+        if !liveHostIDs.isEmpty {
             logRestoreDiag(
-                "startup-restore-skip reason=active-sessions-present count=\(activeSessions.count) sessions=\(activeSessionSummary())"
+                "startup-restore-live count=\(activeSessions.count) hosts=\(liveHostIDs.count) sessions=\(activeSessionSummary())"
             )
-            return
         }
 
-        guard effectiveSessionRestorePolicy != .never else {
-            logRestoreDiag("startup-restore-clear reason=policy-never")
-            sessionRestoreStore.clear()
-            return
-        }
-
-        guard let document = sessionRestoreStore.load() else {
-            logRestoreDiag("startup-restore-skip reason=no-document")
-            return
-        }
-        logRestoreDiag(
-            "startup-restore-loaded savedAt=\(document.savedAt.timeIntervalSince1970) sessions=\(document.sessions.count) selected=\(shortID(document.selectedSessionID))"
-        )
-        let plan = restorePlan(for: document)
-        logRestoreDiag(
-            "startup-restore-plan restorable=\(plan.sessions.count) skipped=\(plan.skippedCount) selected=\(shortID(plan.selectedSnapshotID))"
-        )
-        guard plan.hasRestorableSessions else {
-            logRestoreDiag("startup-restore-clear reason=no-restorable-sessions")
-            sessionRestoreStore.clear()
-            return
-        }
-
-        switch effectiveSessionRestorePolicy {
-        case .always:
-            logRestoreDiag("startup-restore-action restore-immediately")
-            restorePreviousConnections(from: document)
-        case .ask:
+        let document = sessionRestoreStore.load()
+        if let document {
             logRestoreDiag(
-                "startup-restore-action prompt restorable=\(plan.sessions.count) skipped=\(plan.skippedCount)"
+                "startup-restore-loaded savedAt=\(document.savedAt.timeIntervalSince1970) sessions=\(document.sessions.count) selected=\(shortID(document.selectedSessionID))"
             )
-            restoreAlwaysReopen = false
-            restorePrompt = SessionRestorePrompt(
-                document: document,
-                hostNames: plan.sessions.map(\.displayName),
-                skippedCount: plan.skippedCount,
-                preserveSnapshotLiveIDs: true
-            )
-        case .never:
-            logRestoreDiag("startup-restore-clear reason=policy-never-switch")
-            sessionRestoreStore.clear()
         }
+        let hosts = fetchHosts()
+        // The hosts a snapshot could actually be reopened against. The core
+        // decides *what happens*; which hosts qualify stays here, because
+        // credential eligibility reads the keychain.
+        let usableHostIDs = Set(hosts.filter(isHostCredentialRestorable).map(\.id))
+        let action = ForegroundRestoreStartup.action(
+            candidates: (document?.sessions ?? []).map {
+                ForegroundRestoreStartupCandidate(
+                    sessionID: $0.liveSessionID,
+                    hostID: $0.persistedHostID
+                )
+            },
+            hasDocument: document != nil,
+            // SwiftData answers synchronously, so an empty list here really is
+            // empty. Android's Room flow can emit before a write has landed,
+            // which is why the core takes the two facts separately instead of
+            // assuming one from the other.
+            hostsLoaded: true,
+            availableHostIDs: usableHostIDs,
+            liveHostIDs: liveHostIDs,
+            selectedSessionID: document?.selectedSessionID,
+            policy: effectiveSessionRestorePolicy.shared
+        )
+
+        switch action {
+        case .wait(let reason):
+            // Nothing is cleared on a wait. An empty host store is the one
+            // case that reaches here, and deleting the document because the
+            // hosts are momentarily absent is how a restore loses sessions it
+            // could have reopened a moment later.
+            logRestoreDiag("startup-restore-skip reason=wait-\(reason.rawValue)")
+        case .skip(let reason):
+            // A snapshot naming a host that is already on screen was excluded,
+            // not judged unrestorable — clearing over it would throw away the
+            // one entry that is certainly still wanted. Restore turned off is
+            // the user asking for the store to be empty, which is a different
+            // thing, so `.policyNever` still clears unconditionally. Android
+            // states the same condition in `MainActivity`'s `Skip` branch.
+            let keepsLiveSnapshot = reason != .policyNever
+                && (document?.sessions.contains { liveHostIDs.contains($0.persistedHostID) } ?? false)
+            logRestoreDiag(
+                keepsLiveSnapshot
+                    ? "startup-restore-keep reason=\(reason.rawValue) detail=live-host-snapshot"
+                    : "startup-restore-clear reason=\(reason.rawValue)"
+            )
+            if reason != .noDocument, !keepsLiveSnapshot {
+                sessionRestoreStore.clear()
+            }
+        case .restore, .offer:
+            guard let document else { return }
+            // Only the entries the core kept. The resolver answers about the
+            // document it is handed, and a snapshot whose host is already on
+            // screen would open a second tab against it: the live session
+            // carries its own id and can never match the snapshot's, so the
+            // idempotency check inside `restorePreviousConnections` — which
+            // matches on session id — would not see it.
+            let pending = restorableDocument(document, excludingHostIDs: liveHostIDs)
+            // The core says which entries qualify; the resolver still produces
+            // the records, because it also collapses a session's lineage and a
+            // singleton tmux host into one entry, and names them for the sheet.
+            let plan = restorePlan(for: pending)
+            logRestoreDiag(
+                "startup-restore-plan restorable=\(plan.sessions.count) skipped=\(plan.skippedCount) alreadyOpen=\(document.sessions.count - pending.sessions.count) selected=\(shortID(plan.selectedSnapshotID))"
+            )
+            if case .restore = action {
+                logRestoreDiag("startup-restore-action restore-immediately")
+                restorePreviousConnections(from: pending)
+            } else {
+                logRestoreDiag(
+                    "startup-restore-action prompt restorable=\(plan.sessions.count) skipped=\(plan.skippedCount)"
+                )
+                restoreAlwaysReopen = false
+                restorePrompt = SessionRestorePrompt(
+                    document: pending,
+                    hostNames: plan.sessions.map(\.displayName),
+                    skippedCount: plan.skippedCount,
+                    preserveSnapshotLiveIDs: true
+                )
+            }
+        }
+    }
+
+    /// The stored document minus the entries whose host is already on screen.
+    ///
+    /// Those are not skipped and not unrestorable — they are the sessions the
+    /// launch already delivered. Dropping them here keeps the sheet's count
+    /// honest ("skipped because the saved host or credentials changed" is the
+    /// wording it uses) and keeps the reopen loop from stacking a duplicate tab
+    /// on a host the user is already looking at.
+    private func restorableDocument(
+        _ document: SessionRestoreDocument,
+        excludingHostIDs liveHostIDs: Set<UUID>
+    ) -> SessionRestoreDocument {
+        guard !liveHostIDs.isEmpty else { return document }
+        let sessions = document.sessions.filter { !liveHostIDs.contains($0.persistedHostID) }
+        guard sessions.count != document.sessions.count else { return document }
+        return SessionRestoreDocument(
+            schemaVersion: document.schemaVersion,
+            savedAt: document.savedAt,
+            sessions: sessions,
+            selectedSessionID: document.selectedSessionID.flatMap { selected in
+                sessions.contains { $0.liveSessionID == selected } ? selected : nil
+            }
+        )
     }
 
     private func restorePlan(for document: SessionRestoreDocument) -> SessionRestorePlan {
@@ -3157,11 +3886,12 @@ struct ContentView: View {
             // and the persisted document snowballs them (one mosh
             // host reached 4 copies, all bootstrapping at once).
             // Mirrors the failed-overlay retry gesture.
-            let selectionWasCorpse = corpses.contains { selectedItem == .session($0.id) }
+            let selectedCorpseID = corpses.first { selectedItem == .session($0.id) }?.id
+            let selectionWasCorpse = selectedCorpseID != nil
             if !corpses.isEmpty {
                 let corpseIDs = Set(corpses.map(\.id))
+                corpses.forEach { $0.session.terminalSession.sessionCommands.disconnect() }
                 activeSessions.removeAll { corpseIDs.contains($0.id) }
-                corpses.forEach { $0.session.terminalSession.disconnect() }
                 logRestoreDiag(
                     "restore-replace corpses=\(corpses.map { shortID($0.id) }.joined(separator: ",")) snapshot=\(shortID(resolved.snapshot.liveSessionID))"
                 )
@@ -3175,7 +3905,10 @@ struct ContentView: View {
                 logRestoreDiag(
                     "restore-session-reuse live=\(shortID(alive.id)) snapshot=\(shortID(resolved.snapshot.liveSessionID))"
                 )
-                if selectionWasCorpse {
+                if let selectedCorpseID {
+                    // The restore replaces the selected session object in
+                    // its slot: transparent for grid authority.
+                    showEdges.replaceSlot(selectedCorpseID, with: alive.id)
                     selectSession(alive.id)
                 }
                 if firstRestoredID == nil {
@@ -3214,7 +3947,8 @@ struct ContentView: View {
             logRestoreDiag(
                 "restore-session-opened live=\(shortID(live.id)) snapshot=\(shortID(resolved.snapshot.liveSessionID)) host=\(shortID(live.persistedHostID)) sources=\(sourceIDs) preserveIDs=\(preserveSnapshotLiveIDs)"
             )
-            if selectionWasCorpse {
+            if let selectedCorpseID {
+                showEdges.replaceSlot(selectedCorpseID, with: live.id)
                 selectSession(live.id)
             }
             if firstRestoredID == nil {
@@ -3412,7 +4146,7 @@ struct ContentView: View {
             return ForegroundRestoreLiveSession(
                 liveSessionID: live.id,
                 persistedHostID: live.persistedHostID,
-                state: live.session.terminalSession.state,
+                state: legacySessionState(from: sharedState(of: live)),
                 transportConfirmed: transportConfirmed
             )
         }
@@ -3632,6 +4366,22 @@ struct ContentView: View {
             return
         }
 
+        // Nothing may overwrite the stored document before the launch has read
+        // it. The cold-start pass is the only reader of what the previous run
+        // left behind, and a foreground `liveOnly` write that lands first
+        // replaces that with whatever happens to be on screen — on a launch
+        // that opened a host, exactly one session, whose own state change is
+        // what triggered the write. The `activeSessions.isEmpty` guard in
+        // `attemptStartupRestoreIfReady` used to stand in for this by refusing
+        // to restore at all whenever a session existed; read-before-write is
+        // the invariant it was really protecting.
+        guard didEvaluateStartupRestore else {
+            logRestoreDiag(
+                "persist-skip reason=startup-restore-not-evaluated activeCount=\(activeSessions.count)"
+            )
+            return
+        }
+
         let isActive = appPhase.isActive
         let persistMode = ForegroundRestoreCohort.persistMode(
             isActive: isActive,
@@ -3655,7 +4405,7 @@ struct ContentView: View {
             guard let hostID = live.persistedHostID else {
                 skippedNoHostMarker += 1
                 logRestoreDiag(
-                    "persist-skip live=\(shortID(live.id)) reason=no-persisted-host-marker state=\(stateDescription(live.session.terminalSession.state))"
+                    "persist-skip live=\(shortID(live.id)) reason=no-persisted-host-marker state=\(stateDescription(sharedState(of: live)))"
                 )
                 return nil
             }
@@ -3674,14 +4424,14 @@ struct ContentView: View {
                 return nil
             }
 
-            switch live.session.terminalSession.state {
+            switch sharedState(of: live) {
             case .idle, .connecting, .connected:
                 break
             case .disconnected, .failed:
                 guard !isActive else {
                     skippedState += 1
                     logRestoreDiag(
-                        "persist-skip live=\(shortID(live.id)) host=\(shortID(hostID)) reason=foreground-terminal-state state=\(stateDescription(live.session.terminalSession.state))"
+                        "persist-skip live=\(shortID(live.id)) host=\(shortID(hostID)) reason=foreground-terminal-state state=\(stateDescription(sharedState(of: live)))"
                     )
                     return nil
                 }
@@ -3689,7 +4439,7 @@ struct ContentView: View {
             }
 
             logRestoreDiag(
-                "persist-include live=\(shortID(live.id)) host=\(shortID(hostID)) state=\(stateDescription(live.session.terminalSession.state)) active=\(isActive)"
+                "persist-include live=\(shortID(live.id)) host=\(shortID(hostID)) state=\(stateDescription(sharedState(of: live))) active=\(isActive)"
             )
             return SessionRestoreSnapshot(
                 liveSessionID: live.id,
@@ -3700,57 +4450,51 @@ struct ContentView: View {
             )
         }
 
-        let snapshots: [SessionRestoreSnapshot]
-        switch persistMode {
-        case .liveOnly:
-            snapshots = currentSnapshots
-        case .keepCohort:
-            // The window is open. An entry awaiting its verdict keeps its
-            // snapshot even once its tab is gone, so a write landing
-            // mid-window cannot delete what is about to be restored.
-            let liveIDs = Set(currentSnapshots.map(\.liveSessionID))
-            snapshots = currentSnapshots + foregroundRestoreCohort.filter {
-                !liveIDs.contains($0.liveSessionID)
-            }
-        case .mergeWithStored:
-            // Whatever the store already holds outlives this write: the
-            // terminal-state skip above drops a dead session from
-            // `currentSnapshots` while the app is active, and behind an app
-            // lock that dead session is exactly the one the wake owes the
-            // user. Current wins per id; stored order leads so the pre-wake
-            // arrangement survives.
-            var snapshotsByID: [UUID: SessionRestoreSnapshot] = [:]
-            var orderedIDs: [UUID] = []
-
-            for snapshot in previousDocument?.sessions ?? [] {
-                snapshotsByID[snapshot.liveSessionID] = snapshot
-                orderedIDs.append(snapshot.liveSessionID)
-            }
-
-            for snapshot in currentSnapshots {
-                if snapshotsByID[snapshot.liveSessionID] == nil {
-                    orderedIDs.append(snapshot.liveSessionID)
-                }
-                snapshotsByID[snapshot.liveSessionID] = snapshot
-            }
-
-            snapshots = orderedIDs.compactMap { snapshotsByID[$0] }
+        // Which sessions a write contains, and which it selects, is the core's
+        // rule — it was spelled out here and again in Kotlin, and a snapshot
+        // silently dropped by one copy is a session the next wake cannot
+        // reopen. What stays here is the records: they carry display names,
+        // launch modes and tmux targets that mean nothing to the core.
+        //
+        // `storedSelection` reads whichever document this mode is merging
+        // over: the one already loaded for a merge, and the store itself while
+        // the window is open — where the session the user was last looking at
+        // may be mid-reconnect and momentarily absent from `activeSessions`.
+        let storedDocument = persistMode == .keepCohort
+            ? sessionRestoreStore.load()
+            : previousDocument
+        var snapshotsByID: [UUID: SessionRestoreSnapshot] = [:]
+        for snapshot in storedDocument?.sessions ?? [] {
+            snapshotsByID[snapshot.liveSessionID] = snapshot
+        }
+        for snapshot in foregroundRestoreCohort {
+            snapshotsByID[snapshot.liveSessionID] = snapshot
+        }
+        for snapshot in currentSnapshots {
+            snapshotsByID[snapshot.liveSessionID] = snapshot
         }
 
-        let selectedSessionID: UUID?
-        if case .session(let id) = selectedItem,
-           snapshots.contains(where: { $0.liveSessionID == id }) {
-            selectedSessionID = id
-        } else if persistMode == .mergeWithStored {
-            selectedSessionID = previousDocument?.selectedSessionID
-        } else if persistMode == .keepCohort {
-            // The window is open, so the session the user was last looking at
-            // may be mid-reconnect and momentarily absent from `activeSessions`.
-            // Writing nil here would leave them on the host list after the wake.
-            selectedSessionID = sessionRestoreStore.load()?.selectedSessionID
+        let entries = ForegroundRestorePersistPlan.entries(
+            mode: persistMode,
+            currentSessionIDs: currentSnapshots.map(\.liveSessionID),
+            cohortSessionIDs: foregroundRestoreCohort.map(\.liveSessionID),
+            storedSessionIDs: (previousDocument?.sessions ?? []).map(\.liveSessionID),
+            maxSnapshots: ForegroundRestoreDocumentRules.maxSnapshots
+        )
+        let snapshots = entries.compactMap { snapshotsByID[$0.sessionID] }
+
+        let presentedSessionID: UUID?
+        if case .session(let id) = selectedItem {
+            presentedSessionID = id
         } else {
-            selectedSessionID = nil
+            presentedSessionID = nil
         }
+        let selectedSessionID = ForegroundRestorePersistPlan.selection(
+            mode: persistMode,
+            preferred: presentedSessionID,
+            writtenSessionIDs: snapshots.map(\.liveSessionID),
+            storedSelection: storedDocument?.selectedSessionID
+        )
 
         sessionRestoreStore.save(
             sessions: snapshots,
@@ -3783,6 +4527,189 @@ struct ContentView: View {
 
     // MARK: - Sync & continuity
 
+    private func makeContinuationSecurityPolicySnapshot(
+        requiresBiometricForKeyUse: Bool? = nil
+    ) -> ContinuationSecurityPolicySnapshot {
+        let hosts = fetchHosts().sorted { $0.id.uuidString < $1.id.uuidString }
+        let storedKeys = (try? modelContext.fetch(FetchDescriptor<StoredKey>())) ?? []
+        let storedKeysByID = Dictionary(uniqueKeysWithValues: storedKeys.map { ($0.id, $0) })
+        let links = (try? modelContext.fetch(FetchDescriptor<HostJumpLink>())) ?? []
+
+        let connections = hosts.map { host in
+            ContinuationSecurityPolicySnapshot.HostConnection(
+                id: host.id,
+                user: host.effectiveUser,
+                address: host.address,
+                port: host.port,
+                transport: host.transport,
+                launchMode: host.launchMode,
+                tmuxSessionName: host.tmuxSessionName,
+                launchCommand: host.launchCommand,
+                environment: host.envVars,
+                startupSnippet: host.startupSnippet,
+                portForwardRulesData: host.portForwardRulesData
+            )
+        }
+        let credentials = hosts.map { host in
+            let credential: ContinuationSecurityPolicySnapshot.Credential
+            guard let identity = host.identity else {
+                return ContinuationSecurityPolicySnapshot.HostCredential(
+                    hostID: host.id,
+                    credential: .none(identityID: nil)
+                )
+            }
+            switch identity.credentialMode {
+            case .none:
+                credential = .none(identityID: identity.id)
+            case .password:
+                credential = .password(identityID: identity.id)
+            case .key(let keyID):
+                let key = storedKeysByID[keyID]
+                credential = .key(
+                    identityID: identity.id,
+                    keyID: keyID,
+                    algorithm: key?.algorithm.rawValue,
+                    authorizedKeysLine: key?.authorizedKeysLine,
+                    requiresBiometric: key?.requiresBiometric,
+                    isSecureEnclave: key?.isSecureEnclave
+                )
+            case .legacyDevKey(let filename):
+                credential = .legacyDevKey(
+                    identityID: identity.id,
+                    filename: filename
+                )
+            }
+            return ContinuationSecurityPolicySnapshot.HostCredential(
+                hostID: host.id,
+                credential: credential
+            )
+        }
+        let jumpLinks = links
+            .map {
+                ContinuationSecurityPolicySnapshot.JumpLink(
+                    hostID: $0.hostID,
+                    jumpHostID: $0.jumpHostID
+                )
+            }
+            .sorted {
+                if $0.hostID == $1.hostID {
+                    return $0.jumpHostID.uuidString < $1.jumpHostID.uuidString
+                }
+                return $0.hostID.uuidString < $1.hostID.uuidString
+            }
+
+        return ContinuationSecurityPolicySnapshot(
+            hostConnections: connections,
+            jumpLinks: jumpLinks,
+            hostCredentials: credentials,
+            requiresBiometricForKeyUse: requiresBiometricForKeyUse
+                ?? appearance.requireBiometricForKeyUse,
+            passwordCredentialRevision: KeychainHelper.passwordCredentialRevision
+        )
+    }
+
+    /// Compares semantic host/route/credential policy rather than treating
+    /// every SwiftData save as security-sensitive. This keeps unrelated model
+    /// writes invisible while preventing an accepted continuation from being
+    /// redirected or connected under policy that changed after receipt.
+    private func reconcileContinuationSecurityPolicy(
+        requiresBiometricForKeyUse: Bool? = nil,
+        allowingCredentialCompletion explicitCredentialCompletion: Bool = false
+    ) {
+        let allowedCredentialCompletionHostID: UUID?
+        switch continuationCoordinator.sharedState {
+        case .received, .stashedBehindLock, .ready, .resolving,
+             .needsHostAdmission, .connecting:
+            allowedCredentialCompletionHostID = explicitCredentialCompletion
+                ? continuationCoordinator.active?.descriptor.hostID
+                : nil
+        case .needsCredential(_, let target):
+            allowedCredentialCompletionHostID = target.hostID
+        case .idle, .completed, .cancelled, .failed:
+            continuationSecurityPolicySnapshot = nil
+            return
+        }
+
+        let current = makeContinuationSecurityPolicySnapshot(
+            requiresBiometricForKeyUse: requiresBiometricForKeyUse
+        )
+        guard let previous = continuationSecurityPolicySnapshot else {
+            continuationSecurityPolicySnapshot = current
+            return
+        }
+        guard current.invalidates(
+            replacing: previous,
+            allowingCredentialCompletionFor: allowedCredentialCompletionHostID
+        ) else {
+            continuationSecurityPolicySnapshot = current
+            return
+        }
+
+        continuationSecurityPolicySnapshot = nil
+        continuationCoordinator.securityPolicyChanged()
+    }
+
+    private func reconcileEnrollmentSecurityPolicy(
+        requiresBiometricForKeyUse: Bool? = nil
+    ) {
+        guard enrollmentCoordinator.phase.requiresSecurityPolicyMonitoring else {
+            enrollmentSecurityPolicySnapshot = nil
+            return
+        }
+        let current = makeContinuationSecurityPolicySnapshot(
+            requiresBiometricForKeyUse: requiresBiometricForKeyUse
+        )
+        guard let previous = enrollmentSecurityPolicySnapshot else {
+            enrollmentSecurityPolicySnapshot = current
+            return
+        }
+        guard EnrollmentSecurityPolicyMonitor.invalidates(
+            current,
+            replacing: previous,
+            expectedCredentialMutationHostID:
+                enrollmentCoordinator.expectedCredentialPolicyMutationHostID
+        ) else {
+            enrollmentSecurityPolicySnapshot = current
+            return
+        }
+
+        enrollmentSecurityPolicySnapshot = nil
+        enrollmentCoordinator.securityPolicyChanged()
+    }
+
+    private func reconcileCrossDevicePairingSecurityPolicy(
+        requiresBiometricForKeyUse: Bool? = nil
+    ) {
+        guard crossDevicePairingCoordinator.isPresented else {
+            crossDeviceSecurityPolicySnapshot = nil
+            return
+        }
+        let current = makeContinuationSecurityPolicySnapshot(
+            requiresBiometricForKeyUse: requiresBiometricForKeyUse
+        )
+        guard let previous = crossDeviceSecurityPolicySnapshot else {
+            crossDeviceSecurityPolicySnapshot = current
+            return
+        }
+        guard current.invalidates(replacing: previous, allowingCredentialCompletionFor: nil) else {
+            crossDeviceSecurityPolicySnapshot = current
+            return
+        }
+        crossDeviceSecurityPolicySnapshot = nil
+        crossDevicePairingCoordinator.securityPolicyChanged()
+    }
+
+    private func persistPairedBootstrapMutation(_ context: ModelContext) throws {
+        // Both callers have already validated their mutation fence. No actor
+        // suspension occurs between the approved model edit and this save.
+        try PairedBootstrapPersistence.save(
+            approvedSnapshot: makeContinuationSecurityPolicySnapshot(),
+            previousSnapshot: crossDeviceSecurityPolicySnapshot,
+            adopt: { crossDeviceSecurityPolicySnapshot = $0 },
+            persist: { try context.save() }
+        )
+    }
+
     private func refreshContinuityBroadcast(reason: String) {
         continuityBroadcastTask?.cancel()
 
@@ -3791,7 +4718,7 @@ struct ContentView: View {
               appPhase.isActive,
               case .session(let selectedID) = selectedItem,
               let live = activeSessions.first(where: { $0.id == selectedID }),
-              live.session.terminalSession.state == .connected,
+              sharedState(of: live) == .connected,
               let persistedID = live.persistedHostID,
               fetchHost(persistedID) != nil
         else {
@@ -3823,6 +4750,7 @@ struct ContentView: View {
         let route = host.jumpChain + [host]
         if host.storedKeyID != nil || host.privateKeyFilename != nil {
             activityBroadcaster.onContinuationStreams = { [enrollmentCoordinator] input, output in
+                enrollmentSecurityPolicySnapshot = makeContinuationSecurityPolicySnapshot()
                 enrollmentCoordinator.acceptOriginStreams(
                     input: input,
                     output: output,
@@ -3850,8 +4778,8 @@ struct ContentView: View {
             }
             guard !Task.isCancelled,
                   selectedItem == .session(selectedID),
-                  activeSessions.first(where: { $0.id == selectedID })?
-                    .session.terminalSession.state == .connected
+                  activeSessions.first(where: { $0.id == selectedID })
+                    .map({ sharedState(of: $0) == .connected }) == true
             else { return }
 
             do {
@@ -3878,6 +4806,7 @@ struct ContentView: View {
         guard !appLockController.isLocked else { return }
         continuationCompletionTask?.cancel()
         continuationCompletionTask = nil
+        continuationSecurityPolicySnapshot = makeContinuationSecurityPolicySnapshot()
         let descriptor = pending.descriptor
         continuationOverlay = ContinuationOverlayPresentation(
             descriptor: descriptor,
@@ -3890,10 +4819,14 @@ struct ContentView: View {
                 connectionKey: persisted.connectionKey
             )
         }
-        let resolution = ContinuationResolver.resolve(
-            descriptor,
-            among: candidates
-        )
+        continuationCoordinator.consume(pending.id)
+        guard continuationCoordinator.active?.id == pending.id,
+              let resolution = continuationCoordinator.resolve(
+                pending.id,
+                among: candidates,
+                hasSavedHost: { fetchHost($0) != nil }
+              )
+        else { return }
 
         #if DEBUG
         if let value = ProcessInfo.processInfo.environment["TESSERA_CONTINUITY_HARNESS"],
@@ -3908,7 +4841,6 @@ struct ContentView: View {
             case .prefill:
                 resolvedAs = "unexpected prefill"
             }
-            continuationCoordinator.consume(pending.id)
             continuationOverlay?.phase = .failed(
                 "Harness resolved an \(resolvedAs) and stopped before connecting."
             )
@@ -3922,10 +4854,9 @@ struct ContentView: View {
                 continuationOverlay?.phase = .failed(
                     String(localized: "The matching saved host disappeared before the continuation could start.")
                 )
-                continuationCoordinator.consume(pending.id)
+                continuationCoordinator.credentialEnrollmentFailed()
                 return
             }
-            continuationCoordinator.consume(pending.id)
             guard hostRouteHasUsableCredentials(persisted) else {
                 continuationOverlay = nil
                 continuationDraft = ContinuationDraft(
@@ -3937,6 +4868,11 @@ struct ContentView: View {
                 sidebarVisible = false
                 return
             }
+            guard continuationCoordinator.credentialEnrollmentCompleted(
+                continuationID: pending.id,
+                hostID: persisted.id
+            ) else { return }
+            continuationConnectionHostID = persisted.id
             continuationOverlay?.phase = .connecting
             guard let live = connectSavedHost(
                 persisted,
@@ -3946,15 +4882,18 @@ struct ContentView: View {
                 continuationOverlay?.phase = .failed(
                     String(localized: "Tessera could not create the requested session.")
                 )
+                continuationCoordinator.connectionFailed()
                 return
             }
             continuationLiveSessionID = live.id
+            // Handoff/QR receipt is an explicit open of the target session,
+            // evaluated once its routing (selection, creation) settles.
+            showEdges.explicitOpen(live.id)
             if sessionRegistry.isRenderReady(live.id) {
                 finishContinuationAfterRenderReady()
             }
 
         case .prefill:
-            continuationCoordinator.consume(pending.id)
             continuationOverlay = nil
             beginContinuationPrefill(descriptor)
         }
@@ -3985,13 +4924,29 @@ struct ContentView: View {
                 finishContinuationAfterRenderReady()
             }
         case .disconnected:
+            if case .connecting = continuationCoordinator.sharedState {
+                continuationCoordinator.connectionFailed()
+            }
             continuationOverlay?.phase = .failed(
                 String(localized: "The remote session disconnected before it was ready.")
             )
+            if continuationOverlay == nil {
+                continuationLiveSessionID = nil
+                continuationConnectionHostID = nil
+                continuationCoordinator.finishActive()
+            }
         case .failed:
+            if case .connecting = continuationCoordinator.sharedState {
+                continuationCoordinator.connectionFailed()
+            }
             continuationOverlay?.phase = .failed(
                 String(localized: "Authentication or transport setup failed. Review this device's credential and try again.")
             )
+            if continuationOverlay == nil {
+                continuationLiveSessionID = nil
+                continuationConnectionHostID = nil
+                continuationCoordinator.finishActive()
+            }
         }
     }
 
@@ -4000,10 +4955,28 @@ struct ContentView: View {
     /// then gets out of the way without requiring a second user action.
     private func finishContinuationAfterRenderReady() {
         guard let liveID = continuationLiveSessionID,
-              sessionRegistry.isRenderReady(liveID),
-              let overlay = continuationOverlay,
-              overlay.phase != .attached
+            sessionRegistry.isRenderReady(liveID),
+              let continuationID = continuationCoordinator.active?.id,
+              let hostID = continuationConnectionHostID
         else { return }
+
+        if case .connecting = continuationCoordinator.sharedState {
+            guard continuationCoordinator.connectionCompleted(
+                continuationID: continuationID,
+                hostID: hostID
+            ) else { return }
+        }
+
+        // Editor/enrollment continuations use the normal session surface with
+        // no blocking overlay. The shared completion receipt is still recorded
+        // at the same render-ready boundary before releasing the activity.
+        guard let overlay = continuationOverlay else {
+            continuationLiveSessionID = nil
+            continuationConnectionHostID = nil
+            continuationCoordinator.finishActive()
+            return
+        }
+        guard overlay.phase != .attached else { return }
 
         DiagnosticLogStore.appendApp("continuity overlay phase=attached")
         continuationOverlay?.phase = .attached
@@ -4018,6 +4991,7 @@ struct ContentView: View {
             DiagnosticLogStore.appendApp("continuity overlay phase=dismissed")
             continuationOverlay = nil
             continuationLiveSessionID = nil
+            continuationConnectionHostID = nil
             continuationCompletionTask = nil
             continuationCoordinator.finishActive()
         }
@@ -4025,6 +4999,7 @@ struct ContentView: View {
 
     private func beginContinuationPrefill(_ descriptor: SessionActivityDescriptor) {
         if let conflict = continuationRouteConflict(for: descriptor) {
+            continuationCoordinator.hostAdmissionDenied()
             continuationOverlay = ContinuationOverlayPresentation(
                 descriptor: descriptor,
                 phase: .failed(conflict)
@@ -4041,6 +5016,7 @@ struct ContentView: View {
             fetchHost(id) != nil
         }
         guard let existingHostCount = savedHostCountForAdmission() else {
+            continuationCoordinator.hostAdmissionDenied()
             continuationCoordinator.finishActive()
             return
         }
@@ -4064,9 +5040,13 @@ struct ContentView: View {
             let accepted = requestSavedHostAdmission(
                 newRowCount: plannedInsertedIDs.count,
                 resume: { self.beginContinuationPrefill(descriptor) },
-                onCancel: { self.continuationCoordinator.finishActive() }
+                onCancel: {
+                    self.continuationCoordinator.hostAdmissionDenied()
+                    self.continuationCoordinator.finishActive()
+                }
             )
             if !accepted {
+                continuationCoordinator.hostAdmissionDenied()
                 continuationCoordinator.finishActive()
                 presentContinuityFailure(
                     String(localized: "Finish the current host setup, then try Handoff again."),
@@ -4145,6 +5125,29 @@ struct ContentView: View {
             rootHostID: root.id,
             insertedHostIDs: insertedIDs
         )
+        guard let continuationID = continuationCoordinator.active?.id,
+              continuationCoordinator.hostAdmissionCompleted(
+                continuationID: continuationID,
+                admittedHostID: root.id,
+                insertedHostIDs: insertedIDs
+              )
+        else {
+            for hostID in insertedIDs {
+                HostJumpChainResolver.removeOutgoingLink(for: hostID, in: modelContext)
+            }
+            for hostID in insertedIDs {
+                if let host = fetchHost(hostID) { modelContext.delete(host) }
+            }
+            try? modelContext.save()
+            continuationDraft = nil
+            ContinuationDraftRecoveryStore().clear()
+            return
+        }
+        // The shared coordinator approved this exact host insertion plan.
+        // Treat the admitted route as the new baseline before SwiftData's
+        // autosave notification arrives, so expected credential setup may
+        // continue without making unrelated route edits acceptable.
+        continuationSecurityPolicySnapshot = makeContinuationSecurityPolicySnapshot()
         selectedItem = .host(root.id)
         sidebarVisible = false
     }
@@ -4184,7 +5187,7 @@ struct ContentView: View {
         try? modelContext.save()
     }
 
-    /// Seeds the saved host + password credential for the live continuation
+    /// Seeds the saved host + local credential for the live continuation
     /// harness so the injected descriptor takes the production fast path.
     private func prepareContinuityLiveHarnessSavedHostIfNeeded() {
         guard let cfg = ContinuityLiveHarnessConfiguration.load() else { return }
@@ -4195,11 +5198,33 @@ struct ContentView: View {
         let identity = Identity(
             name: "Live Harness",
             user: cfg.user,
-            credentialMode: .password
+            credentialMode: .none
         )
         modelContext.insert(identity)
         do {
-            try KeychainHelper.setPassword(cfg.password, forIdentityID: identity.id)
+            if cfg.generateSourceKey == true {
+                let key = try KeyStore.generateEd25519(
+                    name: "QR live source", context: modelContext
+                )
+                modelContext.insert(key)
+                identity.credentialMode = .key(key.id)
+                // Only the public line leaves Keychain/the simulator. The
+                // fixture driver installs it before requesting continuation.
+                let documents = FileManager.default.urls(
+                    for: .documentDirectory, in: .userDomainMask
+                )[0]
+                try Data(key.authorizedKeysLine.utf8).write(
+                    to: documents.appendingPathComponent("qr-live-source.pub"),
+                    options: .atomic
+                )
+            } else if let password = cfg.password {
+                try KeychainHelper.setPassword(password, forIdentityID: identity.id)
+                identity.credentialMode = .password
+            } else {
+                NSLog("[ContinuityLiveHarness] missing credential configuration")
+                modelContext.delete(identity)
+                return
+            }
         } catch {
             NSLog("[ContinuityLiveHarness] keychain seed failed: \(error)")
             return
@@ -4441,13 +5466,14 @@ struct ContentView: View {
         sidebarVisible = false
     }
 
+    @discardableResult
     private func connect(
         to persistedHost: PersistedHost,
         password: String = "",
         jumpPasswords: [UUID: String] = [:],
         continuationDescriptor: SessionActivityDescriptor? = nil
-    ) {
-        _ = connectSavedHost(
+    ) -> LiveSession? {
+        connectSavedHost(
             persistedHost,
             password: password,
             jumpPasswords: jumpPasswords,
@@ -4489,9 +5515,7 @@ struct ContentView: View {
             createdAt: old.createdAt
         )
         activeSessions[index] = replacement
-        if selectedItem == .session(old.id) {
-            selectedItem = .session(replacement.id)
-        }
+        transferSessionReferences(from: old.id, to: replacement.id)
         // The fallback IS this session's recovery, and the replacement carries a
         // new liveSessionID the cohort entry can never match again. Left in, the
         // entry would read `.dead` forever and be restored alongside the
@@ -4500,6 +5524,92 @@ struct ContentView: View {
         logRestoreDiag(
             "mosh-jump-fallback live=\(shortID(old.id)) replacement=\(shortID(replacement.id)) host=\(shortID(old.persistedHostID))"
         )
+    }
+
+    /// Rebuild a mosh session whose host answered that its mosh-server is
+    /// gone (`MoshSession.recommendsReconnectAfterServerLoss` — a reboot or
+    /// an OOM kill). Nothing will ever answer the old client again, and the
+    /// user's only other way out is closing the tab and reconnecting, which is
+    /// exactly this: same transport, launch mode and host snapshot on a fresh
+    /// server, a new LiveSession id so SessionView restarts its connect task,
+    /// and everything that pointed at the old session follows. A replacement
+    /// that cannot connect fails on its own with the ordinary retry overlay,
+    /// so this cannot loop. Sessions that `MoshServerLossRecovery` keeps stay
+    /// failed, with the reason and Retry on screen.
+    private func attemptMoshServerLossReconnect(liveSessionID: UUID) {
+        guard let index = activeSessions.firstIndex(where: { $0.id == liveSessionID }),
+              case .mosh(let moshSession) = activeSessions[index].session,
+              moshSession.recommendsReconnectAfterServerLoss else { return }
+
+        let old = activeSessions[index]
+        let decision = MoshServerLossRecovery.decide(
+            launchMode: moshSession.host.launchMode,
+            launchCommand: moshSession.host.launchCommand,
+            restorePolicy: effectiveSessionRestorePolicy,
+            isAppLocked: appLockController.isLocked
+        )
+        guard decision == .rebuild else {
+            logRestoreDiag(
+                "mosh-server-lost-kept live=\(shortID(old.id)) host=\(shortID(old.persistedHostID)) reason=\(decision.rawValue)"
+            )
+            return
+        }
+        let replacementSession = MoshSession(
+            host: moshSession.host,
+            requireBiometric: moshSession.requireBiometric,
+            isSecureEnclave: moshSession.isSecureEnclave,
+            preserveTmuxGeometry: moshSession.preserveTmuxGeometry,
+            // The decision above saw this session's snapshot; the rebuild
+            // launches the live host, which an edit may have changed.
+            serverLossRecoveryRestorePolicy: effectiveSessionRestorePolicy
+        )
+        let replacement = LiveSession(
+            session: .mosh(replacementSession),
+            hostName: old.hostName,
+            persistedHostID: old.persistedHostID,
+            hostKey: old.hostKey,
+            launchMode: old.launchMode,
+            effectiveLaunchMode: old.effectiveLaunchMode,
+            pinnedSessionName: old.pinnedSessionName,
+            createdAt: old.createdAt
+        )
+        activeSessions[index] = replacement
+        transferSessionReferences(from: old.id, to: replacement.id)
+        // Same reasoning as the jump fallback: the replacement IS this
+        // entry's recovery, and its new id can never match the entry again.
+        retireForegroundRestoreCohortEntry(old.id, reason: "mosh-server-lost")
+        logRestoreDiag(
+            "mosh-server-lost-reconnect live=\(shortID(old.id)) replacement=\(shortID(replacement.id)) host=\(shortID(old.persistedHostID))"
+        )
+    }
+
+    /// Host-key and Face ID prompts (both behind the handshake prompt gate)
+    /// pause the pending show clocks of sessions still connecting: the
+    /// user's step is in progress.
+    private func updateGridAuthorityPromptPause() {
+        showEdges.setGlobalPromptActive(
+            SSHHandshakePromptGate.isPrompting || hostKeyRequest != nil
+        )
+    }
+
+    /// A rebuilt session takes over everything that pointed at the one it
+    /// replaced: the selection, a Handoff overlay still waiting for it to
+    /// render, and Agent Center's way back. Left behind, the old id's
+    /// `.failed` would finish the Handoff as a failure and the return from
+    /// Agent Center would land on the host list.
+    private func transferSessionReferences(from oldID: UUID, to newID: UUID) {
+        // Same slot, new session object: transparent for grid authority, and
+        // an unresolved show or tap follows the slot to the replacement.
+        showEdges.replaceSlot(oldID, with: newID)
+        if selectedItem == .session(oldID) {
+            selectedItem = .session(newID)
+        }
+        if continuationLiveSessionID == oldID {
+            continuationLiveSessionID = newID
+        }
+        if agentCenterReturnItem == .session(oldID) {
+            agentCenterReturnItem = .session(newID)
+        }
     }
 
     @discardableResult
@@ -4538,6 +5648,9 @@ struct ContentView: View {
             if select {
                 selectedItem = .session(existing.id)
                 sidebarVisible = false
+                // Reopening a saved host that already has a live session
+                // is an explicit open of that session.
+                showEdges.explicitOpen(existing.id)
             }
             return existing
         }
@@ -4554,6 +5667,7 @@ struct ContentView: View {
                 if select {
                     selectedItem = .session(existing.id)
                     sidebarVisible = false
+                    showEdges.explicitOpen(existing.id)
                 }
                 return existing
             }
@@ -4677,7 +5791,7 @@ struct ContentView: View {
     }
 
     private func isReusableLiveSession(_ live: LiveSession) -> Bool {
-        switch live.session.terminalSession.state {
+        switch sharedState(of: live) {
         case .idle, .connecting, .connected:
             return true
         case .disconnected, .failed:
@@ -4718,12 +5832,12 @@ struct ContentView: View {
         // restore window must not reopen it.
         retireForegroundRestoreCohortEntry(live.id, reason: "dismissed")
         let wasSelected = selectedItem == .session(live.id)
+        live.session.terminalSession.sessionCommands.disconnect()
         activeSessions.removeAll { $0.id == live.id }
         if wasSelected {
             selectedItem = nil
             sidebarVisible = true
         }
-        live.session.terminalSession.disconnect()
     }
 
     /// Single switch-to-session entry point shared by the sidebar tap,
@@ -4737,31 +5851,71 @@ struct ContentView: View {
         sessionRegistry.markTouched(id)
     }
 
+    private var commandPaletteTmuxContext: (sessionID: UUID, snapshot: CommandPaletteTmuxSnapshot?)? {
+        guard case .session(let id) = selectedItem,
+              activeSessions.contains(where: { $0.id == id }) else { return nil }
+        // Retain the target through initial hydration so its first published
+        // window snapshot can refresh a palette that is already open.
+        return (id, sessionRegistry.tmuxPaletteSnapshots[id])
+    }
+
     /// Opens the ⌘K quick-switch palette with a fresh snapshot of the
     /// active session set + last-touched timestamps. Gated by the app
     /// lock so the chord is a no-op while the lock overlay is up.
     private func openPalette() {
+        let context = commandPaletteTmuxContext
+        let sync = context?.snapshot
+        let activeTitle = sync?.windows.first(where: { $0.id == sync?.activeWindowID })?.title
         commandPalette.open(
             sessions: activeSessions,
-            agents: appearance.agentCenterEnabled ? agentCenter.sortedAgents : [],
-            lastTouched: sessionRegistry.lastTouched
+            paneTitles: context.flatMap { context in activeTitle.map { [context.sessionID: $0] } } ?? [:],
+            lastTouched: sessionRegistry.lastTouched,
+            tmuxWindows: sync?.windows ?? [],
+            currentSessionID: context?.sessionID,
+            activeWindowID: sync?.activeWindowID,
+            activePaneID: sync?.activePaneID,
+            allowsTmuxMutation: sync?.allowsMutation ?? false,
+            canReorderTmuxWindows: sync?.canReorder ?? false,
+            canTidyTmuxWindows: sync?.canTidy ?? false,
+            isTmuxWindowMutationPending: sync?.isPending ?? false,
+            tmuxWindowOrderError: sync?.error
         )
     }
 
     private func refreshCommandPaletteSnapshot() {
+        guard commandPalette.isOpen else { return }
+        let context = commandPaletteTmuxContext
+        // A terminal shortcut can hand the open palette to a session other
+        // than the selected one; that session's chrome keeps its rows current.
+        if let owner = commandPalette.currentSessionID, owner != context?.sessionID,
+           activeSessions.contains(where: { $0.id == owner }) {
+            commandPalette.refreshSnapshot(
+                sessions: activeSessions,
+                paneTitles: commandPalette.paneTitles,
+                lastTouched: sessionRegistry.lastTouched
+            )
+            return
+        }
+        let sync = context?.snapshot
+        let activeTitle = sync?.windows.first(where: { $0.id == sync?.activeWindowID })?.title
         commandPalette.refreshSnapshot(
             sessions: activeSessions,
-            agents: appearance.agentCenterEnabled ? agentCenter.sortedAgents : [],
-            paneTitles: [:],
-            lastTouched: sessionRegistry.lastTouched
+            paneTitles: context.flatMap { context in activeTitle.map { [context.sessionID: $0] } } ?? [:],
+            lastTouched: sessionRegistry.lastTouched,
+            tmuxWindows: sync?.windows ?? [],
+            currentSessionID: context?.sessionID,
+            activeWindowID: sync?.activeWindowID,
+            activePaneID: sync?.activePaneID,
+            allowsTmuxMutation: sync?.allowsMutation ?? false,
+            canReorderTmuxWindows: sync?.canReorder ?? false,
+            canTidyTmuxWindows: sync?.canTidy ?? false,
+            isTmuxWindowMutationPending: sync?.isPending ?? false,
+            tmuxWindowOrderError: sync?.error
         )
     }
 
     private func handleCommandPaletteCommit(_ result: CommandPaletteCommit) {
         switch result {
-        case .agent(let id):
-            guard appearance.agentCenterEnabled else { return }
-            agentCenter.jump(agentID: id)
         case .home:
             selectedItem = nil
             sidebarVisible = true
@@ -4781,15 +5935,6 @@ struct ContentView: View {
                 windowID: windowID
             )
         }
-    }
-
-    private func handlePendingAgentNotification() {
-        guard appearance.agentCenterEnabled else {
-            _ = AgentNotificationRouter.shared.consume()
-            return
-        }
-        guard let route = AgentNotificationRouter.shared.consume() else { return }
-        agentCenter.jump(agentID: route)
     }
 
     private func toggleAgentCenter() {
@@ -4821,30 +5966,79 @@ struct ContentView: View {
         }
     }
 
-    private func syncAgentScrollLock() {
-        agentCenter.setScrollLock(
-            claudeCode: appearance.agentScrollLockClaudeCodeEnabled,
-            codex: appearance.agentScrollLockCodexEnabled
-        )
+    /// Shows Agent Center on the thread the coordinator already selected.
+    /// Idempotent, unlike `toggleAgentCenter`.
+    private func revealAgentCenterOnSelectedThread() {
+        selectedItem = .agents
+        if isPhone {
+            compactPresentation.sessionsView = .agents
+            compactPresentation.tab = .sessions
+        } else {
+            sidebarVisible = true
+        }
+        updateAgentSurfaceDemand()
     }
 
     private func updateAgentSurfaceDemand() {
         let compactAgentListVisible = isPhone
             && compactPresentation.tab == .sessions
             && compactPresentation.sessionsView == .agents
-        agentCenter.setSurfaceDemand(
-            appearance.agentCenterEnabled
+        let demanded = appearance.agentCenterEnabled
                 && (compactAgentListVisible
                     || (!isPhone && selectedItem == .agents)
                     || commandPalette.isOpen)
-        )
+        agentCenterV2.setSurfaceDemand(demanded)
+        if demanded {
+            let names = Dictionary(fetchHosts().map { ($0.id, $0.name.isEmpty ? $0.address : $0.name) }, uniquingKeysWith: { _, latest in latest })
+            Task { await agentCenterV2.updateHostDisplayLabels(names) }
+        }
+    }
+
+    private func updateAgentV2Experiment(enabled: Bool) {
+        Task {
+            await agentCenterV2.setExperimentEnabled(enabled)
+            await agentCenterV2.consumeColdStartNotifications()
+            await agentCenterV2.configureNotificationDelivery(
+                enabled: enabled && appearance.agentCenterNotificationsEnabled,
+                applicationActive: appPhase.isActive
+            )
+        }
+    }
+
+    private func updateAgentV2NotificationDelivery(enabled: Bool) {
+        Task {
+            await agentCenterV2.configureNotificationDelivery(
+                enabled: enabled && appearance.agentCenterEnabled,
+                applicationActive: appPhase.isActive
+            )
+        }
+    }
+
+    private func updateAgentV2ApplicationActive(_ isActive: Bool) {
+        Task {
+            await agentCenterV2.configureNotificationDelivery(
+                enabled: appearance.agentCenterNotificationsEnabled && appearance.agentCenterEnabled,
+                applicationActive: isActive
+            )
+            await agentCenterV2.setApplicationActive(isActive)
+        }
+    }
+
+    private func handleAgentV2Notification(_ notification: Notification) {
+        guard appearance.agentCenterEnabled,
+              let info = notification.object as? [AnyHashable: Any]
+        else { return }
+        // Keep an opaque cold-start tap in the coordinator until rediscovery
+        // proves its current exact binding. Navigation happens only through
+        // `onNotificationThreadSelected`, never from notification payload.
+        agentCenterV2.receiveNotification(userInfo: info)
     }
 
     private func updateAgentAttentionBackgroundKeepAlive(reason: String) {
         AgentAttentionBackgroundKeepAlive.shared.update(
             enabled: appearance.agentCenterEnabled
                 && appearance.agentCenterNotificationsEnabled,
-            workingCount: agentCenter.workingCount,
+            workingCount: agentCenterV2.attentionBadgeCounts.working,
             appPhase: appPhase,
             reason: reason
         )
@@ -4865,13 +6059,19 @@ struct ContentView: View {
 
     private func logRestoreDiag(_ message: String) {
         DiagnosticLogStore.appendRestore(message)
+        #if DEBUG
+        // A UI test runs out of process and cannot read the app container, so
+        // the restore report is mirrored to the system log while the harness is
+        // on and the runner script asserts against `log show`.
+        SessionRestoreDebugHarness.mirror(message)
+        #endif
     }
 
     private func activeSessionSummary(limit: Int = 8) -> String {
         guard !activeSessions.isEmpty else { return "[]" }
 
         let parts = activeSessions.prefix(limit).map { live in
-            "live=\(shortID(live.id)),host=\(shortID(live.persistedHostID)),transport=\(transportDescription(live)),state=\(stateDescription(live.session.terminalSession.state)),mode=\(live.effectiveLaunchMode.rawValue)"
+            "live=\(shortID(live.id)),host=\(shortID(live.persistedHostID)),transport=\(transportDescription(live)),state=\(stateDescription(sharedState(of: live))),mode=\(live.effectiveLaunchMode.rawValue)"
         }
         let suffix = activeSessions.count > limit ? ",..." : ""
         return "[" + parts.joined(separator: ";") + suffix + "]"
@@ -4883,6 +6083,28 @@ struct ContentView: View {
             return "ssh"
         case .mosh:
             return "mosh"
+        }
+    }
+
+    /// Lifecycle policy is read only from the retained shared coordinator.
+    /// Concrete transport state observation is confined to the Apple backend
+    /// adapter in `AppleSessionCommandFacade`.
+    private func sharedState(of live: LiveSession) -> SharedSessionState {
+        live.session.terminalSession.sessionCommands.state
+    }
+
+    private func stateDescription(_ state: SharedSessionState) -> String {
+        switch state {
+        case .idle:
+            return "idle"
+        case .connecting:
+            return "connecting"
+        case .connected:
+            return "connected"
+        case .disconnected:
+            return "disconnected"
+        case .failed:
+            return "failed"
         }
     }
 
@@ -4999,7 +6221,7 @@ struct CompactNavigationPresentation: Equatable {
 private struct CompactSessionsPage: View {
     let activeSessions: [LiveSession]
     @Binding var selectedView: CompactSessionsView
-    @Bindable var agentCenter: AgentCenter
+    @Bindable var agentCenterV2: AgentCenterV2Coordinator
     let agentCenterEnabled: Bool
     let onSelectSession: (UUID) -> Void
     let onDisconnectSession: (LiveSession) -> Void
@@ -5032,7 +6254,10 @@ private struct CompactSessionsPage: View {
                 sessionList
             case .agents:
                 if agentCenterEnabled {
-                    AgentCenterPage(center: agentCenter)
+                    AgentCenterV2RootView(
+                        model: agentCenterV2.presentation,
+                        includesNavigationSidebar: false
+                    ) { EmptyView() }
                 } else {
                     sessionList
                 }
@@ -5127,14 +6352,18 @@ private struct CompactSessionRowBody<S: ObservableObject & TerminalSession>: Vie
     let onDisconnect: () -> Void
 
     @State private var confirmingDisconnect = false
+    @State private var sharedState: SharedSessionState = .idle
     @Environment(\.designTokens) private var T
     @Environment(SessionRegistry.self) private var registry
+    @Environment(ProgramStatusCenter.self) private var programStatusCenter
+    @Environment(AgentCenterV2Coordinator.self) private var agentCenterV2
 
     var body: some View {
-        let rawState = session.state
+        let rawState = legacySessionState(from: sharedState)
         let state: SessionState = (rawState == .connected && !registry.isRenderReady(live.id))
             ? .connecting
             : rawState
+        let attentionCounts = programStatusCenter.sessionCounts(sessionID: live.id, agentCenter: agentCenterV2)
 
         // spacing 0: the disconnect button's 44 pt hit frame supplies the gap.
         HStack(spacing: 0) {
@@ -5152,10 +6381,20 @@ private struct CompactSessionRowBody<S: ObservableObject & TerminalSession>: Vie
                             .foregroundStyle(T.fg)
                             .lineLimit(1)
 
-                        Text(verbatim: "\(transportLabel) · \(stateLabel(state))")
-                            .font(Typography.tesseraMono(size: 11))
-                            .foregroundStyle(T.fgMuted)
-                            .lineLimit(1)
+                        // "ssh+tmux · connected · 1 needs approval · 1 finished"
+                        HStack(spacing: 4) {
+                            Text(verbatim: "\(transportLabel) · \(stateLabel(state))")
+                                .foregroundStyle(T.fgMuted)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            if attentionCounts.total > 0 {
+                                Text(verbatim: "·").foregroundStyle(T.fgDim)
+                                ProgramStatusWords.countText(attentionCounts, specificKinds: true, T: T)
+                                    .lineLimit(1)
+                                    .layoutPriority(1)
+                            }
+                        }
+                        .font(Typography.tesseraMono(size: 11))
                     }
 
                     Spacer(minLength: 8)
@@ -5190,6 +6429,7 @@ private struct CompactSessionRowBody<S: ObservableObject & TerminalSession>: Vie
             .buttonStyle(.plain)
             .accessibilityLabel("disconnect \(live.displayLabel(in: allSessions))")
         }
+        .onReceive(session.sessionCommands.statePublisher) { sharedState = $0 }
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(T.border)
@@ -5364,6 +6604,7 @@ private let compactNavigationWidthNotificationCallback: CFNotificationCallback =
 /// in for an iPad window resize that XCTest cannot drive deterministically.
 struct CompactNavigationTransitionHarnessView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(AppearancePreferences.self) private var appearance
     @StateObject private var widthController: CompactNavigationHarnessWidthController
     @StateObject private var fixtureSSHSession: SSHSession
     private let fixtureSession: LiveSession
@@ -5427,6 +6668,14 @@ struct CompactNavigationTransitionHarnessView: View {
                 )
         }
         .task { seedFixtureHostIfNeeded() }
+        .onAppear {
+            // The harness asserts navigation state, never motion. The fixture
+            // session's terminal caret is a repeating UIView animation that
+            // would otherwise hold XCUITest's quiescence wait for 60 s around
+            // every width toggle; the launch-overlay halo and status-dot
+            // pulses are held static by TESSERA_STATIC_RINGS at launch.
+            appearance.cursorBlink = false
+        }
     }
 
     private func seedFixtureHostIfNeeded() {

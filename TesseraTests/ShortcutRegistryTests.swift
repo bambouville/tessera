@@ -44,14 +44,14 @@ final class ShortcutRegistryTests: XCTestCase {
     func testEveryActionHasAShippedExpectation() {
         XCTAssertEqual(
             Set(Self.shipped.keys),
-            Set(ShortcutAction.allCases),
+            Set(ShortcutAction.allCases.filter { $0.defaultBinding != nil }),
             "a new bindable action needs a line in this table, or the refactor guard has a hole"
         )
     }
 
-    func testDefaultBindingsMatchTheListTheyReplaced() {
+    func testDefaultBindingsMatchTheListTheyReplaced() throws {
         for (action, expected) in Self.shipped {
-            let binding = action.defaultBinding
+            let binding = try XCTUnwrap(action.defaultBinding)
             XCTAssertEqual(
                 binding.key.keyCommandInput, expected.0,
                 "\(action.rawValue) input changed"
@@ -73,7 +73,7 @@ final class ShortcutRegistryTests: XCTestCase {
     func testShippedDefaultsAreConflictFree() {
         var seen: [KeyBinding: ShortcutAction] = [:]
         for action in ShortcutAction.allCases where !action.isDigitBlock {
-            let binding = action.defaultBinding
+            guard let binding = action.defaultBinding else { continue }
             if let other = seen[binding] {
                 // ⌘↩ is deliberately shared: connect lives on the host editor,
                 // zoom pane on a mounted grid — they can't be on screen at once.
@@ -116,7 +116,7 @@ final class ShortcutRegistryTests: XCTestCase {
         XCTAssertEqual(Set(expected.keys), Set(Self.hiddenButtonActions))
 
         for (action, want) in expected {
-            let bridge = action.defaultBinding.keyEquivalent
+            let bridge = action.defaultBinding?.keyEquivalent
             XCTAssertNotNil(
                 bridge,
                 "\(action.rawValue) has no KeyEquivalent, so its hidden button would attach no chord"
@@ -164,6 +164,20 @@ final class ShortcutRegistryTests: XCTestCase {
                 StoredShortcut.binding(action, in: nil),
                 action.defaultBinding
             )
+        }
+    }
+
+    @MainActor
+    func testWindowMoveActionsAreAssignableWithoutDefaultChord() {
+        let defaults = makeScratchDefaults("window-move-shortcuts")
+        let store = ShortcutStore(defaults: defaults)
+        for action in [ShortcutAction.tmuxMoveWindowLeft, .tmuxMoveWindowRight] {
+            XCTAssertNil(store.binding(for: action))
+            XCTAssertEqual(action.availability, .tmuxAttached)
+            store.setBinding(.cmdShift("m"), for: action)
+            XCTAssertEqual(ShortcutStore(defaults: defaults).binding(for: action), .cmdShift("m"))
+            store.resetToDefault(action)
+            XCTAssertNil(store.binding(for: action))
         }
     }
 
@@ -221,6 +235,21 @@ final class ShortcutRegistryTests: XCTestCase {
         let reloaded = ShortcutStore(defaults: defaults)
         XCTAssertNil(reloaded.binding(for: .refreshTerminal))
         XCTAssertTrue(reloaded.isCustomized(.refreshTerminal))
+    }
+
+    /// A tab's hint must name the digit that reaches it. The last of three
+    /// windows once read ⌘9 — true, but ⌘3 is its own digit and the one
+    /// the rest of the strip's numbering promises.
+    func testWindowShortcutHintPrefersTheWindowsOwnDigit() {
+        func hints(_ count: Int) -> [Int?] {
+            (1...count).map { TmuxWindowShortcutHint.digit(forPosition: $0, windowCount: count) }
+        }
+        XCTAssertEqual(hints(1), [1])
+        XCTAssertEqual(hints(3), [1, 2, 3])
+        XCTAssertEqual(hints(9), [1, 2, 3, 4, 5, 6, 7, 8, 9])
+        XCTAssertEqual(hints(11), [1, 2, 3, 4, 5, 6, 7, 8, nil, nil, 9])
+        XCTAssertNil(TmuxWindowShortcutHint.digit(forPosition: 0, windowCount: 3))
+        XCTAssertNil(TmuxWindowShortcutHint.digit(forPosition: 4, windowCount: 3))
     }
 }
 

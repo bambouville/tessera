@@ -26,6 +26,15 @@ struct SecuritySettingsView: View {
         )
     }
 
+    /// Shows the effective policy: app lock forces the cover on, so the row
+    /// reads on and is disabled until owner authentication is turned off.
+    private var hideContentInAppSwitcherBinding: Binding<Bool> {
+        Binding(
+            get: { appearance.effectiveHideContentInAppSwitcher },
+            set: { appearance.hideContentInAppSwitcher = $0 }
+        )
+    }
+
     var body: some View {
         @Bindable var appearance = appearance
 
@@ -74,6 +83,16 @@ struct SecuritySettingsView: View {
                 subtitle: "also enables device owner authentication",
                 isOn: backgroundLockBinding
             )
+            .padding(.bottom, 18)
+
+            ToggleRow(
+                title: "hide content in app switcher",
+                subtitle: appearance.requireFaceIDToUnlock
+                    ? "always on while device owner authentication is required"
+                    : "show a blank screen in the app switcher instead of Tessera's content",
+                isOn: hideContentInAppSwitcherBinding
+            )
+            .disabled(appearance.requireFaceIDToUnlock)
             .padding(.bottom, 18)
 
             ToggleRow(

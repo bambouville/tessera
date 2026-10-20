@@ -1,0 +1,23 @@
+scenario d2-side-channel-snapback
+# D2: the mosh side channel's refresh-client -C, resize-window and
+# set -w -u window-size never take `latest`, so the unset's recalculation
+# snaps the window back to the sized laptop that typed last.
+session O 80x24 w0
+group O-tessera-view O
+session probes 80x24 p0
+control probe probes no-output
+tty laptop O 200x50
+expect-size w0 200x49
+control side O-tessera-view no-output
+expect-latest w0 side
+key laptop
+expect-latest w0 laptop
+send side refresh-client -C 100,30
+expect-size w0 200x49
+send side resize-window -x 100 -y 30 -t {w0} ; set-option -w -u -t {w0} window-size
+expect side %layout-change {w0} *,100x30,0,0,*
+expect side %layout-change {w0} *,200x49,0,0,*
+expect-size w0 200x49
+expect-latest w0 laptop
+send probe display-message -p -t {w0} 'size=#{window_width}x#{window_height}'
+expect probe size=200x49

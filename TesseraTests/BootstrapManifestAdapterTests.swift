@@ -32,6 +32,150 @@ final class BootstrapManifestAdapterTests: XCTestCase {
         )
     }
 
+    func test_agentCenterExportRequiresPeerSupportAndImportPreservesAbsentAndFalse() async throws {
+        let appearance = AppearancePreferences()
+        let snapshot = PortableAppearanceSnapshot(appearance)
+        let notificationsEnabled = appearance.agentCenterNotificationsEnabled
+        defer {
+            snapshot.restore(to: appearance)
+            appearance.agentCenterNotificationsEnabled = notificationsEnabled
+        }
+        appearance.agentCenterNotificationsEnabled = true
+        let suiteName = "BootstrapManifestAdapterTests.agentCenter.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        for expected in [nil, false, true] as [Bool?] {
+            let container = try TesseraModelContainer.make(inMemory: true)
+            let context = ModelContext(container)
+            appearance.agentCenterEnabled = expected ?? true
+            let manifest = try await BootstrapManifestAdapter.export(
+                from: context,
+                appearance: appearance,
+                knownHosts: makeTempKnownHostsStore(),
+                peerSupportsAgentCenterEnabled: expected != nil
+            )
+            XCTAssertEqual(manifest.settings.agentCenterEnabled, expected)
+            let settings = try XCTUnwrap(JSONSerialization.jsonObject(with: manifest.encoded()) as? [String: Any])
+            XCTAssertEqual((settings["settings"] as? [String: Any])?["agentCenterEnabled"] as? Bool, expected)
+
+            let localValue = expected != true
+            appearance.agentCenterEnabled = localValue
+            let receipt = try await BootstrapManifestAdapter.apply(
+                manifest,
+                fromPeer: "test device",
+                to: context,
+                appearance: appearance,
+                trustHints: BootstrapTrustHintStore(defaults: defaults),
+                provenance: BootstrapImportProvenanceStore(defaults: defaults),
+                knownHosts: makeTempKnownHostsStore(), notificationPermissionDefaults: defaults
+            )
+            XCTAssertEqual(appearance.agentCenterEnabled, expected ?? localValue)
+            XCTAssertEqual(receipt.enabledAgentCenter, expected == true)
+        }
+    }
+
+    func test_importPreservesExplicitBellNotificationsOnFirstAgentCenterEnable() async throws {
+        let appearance = AppearancePreferences()
+        let snapshot = PortableAppearanceSnapshot(appearance)
+        let notifications = appearance.agentCenterNotificationsEnabled
+        let key = "tessera.pref.agentCenterBellCoordinationPerformed"
+        let previousCoordination = UserDefaults.standard.object(forKey: key)
+        defer {
+            snapshot.restore(to: appearance)
+            appearance.agentCenterNotificationsEnabled = notifications
+            UserDefaults.standard.set(previousCoordination, forKey: key)
+        }
+        appearance.agentCenterEnabled = true
+        appearance.agentCenterNotificationsEnabled = true
+        appearance.bellNotificationEnabled = true
+        let context = ModelContext(try TesseraModelContainer.make(inMemory: true))
+        let manifest = try await BootstrapManifestAdapter.export(from: context, appearance: appearance,
+            knownHosts: makeTempKnownHostsStore(), peerSupportsAgentCenterEnabled: true)
+        appearance.agentCenterEnabled = false
+        UserDefaults.standard.removeObject(forKey: key)
+        let suite = "BootstrapManifestAdapterTests.bell.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        _ = try await BootstrapManifestAdapter.apply(manifest, fromPeer: "iPad", to: context,
+            appearance: appearance, trustHints: BootstrapTrustHintStore(defaults: defaults),
+            provenance: BootstrapImportProvenanceStore(defaults: defaults), knownHosts: makeTempKnownHostsStore(),
+            notificationPermissionDefaults: defaults)
+        XCTAssertTrue(appearance.agentCenterEnabled)
+        XCTAssertTrue(appearance.bellNotificationEnabled, "Imported bell choice must win over one-time coordination")
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: key))
+    }
+
+    func test_importPersistsPermissionRequestAndDefersItUntilSetupEnds() async throws {
+        let context = ModelContext(try TesseraModelContainer.make(inMemory: true))
+        let appearance = AppearancePreferences()
+        let snapshot = PortableAppearanceSnapshot(appearance)
+        let key = "tessera.pref.agentCenterBellCoordinationPerformed"
+        let previousCoordination = UserDefaults.standard.object(forKey: key)
+        defer {
+            snapshot.restore(to: appearance)
+            UserDefaults.standard.set(previousCoordination, forKey: key)
+        }
+        appearance.agentCenterEnabled = true
+        let manifest = try await BootstrapManifestAdapter.export(from: context, appearance: appearance,
+            knownHosts: makeTempKnownHostsStore(), peerSupportsAgentCenterEnabled: true)
+        appearance.agentCenterEnabled = false
+        let suite = "BootstrapManifestAdapterTests.permission.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let receipt = try await BootstrapManifestAdapter.apply(manifest, fromPeer: "iPad", to: context,
+            appearance: appearance, trustHints: BootstrapTrustHintStore(defaults: defaults),
+            provenance: BootstrapImportProvenanceStore(defaults: defaults), knownHosts: makeTempKnownHostsStore(),
+            notificationPermissionDefaults: defaults)
+        XCTAssertTrue(receipt.enabledAgentCenter)
+        XCTAssertTrue(appearance.agentCenterEnabled)
+        let deferred = BootstrapNotificationPermissionDeferral(defaults: defaults)
+        XCTAssertTrue(deferred.isPending, "Import itself must durably record the permission request")
+        var calls = 0
+        await deferred.releaseIfReady(nearbyPresented: true, pairingPhase: .idle, isAppActive: true) { calls += 1 }
+        XCTAssertEqual(calls, 0, "The real release path must refuse to interrupt setup")
+        await deferred.releaseIfReady(nearbyPresented: false, pairingPhase: .completed(nil), isAppActive: true) {
+            XCTAssertFalse(deferred.isPending, "Consume before calling permission UI")
+            calls += 1
+        }
+        XCTAssertEqual(calls, 1)
+        await deferred.releaseIfReady(nearbyPresented: false, pairingPhase: .idle, isAppActive: true) { calls += 1 }
+        XCTAssertEqual(calls, 1)
+    }
+
+    func test_pendingPermissionSurvivesFailureCancellationAndNewInstance() async throws {
+        let suite = "BootstrapManifestAdapterTests.deferral.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        // Completed, failure after import (including continuation failure), cancellation.
+        for terminalPhase in [CrossDevicePairingPresentationPhase.completed(nil), .failed("continuation failed"), .idle] {
+            let recorder = BootstrapNotificationPermissionDeferral(defaults: defaults)
+            recorder.recordImport(enabledAgentCenter: true)
+            recorder.recordImport(enabledAgentCenter: false) // A retry must not erase pending work.
+            let reloadedDefaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+            let reloaded = BootstrapNotificationPermissionDeferral(defaults: reloadedDefaults)
+            XCTAssertTrue(reloaded.isPending)
+            var calls = 0
+            for phase in [CrossDevicePairingPresentationPhase.showingOffer, .scanning, .connecting,
+                          .compareSAS("123"), .waitingForPeerSAS("123"), .waitingForSetupChoice,
+                          .bootstrapRecipientImport([]), .transferring] {
+                await reloaded.releaseIfReady(nearbyPresented: false, pairingPhase: phase, isAppActive: true) { calls += 1 }
+            }
+            await reloaded.releaseIfReady(nearbyPresented: true, pairingPhase: terminalPhase, isAppActive: true) { calls += 1 }
+            await reloaded.releaseIfReady(nearbyPresented: false, pairingPhase: terminalPhase, isAppActive: false) { calls += 1 }
+            XCTAssertEqual(calls, 0)
+            XCTAssertTrue(reloaded.isPending)
+            await reloaded.releaseIfReady(nearbyPresented: false, pairingPhase: terminalPhase, isAppActive: true) { calls += 1 }
+            await recorder.releaseIfReady(nearbyPresented: false, pairingPhase: terminalPhase, isAppActive: true) { calls += 1 }
+            XCTAssertEqual(calls, 1)
+            XCTAssertFalse(recorder.isPending)
+        }
+        let noImport = BootstrapNotificationPermissionDeferral(defaults: defaults)
+        noImport.recordImport(enabledAgentCenter: false)
+        await noImport.releaseIfReady(nearbyPresented: false, pairingPhase: .idle, isAppActive: true) {
+            XCTFail("No enabling import must mean no prompt")
+        }
+    }
+
     func test_exportCarriesPortableConfigurationButNoCredentialMaterial() async throws {
         let container = try TesseraModelContainer.make(inMemory: true)
         let context = ModelContext(container)
@@ -74,7 +218,7 @@ final class BootstrapManifestAdapterTests: XCTestCase {
         target.startupSnippet = "cd ~/deploy"
         target.launchCommand = "exec fish -l"
         target.setPortForwardRules([
-            PortForwardRule(
+            PortForwardRule.localForward(
                 id: forwardID,
                 enabled: true,
                 autoStart: false,
@@ -394,6 +538,110 @@ final class BootstrapManifestAdapterTests: XCTestCase {
         XCTAssertEqual(manifest.hosts.count, 1)
         XCTAssertEqual(manifest.hosts[0].name, "address-only.example.invalid")
         XCTAssertNoThrow(try manifest.validate())
+    }
+
+    /// The manifest's `BootstrapPortForwardRule` can only describe a loopback
+    /// local forward. Dynamic and remote rules must be dropped, never flattened
+    /// into a wrong local rule on the receiving device — the export goes
+    /// through `PortForwardRule.portableLocalSubset`, and this is its pin at
+    /// the real use site.
+    func test_exportCarriesOnlyThePortableLocalRuleSubset() async throws {
+        let container = try TesseraModelContainer.make(inMemory: true)
+        let context = ModelContext(container)
+        let localID = UUID(uuidString: "21000000-0000-0000-0000-000000000001")!
+        let dynamicID = UUID(uuidString: "21000000-0000-0000-0000-000000000002")!
+        let remoteID = UUID(uuidString: "21000000-0000-0000-0000-000000000003")!
+        let host = PersistedHost(
+            name: "forwards",
+            address: "forwards.example.invalid",
+            port: 22,
+            transport: .ssh,
+            launchMode: .autoTmux
+        )
+        host.user = "ops"
+        host.setPortForwardRules([
+            PortForwardRule.localForward(
+                id: localID,
+                localPort: 8_080,
+                remoteHost: "localhost",
+                remotePort: 80,
+                label: "web"
+            ),
+            PortForwardRule(
+                id: dynamicID,
+                direction: .dynamic,
+                bind: PortForwardEndpoint(host: "127.0.0.1", port: 1_080),
+                label: "socks"
+            ),
+            PortForwardRule(
+                id: remoteID,
+                direction: .remote,
+                bind: PortForwardEndpoint(host: "0.0.0.0", port: 0),
+                target: PortForwardEndpoint(host: "127.0.0.1", port: 3_000),
+                label: "preview"
+            ),
+        ])
+        context.insert(host)
+        try context.save()
+
+        let manifest = try await BootstrapManifestAdapter.export(
+            from: context,
+            appearance: AppearancePreferences()
+        )
+
+        let exported = try XCTUnwrap(manifest.hosts.first)
+        XCTAssertEqual(exported.portForwards.map(\.id), [localID])
+        XCTAssertEqual(exported.portForwards[0].localPort, 8_080)
+        XCTAssertEqual(exported.portForwards[0].remoteHost, "localhost")
+        XCTAssertEqual(exported.portForwards[0].remotePort, 80)
+        // The dropped rules stay on this device untouched.
+        XCTAssertEqual(
+            RuleCodec.decode(host.portForwardRulesData).map(\.id),
+            [localID, dynamicID, remoteID]
+        )
+        XCTAssertNoThrow(try manifest.validate())
+    }
+
+    /// Blobs written before the forwarding model gained a direction and
+    /// bind/target endpoints must still export. Losing a stored rule to the
+    /// migration is the one unacceptable outcome.
+    func test_exportMigratesAPreSharedModelForwardingBlob() async throws {
+        let container = try TesseraModelContainer.make(inMemory: true)
+        let context = ModelContext(container)
+        let forwardID = UUID(uuidString: "21000000-0000-0000-0000-000000000004")!
+        let host = PersistedHost(
+            name: "legacy",
+            address: "legacy.example.invalid",
+            port: 22,
+            transport: .ssh,
+            launchMode: .autoTmux
+        )
+        host.user = "ops"
+        host.portForwardRulesData = Data("""
+        [{"autoStart":false,"enabled":true,"id":"\(forwardID.uuidString)",\
+        "label":"pg","localPort":5432,"remoteHost":"db.internal","remotePort":5432}]
+        """.utf8)
+        context.insert(host)
+        try context.save()
+
+        let manifest = try await BootstrapManifestAdapter.export(
+            from: context,
+            appearance: AppearancePreferences()
+        )
+
+        let exported = try XCTUnwrap(manifest.hosts.first)
+        XCTAssertEqual(exported.portForwards.count, 1)
+        XCTAssertEqual(exported.portForwards[0].id, forwardID)
+        XCTAssertEqual(exported.portForwards[0].localPort, 5_432)
+        XCTAssertEqual(exported.portForwards[0].remoteHost, "db.internal")
+        XCTAssertEqual(exported.portForwards[0].remotePort, 5_432)
+        XCTAssertEqual(exported.portForwards[0].autoStart, false)
+
+        let migrated = RuleCodec.decode(host.portForwardRulesData)
+        XCTAssertEqual(migrated.count, 1)
+        XCTAssertEqual(migrated[0].direction, .local)
+        XCTAssertEqual(migrated[0].bind, PortForwardEndpoint(host: "127.0.0.1", port: 5_432))
+        XCTAssertEqual(migrated[0].target, PortForwardEndpoint(host: "db.internal", port: 5_432))
     }
 
     func test_exportDoesNotOfferHostWhoseConfiguredKeyMaterialIsMissing() async throws {
@@ -1066,7 +1314,7 @@ final class BootstrapManifestAdapterTests: XCTestCase {
         appearance.mode = .light
         appearance.accent = .amber
         appearance.customAccentRGB = 0x65_43_21
-        appearance.monoFontName = "Menlo-Regular"
+        appearance.terminalFontID = "fira_code"
         appearance.fontSize = 16
         appearance.chromeMaterial = .solid
         appearance.cursorStyle = .bar
@@ -1088,7 +1336,7 @@ private struct PortableAppearanceSnapshot {
     let mode: AppearanceModeOption
     let accent: AccentName
     let customAccentRGB: Int
-    let monoFontName: String
+    let terminalFontID: String
     let fontSize: Double
     let chromeMaterial: ChromeMaterial
     let cursorStyle: CursorStyleOption
@@ -1102,12 +1350,13 @@ private struct PortableAppearanceSnapshot {
     let accessoryBarKeys: [String]
     let filesReaperDays: Int
     let filesDefaultDestination: String
+    let agentCenterEnabled: Bool
 
     init(_ appearance: AppearancePreferences) {
         mode = appearance.mode
         accent = appearance.accent
         customAccentRGB = appearance.customAccentRGB
-        monoFontName = appearance.monoFontName
+        terminalFontID = appearance.terminalFontID
         fontSize = appearance.fontSize
         chromeMaterial = appearance.chromeMaterial
         cursorStyle = appearance.cursorStyle
@@ -1121,13 +1370,14 @@ private struct PortableAppearanceSnapshot {
         accessoryBarKeys = appearance.accessoryBarKeys
         filesReaperDays = appearance.filesReaperDays
         filesDefaultDestination = appearance.filesDefaultDestination
+        agentCenterEnabled = appearance.agentCenterEnabled
     }
 
     func restore(to appearance: AppearancePreferences) {
         appearance.mode = mode
         appearance.accent = accent
         appearance.customAccentRGB = customAccentRGB
-        appearance.monoFontName = monoFontName
+        appearance.terminalFontID = terminalFontID
         appearance.fontSize = fontSize
         appearance.chromeMaterial = chromeMaterial
         appearance.cursorStyle = cursorStyle
@@ -1141,5 +1391,6 @@ private struct PortableAppearanceSnapshot {
         appearance.accessoryBarKeys = accessoryBarKeys
         appearance.filesReaperDays = filesReaperDays
         appearance.filesDefaultDestination = filesDefaultDestination
+        appearance.agentCenterEnabled = agentCenterEnabled
     }
 }

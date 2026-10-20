@@ -7,15 +7,22 @@ source "$HERE/lib.sh"
 
 RUN_DIR="${1:-}"
 [[ -n "$RUN_DIR" ]] || {
-  printf 'usage: run-iphone-keyboard-harness-tests.sh RUN_DIR\n' >&2
+  printf 'usage: run-iphone-keyboard-harness-tests.sh RUN_DIR [--without-building]\n' >&2
   exit 2
 }
+BUILD_ACTION=test
+if [[ "${2:-}" == --without-building ]]; then
+  BUILD_ACTION=test-without-building
+elif [[ -n "${2:-}" ]]; then
+  printf 'unknown option: %s\n' "$2" >&2
+  exit 2
+fi
 
 phone_udid_file="$SIMULATOR_STATE/iphone_keyboard_simulator_udid"
 ipad_udid_file="$SIMULATOR_STATE/ipad_keyboard_simulator_udid"
 phone_udid=''
 ipad_udid=''
-derived_data="$FIXTURE_STATE/iPhoneKeyboardDerivedData"
+derived_data="$(integration_derived_data)"
 result_dir="$RUN_DIR/programmatic"
 phone_result_bundle="$result_dir/iphone-keyboard-harness.xcresult"
 ipad_result_bundle="$result_dir/ipad-keyboard-occlusion.xcresult"
@@ -34,7 +41,7 @@ cleanup() {
   delete_owned_test_simulator "$phone_udid_file" || true
   delete_owned_test_simulator "$ipad_udid_file" || true
 }
-trap cleanup EXIT
+trap 'fail_closed_trap cleanup' EXIT
 
 phone_udid="$(
   TESSERA_INTEGRATION_SIMULATOR_NAME="Tessera Integration iPhone Keyboard" \
@@ -43,7 +50,7 @@ phone_udid="$(
     "$HERE/ensure-test-simulator.sh" | tail -n 1
 )"
 
-xcodebuild test \
+xcodebuild "$BUILD_ACTION" \
   -project "$REPO_ROOT/Tessera.xcodeproj" \
   -scheme Tessera \
   -configuration Debug \
@@ -77,3 +84,4 @@ xcodebuild test-without-building \
   -resultBundlePath "$ipad_result_bundle" \
   -parallel-testing-enabled NO \
   -only-testing:TesseraUITests/KeyboardAccessoryOcclusionHarnessTests
+script_completed=1

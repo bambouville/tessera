@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="agent_notification_channel_name">Avisos de agentes</string>
+    <string name="agent_notification_channel_description">Solicitudes y finalizaciones del centro de agentes</string>
+    <string name="agent_notification_needs_input">El agente necesita entrada</string>
+    <string name="agent_notification_finished">El agente terminó</string>
+    <string name="agent_notification_body">Abre Tessera para revisar.</string>
+    <string name="agent_notification_review">Revisar</string>
+</resources>

@@ -3,6 +3,19 @@ import XCTest
 @testable import Tessera
 
 final class ContinuityFoundationTests: XCTestCase {
+    @MainActor
+    func test_continuationPeerLabelIsNeutralUntilARecognizedPeerArrives() {
+        for name in [nil, "", "another device", "foreign-stamp"] as [String?] {
+            XCTAssertNil(GridAuthorityDeviceIdentity.continuationPeerLabel(name))
+        }
+        for name in ["iPhone", "iPad"] {
+            XCTAssertEqual(
+                GridAuthorityDeviceIdentity.continuationPeerLabel(name),
+                GridAuthorityDeviceIdentity.peerLabel(name)
+            )
+        }
+    }
+
     func test_fullScreenContinuityPresentationBackgroundIsOpaqueInEveryMode() {
         let light = DesignTokens.make(mode: .light, accent: .blue)
         let dark = DesignTokens.make(mode: .dark, accent: .blue)
@@ -86,6 +99,36 @@ final class ContinuityFoundationTests: XCTestCase {
             "envVars", "startupSnippet", "notes", "trustPin"
         ] {
             XCTAssertFalse(wire.contains(forbiddenKey), "descriptor exposed \(forbiddenKey)")
+        }
+    }
+
+    func test_sharedHostBoundaryCannotRepresentAppleCredentialOrShellSecrets() throws {
+        let secretPassword = "shared-boundary-password-sentinel"
+        let secretCommand = "shared-boundary-command-sentinel"
+        let secretEnvironment = "TOKEN=shared-boundary-env-sentinel"
+        let secretSnippet = "shared-boundary-snippet-sentinel"
+        let keyID = UUID()
+        let host = Host(
+            name: "zeus",
+            address: "zeus.lan",
+            user: "alice",
+            password: secretPassword,
+            transport: .ssh,
+            storedKeyID: keyID,
+            launchMode: .customCommand,
+            launchCommand: secretCommand,
+            envVars: secretEnvironment,
+            startupSnippet: secretSnippet
+        )
+
+        let wire = String(
+            decoding: try JSONEncoder().encode(host.sharedProfile()),
+            as: UTF8.self
+        )
+        for secret in [
+            secretPassword, secretCommand, secretEnvironment, secretSnippet, keyID.uuidString,
+        ] {
+            XCTAssertFalse(wire.contains(secret), "shared host boundary leaked \(secret)")
         }
     }
 
@@ -914,6 +957,158 @@ final class ContinuityFoundationTests: XCTestCase {
                 .duplicateRouteHostID(repeated)
             )
         }
+    }
+
+    func test_continuationPolicySnapshotAllowsOnlyExpectedCredentialCompletion() {
+        let identityID = UUID(uuidString: "40000000-0000-0000-0000-000000000001")!
+        let previous = makePolicySnapshot(
+            credential: .none(identityID: nil),
+            passwordRevision: 1
+        )
+        let withPassword = makePolicySnapshot(
+            credential: .password(identityID: identityID),
+            passwordRevision: 2
+        )
+
+        XCTAssertTrue(withPassword.invalidates(
+            replacing: previous,
+            allowingCredentialCompletionFor: nil
+        ))
+        XCTAssertFalse(withPassword.invalidates(
+            replacing: previous,
+            allowingCredentialCompletionFor: withPassword.hostCredentials[0].hostID
+        ))
+    }
+
+    func test_continuationPolicySnapshotNeverAdoptsRouteOrGlobalPolicyMutation() {
+        let previous = makePolicySnapshot(
+            credential: .none(identityID: nil),
+            passwordRevision: 1
+        )
+        let rerouted = makePolicySnapshot(
+            address: "other.example",
+            credential: .none(identityID: nil),
+            passwordRevision: 1
+        )
+        let ownerPresenceChanged = makePolicySnapshot(
+            credential: .none(identityID: nil),
+            requiresBiometric: true,
+            passwordRevision: 1
+        )
+
+        XCTAssertTrue(rerouted.invalidates(
+            replacing: previous,
+            allowingCredentialCompletionFor: previous.hostCredentials[0].hostID
+        ))
+        XCTAssertTrue(ownerPresenceChanged.invalidates(
+            replacing: previous,
+            allowingCredentialCompletionFor: previous.hostCredentials[0].hostID
+        ))
+    }
+
+    func test_continuationPolicySnapshotRejectsUnrelatedCredentialMutation() {
+        let targetHostID = UUID(uuidString: "40000000-0000-0000-0000-000000000002")!
+        let unrelatedHostID = UUID(uuidString: "40000000-0000-0000-0000-000000000003")!
+        let previous = makePolicySnapshot(
+            credential: .none(identityID: nil),
+            passwordRevision: 1
+        )
+        var credentials = previous.hostCredentials
+        credentials.append(.init(
+            hostID: unrelatedHostID,
+            credential: .none(identityID: nil)
+        ))
+        let changed = ContinuationSecurityPolicySnapshot(
+            hostConnections: previous.hostConnections,
+            jumpLinks: previous.jumpLinks,
+            hostCredentials: credentials,
+            requiresBiometricForKeyUse: previous.requiresBiometricForKeyUse,
+            passwordCredentialRevision: previous.passwordCredentialRevision
+        )
+
+        XCTAssertTrue(changed.invalidates(
+            replacing: previous,
+            allowingCredentialCompletionFor: targetHostID
+        ))
+    }
+
+    func test_enrollmentPolicyProductionHookAllowsOnlyExpectedHostCredentialSave() {
+        let targetHostID = UUID(uuidString: "40000000-0000-0000-0000-000000000002")!
+        let unrelatedHostID = UUID(uuidString: "40000000-0000-0000-0000-000000000003")!
+        let identityID = UUID(uuidString: "40000000-0000-0000-0000-000000000004")!
+        let previous = makePolicySnapshot(
+            credential: .none(identityID: nil),
+            passwordRevision: 1
+        )
+        let expectedCredentialSave = makePolicySnapshot(
+            credential: .key(
+                identityID: identityID,
+                keyID: UUID(uuidString: "40000000-0000-0000-0000-000000000005")!,
+                algorithm: "ecdsaP256",
+                authorizedKeysLine: "ecdsa-sha2-nistp256 AAAAexpected",
+                requiresBiometric: true,
+                isSecureEnclave: true
+            ),
+            passwordRevision: 1
+        )
+        XCTAssertFalse(EnrollmentSecurityPolicyMonitor.invalidates(
+            expectedCredentialSave,
+            replacing: previous,
+            expectedCredentialMutationHostID: targetHostID
+        ))
+
+        var unrelatedCredentials = expectedCredentialSave.hostCredentials
+        unrelatedCredentials.append(.init(
+            hostID: unrelatedHostID,
+            credential: .password(identityID: UUID())
+        ))
+        let unrelatedChange = ContinuationSecurityPolicySnapshot(
+            hostConnections: expectedCredentialSave.hostConnections,
+            jumpLinks: expectedCredentialSave.jumpLinks,
+            hostCredentials: unrelatedCredentials,
+            requiresBiometricForKeyUse: expectedCredentialSave.requiresBiometricForKeyUse,
+            passwordCredentialRevision: expectedCredentialSave.passwordCredentialRevision
+        )
+        XCTAssertTrue(EnrollmentSecurityPolicyMonitor.invalidates(
+            unrelatedChange,
+            replacing: previous,
+            expectedCredentialMutationHostID: targetHostID
+        ))
+    }
+
+    private func makePolicySnapshot(
+        address: String = "terminal.example",
+        credential: ContinuationSecurityPolicySnapshot.Credential,
+        requiresBiometric: Bool = false,
+        passwordRevision: UInt64
+    ) -> ContinuationSecurityPolicySnapshot {
+        let hostID = UUID(uuidString: "40000000-0000-0000-0000-000000000002")!
+        return ContinuationSecurityPolicySnapshot(
+            hostConnections: [
+                ContinuationSecurityPolicySnapshot.HostConnection(
+                    id: hostID,
+                    user: "alice",
+                    address: address,
+                    port: 22,
+                    transport: .ssh,
+                    launchMode: .customCommand,
+                    tmuxSessionName: nil,
+                    launchCommand: "exec zsh",
+                    environment: "",
+                    startupSnippet: "",
+                    portForwardRulesData: nil
+                )
+            ],
+            jumpLinks: [],
+            hostCredentials: [
+                ContinuationSecurityPolicySnapshot.HostCredential(
+                    hostID: hostID,
+                    credential: credential
+                )
+            ],
+            requiresBiometricForKeyUse: requiresBiometric,
+            passwordCredentialRevision: passwordRevision
+        )
     }
 
     private func makeDescriptor() -> SessionActivityDescriptor {

@@ -423,6 +423,13 @@ private struct LaunchOverlayMark: View {
         }
         .frame(width: 104, height: 104)      // halo footprint; mark sits centered
         .onAppear {
+            // Under automation the halo and cursor hold their lit frame:
+            // both forever animations otherwise keep XCUITest from ever
+            // seeing the app idle while a session is launching.
+            guard !ContinuousMotion.isSuppressed else {
+                glowOn = true
+                return
+            }
             withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
                 glowOn = true
             }

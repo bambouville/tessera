@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="session_back">Back</string>
+    <string name="session_disconnect">Close session</string>
+    <string name="session_files">Files</string>
+    <string name="session_terminal">Terminal</string>
+    <string name="session_paste">Paste</string>
+    <string name="session_disconnected">Disconnected</string>
+    <string name="session_connecting">Connecting…</string>
+    <string name="session_awaiting_credential">Waiting for a connection password</string>
+    <string name="session_checking_host_key">Waiting for host-key verification</string>
+    <string name="session_owner_authorization">Waiting for device authentication</string>
+    <string name="session_connected">Connected</string>
+    <string name="session_failed">Connection failed</string>
+    <string name="session_retry">Retry</string>
+    <string name="session_close">Close</string>
+    <string name="session_password_title">Password for %1$s on %2$s</string>
+    <string name="session_password_not_saved">The password is used for this connection only.</string>
+    <string name="session_password">Password</string>
+    <string name="session_connect">Connect</string>
+    <string name="session_cancel">Cancel</string>
+    <string name="host_key_unknown">Unknown host key</string>
+    <string name="host_key_changed">Host key changed</string>
+    <string name="host_key_reverted">Host key reverted</string>
+    <string name="host_key_endpoint" translatable="false">%1$s:%2$d</string>
+    <string name="host_key_previous">Previously trusted: %1$s</string>
+    <string name="host_key_changed_warning">Do not replace this key unless you independently verified the server change.</string>
+    <string name="host_key_reverted_warning">This server returned the previously trusted key after a replacement. Verify the server before restoring it.</string>
+    <string name="host_key_trust">Trust and connect</string>
+    <string name="host_key_replace">Replace trusted key</string>
+    <string name="session_open_keys">Open keys</string>
+    <string name="host_key_endpoint_label">endpoint</string>
+    <string name="host_key_algorithm_label">algorithm</string>
+    <string name="host_key_fingerprint_label">fingerprint</string>
+    <string name="host_key_previous_label">previously trusted</string>
+    <string name="host_key_unknown_body">Compare this fingerprint with the one printed on the server before trusting it.</string>
+</resources>

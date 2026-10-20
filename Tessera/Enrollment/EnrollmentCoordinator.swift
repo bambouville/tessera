@@ -343,6 +343,16 @@ final class EnrollmentCoordinator {
             if case .idle = self { return false }
             return true
         }
+
+        var requiresSecurityPolicyMonitoring: Bool {
+            switch self {
+            case .openingStreams, .requesting, .awaitingApproval, .authorizing,
+                 .installing, .syncingRecords:
+                return true
+            case .idle, .completed, .rejected, .cancelled, .failed:
+                return false
+            }
+        }
     }
 
     enum CoordinatorError: Error, LocalizedError {
@@ -389,6 +399,13 @@ final class EnrollmentCoordinator {
     private var requesterContext: ModelContext?
     private var requesterCompletionPersisted = false
     private var requesterCompletionDelivered = false
+    /// Armed only while this coordinator performs the exact requester-host
+    /// identity attachment and SwiftData save authorized by Enrollment v1.
+    /// `ModelContext.didSave` is delivered synchronously, before
+    /// `requesterCompletionPersisted` can become true, so the production policy
+    /// observer needs this narrow in-progress capability as well as the
+    /// post-save acknowledgement window.
+    private var requesterCredentialPersistenceHostID: UUID?
     /// `getContinuationStreams` completes asynchronously and cannot be
     /// cancelled. Bind each callback to the exact requester attempt that
     /// created it so a delayed callback cannot replace a newer transport.
@@ -404,6 +421,18 @@ final class EnrollmentCoordinator {
     private let grantEngine: SyncDeviceAccessGrantEngine
     private let authorizer: EnrollmentBiometricAuthorizing
     private let deviceKeyProvider: DeviceKeyProvider?
+
+    /// The requester is expected to attach the newly enrolled key to this one
+    /// host before it sends the durable-record receipt. No other credential,
+    /// route, host, or global policy mutation is adoptable by the attempt.
+    var expectedCredentialPolicyMutationHostID: UUID? {
+        guard role == .requester,
+              phase.requiresSecurityPolicyMonitoring else { return nil }
+        if let requesterCredentialPersistenceHostID {
+            return requesterCredentialPersistenceHostID
+        }
+        return requesterCompletionPersisted ? requesterHost?.id : nil
+    }
 
     init(
         metadata: KeySecurityMetadataStore = KeySecurityMetadataStore(),
@@ -435,6 +464,7 @@ final class EnrollmentCoordinator {
         requesterContext = modelContext
         requesterCompletionPersisted = false
         requesterCompletionDelivered = false
+        requesterCredentialPersistenceHostID = nil
         phase = .openingStreams(hostName: displayName(for: host))
 
         operationTask = Task { @MainActor [weak self] in
@@ -614,6 +644,7 @@ final class EnrollmentCoordinator {
         requesterContext = nil
         requesterCompletionPersisted = false
         requesterCompletionDelivered = false
+        requesterCredentialPersistenceHostID = nil
         approvalHostName = nil
         approvalEndpoint = nil
         role = nil
@@ -632,7 +663,35 @@ final class EnrollmentCoordinator {
     /// installer task and continuation streams cancelled synchronously.
     func applicationDidLock() {
         guard phase.isPresented else { return }
+        service?.applicationDidLock()
+        // `cancel()` performs the established Apple-side teardown and
+        // presentation. Clear the service first because its shared authority
+        // has already taken the stronger lock invalidation transition above.
+        service = nil
         cancel()
+    }
+
+    /// Host, route, credential, and owner-presence changes invalidate the
+    /// active shared authorization attempt. The Apple adapter cancels its
+    /// installer/stream work first, then projects the shared terminal state.
+    func securityPolicyChanged() {
+        guard phase.requiresSecurityPolicyMonitoring else { return }
+        invalidateRequesterStreamAttempt()
+        operationTask?.cancel()
+        operationTask = nil
+
+        guard let service else {
+            transport?.close()
+            transport = nil
+            serviceState = .failed(nil, .authorizationFailed)
+            phase = .failed(String(localized: "Enrollment authorization is no longer current."))
+            return
+        }
+
+        service.securityPolicyChanged()
+        reconcileServiceState()
+        transport?.close()
+        transport = nil
     }
 
     func dismissTerminalState() {
@@ -712,6 +771,12 @@ final class EnrollmentCoordinator {
                 phase = .failed(String(localized: "Enrollment persistence changed state unexpectedly."))
                 return
             }
+            guard let requesterHost else {
+                phase = .failed(CoordinatorError.missingHost.localizedDescription)
+                return
+            }
+            requesterCredentialPersistenceHostID = requesterHost.id
+            defer { requesterCredentialPersistenceHostID = nil }
             do {
                 try finishRequesterEnrollment()
                 requesterCompletionPersisted = true
@@ -955,6 +1020,7 @@ final class EnrollmentCoordinator {
         requesterContext = nil
         requesterCompletionPersisted = false
         requesterCompletionDelivered = false
+        requesterCredentialPersistenceHostID = nil
         requesterIntentCreatedForCurrentAttempt = false
         requesterLedgerSnapshot = nil
         requesterPeerName = "other device"

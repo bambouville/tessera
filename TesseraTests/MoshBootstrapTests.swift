@@ -1,8 +1,190 @@
 import XCTest
+import TesseraCore
+import TesseraSessionCore
+import TmuxControlCore
 import TmuxControl
 @testable import Tessera
 
 final class MoshBootstrapTests: XCTestCase {
+
+    func test_tmuxLaunchEnablesMouseOnWorkAndViewIncludingCompactReconnect() {
+        let host = Host(address: "example.com", user: "alice", launchMode: .pinnedTmux, tmuxSessionName: "shared")
+        let geometry = MoshBootstrapGeometry(
+            sessionID: "$7", sessionCreated: 1_721_234_567, windowID: "@11", cols: 132, rows: 44
+        )
+        let cases: [(Bool, MoshBootstrapGeometry?)] = [(false, nil), (true, nil), (true, geometry)]
+        for (preservesGeometry, existingGeometry) in cases {
+            let command = MoshBootstrap.launchCommand(
+                for: host, preserveTmuxGeometry: preservesGeometry, preservedTmuxGeometry: existingGeometry
+            )!
+            XCTAssertTrue(command.contains("mouse on"), command)
+            let view = existingGeometry == nil ? "shared-tessera-view" : "$7"
+            XCTAssertTrue(command.contains("set-option -t '\\''\(view)'\\'' mouse on"), command)
+            XCTAssertFalse(command.contains("set-option -g"), command)
+            if existingGeometry != nil {
+                XCTAssertTrue(command.contains("#{session_group}"), command)
+                guard let verify = command.range(of: "$7,1721234567,@11,132,44", options: .backwards),
+                      let mouse = command.range(of: "tessera_tmux_mouse_owner=") else {
+                    XCTFail(command)
+                    continue
+                }
+                XCTAssertLessThan(verify.upperBound, mouse.lowerBound)
+            }
+        }
+    }
+
+    @MainActor
+    func test_agentReadCarrierCoalescesRecoveryAndKeepsOtherWaitersWhenOneCancels() async throws {
+        let started = expectation(description: "one authentication")
+        let gate = MoshAgentCarrierTestGate(started: started)
+        let carrier = MoshAgentReadCarrier<Int>(close: { _ in })
+        let first = Task { try await carrier.acquire(isUsable: { _ in true }) { await gate.open() } }
+        await fulfillment(of: [started], timeout: 2)
+        let secondStarted = expectation(description: "second waiter entered")
+        let second = Task {
+            secondStarted.fulfill()
+            return try await carrier.acquire(isUsable: { _ in true }) { await gate.open() }
+        }
+        await fulfillment(of: [secondStarted], timeout: 2)
+        first.cancel()
+        do { _ = try await first.value; XCTFail("cancelled waiter succeeded") }
+        catch is CancellationError {} catch { XCTFail("unexpected error: \(error)") }
+        await gate.release(7)
+        let lease = try await second.value
+        XCTAssertEqual(lease.value, 7)
+        let calls = await gate.calls
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(carrier.current?.id, lease.id)
+        carrier.reset()
+    }
+
+    @MainActor
+    func test_agentReadCarrierDeadlineClosesLateAuthenticationWithoutReplacingNewLease() async throws {
+        let started = expectation(description: "blocked authentication")
+        let closed = expectation(description: "late route closed")
+        let gate = MoshAgentCarrierTestGate(started: started)
+        let carrier = MoshAgentReadCarrier<Int>(deadline: .milliseconds(20), retryDelay: .zero,
+            close: { if $0 == 1 { closed.fulfill() } })
+        let first = Task { try await carrier.acquire(isUsable: { _ in true }) { await gate.open() } }
+        await fulfillment(of: [started], timeout: 2)
+        do { _ = try await first.value; XCTFail("deadline did not fire") }
+        catch { XCTAssertEqual(error as? AgentProjectionError, .channelUnavailable) }
+        let fresh = try await carrier.acquire(isUsable: { _ in true }) { 2 }
+        await gate.release(1)
+        await fulfillment(of: [closed], timeout: 2)
+        XCTAssertEqual(carrier.current?.id, fresh.id)
+        carrier.invalidate(UUID())
+        XCTAssertEqual(carrier.current?.value, 2, "late failure cannot retire a different lease")
+        carrier.reset()
+    }
+
+    @MainActor
+    func test_agentReadCarrierDisconnectCancelsRenewalAndDisposesLateRoute() async throws {
+        let started = expectation(description: "authentication started")
+        let closed = expectation(description: "route arriving after disconnect closed")
+        let gate = MoshAgentCarrierTestGate(started: started)
+        let carrier = MoshAgentReadCarrier<Int>(close: { _ in closed.fulfill() })
+        let pending = Task { try await carrier.acquire(isUsable: { _ in true }) { await gate.open() } }
+        await fulfillment(of: [started], timeout: 2)
+        carrier.reset()
+        do { _ = try await pending.value; XCTFail("disconnected waiter succeeded") }
+        catch is CancellationError {} catch { XCTFail("unexpected error: \(error)") }
+        await gate.release(1)
+        await fulfillment(of: [closed], timeout: 2)
+        XCTAssertNil(carrier.current)
+    }
+
+    @MainActor
+    func test_agentReadCarrierLastWaiterCancellationRetiresAuthentication() async throws {
+        let started = expectation(description: "authentication started")
+        let closed = expectation(description: "late cancelled route closed")
+        let gate = MoshAgentCarrierTestGate(started: started)
+        let carrier = MoshAgentReadCarrier<Int>(close: { _ in closed.fulfill() })
+        let pending = Task { try await carrier.acquire(isUsable: { _ in true }) { await gate.open() } }
+        await fulfillment(of: [started], timeout: 2)
+        pending.cancel()
+        do { _ = try await pending.value; XCTFail("cancelled waiter succeeded") }
+        catch is CancellationError {} catch { XCTFail("unexpected error: \(error)") }
+        await gate.release(1)
+        await fulfillment(of: [closed], timeout: 2)
+        XCTAssertNil(carrier.current)
+    }
+
+    @MainActor
+    func test_agentReadCarrierBacksOffAfterFailedAuthentication() async {
+        let carrier = MoshAgentReadCarrier<Int>(retryDelay: .seconds(60), close: { _ in })
+        do {
+            _ = try await carrier.acquire(isUsable: { _ in true }) { throw AgentProjectionError.channelUnavailable }
+            XCTFail("failed authentication succeeded")
+        } catch {}
+        do {
+            _ = try await carrier.acquire(isUsable: { _ in true }) { XCTFail("authentication storm"); return 1 }
+            XCTFail("cooldown did not apply")
+        } catch { XCTAssertEqual(error as? AgentProjectionError, .channelUnavailable) }
+        carrier.reset()
+    }
+
+    @MainActor
+    func test_agentReadCarrierRenewsDeadRouteButReusesHealthyRoute() async throws {
+        let closed = expectation(description: "dead route closed")
+        let carrier = MoshAgentReadCarrier<Int>(close: { if $0 == 1 { closed.fulfill() } })
+        carrier.replace(with: 1)
+        let fresh = try await carrier.acquire(isUsable: { $0 != 1 }) { 2 }
+        let reused = try await carrier.acquire(isUsable: { _ in true }) { XCTFail("unnecessary authentication"); return 3 }
+        XCTAssertEqual(fresh.id, reused.id)
+        XCTAssertEqual(reused.value, 2)
+        await fulfillment(of: [closed], timeout: 2)
+        carrier.reset()
+    }
+
+    @MainActor
+    func test_agentReadHandleRejectsFrameCompletingAfterCarrierReplacement() async throws {
+        let started = expectation(description: "waiting for frame")
+        let gate = MoshAgentCarrierTestGate(started: started)
+        var current = true
+        let handle = MoshAgentReadExecHandle(
+            base: MoshAgentCarrierTestExecHandle(gate: gate),
+            isCurrent: { current }, failed: { _ in }
+        )
+        let read = Task { try await handle.nextFrame() }
+        await fulfillment(of: [started], timeout: 2)
+        current = false
+        await gate.release(1)
+        do { _ = try await read.value; XCTFail("stale frame accepted") }
+        catch { XCTAssertEqual(error as? AppleAgentPlatformError, .staleBinding) }
+    }
+
+    @MainActor
+    func test_agentReadRouteAllowsCredentialRotationButRejectsAccountEndpointAndJumpChanges() {
+        let bastion = Host(address: "bastion.test", user: "relay")
+        let original = Host(address: "host.test", user: "alice", jumpChain: [bastion])
+        var edited = original
+        edited.storedKeyID = UUID()
+        XCTAssertTrue(MoshSession.isSameAgentReadRoute(original, edited))
+        edited.user = "bob"
+        XCTAssertFalse(MoshSession.isSameAgentReadRoute(original, edited))
+        edited = original; edited.address = "other.test"
+        XCTAssertFalse(MoshSession.isSameAgentReadRoute(original, edited))
+        edited = original; edited.port = 2222
+        XCTAssertFalse(MoshSession.isSameAgentReadRoute(original, edited))
+        edited = original; edited.jumpChain = []
+        XCTAssertFalse(MoshSession.isSameAgentReadRoute(original, edited))
+        edited = original; edited.jumpChain[0].address = "other-bastion.test"
+        XCTAssertFalse(MoshSession.isSameAgentReadRoute(original, edited))
+        edited = original; edited.jumpChainBrokenReason = "deleted"
+        XCTAssertFalse(MoshSession.isSameAgentReadRoute(original, edited))
+    }
+
+    @MainActor
+    func test_controlChannelDeliversCompoundAttachThroughPOSIXShell() {
+        let command = TmuxControlChannel.attachCommand(sessionName: "quoted' session")
+        XCTAssertTrue(command.hasPrefix("if command -v tmux"))
+        XCTAssertEqual(
+            TmuxControlChannel.commandLine(command),
+            "exec /bin/sh -c \(MoshBootstrapGrammar.singleQuotedShellString(command))\n"
+        )
+        XCTAssertFalse(TmuxControlChannel.commandLine(command).hasPrefix("exec if "))
+    }
 
     func test_bootstrapCommand_autoTmuxUsesResolvedSessionName() {
         let host = Host(
@@ -17,7 +199,9 @@ final class MoshBootstrapTests: XCTestCase {
 
         XCTAssertEqual(
             command,
-            "mosh-server new -- tmux -u new-session -A -s tessera-auto1234 \\; set-option -t tessera-auto1234 status off"
+            MoshBootstrapGrammar.serverNewCommand(
+                launchCommand: AutoTmuxCommands.moshVisibleClientCommand(sessionTarget: "tessera-auto1234", ignoresSize: false)
+            )
         )
     }
 
@@ -37,13 +221,18 @@ final class MoshBootstrapTests: XCTestCase {
             "tessera-auto1234"
         }
 
-        XCTAssertTrue(command.hasPrefix("mosh-server new -- sh -lc "))
+        XCTAssertTrue(command.contains("exec mosh-server new -c 256 -- sh -lc "))
         XCTAssertTrue(command.contains("tmux -V 2>/dev/null"))
-        XCTAssertTrue(command.contains("new-session -A -f ignore-size"))
-        XCTAssertTrue(command.contains("else exec tmux -u new-session -A"))
-        XCTAssertEqual(
-            TmuxControlChannel.attachCommand(sessionName: "tessera-auto1234"),
-            "tmux -CC attach -t tessera-auto1234"
+        XCTAssertTrue(command.contains("-f ignore-size"))
+        XCTAssertTrue(command.contains("show-options -gv terminal-overrides"))
+        // Both mosh clients join Tessera's own view of the session; the user's
+        // session is only ever asked to exist. `bootstrapCommand` re-quotes the
+        // launch argv for PATH resolution, so the exact quoting is asserted on
+        // the single-layer `launchCommand` below.
+        XCTAssertTrue(command.contains("tessera-auto1234-view"))
+        XCTAssertTrue(
+            TmuxControlChannel.attachCommand(sessionName: "tessera-auto1234")
+                .contains("tmux -CC attach-session -t 'tessera-auto1234-view'")
         )
         let sideChannelCommand = TmuxControlChannel.attachCommand(
             sessionName: "tessera-auto1234",
@@ -51,11 +240,22 @@ final class MoshBootstrapTests: XCTestCase {
         )
         XCTAssertTrue(sideChannelCommand.contains("tmux -V 2>/dev/null"))
         XCTAssertTrue(sideChannelCommand.contains(
-            "exec tmux -CC attach -f ignore-size -t tessera-auto1234"
+            "exec tmux -CC attach-session -f no-output,ignore-size -t 'tessera-auto1234-view'"
         ))
         XCTAssertTrue(sideChannelCommand.contains(
-            "else exec tmux -CC attach -t tessera-auto1234"
+            "exec tmux -CC attach-session -t 'tessera-auto1234-view'"
         ))
+        // The reported bug: `status` is a tmux *session* option, so setting it
+        // on the session the user asked for hid the status line for every
+        // client of that session, and kept it hidden after Tessera left.
+        let launch = MoshBootstrap.launchCommand(
+            for: host,
+            visibleTmuxClientIgnoresSize: true
+        ) { _ in "tessera-auto1234" } ?? ""
+        XCTAssertTrue(launch.contains("-s '\\''tessera-auto1234-view'\\''"), launch)
+        XCTAssertTrue(launch.contains("-t '\\''tessera-auto1234'\\''"), launch)
+        XCTAssertFalse(launch.contains("-t '\\''tessera-auto1234'\\'' status"), launch)
+        XCTAssertTrue(launch.contains("-t '\\''tessera-auto1234-view'\\'' status off"), launch)
     }
 
     func test_bootstrapCommand_tagsVisibleTmuxClientForSafeAutoReclaim() {
@@ -114,30 +314,43 @@ final class MoshBootstrapTests: XCTestCase {
             preservingExistingSession
         )
         XCTAssertTrue(
-            preservingExistingSession.contains("attach-session -f ignore-size"),
+            preservingExistingSession.contains("attach-session $tessera_tmux_f"),
             preservingExistingSession
         )
     }
 
-    func test_bootstrapCommand_geometryNeutralTmuxPreservesOnlyExistingSession() {
+    func test_bootstrapCommand_geometryNeutralTmuxPreservesOnlyExistingSession() throws {
         let host = Host(
             address: "example.com",
             user: "alice",
             launchMode: .autoTmux
         )
 
-        let command = MoshBootstrap.bootstrapCommand(
+        // The launch argv is what `mosh-server new --` receives; the bootstrap
+        // command wraps it in a further quoting layer for PATH resolution.
+        let command = try XCTUnwrap(MoshBootstrap.launchCommand(
             for: host,
             preserveTmuxGeometry: true
         ) { _ in
             "tessera-auto1234"
-        }
+        })
+        XCTAssertTrue(
+            MoshBootstrap.bootstrapCommand(for: host, preserveTmuxGeometry: true) { _ in "tessera-auto1234" }
+                .contains("exec mosh-server new -c 256 -- sh -lc ")
+        )
 
         XCTAssertFalse(command.contains("stty cols"))
         XCTAssertTrue(command.contains("then exit 75"))
         XCTAssertTrue(command.contains(
-            "else exec tmux -u new-session -s '\\''tessera-auto1234'\\''"
-        ))
+            "exec tmux -u new-session $tessera_tmux_f "
+                + "-s '\\''tessera-auto1234-view'\\'' -t '\\''tessera-auto1234'\\''"
+        ), command)
+        // Joining work that already exists must not resize it to this compact
+        // client; only a launch that started the owner may adopt the grid.
+        XCTAssertTrue(command.contains(
+            "else tmux -u new-session -d -s '\\''tessera-auto1234'\\''; "
+                + "tessera_tmux_f='\\'''\\''; fi"
+        ), command)
         XCTAssertTrue(command.contains(
             "@tessera-size-owner '\\''#{client_name}'\\''"
         ))
@@ -171,10 +384,9 @@ final class MoshBootstrapTests: XCTestCase {
         XCTAssertTrue(command.contains("matched=1"))
         XCTAssertTrue(command.contains("[ \"$matched\" = 1 ]"))
         XCTAssertTrue(command.contains("exit 77"))
-        XCTAssertTrue(command.contains("attach-session -f ignore-size -t"))
+        XCTAssertTrue(command.contains("attach-session $tessera_tmux_f -t"))
         XCTAssertTrue(command.contains("$7,1721234567,@11,132,44"))
-        XCTAssertTrue(command.contains("attach-session -f ignore-size"))
-        XCTAssertTrue(command.contains("else exec tmux -u attach-session"))
+        XCTAssertTrue(command.contains("show-options -gv terminal-overrides"))
         XCTAssertTrue(command.contains("@tessera-size-owner"))
         XCTAssertFalse(command.contains("refresh-client -C"))
     }
@@ -232,7 +444,9 @@ final class MoshBootstrapTests: XCTestCase {
 
         XCTAssertEqual(
             command,
-            "mosh-server new -- tmux -u new-session -A -s dev-session \\; set-option -t dev-session status off"
+            MoshBootstrapGrammar.serverNewCommand(
+                launchCommand: AutoTmuxCommands.moshVisibleClientCommand(sessionTarget: "dev-session", ignoresSize: false)
+            )
         )
     }
 
@@ -250,7 +464,9 @@ final class MoshBootstrapTests: XCTestCase {
 
         XCTAssertEqual(
             command,
-            "mosh-server new -- tmux -u new-session -A -s tessera-fallback \\; set-option -t tessera-fallback status off"
+            MoshBootstrapGrammar.serverNewCommand(
+                launchCommand: AutoTmuxCommands.moshVisibleClientCommand(sessionTarget: "tessera-fallback", ignoresSize: false)
+            )
         )
     }
 
@@ -268,7 +484,9 @@ final class MoshBootstrapTests: XCTestCase {
 
         XCTAssertEqual(
             command,
-            "mosh-server new -- tmux -u new-session -A -s tessera-fallback \\; set-option -t tessera-fallback status off"
+            MoshBootstrapGrammar.serverNewCommand(
+                launchCommand: AutoTmuxCommands.moshVisibleClientCommand(sessionTarget: "tessera-fallback", ignoresSize: false)
+            )
         )
     }
 
@@ -284,7 +502,9 @@ final class MoshBootstrapTests: XCTestCase {
 
         XCTAssertEqual(
             command,
-            "mosh-server new -- sh -lc 'printf '\\''hi'\\''; echo done'"
+            MoshBootstrapGrammar.serverNewCommand(
+                launchCommand: "sh -lc 'printf '\\''hi'\\''; echo done'"
+            )
         )
     }
 
@@ -298,7 +518,7 @@ final class MoshBootstrapTests: XCTestCase {
 
         let command = MoshBootstrap.bootstrapCommand(for: host)
 
-        XCTAssertEqual(command, "mosh-server new")
+        XCTAssertEqual(command, MoshBootstrapGrammar.serverNewCommand(launchCommand: nil))
     }
 
     func test_parseConnectResponse_readsPortAndKey() throws {
@@ -541,9 +761,10 @@ final class PrivateKeyAuditMoshCredentialLifetimeTests: XCTestCase {
     func test_PK011_driverReleasesSwiftAndNativeBootstrapKeyAtHandoff() {
         let driver = MoshTransportDriver(
             host: "127.0.0.1",
+            diagnosticHostID: UUID(),
             udpPort: 60_004,
             base64Key: "qiXpjXIk6M8/nWtBn9s6rQ",
-            onOutput: { _, _ in },
+            onOutput: { _, _, _, _ in },
             onConnected: {},
             onDisconnected: {},
             onFailed: { _ in },
@@ -765,4 +986,73 @@ final class HostLaunchPrologueTests: XCTestCase {
             HostLaunchPrologue.inlineForArgv(envVars: "", startupSnippet: "")
         )
     }
+
+    // MARK: - Side-channel lifetime
+
+    func test_theSideChannelSurvivesTheUserLookingAtAnotherSession() {
+        // The 2026-09-11 report: with a mosh+tmux and an ssh+tmux session both
+        // open, switching to the SSH one dropped the mosh session's control
+        // connection. Its TCP control read as disconnected, its forwarded
+        // ports stopped, and switching back paid a fresh SSH connect plus a
+        // tmux re-attach — one to two seconds, every time.
+        //
+        // Which session is on screen is not an input to this rule at all, so
+        // there is no "inactive" case to pass: that is the fix.
+        for launchMode in [HostLaunchMode.autoTmux, .pinnedTmux] {
+            XCTAssertTrue(
+                MoshSideChannelLifetime.shouldMaintain(
+                    launchMode: launchMode,
+                    isConnected: true
+                ),
+                "\(launchMode) should hold its side channel while connected"
+            )
+        }
+    }
+
+    func test_aSessionThatIsNotConnectedHasNothingToControl() {
+        XCTAssertFalse(
+            MoshSideChannelLifetime.shouldMaintain(
+                launchMode: .autoTmux,
+                isConnected: false
+            )
+        )
+    }
+
+    func test_plainMoshNeverOpensATmuxSideChannel() {
+        // `.customCommand` has no tmux control channel. Its Agent Center read
+        // carrier has a separate lifetime, independent of the UDP terminal.
+        XCTAssertFalse(
+            MoshSideChannelLifetime.shouldMaintain(
+                launchMode: .customCommand,
+                isConnected: true
+            )
+        )
+    }
+}
+
+private actor MoshAgentCarrierTestGate {
+    let started: XCTestExpectation
+    private(set) var calls = 0
+    private var continuation: CheckedContinuation<Int, Never>?
+
+    init(started: XCTestExpectation) { self.started = started }
+
+    func open() async -> Int {
+        calls += 1
+        return await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            started.fulfill()
+        }
+    }
+
+    func release(_ value: Int) {
+        continuation?.resume(returning: value)
+        continuation = nil
+    }
+}
+
+private struct MoshAgentCarrierTestExecHandle: AppleAgentStreamingExecHandle {
+    let gate: MoshAgentCarrierTestGate
+    func nextFrame() async throws -> AgentExecFrame? { _ = await gate.open(); return nil }
+    func cancel() async {}
 }

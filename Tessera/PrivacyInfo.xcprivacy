@@ -21,8 +21,9 @@
 	<array>
 		<!--
 		  UserDefaults: preferences, per-host runtime state, OS-detection
-		  flags, session-restore, swipe-pad profiles. All UserDefaults.standard,
-		  accessible only to this app. Reason CA92.1.
+		  flags, session-restore, swipe-pad profiles. App-private defaults use
+		  reason CA92.1; App Group defaults used for share integration
+		  (group.com.bambouville.TesseraApp) use reason 1C8F.1.
 		-->
 		<dict>
 			<key>NSPrivacyAccessedAPIType</key>
@@ -30,6 +31,7 @@
 			<key>NSPrivacyAccessedAPITypeReasons</key>
 			<array>
 				<string>CA92.1</string>
+				<string>1C8F.1</string>
 			</array>
 		</dict>
 		<!--

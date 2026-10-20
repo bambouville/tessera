@@ -1,5 +1,7 @@
 import SwiftTerm
 import UIKit
+import ObjectiveC
+import TesseraCore
 
 extension Notification.Name {
     static let tesseraForceRefreshTerminal = Notification.Name(
@@ -48,11 +50,341 @@ enum TesseraTerminalSelectionPathAction {
 }
 
 /// SwiftTerm calls `becomeFirstResponder()` from its own single-tap handler.
-/// Surface that transition so the phone keyboard-dismissal latch clears only
+/// Surface that transition so the keyboard-dismissal latch clears only
 /// for a real focus request, not merely because SwiftUI happened to update
 /// while the terminal was still first responder during the hide-button tap.
 final class TesseraResponderAwareTerminalView: TerminalView {
+    private var appliedLayoutSize: CGSize?
+    private var appliedLayoutGrid: TerminalResizeCoalescer.Size?
+    private var appliedGridFrame: CGRect?
+    private var pendingLayoutResize: DispatchWorkItem?
+
+    func cancelPendingLayoutResize() {
+        pendingLayoutResize?.cancel()
+        pendingLayoutResize = nil
+    }
+
+    override func layoutTerminalSizeChanged(to newSize: CGSize) {
+        cancelPendingLayoutResize()
+        guard newSize.width > 0, newSize.height > 0 else { return }
+        guard appliedLayoutSize != nil else {
+            commitLayoutSize(newSize)
+            return
+        }
+        let grid = TerminalResizeCoalescer.Size(cols: getTerminal().cols, rows: getTerminal().rows)
+        // Font changes and explicit grid ownership can resize outside layout.
+        // A return to the old bounds must reconcile those changes too.
+        guard newSize != appliedLayoutSize || grid != appliedLayoutGrid || getOptimalFrameSize() != appliedGridFrame else { return }
+        let gridFrame = getOptimalFrameSize()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.bounds.size == newSize else { return }
+            self.pendingLayoutResize = nil
+            // An explicit font or grid change supersedes this layout proposal.
+            guard self.getTerminal().cols == grid.cols, self.getTerminal().rows == grid.rows,
+                  self.getOptimalFrameSize() == gridFrame else { return }
+            self.commitLayoutSize(newSize)
+        }
+        pendingLayoutResize = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + TerminalResizeCoalescer.settleSeconds, execute: work)
+    }
+
+    private func commitLayoutSize(_ size: CGSize) {
+        appliedLayoutSize = size
+        super.layoutTerminalSizeChanged(to: size)
+        appliedLayoutGrid = .init(cols: getTerminal().cols, rows: getTerminal().rows)
+        appliedGridFrame = getOptimalFrameSize()
+    }
+
+    /// SwiftTerm sends a bracketed paste as three writes: opening delimiter,
+    /// text, closing delimiter. Each becomes one session command, and the
+    /// grid-authority gate decides per command (S5′): a take-over landing
+    /// between them would deliver the opening delimiter alone, and the
+    /// application would read every later key as pasted text. Collect the
+    /// writes and send the paste once, so the gate admits or drops it whole.
+    override func paste(_ sender: Any?) {
+        guard let delegate = terminalDelegate else { return super.paste(sender) }
+        let collector = PasteCollector(forwardingTo: delegate)
+        terminalDelegate = collector
+        super.paste(sender)
+        terminalDelegate = delegate
+        if !collector.bytes.isEmpty { send(data: collector.bytes[...]) }
+    }
+
+    /// The delegate for the length of one `super.paste`: keeps its writes,
+    /// forwards everything else.
+    private final class PasteCollector: NSObject, TerminalViewDelegate {
+        private let delegate: TerminalViewDelegate
+        private(set) var bytes: [UInt8] = []
+
+        init(forwardingTo delegate: TerminalViewDelegate) { self.delegate = delegate }
+
+        func send(source: TerminalView, data: ArraySlice<UInt8>) { bytes.append(contentsOf: data) }
+        func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
+            delegate.sizeChanged(source: source, newCols: newCols, newRows: newRows)
+        }
+        func setTerminalTitle(source: TerminalView, title: String) {
+            delegate.setTerminalTitle(source: source, title: title)
+        }
+        func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
+            delegate.hostCurrentDirectoryUpdate(source: source, directory: directory)
+        }
+        func scrolled(source: TerminalView, position: Double) {
+            delegate.scrolled(source: source, position: position)
+        }
+        func scrollbackTrimmed(source: TerminalView, points: Double) {
+            delegate.scrollbackTrimmed(source: source, points: points)
+        }
+        func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
+            delegate.requestOpenLink(source: source, link: link, params: params)
+        }
+        func bell(source: TerminalView) { delegate.bell(source: source) }
+        func clipboardCopy(source: TerminalView, content: Data) {
+            delegate.clipboardCopy(source: source, content: content)
+        }
+        func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {
+            delegate.iTermContent(source: source, content: content)
+        }
+        func rangeChanged(source: TerminalView, startY: Int, endY: Int) {
+            delegate.rangeChanged(source: source, startY: startY, endY: endY)
+        }
+    }
+
+    private typealias DrawImplementation = @convention(c) (
+        AnyObject,
+        Selector,
+        CGRect
+    ) -> Void
+
+    private static let drawSelector = #selector(UIView.draw(_:))
+    private static let inheritedDrawImplementation: IMP? = {
+        class_getInstanceMethod(TerminalView.self, drawSelector)
+            .map(method_getImplementation)
+    }()
+    /// SwiftTerm's `draw(_:)` override is public but not open, so Swift cannot
+    /// override it from the app module. Install a drawing trampoline on this
+    /// concrete subclass only (never swizzle TerminalView). Visible surfaces
+    /// invoke the inherited implementation exactly once; inactive sessions
+    /// retain their emulator state without rasterizing an invisible canvas.
+    private static let terminalDrawHookInstalled: Bool = {
+        guard inheritedDrawImplementation != nil,
+              let inheritedMethod = class_getInstanceMethod(
+                TerminalView.self,
+                drawSelector
+              ),
+              let hookMethod = class_getInstanceMethod(
+                TesseraResponderAwareTerminalView.self,
+                #selector(tesseraLatencyDraw(_:))
+              )
+        else { return false }
+        return class_addMethod(
+            TesseraResponderAwareTerminalView.self,
+            drawSelector,
+            method_getImplementation(hookMethod),
+            method_getTypeEncoding(inheritedMethod)
+        )
+    }()
+
+    private var latencyHost: UUID?
+    private var latencyFeedToVisibleDraw: AsyncDeliveryDiagnostics?
+    private var latencyFeedToHiddenDraw: AsyncDeliveryDiagnostics?
+    private var latencyVisibleDrawCall: AsyncDeliveryDiagnostics?
+    private var latencyHiddenDrawCall: AsyncDeliveryDiagnostics?
+    private var hasPendingVisibleFeed = false
+    private var hasPendingHiddenFeed = false
+    private var reportedMetalRendererMode: Bool?
+    private let latencyViewID = String(UUID().uuidString.prefix(8))
+    private var latencyDiagnosticsEnabled = false
+    private(set) var sessionDrawingEnabled = true
+#if DEBUG
+    private(set) var latencyDrawCallbackEntryCount = 0
+    private(set) var latencyDrawForwardedCallCount = 0
+    var scrollBenchmarkDrawMilliseconds: [Double] = []
+    var scrollBenchmarkRecording = false
+#endif
+
+    func setSessionDrawingEnabled(_ enabled: Bool) {
+        // UIKit can still invoke draw on an isHidden view. The renderer guard,
+        // not the compositing hint, owns suppression. Install before the first
+        // container display even when diagnostics are disabled.
+        _ = Self.terminalDrawHookInstalled
+        guard sessionDrawingEnabled != enabled else { return }
+        sessionDrawingEnabled = enabled
+        isHidden = !enabled
+        if !enabled {
+            // Structural single-claimant: a surface the user cannot see must not
+            // hold the keyboard. UIKit does NOT resign a hidden first responder,
+            // and only one view per window can hold it — so an invisible session
+            // that keeps it silently swallows every keystroke meant for the
+            // visible terminal. It also satisfies the `hasOtherTextResponder`
+            // bail in `restoreKeyboardFocusAfterActivation` (TerminalView is a
+            // UITextInput), which then refuses to repair the on-screen terminal.
+            if isFirstResponder {
+                noteKeyboardDiagnostic("resign-on-hide")
+                _ = resignFirstResponderForTransition()
+            }
+            // A deliberately invisible surface has no pending presentation
+            // deadline. Discard diagnostic markers only, never terminal bytes.
+            if hasPendingVisibleFeed { latencyFeedToVisibleDraw?.discarded(count: 1) }
+            if hasPendingHiddenFeed { latencyFeedToHiddenDraw?.discarded(count: 1) }
+            hasPendingVisibleFeed = false
+            hasPendingHiddenFeed = false
+        } else {
+            // Hidden feeds may already have cleared the old dirty-row range.
+            // Repaint the current buffer via SwiftTerm's normal CG/Metal
+            // scheduler, without replaying output or changing scroll position.
+            let terminal = getTerminal()
+            if terminal.rows > 0 {
+                terminal.refresh(startRow: 0, endRow: terminal.rows - 1)
+                feed(text: "")
+            }
+            setNeedsDisplay(bounds)
+        }
+        if latencyDiagnosticsEnabled, let latencyHost {
+            DiagnosticLogStore.appendSSH("latency-render-visibility host=\(latencyHost.uuidString.prefix(8)) view=\(latencyViewID) drawingEnabled=\(enabled)")
+        }
+    }
+
+    func bindLatencyDiagnostics(host: UUID) {
+        // Drawing visibility is production behavior; these optional metrics
+        // remain verbose-only and follow the frozen-lifetime queue policy.
+        guard DiagnosticLogStore.isVerboseEnabled else { return }
+        guard latencyHost != host || latencyFeedToVisibleDraw == nil else {
+            reportRendererModeIfNeeded()
+            return
+        }
+        latencyDiagnosticsEnabled = true
+        latencyHost = host
+        latencyFeedToVisibleDraw = SessionLatencyDiagnostics.queue(
+            host: host,
+            stage: "renderer-coregraphics-feed-visible-to-draw view=\(latencyViewID)"
+        )
+        latencyFeedToHiddenDraw = SessionLatencyDiagnostics.queue(
+            host: host,
+            stage: "renderer-coregraphics-feed-hidden-to-draw view=\(latencyViewID)"
+        )
+        latencyVisibleDrawCall = SessionLatencyDiagnostics.queue(
+            host: host,
+            stage: "renderer-coregraphics-draw-visible-call view=\(latencyViewID)"
+        )
+        latencyHiddenDrawCall = SessionLatencyDiagnostics.queue(
+            host: host,
+            stage: "renderer-coregraphics-draw-hidden-call view=\(latencyViewID)"
+        )
+        _ = Self.terminalDrawHookInstalled
+        reportRendererModeIfNeeded()
+    }
+
+    func noteLatencyFeed() {
+        guard latencyDiagnosticsEnabled, sessionDrawingEnabled else { return }
+        reportRendererModeIfNeeded()
+        // This subclass trampoline observes SwiftTerm's CoreGraphics callback.
+        // If a future configuration opts into Metal, do not leave a false
+        // pending claim: its MTKView renderer has a different callback path.
+        guard !isUsingMetalRenderer else { return }
+        if isLatencySurfaceVisible {
+            guard !hasPendingVisibleFeed else { return }
+            hasPendingVisibleFeed = true
+            latencyFeedToVisibleDraw?.enqueued()
+        } else {
+            guard !hasPendingHiddenFeed else { return }
+            hasPendingHiddenFeed = true
+            latencyFeedToHiddenDraw?.enqueued()
+        }
+    }
+
+    private var isLatencySurfaceVisible: Bool {
+        guard window != nil else { return false }
+        var ancestor: UIView? = self
+        while let current = ancestor {
+            if current.isHidden || current.alpha <= 0 || current.layer.opacity <= 0 {
+                return false
+            }
+            ancestor = current.superview
+        }
+        return true
+    }
+
+    private func reportRendererModeIfNeeded() {
+        guard latencyDiagnosticsEnabled, let latencyHost else { return }
+        let metal = isUsingMetalRenderer
+        guard reportedMetalRendererMode != metal else { return }
+        reportedMetalRendererMode = metal
+        let callback = metal
+            ? "unavailable-from-app"
+            : (Self.terminalDrawHookInstalled ? "subclass-draw" : "install-failed")
+        DiagnosticLogStore.appendSSH(
+            "latency-renderer-v3 host=\(latencyHost.uuidString.prefix(8)) mode=\(metal ? "metal" : "coregraphics") callback=\(callback) metric=entry-to-return compositor=unobserved view=\(latencyViewID)"
+        )
+    }
+
+    /// Objective-C trampoline installed as this subclass's `drawRect:` method.
+    /// Calling the captured inherited IMP directly avoids redispatching to the
+    /// trampoline and preserves SwiftTerm's exact rendering implementation.
+    @objc private func tesseraLatencyDraw(_ dirtyRect: CGRect) {
+#if DEBUG
+        latencyDrawCallbackEntryCount += 1
+#endif
+        guard sessionDrawingEnabled else { return }
+        if hasPendingVisibleFeed {
+            latencyFeedToVisibleDraw?.consumed()
+            hasPendingVisibleFeed = false
+        }
+        if hasPendingHiddenFeed {
+            latencyFeedToHiddenDraw?.consumed()
+            hasPendingHiddenFeed = false
+        }
+
+        let drawCall = latencyDiagnosticsEnabled
+            ? (isLatencySurfaceVisible ? latencyVisibleDrawCall : latencyHiddenDrawCall)
+            : nil
+        drawCall?.enqueued()
+        defer { drawCall?.consumed() }
+
+        guard let implementation = Self.inheritedDrawImplementation else {
+            return
+        }
+        let draw = unsafeBitCast(implementation, to: DrawImplementation.self)
+#if DEBUG
+        latencyDrawForwardedCallCount += 1
+        let benchmarkStart = scrollBenchmarkRecording ? CACurrentMediaTime() : 0
+#endif
+        draw(self, Self.drawSelector, dirtyRect)
+#if DEBUG
+        if benchmarkStart > 0 {
+            scrollBenchmarkDrawMilliseconds.append((CACurrentMediaTime() - benchmarkStart) * 1000)
+        }
+#endif
+    }
+    private(set) var agentCursorVisible = true
+    override func showCursor(source: Terminal) {
+        agentCursorVisible = true
+        super.showCursor(source: source)
+    }
+    override func hideCursor(source: Terminal) {
+        agentCursorVisible = false
+        super.hideCursor(source: source)
+    }
     var onBecameFirstResponder: (() -> Void)?
+    var allowsFirstResponderRequest: ((_ fromTerminalTap: Bool) -> Bool)?
+    var onWillResignFirstResponder: ((_ forTransition: Bool) -> Void)?
+    var onDidResignFirstResponder: ((_ accepted: Bool) -> Void)?
+    var onDidMoveToWindow: (() -> Void)?
+    private var resigningForTransition = false
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { onDidMoveToWindow?() }
+    }
+
+    /// Session/lifecycle cleanup is temporary focus loss, not a user request
+    /// to keep the keyboard hidden. The system hide key uses the override below.
+    @discardableResult
+    func resignFirstResponderForTransition() -> Bool {
+        resigningForTransition = true
+        defer { resigningForTransition = false }
+        return resignFirstResponder()
+    }
+    private var keyboardTextInputCount = 0
     var agentScrollBlockingActive = false
     var onAgentScrollBlocked: (() -> Void)?
 
@@ -73,15 +405,96 @@ final class TesseraResponderAwareTerminalView: TerminalView {
             wireMousePanPriority()
         }
     }
+    weak var discreteScrollGesture: UIPanGestureRecognizer?
     private weak var swiftTermMousePanGesture: UIPanGestureRecognizer?
 
+    var focusOnlyTap: (() -> Void)? {
+        didSet { updateFocusOnlyGestures() }
+    }
+    private var focusTapGesture: UITapGestureRecognizer?
+    private var focusDisabledGestures: [UIGestureRecognizer] = []
+
+    private func updateFocusOnlyGestures() {
+        if focusTapGesture == nil {
+            let tap = UITapGestureRecognizer(target: self, action: #selector(handleFocusOnlyTap(_:)))
+            tap.cancelsTouchesInView = false
+            addGestureRecognizer(tap)
+            focusTapGesture = tap
+        }
+        focusTapGesture?.isEnabled = focusOnlyTap != nil
+        if focusOnlyTap == nil {
+            focusDisabledGestures.forEach { $0.isEnabled = true }
+            focusDisabledGestures.removeAll()
+        } else {
+            // SwiftTerm's tap/selection recognizers have no delegate. Disable
+            // them directly while leaving every scroll owner available.
+            for gesture in gestureRecognizers ?? [] where gesture !== focusTapGesture {
+                if gesture is UITapGestureRecognizer || gesture is UILongPressGestureRecognizer
+                    || (gesture is UIPanGestureRecognizer
+                        && gesture !== panGestureRecognizer
+                        && gesture !== semanticScrollGesture
+                        && gesture !== discreteScrollGesture
+                        && gesture !== agentScrollBlockGesture) {
+                    if gesture.isEnabled {
+                        focusDisabledGestures.append(gesture)
+                        gesture.isEnabled = false
+                    }
+                }
+            }
+        }
+    }
+
+    @objc private func handleFocusOnlyTap(_ gesture: UITapGestureRecognizer) {
+        if gesture.state == .ended { focusOnlyTap?() }
+    }
+
     override func becomeFirstResponder() -> Bool {
+        guard focusOnlyTap == nil else { return false }
         let wasFirstResponder = isFirstResponder
+        let fromTerminalTap = gestureRecognizers?.contains {
+            $0 is UITapGestureRecognizer && $0.state == .ended
+        } == true
+        if !wasFirstResponder, allowsFirstResponderRequest?(fromTerminalTap) == false {
+            noteKeyboardDiagnostic("focus-request-denied")
+            return false
+        }
         let accepted = super.becomeFirstResponder()
         if accepted, !wasFirstResponder {
+            keyboardTextInputCount = 0
+            noteKeyboardDiagnostic("focus-acquired")
             onBecameFirstResponder?()
         }
         return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let wasFirstResponder = isFirstResponder
+        if wasFirstResponder { onWillResignFirstResponder?(resigningForTransition) }
+        let accepted = super.resignFirstResponder()
+        if wasFirstResponder { onDidResignFirstResponder?(accepted) }
+        if accepted, wasFirstResponder {
+            noteKeyboardDiagnostic("focus-resigned")
+        }
+        return accepted
+    }
+
+    override func insertText(_ text: String) {
+        if DiagnosticLogStore.isVerboseEnabled {
+            keyboardTextInputCount += 1
+            if keyboardTextInputCount <= 4 || keyboardTextInputCount.isMultiple(of: 64) {
+                noteKeyboardDiagnostic("insert-text bytes=\(text.utf8.count) count=\(keyboardTextInputCount)")
+            }
+        }
+        super.insertText(text)
+    }
+
+    /// Content-free breadcrumbs: distinguish UIKit input/focus loss from a
+    /// transport rejection without recording characters, commands, or keys.
+    func noteKeyboardDiagnostic(_ event: String) {
+        guard DiagnosticLogStore.isVerboseEnabled else { return }
+        let message = "keyboard-input view=\(latencyViewID) event=\(event) firstResponder=\(isFirstResponder) drawing=\(sessionDrawingEnabled) attached=\(window != nil) keyWindow=\(window?.isKeyWindow == true)"
+        DiagnosticLogStore.appendSSH(message)
+        NSLog("[Tessera][KeyboardDiag] %@", message)
     }
 
     override func accessibilityScroll(
@@ -92,6 +505,21 @@ final class TesseraResponderAwareTerminalView: TerminalView {
         }
         onAgentScrollBlocked?()
         return true
+    }
+
+    /// UIScrollView's own pan moves primary history by any vertical component.
+    /// The agent blocker takes only vertical-dominant finger pans (horizontal
+    /// drags can belong to a full-screen program), so while it is active a
+    /// diagonal pan it let pass must not start here either. The alternate
+    /// screen has no history for this pan to move.
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if gestureRecognizer === panGestureRecognizer,
+           agentScrollBlockingActive,
+           !getTerminal().isCurrentBufferAlternate {
+            onAgentScrollBlocked?()
+            return false
+        }
+        return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
 
     override func addGestureRecognizer(_ gestureRecognizer: UIGestureRecognizer) {
@@ -120,6 +548,7 @@ final class TesseraResponderAwareTerminalView: TerminalView {
                 .first { !existingGestureIDs.contains(ObjectIdentifier($0)) }
         }
         wireMousePanPriority()
+        updateFocusOnlyGestures()
     }
 
     private func wireMousePanPriority() {
@@ -230,6 +659,10 @@ final class TesseraTerminalContainer: UIView {
     /// palette when the user actually picks a different theme — avoids a full
     /// repaint on every font-size or cursor-blink tweak in updateUIView.
     var appliedThemeID: String?
+    /// `TerminalFontCatalog` id last installed on `view.font`. Cached rather
+    /// than re-derived, because `view.font` reports the resolved face and the
+    /// system option resolves to a name no catalog id matches.
+    var appliedTerminalFontID: String?
     var appliedScrollbackLines: Int?
     /// Whether the canvas was last configured transparent (background-picture
     /// mode) — cached like `appliedThemeID` so applyAppearance only repaints
@@ -272,6 +705,7 @@ final class TesseraTerminalContainer: UIView {
     override init(frame: CGRect) {
         self.terminalView = TesseraResponderAwareTerminalView(frame: .zero)
         super.init(frame: frame)
+        terminalView.setSessionDrawingEnabled(true)
         // SwiftTerm's TerminalView is a UIScrollView whose content is the grid,
         // and it parks the live tail at `contentSize - rows`. UIKit's automatic
         // safe-area adjustment fights that: when the no-resize keyboard layout
@@ -423,6 +857,8 @@ final class TesseraTerminalContainer: UIView {
         case .tmuxPreviousWindow:  return #selector(tmuxPreviousWindow)
         case .tmuxNextWindow:      return #selector(tmuxNextWindow)
         case .tmuxSelectWindow:    return #selector(tmuxSelectWindow(_:))
+        case .tmuxMoveWindowLeft:  return #selector(tmuxMoveWindowLeft)
+        case .tmuxMoveWindowRight: return #selector(tmuxMoveWindowRight)
         case .paneSplitSideBySide: return #selector(tmuxSplitPaneHorizontal)
         case .paneSplitStacked:    return #selector(tmuxSplitPaneVertical)
         case .panePrevious:        return #selector(tmuxPaneCyclePrevious)
@@ -465,6 +901,8 @@ final class TesseraTerminalContainer: UIView {
              #selector(tmuxKillWindow),
              #selector(tmuxPreviousWindow),
              #selector(tmuxNextWindow),
+             #selector(tmuxMoveWindowLeft),
+             #selector(tmuxMoveWindowRight),
              #selector(tmuxSplitPaneHorizontal),
              #selector(tmuxSplitPaneVertical),
              #selector(tmuxSelectWindow(_:)):
@@ -540,6 +978,14 @@ final class TesseraTerminalContainer: UIView {
 
     @objc private func tmuxNextWindow() {
         onTmuxShortcut?(.nextWindow)
+    }
+
+    @objc private func tmuxMoveWindowLeft() {
+        onTmuxShortcut?(.moveWindowLeft)
+    }
+
+    @objc private func tmuxMoveWindowRight() {
+        onTmuxShortcut?(.moveWindowRight)
     }
 
     @objc private func tmuxSplitPaneHorizontal() {
@@ -1290,6 +1736,8 @@ enum TesseraTmuxShortcut {
     case killCurrentWindow
     case previousWindow
     case nextWindow
+    case moveWindowLeft
+    case moveWindowRight
     case splitPaneHorizontal
     case splitPaneVertical
     case cyclePaneNext

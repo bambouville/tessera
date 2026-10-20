@@ -44,6 +44,12 @@ public struct SwipePadBinding: Codable, Equatable, Hashable {
 /// capture groups: selection marker, option number, label, and optional
 /// shortcut. Response templates support `{index}`, `{shortcut}`, `↵`, and
 /// `esc`; they are encoded by `MacroEncoder` at dispatch time.
+///
+/// Match a row's leading blanks with possessive horizontal whitespace
+/// (`\h*+`, which still covers the nonbreaking space Claude draws after its
+/// glyph) wherever two runs meet around an optional marker: `\s` also matches
+/// newlines, and `^\s*X?\s*` backtracks quadratically from every row start
+/// across blank screen area.
 public struct AgentDetectionRules: Codable, Equatable, Hashable {
     public var blockingPromptPatterns: [String]
     public var idlePromptPatterns: [String]
@@ -54,9 +60,9 @@ public struct AgentDetectionRules: Codable, Equatable, Hashable {
     public init(
         blockingPromptPatterns: [String],
         idlePromptPatterns: [String],
-        menuOptionPattern: String = #"(?m)^\s*([›❯>]?)\s*(\d+)\.\s+(.+?)(?:\s+\(([^()]*)\))?\s*$"#,
+        menuOptionPattern: String = #"(?m)^\h*+([›❯>]?)\h*+(\d+)\.\s+(.+?)(?:\s+\(([^()]*)\))?\s*$"#,
         responseTemplate: String,
-        fallbackResponseTemplate: String = "{index}↵"
+        fallbackResponseTemplate: String = "{index}"
     ) {
         self.blockingPromptPatterns = blockingPromptPatterns
         self.idlePromptPatterns = idlePromptPatterns
@@ -118,6 +124,9 @@ public extension SwipePadProfile {
     /// Stable IDs so user edits survive across launches.
     static let builtInClaudeCodeID = UUID(uuidString: "B17710C0-0000-0000-0000-000000000001")!
     static let builtInCodexCLIID   = UUID(uuidString: "B17710C0-0000-0000-0000-000000000002")!
+    static let builtInOpenCodeID   = UUID(uuidString: "B17710C0-0000-0000-0000-000000000004")!
+    static let builtInPiID         = UUID(uuidString: "B17710C0-0000-0000-0000-000000000005")!
+    static let builtInKimiID       = UUID(uuidString: "B17710C0-0000-0000-0000-000000000006")!
     static let fallbackID          = UUID(uuidString: "B17710C0-0000-0000-0000-0000000000FA")!
 
     /// Built-in IDs that used to ship but were removed in later releases.
@@ -127,13 +136,16 @@ public extension SwipePadProfile {
         UUID(uuidString: "B17710C0-0000-0000-0000-000000000003")!,  // aider, retired 2026-05-16
     ]
 
-    /// → 1↵ (approve), ← 3↵ (deny), ↑ 2↵ (always allow).
+    /// → 1 (approve), ← 3 (deny), ↑ 2 (always allow).
     /// Claude's current permission menu is `1. Yes / 2. Yes, and always
     /// allow… / 3. No` — deny must send 3, always must send 2. (The menu was
     /// `1. Yes / 2. No / 3. Yes, don't ask again` when these bindings first
     /// shipped; the drift test in SwipePadPetalLayoutTests pins label↔macro
     /// against the parser's fixture so a future reorder can't silently turn
     /// the deny gesture into a consent grant again.)
+    /// A digit alone answers, as the shared core's `responseMacro` spells it:
+    /// Claude acts on the digit at once, and a trailing Enter would reach
+    /// whatever the answer revealed — the composer, with a draft in it.
     /// Match expression catches both the semver-style `process.title` Claude
     /// Code sets at runtime (e.g. `2.1.143`) and npm wrapper argv names
     /// (`claude`, `claude-code`) that show up in plain-SSH `ps` snapshots.
@@ -143,9 +155,9 @@ public extension SwipePadProfile {
             name: "claude code",
             matchProcess: "regex:^(\\d+\\.\\d+\\.\\d+|claude(?:-code)?)$",
             bindings: [
-                .right: SwipePadBinding(macro: "1↵", label: "approve"),
-                .left:  SwipePadBinding(macro: "3↵", label: "deny"),
-                .up:    SwipePadBinding(macro: "2↵", label: "always"),
+                .right: SwipePadBinding(macro: "1", label: "approve"),
+                .left:  SwipePadBinding(macro: "3", label: "deny"),
+                .up:    SwipePadBinding(macro: "2", label: "always"),
             ],
             isBuiltIn: true,
             agentDetection: AgentDetectionRules(
@@ -160,7 +172,7 @@ public extension SwipePadProfile {
                     // can never suppress its preceding blocking prompt.
                     #"(?m)^\s*[›❯](?![ \t]*\d+\.)[^\r\n]*$"#,
                 ],
-                responseTemplate: "{index}↵"
+                responseTemplate: "{index}"
             )
         )
     }
@@ -195,18 +207,55 @@ public extension SwipePadProfile {
                     // without the normal command-permission question. Anchor
                     // to its provider-specific first choice so ordinary lists
                     // containing the word "plan" cannot become actions.
-                    #"(?mi)^\s*[›❯>]?\s*1\.\s*Yes,\s+(?:implement (?:this|the) plan|start implementing)\b.*$"#,
+                    #"(?mi)^\h*+[›❯>]?\h*+1\.\s*Yes,\s+(?:implement (?:this|the) plan|start implementing)\b.*$"#,
                 ],
                 idlePromptPatterns: [
                     // Placeholder copy changes between Codex releases (for
-                    // example “Write tests…” and “Implement {feature}”). The
-                    // stable signal is the composer glyph; numbered approval
-                    // rows are deliberately excluded.
-                    #"(?m)^\s*[›❯](?![ \t]*\d+\.)[^\r\n]*$"#,
+                    // example “Write tests…” and “Implement {feature}”).
+                    // Ultra effort uses » for the live composer. Numbered
+                    // approval rows are deliberately excluded.
+                    #"(?m)^\s*[›»❯](?![ \t]*\d+\.)[^\r\n]*$"#,
                 ],
                 responseTemplate: "{shortcut}",
-                fallbackResponseTemplate: "{index}↵"
+                fallbackResponseTemplate: "{index}"
             )
+        )
+    }
+
+    /// Detection-only profiles. Their terminal menus are deliberately not
+    /// guessed: provider drift cannot turn a deny gesture into consent. V2
+    /// enables richer lifecycle/transcript/action capability only after each
+    /// separately versioned adapter passes its pinned fixture and live gate.
+    static var builtInOpenCode: SwipePadProfile {
+        SwipePadProfile(
+            id: builtInOpenCodeID,
+            name: "opencode",
+            matchProcess: "regex:^opencode(?:$|-)",
+            bindings: [:],
+            isBuiltIn: true,
+            agentDetection: nil
+        )
+    }
+
+    static var builtInPi: SwipePadProfile {
+        SwipePadProfile(
+            id: builtInPiID,
+            name: "pi",
+            matchProcess: "pi",
+            bindings: [:],
+            isBuiltIn: true,
+            agentDetection: nil
+        )
+    }
+
+    static var builtInKimi: SwipePadProfile {
+        SwipePadProfile(
+            id: builtInKimiID,
+            name: "kimi code",
+            matchProcess: "regex:^kimi(?:$|-)",
+            bindings: [:],
+            isBuiltIn: true,
+            agentDetection: nil
         )
     }
 
@@ -225,6 +274,6 @@ public extension SwipePadProfile {
     }
 
     static var allBuiltIns: [SwipePadProfile] {
-        [builtInClaudeCode, builtInCodexCLI, fallback]
+        [builtInClaudeCode, builtInCodexCLI, builtInOpenCode, builtInPi, builtInKimi, fallback]
     }
 }

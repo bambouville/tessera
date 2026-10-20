@@ -95,7 +95,11 @@ struct ForwardingTabView: View {
             enabled = true
         }
 
-        return PortForwardRule(
+        // The editor is local-only this round: every rule it builds is a
+        // loopback local forward. Remote and dynamic directions exist in the
+        // shared model and survive storage untouched; surfacing them here is a
+        // direction picker plus a bind-address field, nothing deeper.
+        return PortForwardRule.localForward(
             id: id,
             enabled: enabled,
             autoStart: autoStart,
@@ -134,9 +138,9 @@ struct ForwardingTabView: View {
         switch editing {
         case .existing:
             guard let original = originalForEditing else { return true }
-            if localPortText != String(original.localPort) { return true }
-            if remoteHost != original.remoteHost { return true }
-            if remotePortText != String(original.remotePort) { return true }
+            if localPortText != String(original.bind.port) { return true }
+            if remoteHost != (original.target?.host ?? "") { return true }
+            if remotePortText != String(original.target?.port ?? 0) { return true }
             if ruleLabel != original.label { return true }
             if autoStart != original.autoStart { return true }
             return false
@@ -277,13 +281,13 @@ struct ForwardingTabView: View {
     @ViewBuilder
     private func portsRow(_ rule: PortForwardRule) -> some View {
         HStack(spacing: 0) {
-            Text(String(rule.localPort))
+            Text(String(rule.bind.port))
                 .font(Typography.tesseraMono(size: 13).weight(.semibold))
                 .foregroundStyle(rule.enabled ? T.accent : T.fgMuted)
             Text(verbatim: " → ")
                 .font(Typography.tesseraMono(size: 13))
                 .foregroundStyle(T.fgDim)
-            Text(verbatim: "\(rule.remoteHost):\(rule.remotePort)")
+            Text(verbatim: rule.targetDisplayText)
                 .font(Typography.tesseraMono(size: 13))
                 .foregroundStyle(rule.enabled ? T.fg : T.fgMuted)
             if !rule.label.isEmpty {
@@ -323,8 +327,7 @@ struct ForwardingTabView: View {
                 Field(label: "local port") {
                     Input(text: $localPortText, verbatimPlaceholder: "8080")
                         .keyboardType(.numberPad)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                        .literalTextInput()
                 }
                 .frame(width: 130)
 
@@ -336,8 +339,7 @@ struct ForwardingTabView: View {
                 Field(label: "remote port") {
                     Input(text: $remotePortText, verbatimPlaceholder: "8080")
                         .keyboardType(.numberPad)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                        .literalTextInput()
                 }
                 .frame(width: 130)
 
@@ -346,14 +348,12 @@ struct ForwardingTabView: View {
 
             Field(label: "remote host", sub: "the address as seen from the SSH server") {
                 Input(text: $remoteHost, verbatimPlaceholder: "localhost")
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                    .literalTextInput()
             }
 
             Field(label: "label (optional)") {
                 Input(text: $ruleLabel, placeholder: "web app")
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                    .literalTextInput()
             }
 
             Divider().background(T.border)
@@ -480,9 +480,9 @@ struct ForwardingTabView: View {
     }
 
     private func populateForm(from rule: PortForwardRule) {
-        localPortText = String(rule.localPort)
-        remoteHost = rule.remoteHost
-        remotePortText = String(rule.remotePort)
+        localPortText = String(rule.bind.port)
+        remoteHost = rule.target?.host ?? ""
+        remotePortText = String(rule.target?.port ?? 0)
         ruleLabel = rule.label
         autoStart = rule.autoStart
     }
@@ -559,14 +559,20 @@ struct ForwardingTabView: View {
             return String(localized: "remote port must be between 1 and 65535")
         case .localPortCollision:
             return String(localized: "another rule on this host already uses that local port")
+        case .shared:
+            // The local-only editor cannot build a rule that trips the shared
+            // validator's remaining cases (non-loopback bind, dynamic carrying
+            // a target). Surfaced generically so a rule that arrived from
+            // another platform still reports something actionable.
+            return String(localized: "this rule isn't valid on this device")
         }
     }
 
     private func ruleSummary(_ rule: PortForwardRule) -> String {
         if rule.label.isEmpty {
-            return "\(rule.localPort) → \(rule.remoteHost):\(rule.remotePort)"
+            return "\(rule.bind.port) → \(rule.targetDisplayText)"
         }
-        return "\(rule.localPort) → \(rule.remoteHost):\(rule.remotePort) — \(rule.label)"
+        return "\(rule.bind.port) → \(rule.targetDisplayText) — \(rule.label)"
     }
 
     private struct Preset {

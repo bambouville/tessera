@@ -207,7 +207,7 @@ final class ReverseAttachCedeTests: XCTestCase {
         XCTAssertEqual(sent.string, "")
 
         controller.updateClientSize(cols: 130, rows: 44)
-        XCTAssertEqual(sent.string, "refresh-client -C 130,44\n")
+        XCTAssertEqual(sent.string, "refresh-client -C 130,44\nselect-window\n")
         XCTAssertFalse(sent.string.contains("ignore-size"))
     }
 
@@ -525,16 +525,19 @@ final class ReverseAttachCedeTests: XCTestCase {
         handshake.append(contentsOf: "%begin 0 1 0\r\n%end 0 1 0\r\n".utf8)
         controller.ingest(handshake)
         controller.ingest(Array("%session-changed $0 phone-born\r\n".utf8))
-        for number in 2...4 {
+        // history-limit and pause-after precede the window list; the old
+        // wildcard bell registration no longer occupies an attach slot.
+        for number in 2...3 {
             acknowledgeCommand(controller, number: number)
         }
         let compactLayout = "beef,50x30,0,0,0"
         controller.ingest(Array(
-            ("%begin 0 5 1\r\n"
+            ("%begin 0 4 1\r\n"
                 + "@0\t\(compactLayout)\t\(compactLayout)\t0\tshell\r\n"
-                + "%end 0 5 1\r\n").utf8
+                + "%end 0 4 1\r\n").utf8
         ))
-        for number in 6...8 {
+        // Remaining pane, active-window and separator-probe replies.
+        for number in 5...7 {
             acknowledgeCommand(controller, number: number)
         }
         sent.clear()

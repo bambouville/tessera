@@ -1,5 +1,11 @@
 {
   "Swipe pad · %@ waiting for input, %lld options": {
+    "en": {
+      "value": "Swipe pad · %1$@ waiting for input, %#@options@",
+      "subs": {
+        "options": { "argNum": 2, "one": "%lld option", "other": "%lld options" }
+      }
+    },
     "de": {
       "value": "Swipe-Pad · %1$@ wartet auf Eingabe, %#@options@",
       "subs": {

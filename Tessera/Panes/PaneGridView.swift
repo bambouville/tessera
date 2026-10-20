@@ -140,13 +140,18 @@ private struct PaneGridFocusRing: View {
     }
 }
 
+struct TmuxScrollGestureTarget {
+    private(set) var paneID: PaneId?
+
+    mutating func begin(paneID: PaneId?) {
+        self.paneID = paneID
+    }
+}
+
 /// Pure geometry for laying out a tmux window layout tree into pixel frames.
 ///
-/// The hard constraint (plan risk #2): a pane's terminal **surface** must be an
-/// exact integer number of cells — `rect.width × rect.height` — so SwiftTerm's
-/// own grid snapping matches the grid tmux laid the pane out to. If the surface
-/// were a fractional number of cells, SwiftTerm would compute a different
-/// cols/rows than tmux and every live escape would mis-render.
+/// The visible bounds stay at `rect.width × rect.height` cells; the underlying
+/// SwiftTerm surface gets sub-cell slack so pixel snapping preserves that grid.
 ///
 /// Per-pane headers are chrome that sits OUTSIDE the surface: each header eats
 /// `headerHeight` pixels ABOVE its pane's surface. To keep total height within
@@ -154,6 +159,26 @@ private struct PaneGridFocusRing: View {
 /// it sizes the tmux client (see `PaneGridView.reservedHeaderRows`) — so the
 /// surfaces stay exact cell multiples and the headers fill the reserved space.
 enum PaneLayoutMath {
+    static func scrollPane(
+        at point: CGPoint,
+        contentOffset: CGPoint,
+        canvasInset: CGPoint = .zero,
+        cellSize: CGSize,
+        panes: [(PaneId, CellRect)],
+        fallback: PaneId?
+    ) -> PaneId? {
+        guard cellSize.width > 0, cellSize.height > 0 else { return fallback }
+        let x = point.x - contentOffset.x - canvasInset.x
+        let y = point.y - contentOffset.y - canvasInset.y
+        guard x.isFinite, y.isFinite, x >= 0, y >= 0 else { return fallback }
+        let column = floor(x / cellSize.width)
+        let row = floor(y / cellSize.height)
+        return panes.first { _, rect in
+            column >= CGFloat(rect.x) && column < CGFloat(rect.x + rect.width)
+                && row >= CGFloat(rect.y) && row < CGFloat(rect.y + rect.height)
+        }?.0 ?? fallback
+    }
+
     /// The maximum number of leaves crossed by any vertical line through the
     /// layout — i.e. the deepest stack of pane headers in a single column. The
     /// caller reserves this many rows (one header = one cell tall) from the
@@ -432,9 +457,15 @@ final class PaneRuntime {
     let paneId: PaneId
     let box: TerminalBox
 
-    init(paneId: PaneId) {
+    init(paneId: PaneId, renderDropSummary: RenderDropSummaryReporter) {
         self.paneId = paneId
-        self.box = TerminalBox(traceLabel: "pane-\(paneId.rawValue)")
+        // Inline tmux pane surfaces have no independent PTY painter; every
+        // byte must carry the ledger owner selected for this pane.
+        self.box = TerminalBox(
+            traceLabel: "pane-\(paneId.rawValue)",
+            acceptsPainterFeeds: false
+        )
+        renderDropSummary.register(self.box)
     }
 }
 
@@ -446,9 +477,15 @@ final class PaneRuntime {
 final class PaneRuntimeStore {
     private var runtimes: [PaneId: PaneRuntime] = [:]
 
-    func runtime(for paneId: PaneId) -> PaneRuntime {
-        if let existing = runtimes[paneId] { return existing }
-        let created = PaneRuntime(paneId: paneId)
+    func runtime(
+        for paneId: PaneId,
+        renderDropSummary: RenderDropSummaryReporter
+    ) -> PaneRuntime {
+        if let existing = runtimes[paneId] {
+            renderDropSummary.register(existing.box)
+            return existing
+        }
+        let created = PaneRuntime(paneId: paneId, renderDropSummary: renderDropSummary)
         runtimes[paneId] = created
         return created
     }
@@ -459,13 +496,32 @@ final class PaneRuntimeStore {
         runtimes[paneId]
     }
 
+    /// Panes with a mounted runtime. Consumers that mirror per-pane state
+    /// (the inline history ladder's per-surface record) need to know which
+    /// ids a prune or an unmount is about to retire.
+    var paneIds: Set<PaneId> { Set(runtimes.keys) }
+
     /// Drop runtimes for panes that no longer exist, unregistering their sinks
     /// and discarding their kitty snapshots.
-    func prune(keeping liveIds: Set<PaneId>, controller: TmuxController, kitty: KittyPaneModeStore) {
+    func prune(
+        keeping liveIds: Set<PaneId>,
+        controller: TmuxController,
+        kitty: KittyPaneModeStore,
+        renderDropSummary: RenderDropSummaryReporter
+    ) {
         for paneId in runtimes.keys where !liveIds.contains(paneId) {
             controller.setPaneSink(paneId, nil)
             kitty.discard(paneId)
+            if let runtime = runtimes[paneId] {
+                renderDropSummary.unregister(runtime.box)
+            }
             runtimes.removeValue(forKey: paneId)
+        }
+    }
+
+    func unregisterAll(from renderDropSummary: RenderDropSummaryReporter) {
+        for runtime in runtimes.values {
+            renderDropSummary.unregister(runtime.box)
         }
     }
 }
@@ -507,7 +563,10 @@ final class KittyPaneModeStore {
             terminal.resetKeyboardMode()
         }
         let wanted = bracketedPaste[paneId] ?? false
-        box.feed(Array((wanted ? "\u{1B}[?2004h" : "\u{1B}[?2004l").utf8)[...])
+        box.feed(
+            owner: box.boundOwner,
+            Array((wanted ? "\u{1B}[?2004h" : "\u{1B}[?2004l").utf8)[...]
+        )
     }
 
     func discard(_ paneId: PaneId) {
@@ -846,6 +905,8 @@ struct MoshPaneChromeOverlay: View {
 struct PaneGridView: View {
     let window: TmuxController.WindowInfo
     let tmux: TmuxController
+    let renderDropSummary: RenderDropSummaryReporter
+    let sessionCommands: AppleSessionCommandFacade
     let cellSize: CGSize
     let chrome: DesignTokens
     let backgroundColor: SwiftUI.Color
@@ -870,11 +931,18 @@ struct PaneGridView: View {
     let agentScrollPreventionForPane: (PaneId) -> AgentScrollPrevention?
     let onAgentScrollBlocked: (PaneId) -> Void
     let suppressFindReclaim: Bool
-    /// Continued-elsewhere veil: drop every pane's outbound bytes and strip
-    /// held first responder. The reclaim-suppression flag above cannot do
-    /// this — it only prevents grabbing focus, and a pane that already holds
-    /// it would keep feeding the shared PTY from under the blur.
+    /// Input waits for grid authority (veiled, reclaiming, or resuming over
+    /// a live channel): drop every pane's outbound bytes. The reclaim
+    /// suppression flag above cannot do this — it only prevents grabbing
+    /// focus, and a pane that already holds it would keep feeding the shared
+    /// PTY.
     let inputSuppressed: Bool
+    /// Continued-elsewhere veil only: strip held first responder. Kept apart
+    /// from `inputSuppressed` so a brief `.resuming` (every resume) gates
+    /// sends without resigning the focused pane: resigning would bounce the
+    /// software keyboard, change the viewport twice and re-fence a show's
+    /// claim.
+    let forceResignFirstResponder: Bool
     /// Phone presentation: keep the remote split layout unchanged, but mount
     /// only the active pane and scale that pane's authoritative cell grid to
     /// the available local viewport.
@@ -898,6 +966,44 @@ struct PaneGridView: View {
     /// scroll writes, inertia start/stop, size changes, and the post-repaint
     /// local-terminal snapshot all flow through here.
     let onScrollDiagnostic: (_ paneId: PaneId, _ message: String) -> Void
+
+    // MARK: Inline (SSH+tmux) history ladder
+    //
+    // A grid pane is a render-ledger surface in its own right
+    // (`pane:<id>`), so its local scrollback deepens on demand exactly like
+    // the single-pane `.live` surface. The grid owns the SwiftTerm mounts, so
+    // it is the only place those surfaces' geometry and lifetime are visible;
+    // the policy itself stays in the session (and, under that, in the shared
+    // `TmuxInlineHistoryGate` / render ledger). All five default to nil so
+    // call sites that do not run the ladder are unaffected.
+
+    /// This pane's terminal box is mounted and registered with the ledger.
+    /// Gives the session a per-pane box to place a settled history page into.
+    var onPaneSurfaceReady: ((PaneId, TerminalBox) -> Void)? = nil
+    /// This pane's surface is gone (pruned, unmounted, or the whole grid
+    /// disappeared): drop any record kept for it.
+    var onPaneSurfaceRetired: ((PaneId) -> Void)? = nil
+    /// The ledger bound a new owner to this pane. `identityChanged` is false
+    /// for the new epoch a deepen allocates over the same window/pane, and
+    /// true when the surface actually changed hands.
+    var onPaneSurfaceRebound: ((PaneId, _ identityChanged: Bool) -> Void)? = nil
+    /// A committed scroll frame on this pane's surface: output, and the
+    /// programmatic write at the end of a wheel/trackpad delta. Finger drags
+    /// on the native scroll view never arrive here.
+    var onPaneScrolled: ((PaneId, TerminalView) -> Void)? = nil
+    /// A reader's finger frame on this pane's surface (UIScrollView's pan or
+    /// its deceleration), with the offset before the frame.
+    var onPaneNativeScrollFrame: ((PaneId, TerminalView, _ previousOffsetY: CGFloat) -> Void)? = nil
+    /// A scroll-UP delta from the custom wheel/trackpad recognizer, with the
+    /// *proposed* (pre-clamp) offset — a negative value is the gesture
+    /// genuinely crossing this pane's oldest local row.
+    var onPanePrimaryScrollbackUnderflow: ((
+        PaneId,
+        TerminalView,
+        _ pointsY: Double,
+        _ proposedOffsetY: CGFloat,
+        _ maxOffsetY: CGFloat
+    ) -> Void)? = nil
 
     /// Per-pane runtimes, persisted across re-renders (reset when the active
     /// window changes via `.id(window.id)` on this view).
@@ -966,10 +1072,13 @@ struct PaneGridView: View {
                         // compact client expanded. Repaint on the next runloop
                         // after the new bounds reach SwiftTerm; otherwise the
                         // first pane stays half-width until focus changes.
+                        // While a peer holds the grid the controller owes it
+                        // instead (P7): its every relayout would cost a deep
+                        // capture here.
                         guard let paneID = window.activePaneId else { return }
                         DispatchQueue.main.async {
                             guard tmux.activePaneId == paneID else { return }
-                            tmux.refreshPane(paneId: paneID, deep: true)
+                            tmux.refreshPaneAfterCompactGeometryChange(paneId: paneID)
                         }
                     }
             } else {
@@ -996,11 +1105,18 @@ struct PaneGridView: View {
                     // doesn't disturb the layout the way an explicit position
                     // would). Header chrome and focus rings stack above them.
                     ForEach(frames) { frame in
+                        let surfaceSize = TerminalCellMetrics.surfaceSize(
+                            for: frame.surfaceFrame.size,
+                            cellSize: cellSize
+                        )
                         paneSurface(
                             paneId: frame.paneId,
                             isFocused: frame.paneId == window.activePaneId
                         )
-                        .frame(width: frame.surfaceFrame.width, height: frame.surfaceFrame.height)
+                        .frame(width: surfaceSize.width, height: surfaceSize.height, alignment: .topLeading)
+                        .frame(width: frame.surfaceFrame.width, height: frame.surfaceFrame.height, alignment: .topLeading)
+                        .clipped()
+                        .contentShape(Rectangle())
                         .offset(x: frame.surfaceFrame.minX, y: frame.surfaceFrame.minY)
                     }
 
@@ -1021,7 +1137,9 @@ struct PaneGridView: View {
                             cellWidth: cellSize.width,
                             onClose: { paneId in
                                 onUserActivity?()
-                                tmux.killPane(paneId)
+                                _ = sessionCommands.dispatch(
+                                    .closeTmuxPane(paneId.description)
+                                )
                             }
                         )
                     }
@@ -1054,6 +1172,21 @@ struct PaneGridView: View {
                 }
             }
         }
+        .onDisappear {
+            for paneId in store.paneIds {
+                onPaneSurfaceRetired?(paneId)
+            }
+            store.unregisterAll(from: renderDropSummary)
+        }
+        .onChange(of: inputSuppressed) { _, suppressed in
+            // Typing the gate now drops at apply time already sits in the
+            // panes' UIKit input mirrors; later edits must not delete it
+            // remotely (S5′).
+            guard suppressed else { return }
+            for paneId in store.paneIds {
+                store.existingRuntime(for: paneId)?.box.noteOutOfBandInput()
+            }
+        }
     }
 
     @ViewBuilder
@@ -1066,6 +1199,7 @@ struct PaneGridView: View {
                 width: CGFloat(rect.width) * cellSize.width,
                 height: CGFloat(rect.height) * cellSize.height
             )
+            let surfaceSize = TerminalCellMetrics.surfaceSize(for: paneSize, cellSize: cellSize)
             let scale = min(
                 viewport.width / paneSize.width,
                 viewport.height / paneSize.height
@@ -1074,7 +1208,10 @@ struct PaneGridView: View {
             ZStack {
                 if terminalBackground == nil { backgroundColor }
                 paneSurface(paneId: paneID, isFocused: true)
-                    .frame(width: paneSize.width, height: paneSize.height)
+                    .frame(width: surfaceSize.width, height: surfaceSize.height, alignment: .topLeading)
+                    .frame(width: paneSize.width, height: paneSize.height, alignment: .topLeading)
+                    .clipped()
+                    .contentShape(Rectangle())
                     .scaleEffect(scale)
                     .position(x: viewport.width / 2, y: viewport.height / 2)
                     .id(paneID)
@@ -1102,7 +1239,7 @@ struct PaneGridView: View {
 
     @ViewBuilder
     private func paneSurface(paneId: PaneId, isFocused: Bool) -> some View {
-        let runtime = store.runtime(for: paneId)
+        let runtime = store.runtime(for: paneId, renderDropSummary: renderDropSummary)
         let agentScrollPrevention = agentScrollPreventionForPane(paneId)
 
         ZStack {
@@ -1119,16 +1256,76 @@ struct PaneGridView: View {
                     // markers, so feeding it per-pane output would be dead work
                     // (and feeding ALL panes would interleave its parsing). It
                     // is fed only on the shared single-pane / passthrough path.
-                    tmux.setPaneSink(paneId) { [box = runtime.box] slice in
-                        box.feed(slice)
-                    }
+                    tmux.setPaneRenderSurface(
+                        paneId,
+                        legacyFeed: { [box = runtime.box] slice in
+                            box.feed(slice)
+                        },
+                        bind: { [box = runtime.box] owner, scrollbackLimit in
+                            guard let windowID = owner.windowID,
+                                  let ownerPaneID = owner.paneID,
+                                  ownerPaneID == paneId
+                            else { return }
+                            // A deepen rebinds this exact window/pane under a
+                            // new owner epoch; only a real identity change
+                            // invalidates the pane's credited history depth.
+                            let previousOwner = box.boundOwner
+                            onPaneSurfaceRebound?(
+                                paneId,
+                                previousOwner?.windowId != windowID
+                                    || previousOwner?.paneId != ownerPaneID
+                            )
+                            box.bind(
+                                owner: TerminalRenderOwner(
+                                    windowId: windowID,
+                                    paneId: ownerPaneID,
+                                    epoch: owner.epoch
+                                ),
+                                restoringScrollbackLimit: scrollbackLimit
+                            )
+                        },
+                        feed: { [box = runtime.box] owner, slice in
+                            guard let windowID = owner.windowID,
+                                  let ownerPaneID = owner.paneID,
+                                  ownerPaneID == paneId
+                            else { return }
+                            box.feed(
+                                owner: TerminalRenderOwner(
+                                    windowId: windowID,
+                                    paneId: ownerPaneID,
+                                    epoch: owner.epoch
+                                ),
+                                slice
+                            )
+                        },
+                        state: { [box = runtime.box] in
+                            guard let terminal = box.view?.getTerminal() else { return nil }
+                            return (
+                                altScreen: terminal.isCurrentBufferAlternate,
+                                mouseMode: terminal.mouseMode == .off ? .off : .tracking,
+                                columns: terminal.cols,
+                                rows: terminal.rows
+                            )
+                        }
+                    )
+                    onPaneSurfaceReady?(paneId, runtime.box)
                     tmux.refreshPane(paneId: paneId, deep: isFocused)
                     if isFocused { onFocusedBoxChanged(runtime.box) }
                 },
-                onSend: { bytes in
-                    guard !inputSuppressed else { return }
+                onSend: { [box = runtime.box] bytes in
+                    guard !inputSuppressed else {
+                        // Dropped bytes never reached the PTY: the UIKit
+                        // editing mirror must not believe they did (L10).
+                        box.noteOutOfBandInput()
+                        return
+                    }
                     onUserActivity?()
-                    tmux.sendInput(Array(bytes), toPane: paneId)
+                    // A receipt would make this authority-neutral; grid typing stays gated.
+                    _ = sessionCommands.dispatch(.sendTmuxPaneInput(
+                        data: Data(bytes),
+                        paneID: paneId.description,
+                        receipt: nil
+                    ))
                 },
                 onResize: { _, _ in
                     // Grid mode is size-authoritative via pushGridSize; per-pane
@@ -1136,7 +1333,21 @@ struct PaneGridView: View {
                 },
                 onTitle: { _ in },
                 onUserActivity: onUserActivity,
+                focusOnlyTap: isFocused ? nil : {
+                    onUserActivity?()
+                    modifierState.requestSoftwareKeyboardOnTerminalTap()
+                    _ = sessionCommands.dispatch(.selectTmuxPane(paneId.description))
+                },
                 onBell: { [paneId] in onPaneBell(paneTitle(paneId)) },
+                onPrimaryScrollbackUnderflow: { [paneId] view, pointsY, proposedOffsetY, maxOffsetY in
+                    onPanePrimaryScrollbackUnderflow?(
+                        paneId,
+                        view,
+                        pointsY,
+                        proposedOffsetY,
+                        maxOffsetY
+                    )
+                },
                 agentScrollBlockingActive: agentScrollPrevention != nil,
                 onAgentScrollBlocked: { [paneId] in onAgentScrollBlocked(paneId) },
                 mouseReportingImpliesAltScreen: false,
@@ -1151,8 +1362,14 @@ struct PaneGridView: View {
                 // Structural single-claimant: only the focused pane reclaims
                 // first responder (and not while the find bar holds it).
                 suppressFirstResponderReclaim: !isFocused || suppressFindReclaim,
-                forceResignFirstResponder: inputSuppressed,
+                forceResignFirstResponder: forceResignFirstResponder,
                 onHardwareKey: nil,
+                onTerminalScrolled: { [paneId] view in
+                    onPaneScrolled?(paneId, view)
+                },
+                onNativeScrollFrame: { [paneId] view, previousOffsetY in
+                    onPaneNativeScrollFrame?(paneId, view, previousOffsetY)
+                },
                 onScrollDiagnostic: { [paneId] message in
                     onScrollDiagnostic(paneId, message)
                 },
@@ -1161,17 +1378,6 @@ struct PaneGridView: View {
                 paneCycleEnabled: true,
                 terminalBackground: terminalBackground
             )
-
-            // Tap-to-focus on an unfocused pane: select-pane only, no click
-            // forwarding into the in-pane TUI (iTerm2 behavior).
-            if !isFocused {
-                SwiftUI.Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        onUserActivity?()
-                        tmux.selectPane(paneId)
-                    }
-            }
         }
         // Deep-on-first-focus: a pane mounted as a background sibling gets a
         // shallow refresh; when it becomes the active pane, pull its full
@@ -1188,6 +1394,9 @@ struct PaneGridView: View {
                 kittyPaneModes.snapshot(paneId, from: terminal)
             }
             tmux.setPaneSink(paneId, nil)
+            // Clearing the sink undeclares this render surface, so nothing
+            // credited for it survives.
+            onPaneSurfaceRetired?(paneId)
         }
     }
 
@@ -1280,10 +1489,15 @@ struct PaneGridView: View {
     }
 
     private func pruneRuntimes() {
+        let liveIds = Set(window.layout?.paneIds ?? [])
+        for paneId in store.paneIds where !liveIds.contains(paneId) {
+            onPaneSurfaceRetired?(paneId)
+        }
         store.prune(
-            keeping: Set(window.layout?.paneIds ?? []),
+            keeping: liveIds,
             controller: tmux,
-            kitty: kittyPaneModes
+            kitty: kittyPaneModes,
+            renderDropSummary: renderDropSummary
         )
     }
 
@@ -1302,7 +1516,7 @@ struct PaneGridView: View {
         let rows = max(1, Int(size.height / cellSize.height) - reservedHeaderRows)
         if let last = lastPushedSize, last.cols == cols, last.rows == rows { return }
         lastPushedSize = (cols, rows)
-        tmux.updateClientSize(cols: cols, rows: rows)
+        sessionCommands.resize(columns: cols, rows: rows)
     }
 
 }

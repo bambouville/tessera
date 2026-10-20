@@ -1,0 +1,1480 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "inline-initial-deep-primary-feed",
+      "steps": [
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%session-changed $0 work\n%window-add @1\n%window-pane-changed @1 %1\n%session-window-changed $0 @1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "surfacesDeclared",
+              "surfaces": [
+                {
+                  "surfaceID": "live",
+                  "presentation": "single"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "transportAttached",
+              "profile": "inline"
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%begin 1 1 1\n%1\t0\t0\tpane\twindow\thost\t0\t0\t0\t23\t1\t0\t0\t0\t1\t0\t0\t0\t0\t0\t0\t0\n%end 1 1 1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%begin 2 2 1\nready\n%end 2 2 1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "surfaceState",
+              "surfaceID": "live",
+              "request": 1,
+              "altScreen": false,
+              "mouseMode": "off",
+              "columns": 80,
+              "rows": 24
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%output %1 pane-output-after-initial\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "correlatedRefreshRequested",
+              "surfaceID": "live",
+              "stage": "deep",
+              "reason": "authority-reclaim",
+              "correlation": 77
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%begin 3 3 1\n%1\t0\t0\tpane\twindow\thost\t0\t0\t0\t23\t1\t0\t0\t0\t1\t0\t0\t0\t0\t0\t0\t0\n%end 3 3 1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%begin 4 4 1\nauthority ready\n%end 4 4 1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "surfaceState",
+              "surfaceID": "live",
+              "request": 2,
+              "altScreen": false,
+              "mouseMode": "off",
+              "columns": 80,
+              "rows": 24
+            }
+          }
+        }
+      ],
+      "expectedEffects": [
+        {
+          "kind": "armTimer",
+          "token": 1,
+          "milliseconds": 4000
+        },
+        {
+          "kind": "sendCommand",
+          "command": "display-message -p -t @1 '#{pane_id}\t#{cursor_x}\t#{cursor_y}\t#{pane_title}\t#{window_name}\t#{host}\t#{alternate_on}\t#{history_size}\t#{scroll_region_upper}\t#{scroll_region_lower}\t#{cursor_flag}\t#{insert_flag}\t#{keypad_cursor_flag}\t#{keypad_flag}\t#{wrap_flag}\t#{mouse_standard_flag}\t#{mouse_button_flag}\t#{mouse_all_flag}\t#{mouse_sgr_flag}\t#{origin_flag}\t#{alternate_saved_x}\t#{alternate_saved_y}\t#{pane_width}\t#{pane_height}'"
+        },
+        {
+          "kind": "sendCommand",
+          "command": "capture-pane -p -e -N -S -2000 -t @1"
+        },
+        {
+          "kind": "resolveSurfaceState",
+          "surfaceID": "live",
+          "request": 1
+        },
+        {
+          "kind": "bindSurface",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 1
+          }
+        },
+        {
+          "kind": "feed",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 1
+          },
+          "source": "tmux-repaint-deep",
+          "bytes": {
+            "length": 102,
+            "sha256": "a0cee7a8d3140fc0c34d6a9a51afe143f5e853da3338ebdf8f6be91c44c81d96"
+          }
+        },
+        {
+          "kind": "restoreWindowModes",
+          "surfaceID": "live",
+          "windowID": 1,
+          "paneInAltScreen": false
+        },
+        {
+          "kind": "cancelTimer",
+          "token": 1
+        },
+        {
+          "kind": "initialRenderReady"
+        },
+        {
+          "kind": "inlineHistorySettled",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 1
+          },
+          "depth": 10000,
+          "historySize": 0,
+          "canDeepen": false
+        },
+        {
+          "kind": "feed",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 1
+          },
+          "source": "pane-output",
+          "bytes": {
+            "length": 25,
+            "sha256": "1a0d6b7ce43a3e7b00097a72ba87d9504d240fc8189e1aa658e37e602ea8b238"
+          }
+        },
+        {
+          "kind": "sendCommand",
+          "command": "display-message -p -t @1 '#{pane_id}\t#{cursor_x}\t#{cursor_y}\t#{pane_title}\t#{window_name}\t#{host}\t#{alternate_on}\t#{history_size}\t#{scroll_region_upper}\t#{scroll_region_lower}\t#{cursor_flag}\t#{insert_flag}\t#{keypad_cursor_flag}\t#{keypad_flag}\t#{wrap_flag}\t#{mouse_standard_flag}\t#{mouse_button_flag}\t#{mouse_all_flag}\t#{mouse_sgr_flag}\t#{origin_flag}\t#{alternate_saved_x}\t#{alternate_saved_y}\t#{pane_width}\t#{pane_height}'"
+        },
+        {
+          "kind": "sendCommand",
+          "command": "capture-pane -p -e -N -S -2000 -t @1"
+        },
+        {
+          "kind": "resolveSurfaceState",
+          "surfaceID": "live",
+          "request": 2
+        },
+        {
+          "kind": "saveWindowModes",
+          "surfaceID": "live",
+          "windowID": 1
+        },
+        {
+          "kind": "bindSurface",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 2
+          }
+        },
+        {
+          "kind": "feed",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 2
+          },
+          "source": "tmux-repaint-deep",
+          "bytes": {
+            "length": 112,
+            "sha256": "d72d394ca63223f4ed8dd4cf8e541096207b7ee87ad96a0eb89c6515c8003feb"
+          }
+        },
+        {
+          "kind": "restoreWindowModes",
+          "surfaceID": "live",
+          "windowID": 1,
+          "paneInAltScreen": false
+        },
+        {
+          "kind": "refreshCompleted",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 2
+          },
+          "stage": "deep",
+          "correlation": 77
+        },
+        {
+          "kind": "inlineHistorySettled",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 2
+          },
+          "depth": 10000,
+          "historySize": 0,
+          "canDeepen": false
+        }
+      ]
+    },
+    {
+      "name": "side-channel-history-feed-and-credit",
+      "steps": [
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%session-changed $0 work\n%window-add @1\n%window-pane-changed @1 %1\n%session-window-changed $0 @1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "surfacesDeclared",
+              "surfaces": [
+                {
+                  "surfaceID": "live",
+                  "presentation": "single"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "transportAttached",
+              "profile": "sideChannel"
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "scrollbackRequested",
+              "surfaceID": "live",
+              "pointsY": 1,
+              "isInertial": false
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%begin 1 1 1\n%1\t0\t0\tpane\twindow\thost\t0\t1\t0\t23\t1\t0\t0\t0\t1\t0\t0\t0\t0\t0\t0\t0\n%end 1 1 1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%begin 2 2 1\nhistory\nlive\n%end 2 2 1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "surfaceState",
+              "surfaceID": "live",
+              "request": 1,
+              "altScreen": false,
+              "mouseMode": "off",
+              "columns": 80,
+              "rows": 24
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "historyPresentationFailed",
+              "surfaceID": "live",
+              "owner": {
+                "windowID": 1,
+                "paneID": 1,
+                "epoch": 1
+              }
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "scrollbackRequested",
+              "surfaceID": "live",
+              "pointsY": 1,
+              "isInertial": false
+            }
+          }
+        }
+      ],
+      "expectedEffects": [
+        {
+          "kind": "armTimer",
+          "token": 1,
+          "milliseconds": 4000
+        },
+        {
+          "kind": "sendCommand",
+          "command": "display-message -p -t %1 '#{pane_id}\t#{cursor_x}\t#{cursor_y}\t#{pane_title}\t#{window_name}\t#{host}\t#{alternate_on}\t#{history_size}\t#{scroll_region_upper}\t#{scroll_region_lower}\t#{cursor_flag}\t#{insert_flag}\t#{keypad_cursor_flag}\t#{keypad_flag}\t#{wrap_flag}\t#{mouse_standard_flag}\t#{mouse_button_flag}\t#{mouse_all_flag}\t#{mouse_sgr_flag}\t#{origin_flag}\t#{alternate_saved_x}\t#{alternate_saved_y}\t#{pane_width}\t#{pane_height}'"
+        },
+        {
+          "kind": "sendCommand",
+          "command": "capture-pane -p -e -N -S -240 -t %1"
+        },
+        {
+          "kind": "resolveSurfaceState",
+          "surfaceID": "live",
+          "request": 1
+        },
+        {
+          "kind": "bindSurface",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 1
+          }
+        },
+        {
+          "kind": "feed",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 1
+          },
+          "source": "mosh-history",
+          "bytes": {
+            "length": 110,
+            "sha256": "f20f13efdf874a073eff9e0b0b76b6faa20a64bd2f3d21c980aed2932969f60f"
+          }
+        },
+        {
+          "kind": "restoreWindowModes",
+          "surfaceID": "live",
+          "windowID": 1,
+          "paneInAltScreen": false
+        },
+        {
+          "kind": "cancelTimer",
+          "token": 1
+        },
+        {
+          "kind": "requestTransportFullFrame"
+        },
+        {
+          "kind": "historyReady",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 1
+          },
+          "depth": 10000,
+          "historySize": 1,
+          "placement": "bottom"
+        },
+        {
+          "kind": "diagnostic",
+          "message": "render-ledger history-presentation-failed surface=live"
+        },
+        {
+          "kind": "armTimer",
+          "token": 2,
+          "milliseconds": 4000
+        },
+        {
+          "kind": "sendCommand",
+          "command": "display-message -p -t %1 '#{pane_id}\t#{cursor_x}\t#{cursor_y}\t#{pane_title}\t#{window_name}\t#{host}\t#{alternate_on}\t#{history_size}\t#{scroll_region_upper}\t#{scroll_region_lower}\t#{cursor_flag}\t#{insert_flag}\t#{keypad_cursor_flag}\t#{keypad_flag}\t#{wrap_flag}\t#{mouse_standard_flag}\t#{mouse_button_flag}\t#{mouse_all_flag}\t#{mouse_sgr_flag}\t#{origin_flag}\t#{alternate_saved_x}\t#{alternate_saved_y}\t#{pane_width}\t#{pane_height}'"
+        },
+        {
+          "kind": "sendCommand",
+          "command": "capture-pane -p -e -N -S -240 -t %1"
+        }
+      ]
+    },
+    {
+      "name": "inline-stale-late-reply-and-pause",
+      "steps": [
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%session-changed $0 work\n%window-add @1\n%window-pane-changed @1 %1\n%session-window-changed $0 @1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "surfacesDeclared",
+              "surfaces": [
+                {
+                  "surfaceID": "live",
+                  "presentation": "single"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "transportAttached",
+              "profile": "inline"
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%window-add @2\n%window-pane-changed @2 %2\n%session-window-changed $0 @2\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%begin 1 1 1\n%1\t0\t0\tpane\twindow\thost\t0\t0\t0\t23\t1\t0\t0\t0\t1\t0\t0\t0\t0\t0\t0\t0\n%end 1 1 1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%begin 2 2 1\n%2\t0\t0\tpane\twindow\thost\t0\t0\t0\t23\t1\t0\t0\t0\t1\t0\t0\t0\t0\t0\t0\t0\n%end 2 2 1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%begin 3 3 1\nswitched screen\n%end 3 3 1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "surfaceState",
+              "surfaceID": "live",
+              "request": 1,
+              "altScreen": false,
+              "mouseMode": "off",
+              "columns": 80,
+              "rows": 24
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%pause %2\n"
+          }
+        }
+      ],
+      "expectedEffects": [
+        {
+          "kind": "armTimer",
+          "token": 1,
+          "milliseconds": 4000
+        },
+        {
+          "kind": "sendCommand",
+          "command": "display-message -p -t @1 '#{pane_id}\t#{cursor_x}\t#{cursor_y}\t#{pane_title}\t#{window_name}\t#{host}\t#{alternate_on}\t#{history_size}\t#{scroll_region_upper}\t#{scroll_region_lower}\t#{cursor_flag}\t#{insert_flag}\t#{keypad_cursor_flag}\t#{keypad_flag}\t#{wrap_flag}\t#{mouse_standard_flag}\t#{mouse_button_flag}\t#{mouse_all_flag}\t#{mouse_sgr_flag}\t#{origin_flag}\t#{alternate_saved_x}\t#{alternate_saved_y}\t#{pane_width}\t#{pane_height}'"
+        },
+        {
+          "kind": "sendCommand",
+          "command": "display-message -p -t @2 '#{pane_id}\t#{cursor_x}\t#{cursor_y}\t#{pane_title}\t#{window_name}\t#{host}\t#{alternate_on}\t#{history_size}\t#{scroll_region_upper}\t#{scroll_region_lower}\t#{cursor_flag}\t#{insert_flag}\t#{keypad_cursor_flag}\t#{keypad_flag}\t#{wrap_flag}\t#{mouse_standard_flag}\t#{mouse_button_flag}\t#{mouse_all_flag}\t#{mouse_sgr_flag}\t#{origin_flag}\t#{alternate_saved_x}\t#{alternate_saved_y}\t#{pane_width}\t#{pane_height}'"
+        },
+        {
+          "kind": "diagnostic",
+          "message": "render-ledger stale-reply surface=live generation=1 phase=metadata lines=1"
+        },
+        {
+          "kind": "sendCommand",
+          "command": "capture-pane -p -e -N -S -2000 -t @2"
+        },
+        {
+          "kind": "resolveSurfaceState",
+          "surfaceID": "live",
+          "request": 1
+        },
+        {
+          "kind": "bindSurface",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 2,
+            "paneID": 2,
+            "epoch": 2
+          }
+        },
+        {
+          "kind": "feed",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 2,
+            "paneID": 2,
+            "epoch": 2
+          },
+          "source": "tmux-repaint-deep",
+          "bytes": {
+            "length": 112,
+            "sha256": "e0742a093b025a41eb7e215f15242b284f7642b963f26904df4eb066ef038a17"
+          }
+        },
+        {
+          "kind": "restoreWindowModes",
+          "surfaceID": "live",
+          "windowID": 2,
+          "paneInAltScreen": false
+        },
+        {
+          "kind": "cancelTimer",
+          "token": 1
+        },
+        {
+          "kind": "initialRenderReady"
+        },
+        {
+          "kind": "inlineHistorySettled",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 2,
+            "paneID": 2,
+            "epoch": 2
+          },
+          "depth": 10000,
+          "historySize": 0,
+          "canDeepen": false
+        },
+        {
+          "kind": "sendCommand",
+          "command": "refresh-client -A '%2:continue'"
+        },
+        {
+          "kind": "sendCommand",
+          "command": "display-message -p -t @2 '#{pane_id}\t#{cursor_x}\t#{cursor_y}\t#{pane_title}\t#{window_name}\t#{host}\t#{alternate_on}\t#{history_size}\t#{scroll_region_upper}\t#{scroll_region_lower}\t#{cursor_flag}\t#{insert_flag}\t#{keypad_cursor_flag}\t#{keypad_flag}\t#{wrap_flag}\t#{mouse_standard_flag}\t#{mouse_button_flag}\t#{mouse_all_flag}\t#{mouse_sgr_flag}\t#{origin_flag}\t#{alternate_saved_x}\t#{alternate_saved_y}\t#{pane_width}\t#{pane_height}'"
+        }
+      ]
+    },
+    {
+      "name": "inline-size-replay-and-reattach",
+      "steps": [
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%session-changed $0 work\n%window-add @1\n%window-pane-changed @1 %1\n%session-window-changed $0 @1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "surfacesDeclared",
+              "surfaces": [
+                {
+                  "surfaceID": "live",
+                  "presentation": "single"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "transportAttached",
+              "profile": "inline"
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "clientSize",
+              "columns": 80,
+              "rows": 24
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "transportLost"
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "transportAttached",
+              "profile": "inline"
+            }
+          }
+        }
+      ],
+      "expectedEffects": [
+        {
+          "kind": "armTimer",
+          "token": 1,
+          "milliseconds": 4000
+        },
+        {
+          "kind": "sendCommand",
+          "command": "display-message -p -t @1 '#{pane_id}\t#{cursor_x}\t#{cursor_y}\t#{pane_title}\t#{window_name}\t#{host}\t#{alternate_on}\t#{history_size}\t#{scroll_region_upper}\t#{scroll_region_lower}\t#{cursor_flag}\t#{insert_flag}\t#{keypad_cursor_flag}\t#{keypad_flag}\t#{wrap_flag}\t#{mouse_standard_flag}\t#{mouse_button_flag}\t#{mouse_all_flag}\t#{mouse_sgr_flag}\t#{origin_flag}\t#{alternate_saved_x}\t#{alternate_saved_y}\t#{pane_width}\t#{pane_height}'"
+        },
+        {
+          "kind": "sendCommand",
+          "command": "refresh-client -C 80,24"
+        },
+        {
+          "kind": "sendCommand",
+          "command": "select-window"
+        },
+        {
+          "kind": "cancelTimer",
+          "token": 1
+        },
+        {
+          "kind": "diagnostic",
+          "message": "render-ledger transport-lost"
+        },
+        {
+          "kind": "armTimer",
+          "token": 2,
+          "milliseconds": 4000
+        },
+        {
+          "kind": "sendCommand",
+          "command": "display-message -p -t @1 '#{pane_id}\t#{cursor_x}\t#{cursor_y}\t#{pane_title}\t#{window_name}\t#{host}\t#{alternate_on}\t#{history_size}\t#{scroll_region_upper}\t#{scroll_region_lower}\t#{cursor_flag}\t#{insert_flag}\t#{keypad_cursor_flag}\t#{keypad_flag}\t#{wrap_flag}\t#{mouse_standard_flag}\t#{mouse_button_flag}\t#{mouse_all_flag}\t#{mouse_sgr_flag}\t#{origin_flag}\t#{alternate_saved_x}\t#{alternate_saved_y}\t#{pane_width}\t#{pane_height}'"
+        }
+      ]
+    },
+    {
+      "name": "side-channel-freeze-deepen-and-reattach",
+      "steps": [
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%session-changed $0 work\n%window-add @1\n%window-pane-changed @1 %1\n%session-window-changed $0 @1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "surfacesDeclared",
+              "surfaces": [
+                {
+                  "surfaceID": "live",
+                  "presentation": "single"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "transportAttached",
+              "profile": "sideChannel"
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "scrollbackRequested",
+              "surfaceID": "live",
+              "pointsY": 1,
+              "isInertial": false
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%begin 1 1 1\n%1\t0\t0\tpane\twindow\thost\t0\t400\t0\t23\t1\t0\t0\t0\t1\t0\t0\t0\t0\t0\t0\t0\n%end 1 1 1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%begin 2 2 1\nshallow history\nlive\n%end 2 2 1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "surfaceState",
+              "surfaceID": "live",
+              "request": 1,
+              "altScreen": false,
+              "mouseMode": "off",
+              "columns": 80,
+              "rows": 24
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "historyPresented",
+              "surfaceID": "live",
+              "owner": {
+                "windowID": 1,
+                "paneID": 1,
+                "epoch": 1
+              }
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%output %1 live advance\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "findOpened",
+              "surfaceID": "live"
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "scrollbackReturnedToTail",
+              "surfaceID": "live"
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "findOpened",
+              "surfaceID": "live"
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%begin 3 3 1\n%1\t0\t0\tpane\twindow\thost\t0\t400\t0\t23\t1\t0\t0\t0\t1\t0\t0\t0\t0\t0\t0\t0\n%end 3 3 1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%begin 4 4 1\ndeep history\nlive\n%end 4 4 1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "surfaceState",
+              "surfaceID": "live",
+              "request": 2,
+              "altScreen": false,
+              "mouseMode": "off",
+              "columns": 80,
+              "rows": 24
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "historyPresented",
+              "surfaceID": "live",
+              "owner": {
+                "windowID": 1,
+                "paneID": 1,
+                "epoch": 3
+              }
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "transportLost"
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "transportAttached",
+              "profile": "sideChannel"
+            }
+          }
+        }
+      ],
+      "expectedEffects": [
+        {
+          "kind": "armTimer",
+          "token": 1,
+          "milliseconds": 4000
+        },
+        {
+          "kind": "sendCommand",
+          "command": "display-message -p -t %1 '#{pane_id}\t#{cursor_x}\t#{cursor_y}\t#{pane_title}\t#{window_name}\t#{host}\t#{alternate_on}\t#{history_size}\t#{scroll_region_upper}\t#{scroll_region_lower}\t#{cursor_flag}\t#{insert_flag}\t#{keypad_cursor_flag}\t#{keypad_flag}\t#{wrap_flag}\t#{mouse_standard_flag}\t#{mouse_button_flag}\t#{mouse_all_flag}\t#{mouse_sgr_flag}\t#{origin_flag}\t#{alternate_saved_x}\t#{alternate_saved_y}\t#{pane_width}\t#{pane_height}'"
+        },
+        {
+          "kind": "sendCommand",
+          "command": "capture-pane -p -e -N -S -240 -t %1"
+        },
+        {
+          "kind": "resolveSurfaceState",
+          "surfaceID": "live",
+          "request": 1
+        },
+        {
+          "kind": "bindSurface",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 1
+          }
+        },
+        {
+          "kind": "feed",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 1
+          },
+          "source": "mosh-history",
+          "bytes": {
+            "length": 118,
+            "sha256": "607fdbcf4ddeaabc7bce594c8659ec977b26142ecee373db2b4931367753eecf"
+          }
+        },
+        {
+          "kind": "restoreWindowModes",
+          "surfaceID": "live",
+          "windowID": 1,
+          "paneInAltScreen": false
+        },
+        {
+          "kind": "cancelTimer",
+          "token": 1
+        },
+        {
+          "kind": "requestTransportFullFrame"
+        },
+        {
+          "kind": "historyReady",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 1
+          },
+          "depth": 240,
+          "historySize": 400,
+          "placement": "bottom"
+        },
+        {
+          "kind": "diagnostic",
+          "message": "render-ledger side-channel-frozen surface=live"
+        },
+        {
+          "kind": "bindSurface",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 2
+          }
+        },
+        {
+          "kind": "requestTransportFullFrame"
+        },
+        {
+          "kind": "armTimer",
+          "token": 2,
+          "milliseconds": 4000
+        },
+        {
+          "kind": "sendCommand",
+          "command": "display-message -p -t %1 '#{pane_id}\t#{cursor_x}\t#{cursor_y}\t#{pane_title}\t#{window_name}\t#{host}\t#{alternate_on}\t#{history_size}\t#{scroll_region_upper}\t#{scroll_region_lower}\t#{cursor_flag}\t#{insert_flag}\t#{keypad_cursor_flag}\t#{keypad_flag}\t#{wrap_flag}\t#{mouse_standard_flag}\t#{mouse_button_flag}\t#{mouse_all_flag}\t#{mouse_sgr_flag}\t#{origin_flag}\t#{alternate_saved_x}\t#{alternate_saved_y}\t#{pane_width}\t#{pane_height}'"
+        },
+        {
+          "kind": "sendCommand",
+          "command": "capture-pane -p -e -N -S -10000 -t %1"
+        },
+        {
+          "kind": "resolveSurfaceState",
+          "surfaceID": "live",
+          "request": 2
+        },
+        {
+          "kind": "saveWindowModes",
+          "surfaceID": "live",
+          "windowID": 1
+        },
+        {
+          "kind": "bindSurface",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 3
+          }
+        },
+        {
+          "kind": "feed",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 3
+          },
+          "source": "mosh-history",
+          "bytes": {
+            "length": 115,
+            "sha256": "ca833e967fb77377df72f41e5819ff697d2470effe49c0f4f841883c0efa6793"
+          }
+        },
+        {
+          "kind": "restoreWindowModes",
+          "surfaceID": "live",
+          "windowID": 1,
+          "paneInAltScreen": false
+        },
+        {
+          "kind": "cancelTimer",
+          "token": 2
+        },
+        {
+          "kind": "requestTransportFullFrame"
+        },
+        {
+          "kind": "historyReady",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 3
+          },
+          "depth": 10000,
+          "historySize": 400,
+          "placement": "bottom"
+        },
+        {
+          "kind": "diagnostic",
+          "message": "render-ledger transport-lost"
+        },
+        {
+          "kind": "bindSurface",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 4
+          }
+        }
+      ]
+    },
+    {
+      "name": "correlated-refresh-has-exact-terminal-outcome",
+      "steps": [
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%session-changed $0 work\n%window-add @1\n%window-pane-changed @1 %1\n%session-window-changed $0 @1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "surfacesDeclared",
+              "surfaces": [
+                {
+                  "surfaceID": "live",
+                  "presentation": "single"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "transportAttached",
+              "profile": "inline"
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "correlatedRefreshRequested",
+              "surfaceID": "live",
+              "stage": "deep",
+              "reason": "authority-reclaim",
+              "correlation": 91
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%begin 1 1 1\n%1\t0\t0\tpane\twindow\thost\t0\t0\t0\t23\t1\t0\t0\t0\t1\t0\t0\t0\t0\t0\t0\t0\n%end 1 1 1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%begin 2 2 1\n%1\t0\t0\tpane\twindow\thost\t0\t0\t0\t23\t1\t0\t0\t0\t1\t0\t0\t0\t0\t0\t0\t0\n%end 2 2 1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%begin 3 3 1\nauthority ready\n%end 3 3 1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "surfaceState",
+              "surfaceID": "live",
+              "request": 1,
+              "altScreen": false,
+              "mouseMode": "off",
+              "columns": 80,
+              "rows": 24
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "correlatedRefreshRequested",
+              "surfaceID": "live",
+              "stage": "deep",
+              "reason": "invalid",
+              "correlation": 0
+            }
+          }
+        }
+      ],
+      "expectedEffects": [
+        {
+          "kind": "armTimer",
+          "token": 1,
+          "milliseconds": 4000
+        },
+        {
+          "kind": "sendCommand",
+          "command": "display-message -p -t @1 '#{pane_id}\t#{cursor_x}\t#{cursor_y}\t#{pane_title}\t#{window_name}\t#{host}\t#{alternate_on}\t#{history_size}\t#{scroll_region_upper}\t#{scroll_region_lower}\t#{cursor_flag}\t#{insert_flag}\t#{keypad_cursor_flag}\t#{keypad_flag}\t#{wrap_flag}\t#{mouse_standard_flag}\t#{mouse_button_flag}\t#{mouse_all_flag}\t#{mouse_sgr_flag}\t#{origin_flag}\t#{alternate_saved_x}\t#{alternate_saved_y}\t#{pane_width}\t#{pane_height}'"
+        },
+        {
+          "kind": "sendCommand",
+          "command": "display-message -p -t @1 '#{pane_id}\t#{cursor_x}\t#{cursor_y}\t#{pane_title}\t#{window_name}\t#{host}\t#{alternate_on}\t#{history_size}\t#{scroll_region_upper}\t#{scroll_region_lower}\t#{cursor_flag}\t#{insert_flag}\t#{keypad_cursor_flag}\t#{keypad_flag}\t#{wrap_flag}\t#{mouse_standard_flag}\t#{mouse_button_flag}\t#{mouse_all_flag}\t#{mouse_sgr_flag}\t#{origin_flag}\t#{alternate_saved_x}\t#{alternate_saved_y}\t#{pane_width}\t#{pane_height}'"
+        },
+        {
+          "kind": "diagnostic",
+          "message": "render-ledger stale-reply surface=live generation=1 phase=metadata lines=1"
+        },
+        {
+          "kind": "sendCommand",
+          "command": "capture-pane -p -e -N -S -2000 -t @1"
+        },
+        {
+          "kind": "resolveSurfaceState",
+          "surfaceID": "live",
+          "request": 1
+        },
+        {
+          "kind": "bindSurface",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 2
+          }
+        },
+        {
+          "kind": "feed",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 2
+          },
+          "source": "tmux-repaint-deep",
+          "bytes": {
+            "length": 112,
+            "sha256": "d72d394ca63223f4ed8dd4cf8e541096207b7ee87ad96a0eb89c6515c8003feb"
+          }
+        },
+        {
+          "kind": "restoreWindowModes",
+          "surfaceID": "live",
+          "windowID": 1,
+          "paneInAltScreen": false
+        },
+        {
+          "kind": "refreshCompleted",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 2
+          },
+          "stage": "deep",
+          "correlation": 91
+        },
+        {
+          "kind": "cancelTimer",
+          "token": 1
+        },
+        {
+          "kind": "initialRenderReady"
+        },
+        {
+          "kind": "inlineHistorySettled",
+          "surfaceID": "live",
+          "owner": {
+            "windowID": 1,
+            "paneID": 1,
+            "epoch": 2
+          },
+          "depth": 10000,
+          "historySize": 0,
+          "canDeepen": false
+        },
+        {
+          "kind": "diagnostic",
+          "message": "render-ledger rejected-refresh-correlation surface=live"
+        },
+        {
+          "kind": "refreshFailed",
+          "surfaceID": "live",
+          "correlation": 0,
+          "reason": "invalid-correlation"
+        }
+      ]
+    },
+    {
+      "name": "side-channel-transport-frame-reservation-retarget-and-move",
+      "steps": [
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%session-changed $0 work\n%window-add @1\n%window-pane-changed @1 %1\n%session-window-changed $0 @1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "surfacesDeclared",
+              "surfaces": [
+                {
+                  "surfaceID": "live",
+                  "presentation": "single"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "transportAttached",
+              "profile": "sideChannel"
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "fact",
+            "fact": {
+              "version": 1,
+              "kind": "correlatedTransportFullFrameRequested",
+              "surfaceID": "live",
+              "reason": "authority-reclaim",
+              "correlation": 7
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%layout-change @1 b0f2,80x24,0,0,1 b0f2,80x24,0,0,1 0\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%layout-change @1 b0f3,81x24,0,0,1 b0f3,81x24,0,0,1 0\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%window-pane-changed @1 %2\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%layout-change @1 b0f4,80x24,0,0,2 b0f4,80x24,0,0,2 0\n"
+          }
+        }
+      ],
+      "expectedEffects": [
+        {
+          "correlation": 7,
+          "kind": "requestCorrelatedTransportFullFrame",
+          "reason": "authority-reclaim",
+          "surfaceID": "live"
+        },
+        {
+          "kind": "bindSurface",
+          "owner": {
+            "epoch": 1,
+            "paneID": 1,
+            "windowID": 1
+          },
+          "surfaceID": "live"
+        },
+        {
+          "kind": "diagnostic",
+          "message": "render-ledger transport-frame-retargeted surface=live correlation=7 owner=@1/%1#1"
+        },
+        {
+          "correlation": 7,
+          "kind": "requestCorrelatedTransportFullFrame",
+          "owner": {
+            "epoch": 1,
+            "paneID": 1,
+            "windowID": 1
+          },
+          "reason": "authority-reclaim",
+          "surfaceID": "live"
+        },
+        {
+          "kind": "diagnostic",
+          "message": "render-ledger side-channel-invalidated reason=layout-change"
+        },
+        {
+          "kind": "requestTransportFullFrame"
+        },
+        {
+          "kind": "bindSurface",
+          "owner": {
+            "epoch": 2,
+            "paneID": 1,
+            "windowID": 1
+          },
+          "surfaceID": "live"
+        },
+        {
+          "kind": "diagnostic",
+          "message": "render-ledger transport-frame-retargeted surface=live correlation=7 owner=@1/%1#2"
+        },
+        {
+          "correlation": 7,
+          "kind": "requestCorrelatedTransportFullFrame",
+          "owner": {
+            "epoch": 2,
+            "paneID": 1,
+            "windowID": 1
+          },
+          "reason": "authority-reclaim",
+          "surfaceID": "live"
+        },
+        {
+          "kind": "diagnostic",
+          "message": "render-ledger side-channel-invalidated reason=layout-change"
+        },
+        {
+          "kind": "requestTransportFullFrame"
+        },
+        {
+          "kind": "bindSurface",
+          "owner": {
+            "epoch": 3,
+            "paneID": 2,
+            "windowID": 1
+          },
+          "surfaceID": "live"
+        },
+        {
+          "correlation": 7,
+          "kind": "transportFullFrameFailed",
+          "reason": "owner-changed",
+          "surfaceID": "live"
+        },
+        {
+          "kind": "diagnostic",
+          "message": "render-ledger side-channel-invalidated reason=layout-change"
+        },
+        {
+          "kind": "requestTransportFullFrame"
+        }
+      ]
+    }
+  ],
+  "abiCases": [
+    {
+      "name": "platform-command-replies-preserve-fifo-order",
+      "steps": [
+        {
+          "input": {
+            "kind": "platformCommand",
+            "command": "display-message -p 'first ABI vector reply'"
+          }
+        },
+        {
+          "input": {
+            "kind": "platformCommand",
+            "command": "display-message -p 'second ABI vector reply'"
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%begin 1 1 1\nfirst ABI vector reply\n%end 1 1 1\n"
+          }
+        },
+        {
+          "input": {
+            "kind": "wire",
+            "wire": "%begin 2 2 1\nsecond ABI vector reply\n%end 2 2 1\n"
+          }
+        }
+      ],
+      "expectedEffects": [
+        {
+          "kind": "commandReply",
+          "tag": 1,
+          "success": true,
+          "lines": [
+            "first ABI vector reply"
+          ]
+        },
+        {
+          "kind": "commandReply",
+          "tag": 2,
+          "success": true,
+          "lines": [
+            "second ABI vector reply"
+          ]
+        }
+      ]
+    }
+  ]
+}

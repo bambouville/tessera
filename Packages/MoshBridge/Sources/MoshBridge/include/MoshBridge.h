@@ -18,6 +18,15 @@ typedef void (^MoshBridgeOutputHandler)(NSData *data);
 /// Spike 2 primitive probe: raw AES-128 ECB via CommonCrypto (no OCB).
 /// Isolates whether the primitive works before blaming OCB.
 + (NSInteger)primitiveProbe;
+/// Loopback regression probe for a reclaimed mosh client socket.
++ (NSInteger)reclaimedSocketProbe;
+/// Host-free test of the native fresh repaint fence's logical-state policy.
++ (NSInteger)fullRepaintFenceProbe;
+/// Host-free native frame bytes for mouse tracking and encoding regressions.
++ (NSData *)mouseFrameProbeWithMode:(NSInteger)mode
+                          encoding:(NSInteger)encoding
+                          scenario:(NSInteger)scenario
+    NS_SWIFT_NAME(mouseFrameProbe(mode:encoding:scenario:));
 @end
 
 @interface MoshBridgeClient : NSObject
@@ -35,6 +44,8 @@ typedef void (^MoshBridgeOutputHandler)(NSData *data);
 @property (nonatomic, readonly) NSArray<NSNumber *> *socketFDs;
 @property (nonatomic, readonly, getter=isConnected) BOOL connected;
 @property (nonatomic, readonly, getter=isTransportReachable) BOOL transportReachable;
+@property (nonatomic, readonly) uint64_t serverContactAgeMilliseconds;
+@property (nonatomic, readonly) uint64_t replyAgeMilliseconds;
 @property (nonatomic, readonly, getter=isShutdownComplete) BOOL shutdownComplete;
 @property (nonatomic, readonly) BOOL applicationModeCursorKeys;
 /// Testable lifetime invariant: false immediately after `start` initializes
@@ -51,6 +62,12 @@ typedef void (^MoshBridgeOutputHandler)(NSData *data);
 /// state) so the terminal resynchronizes with the client's framebuffer
 /// model after something painted the terminal outside the SSP diff stream.
 - (BOOL)forceFullRepaint:(NSError * _Nullable * _Nullable)error;
+/// Begin a fresh SSP input/echo-acknowledgement barrier. Zero means unavailable.
+/// Normal driver ticks advance it; this call emits no terminal bytes.
+- (uint64_t)beginFullRepaintFence:(NSError * _Nullable * _Nullable)error __attribute__((swift_error(nonnull_error)));
+/// True only after the server's echo ack covers the fixed token and its
+/// framebuffer matches the current grid. This does not tick or emit output.
+- (BOOL)isFullRepaintFenceReady:(uint64_t)token NS_SWIFT_NAME(isFullRepaintFenceReady(token:));
 - (void)shutdown;
 
 @end

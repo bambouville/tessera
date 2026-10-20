@@ -1,7 +1,9 @@
 import Foundation
 import Citadel
 import NIOCore
+import TesseraSessionCore
 import TmuxControl
+import TmuxControlCore
 
 struct MoshBootstrapGeometry: Equatable, Sendable {
     let sessionID: String
@@ -58,6 +60,30 @@ struct MoshBootstrapResult: Equatable, Sendable {
     }
 }
 
+/// The authenticated SSH route owned by one raw-mosh session.
+///
+/// Mosh's terminal traffic remains UDP.  This lease exists solely so
+/// session-owned features can open bounded child exec channels. Initially this
+/// is the bootstrap route; `MoshSession` may renew SSH independently after a
+/// network failure, validating the original route/account without restarting
+/// mosh-server. It closes the lease when the UDP session or read attempt ends.
+struct MoshBootstrapConnection: @unchecked Sendable {
+    let result: MoshBootstrapResult
+    private let chain: EstablishedSSHChain
+
+    init(result: MoshBootstrapResult, chain: EstablishedSSHChain) {
+        self.result = result
+        self.chain = chain
+    }
+
+    var client: SSHClient { chain.client }
+    var resolvedHost: Host { chain.resolvedHost }
+
+    func close() async {
+        await chain.closeAll()
+    }
+}
+
 enum MoshBootstrapError: Error, Equatable, LocalizedError, Sendable {
     case authenticationFailed(String)
     case connectionFailed(String)
@@ -90,69 +116,46 @@ enum MoshBootstrapError: Error, Equatable, LocalizedError, Sendable {
     }
 }
 
+extension MoshBootstrapError {
+    /// Lift the portable grammar's classification onto the app's localized
+    /// error. The grammar deliberately carries no transcript, so nothing to
+    /// redact crosses this boundary.
+    init(_ failure: MoshBootstrapGrammarFailure) {
+        switch failure {
+        case .missingServer:
+            self = .missingServer
+        case .missingConnect:
+            self = .missingConnect
+        case .malformedConnect:
+            self = .malformedConnect
+        }
+    }
+}
+
 /// The single boundary for removing live mosh session credentials from text
 /// before it reaches either unified logging or Tessera's diagnostic file.
 ///
 /// Bootstrap parser errors intentionally retain no transcript at all. This
 /// remains defense in depth for errors produced below Citadel and for future
 /// diagnostic call sites that receive remote command output.
+///
+/// The patterns and their order live in
+/// `TesseraSessionCore.SensitiveDataRedaction`; this is the app-facing name
+/// for them. `redact` applies the mosh subset only — the same two patterns it
+/// always did — because its output can still reach a user-facing failure
+/// message, where the host you failed to reach is information the user is
+/// entitled to. The wider `credentialAssignment` / `endpointIdentifier`
+/// stages of the shared list are for sinks that keep no user-facing text.
 enum SensitiveDataRedactor {
-    private static let moshConnectLinePattern = try! NSRegularExpression(
-        pattern: #"(?im)\bMOSH[ \t]+CONNECT(?:[ \t]+[^\r\n]*)?"#
-    )
-    private static let moshKeyPattern = try! NSRegularExpression(
-        pattern: #"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{22}(?:==)?(?![A-Za-z0-9+/=])"#
-    )
-
     static func redact(_ text: String) -> String {
-        let mutable = NSMutableString(string: text)
-        let fullRange = NSRange(location: 0, length: mutable.length)
-        let matches = moshConnectLinePattern.matches(in: text, range: fullRange)
-
-        // Work backwards so replacing one line cannot invalidate the ranges of
-        // earlier matches. A port is retained only after strict decimal/range
-        // validation; every malformed tail is treated as credential material.
-        for match in matches.reversed() {
-            let connectText = mutable.substring(with: match.range)
-            let fields = connectText.split(whereSeparator: \Character.isWhitespace)
-            let replacement: String
-            if fields.count >= 4, isValidMoshPortToken(fields[2]) {
-                replacement = "MOSH CONNECT \(fields[2]) <redacted>"
-            } else {
-                replacement = "MOSH CONNECT <redacted>"
-            }
-            mutable.replaceCharacters(in: match.range, with: replacement)
-        }
-
-        // Defense in depth for exception bridges that contain only the key,
-        // and for malformed output that splits CONNECT and its key over lines.
-        let connectRedacted = mutable as String
-        let redactedRange = NSRange(
-            connectRedacted.startIndex..<connectRedacted.endIndex,
-            in: connectRedacted
-        )
-        return moshKeyPattern.stringByReplacingMatches(
-            in: connectRedacted,
-            range: redactedRange,
-            withTemplate: "<redacted-key>"
-        )
+        SensitiveDataRedaction.redactTransportDetail(text)
     }
 
     static func bootstrapTranscriptSummary(stdout: String, stderr: String) -> String {
-        "stdoutBytes=\(stdout.utf8.count) stderrBytes=\(stderr.utf8.count) connectMarker=\(containsConnectMarker(stdout) || containsConnectMarker(stderr))"
-    }
-
-    private static func containsConnectMarker(_ text: String) -> Bool {
-        text.range(of: "MOSH CONNECT", options: [.caseInsensitive]) != nil
-    }
-
-    private static func isValidMoshPortToken(_ token: Substring) -> Bool {
-        guard !token.isEmpty,
-              token.utf8.allSatisfy({ (0x30...0x39).contains($0) }),
-              let port = Int(token),
-              (1...65_535).contains(port)
-        else { return false }
-        return true
+        SensitiveDataRedaction.bootstrapTranscriptSummary(
+            stdout: stdout,
+            stderr: stderr
+        )
     }
 }
 
@@ -169,6 +172,34 @@ enum MoshBootstrap {
         gridAuthorityDeviceID: String? = nil,
         sessionNameResolver: SessionNameResolver = HostRuntimeStateStore.sessionName(for:)
     ) async throws -> MoshBootstrapResult {
+        let connection = try await bootstrapRetainingConnection(
+            host: host,
+            requireBiometric: requireBiometric,
+            isSecureEnclave: isSecureEnclave,
+            hostKeyPrompt: hostKeyPrompt,
+            preserveTmuxGeometry: preserveTmuxGeometry,
+            visibleTmuxClientIgnoresSize: visibleTmuxClientIgnoresSize,
+            gridAuthorityDeviceID: gridAuthorityDeviceID,
+            sessionNameResolver: sessionNameResolver
+        )
+        await connection.close()
+        return connection.result
+    }
+
+    /// Variant for the raw-mosh session owner.  Unlike `bootstrap`, it hands
+    /// back the bootstrap route instead of throwing it away after key
+    /// exchange.  Callers must own and close the result; no other code may
+    /// create a route merely to inspect an Agent Center source.
+    static func bootstrapRetainingConnection(
+        host: Host,
+        requireBiometric: Bool = false,
+        isSecureEnclave: Bool = false,
+        hostKeyPrompt: HostKeyVerificationPrompt? = nil,
+        preserveTmuxGeometry: Bool = false,
+        visibleTmuxClientIgnoresSize: Bool = false,
+        gridAuthorityDeviceID: String? = nil,
+        sessionNameResolver: SessionNameResolver = HostRuntimeStateStore.sessionName(for:)
+    ) async throws -> MoshBootstrapConnection {
         // The bootstrap SSH ride (and only this ride) carries the mosh key
         // exchange; it goes through the shared jump-chain establisher so a
         // bastioned host can still launch mosh-server. The subsequent UDP
@@ -205,12 +236,11 @@ enum MoshBootstrap {
                 ),
                 on: client
             )
-            // Probe the OS family before closing the bootstrap client.
-            // Mosh has no SSH transport after this point, so this is the
-            // only window we have. Any error returns nil and the result
-            // simply lacks a detected hint.
+            // Probe the OS family before returning the bootstrap client.
+            // Any error returns nil and the result simply lacks a detected
+            // hint. The raw-mosh owner may retain this same authenticated
+            // route for bounded child execs; it is never a new connection.
             let detection = await OSDetectionProbe.run(on: client)
-            await chain.closeAll()
             if transcriptSuggestsMissingServer(transcript) {
                 throw MoshBootstrapError.missingServer
             }
@@ -218,15 +248,18 @@ enum MoshBootstrap {
                 stdout: transcript.stdout,
                 stderr: transcript.stderr
             )
-            return MoshBootstrapResult(
-                udpPort: parsed.udpPort,
-                base64Key: parsed.base64Key,
-                serverPID: parsed.serverPID,
-                detectedOSHint: detection?.osHint,
-                networkPathAssessment: detection?.networkPathAssessment ?? .unavailable,
-                targetAddress: chain.resolvedHost.address,
-                jumpChainHopCount: chain.resolvedHost.jumpChain.count,
-                preservedTmuxGeometry: preservedTmuxGeometry
+            return MoshBootstrapConnection(
+                result: MoshBootstrapResult(
+                    udpPort: parsed.udpPort,
+                    base64Key: parsed.base64Key,
+                    serverPID: parsed.serverPID,
+                    detectedOSHint: detection?.osHint,
+                    networkPathAssessment: detection?.networkPathAssessment ?? .unavailable,
+                    targetAddress: chain.resolvedHost.address,
+                    jumpChainHopCount: chain.resolvedHost.jumpChain.count,
+                    preservedTmuxGeometry: preservedTmuxGeometry
+                ),
+                chain: chain
             )
         } catch let error as RemoteCommandFailure {
             await chain.closeAll()
@@ -284,17 +317,16 @@ enum MoshBootstrap {
         gridAuthorityDeviceID: String? = nil,
         sessionNameResolver: SessionNameResolver = HostRuntimeStateStore.sessionName(for:)
     ) -> String {
-        if let command = launchCommand(
-            for: host,
-            preserveTmuxGeometry: preserveTmuxGeometry,
-            preservedTmuxGeometry: preservedTmuxGeometry,
-            visibleTmuxClientIgnoresSize: visibleTmuxClientIgnoresSize,
-            gridAuthorityDeviceID: gridAuthorityDeviceID,
-            sessionNameResolver: sessionNameResolver
-        ) {
-            return "mosh-server new -- \(command)"
-        }
-        return "mosh-server new"
+        MoshBootstrapGrammar.serverNewCommand(
+            launchCommand: launchCommand(
+                for: host,
+                preserveTmuxGeometry: preserveTmuxGeometry,
+                preservedTmuxGeometry: preservedTmuxGeometry,
+                visibleTmuxClientIgnoresSize: visibleTmuxClientIgnoresSize,
+                gridAuthorityDeviceID: gridAuthorityDeviceID,
+                sessionNameResolver: sessionNameResolver
+            )
+        )
     }
 
     static func launchCommand(
@@ -372,21 +404,14 @@ enum MoshBootstrap {
         let visibleClientOption = gridAuthorityDeviceID.map {
             TmuxController.gridAuthorityVisibleClientOption(identityID: $0)
         }
-        let visibleClientCommand = visibleClientOption.map {
-            " \\; set-option -F -t \(sessionName) \($0) '#{client_name}|#{client_pid}|#{client_created}'"
-        } ?? ""
         guard preserveTmuxGeometry else {
-            let arguments = "-s \(sessionName)"
-                + visibleClientCommand
-                + " \\; set-option -t \(sessionName) status off"
-            guard visibleTmuxClientIgnoresSize else {
-                return "tmux -u new-session -A \(arguments)"
-            }
-            let body = AutoTmuxScript.geometryPreservingClientCommand(
-                tmuxCommand: "tmux -u new-session -A",
-                arguments: arguments
+            // Shared with Android: one builder owns the bytes both platforms
+            // send, so the ignore-size gating cannot drift between them again.
+            return AutoTmuxCommands.moshVisibleClientCommand(
+                sessionTarget: sessionName,
+                gridAuthorityDeviceID: gridAuthorityDeviceID,
+                ignoresSize: visibleTmuxClientIgnoresSize
             )
-            return "sh -lc \(singleQuotedShellString(body))"
         }
 
         // `ignore-size` does not stop the only attached tmux client from
@@ -402,7 +427,13 @@ enum MoshBootstrap {
         // disappeared or changed meanwhile, fail without touching a newly
         // created or unrelated same-name session. A phone-created session has
         // no token and is created only if the name is still absent.
-        let namedTarget = singleQuotedShellString(sessionName)
+        // Presentation and cleanup options belong to Tessera's own view.
+        // Mouse input is also enabled on the owner: full-screen programs in
+        // the shared windows can consult its option before capturing input.
+        let ownerTarget = singleQuotedShellString(sessionName)
+        let viewTarget = singleQuotedShellString(
+            AutoTmuxCommands.moshViewSessionName(for: sessionName)
+        )
         let body: String
         if let geometry = preservedTmuxGeometry {
             let identityTarget = singleQuotedShellString(geometry.sessionID)
@@ -412,37 +443,59 @@ enum MoshBootstrap {
             )
             let readCurrent = "tmux -u display-message -p -t \(identityTarget) \(format)"
             let verify = "current=$(\(readCurrent)) && [ \"$current\" = \(expected) ]"
+            // Only change the owner if it still shares the verified view's
+            // windows. The owner can be killed and its name reused while this
+            // view keeps the original work alive.
+            let enableOwnerMouse = AutoTmuxCommands.enableGroupedOwnerMouseCommand(
+                sessionTarget: sessionName,
+                viewTarget: geometry.sessionID
+            )
             let waitForResize = "attempts=0; matched=0; while [ \"$attempts\" -lt 200 ]; do "
                 + "attempts=$((attempts + 1)); "
                 + "set -- $(stty size 2>/dev/null) || exit 76; "
                 + "if [ \"$1\" = \"\(geometry.rows)\" ] && [ \"$2\" = \"\(geometry.cols)\" ]; then matched=1; break; fi; "
                 + "sleep 0.05; done; "
                 + "[ \"$matched\" = 1 ] || exit 77"
-            let attach = AutoTmuxScript.geometryPreservingClientCommand(
-                tmuxCommand: "tmux -u attach-session",
-                arguments: "-t \(identityTarget) "
-                    + "\\; set-option -F -t \(identityTarget) @tessera-size-owner '#{client_name}' "
-                    + (visibleClientOption.map {
-                        "\\; set-option -F -t \(identityTarget) \($0) '#{client_name}|#{client_pid}|#{client_created}' "
-                    } ?? "")
-                    + "\\; set-option -t \(identityTarget) status off"
-            )
-            body = "if tmux -u has-session -t \(identityTarget) 2>/dev/null; then "
+            let attach = "exec tmux -u attach-session $tessera_tmux_f -t \(identityTarget) "
+                + "\\; set-option -F -t \(identityTarget) @tessera-size-owner '#{client_name}'"
+                + AutoTmuxCommands.viewSessionOptions(
+                    viewTarget: identityTarget,
+                    gridAuthorityDeviceID: gridAuthorityDeviceID
+                )
+            // The probed session is proof a server is already up, so the
+            // read-modify-write override cannot land on one that exits again
+            // before the client attaches.
+            body = AutoTmuxCommands.versionGatedLaunchWords(ignoresSize: true)
+                + AutoTmuxCommands.truecolorOverrideOnce
+                + "if tmux -u has-session -t \(identityTarget) 2>/dev/null; then "
                 + verify + " && "
                 + waitForResize + " && "
                 + verify + " && "
+                + "{ \(enableOwnerMouse); } && "
                 + attach + "; "
                 + "else exit 75; fi"
         } else {
-            body = "if tmux -u has-session -t \(namedTarget) 2>/dev/null; then "
-                + "exit 75; "
-                + "else exec tmux -u new-session -s \(namedTarget) "
-                + "\\; set-option -t \(namedTarget) status off "
-                + "\\; set-option -F -t \(namedTarget) @tessera-size-owner '#{client_name}' "
-                + (visibleClientOption.map {
-                    "\\; set-option -F -t \(namedTarget) \($0) '#{client_name}|#{client_pid}|#{client_created}' "
-                } ?? "")
-                + "; fi"
+            // Creating our own view leaves nothing of *ours* to preserve, but
+            // the owner's windows are another matter: joining a session that
+            // already exists must not resize its work to this compact client,
+            // so the view is created with `ignore-size` in that case and
+            // without it — free to adopt the client's grid — only when this
+            // launch is what started the owner.
+            let attach = "exec tmux -u new-session $tessera_tmux_f "
+                + "-s \(viewTarget) -t \(ownerTarget) "
+                + "\\; set-option -F -t \(viewTarget) @tessera-size-owner '#{client_name}'"
+                + AutoTmuxCommands.viewSessionOptions(
+                    viewTarget: viewTarget,
+                    gridAuthorityDeviceID: gridAuthorityDeviceID
+                )
+            body = AutoTmuxCommands.versionGatedLaunchWords(ignoresSize: true)
+                + "if tmux -u has-session -t \(viewTarget) 2>/dev/null; then exit 75; fi; "
+                + "if tmux -u has-session -t \(ownerTarget) 2>/dev/null; then :; "
+                + "else tmux -u new-session -d -s \(ownerTarget); tessera_tmux_f=''; fi; "
+                + AutoTmuxCommands.enableSessionMouseCommand(sessionTarget: sessionName)
+                + " || exit; "
+                + AutoTmuxCommands.truecolorOverrideOnce
+                + attach
         }
         return "sh -lc \(singleQuotedShellString(body))"
     }
@@ -459,7 +512,13 @@ enum MoshBootstrap {
             sessionNameResolver: sessionNameResolver
         ) else { return nil }
 
-        let target = singleQuotedShellString(sessionName)
+        // Probe the session this device will actually attach to — Tessera's
+        // own view — not the user's session. They share windows, so the grid is
+        // the same, but the identity token is the view's and the launch verifies
+        // it against exactly that session id.
+        let target = singleQuotedShellString(
+            AutoTmuxCommands.moshViewSessionName(for: sessionName)
+        )
         let format = singleQuotedShellString(
             "#{session_id},#{session_created},#{window_id},#{window_width},#{window_height}"
         )
@@ -540,46 +599,28 @@ enum MoshBootstrap {
         }
     }
 
+    /// Every `MOSH CONNECT` rule — the strict literal prefix, the four-field
+    /// shape, the port range, the 22-character key with optional padding, and
+    /// the detached-PID banner — lives in `MoshBootstrapGrammar` so Android
+    /// cannot drift from it. This only lifts the result into the app's type.
     static func parseConnectResponse(
         stdout: String,
         stderr: String = ""
     ) throws -> MoshBootstrapResult {
-        let combinedOutput = combinedBootstrapOutput(stdout: stdout, stderr: stderr)
-        let serverPID = detachedServerPID(from: combinedOutput)
-        var sawMalformedLine = false
-
-        for rawLine in combinedOutput.split(whereSeparator: \.isNewline) {
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard line.hasPrefix("MOSH CONNECT ") else { continue }
-
-            let fields = line.split(whereSeparator: \.isWhitespace)
-            guard fields.count == 4 else {
-                sawMalformedLine = true
-                continue
-            }
-
-            guard let port = Int(fields[2]), (1...65_535).contains(port) else {
-                sawMalformedLine = true
-                continue
-            }
-
-            guard let key = normalizedConnectKey(String(fields[3])) else {
-                sawMalformedLine = true
-                continue
-            }
-
+        do {
+            let parsed = try MoshBootstrapGrammar.parseConnectResponse(
+                stdout: stdout,
+                stderr: stderr
+            )
             return MoshBootstrapResult(
-                udpPort: port,
-                base64Key: key,
-                serverPID: serverPID,
+                udpPort: parsed.udpPort,
+                base64Key: parsed.base64Key,
+                serverPID: parsed.serverPID,
                 detectedOSHint: nil
             )
+        } catch let failure as MoshBootstrapGrammarFailure {
+            throw MoshBootstrapError(failure)
         }
-
-        if sawMalformedLine {
-            throw MoshBootstrapError.malformedConnect
-        }
-        throw MoshBootstrapError.missingConnect
     }
 
     private static func classifyConnectionError(_ error: Error) -> MoshBootstrapError {
@@ -650,65 +691,16 @@ enum MoshBootstrap {
     }
 
     private static func singleQuotedShellString(_ string: String) -> String {
-        let escaped = string.replacingOccurrences(of: "'", with: "'\\''")
-        return "'\(escaped)'"
-    }
-
-    private static func normalizedConnectKey(_ rawKey: String) -> String? {
-        let candidate: Substring
-        if rawKey.hasSuffix("==") {
-            candidate = rawKey.dropLast(2)
-        } else {
-            candidate = Substring(rawKey)
-        }
-
-        guard candidate.count == 22 else { return nil }
-
-        let allowed = CharacterSet(
-            charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/"
-        )
-        guard candidate.unicodeScalars.allSatisfy({ allowed.contains($0) }) else {
-            return nil
-        }
-
-        return String(candidate)
-    }
-
-    private static func combinedBootstrapOutput(
-        stdout: String,
-        stderr: String
-    ) -> String {
-        guard !stderr.isEmpty else { return stdout }
-        guard !stdout.isEmpty else { return stderr }
-        return "\(stdout)\n\(stderr)"
-    }
-
-    private static func detachedServerPID(from output: String) -> Int? {
-        let prefix = "[mosh-server detached, pid = "
-
-        for rawLine in output.split(whereSeparator: \.isNewline) {
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard line.hasPrefix(prefix), line.hasSuffix("]") else { continue }
-
-            let pidStart = line.index(line.startIndex, offsetBy: prefix.count)
-            let pidEnd = line.index(before: line.endIndex)
-            let pidText = line[pidStart..<pidEnd]
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let pid = Int(pidText), pid > 0 else { continue }
-            return pid
-        }
-
-        return nil
+        MoshBootstrapGrammar.singleQuotedShellString(string)
     }
 
     private static func transcriptSuggestsMissingServer(
         _ transcript: CommandTranscript
     ) -> Bool {
-        let combined = "\(transcript.stderr)\n\(transcript.stdout)".lowercased()
-        guard combined.contains("mosh-server") else { return false }
-        return combined.contains("not found")
-            || combined.contains("command not found")
-            || combined.contains("no such file")
+        MoshBootstrapGrammar.transcriptSuggestsMissingServer(
+            stdout: transcript.stdout,
+            stderr: transcript.stderr
+        )
     }
 
     private static func executeBootstrapCommand(

@@ -1,0 +1,82 @@
+{
+  "Discard": {
+    "de": "Verwerfen",
+    "es": "Descartar",
+    "fr": "Supprimer",
+    "ja": "破棄",
+    "zh-Hans": "丢弃",
+    "zh-Hant": "捨棄"
+  },
+  "Queue upload": {
+    "de": "Upload vormerken",
+    "es": "Poner en cola",
+    "fr": "Mettre en file",
+    "ja": "アップロードを予約",
+    "zh-Hans": "加入上传队列",
+    "zh-Hant": "加入上傳佇列"
+  },
+  "active session": {
+    "de": "aktive Sitzung",
+    "es": "sesión activa",
+    "fr": "session active",
+    "ja": "使用中のセッション",
+    "zh-Hans": "当前会话",
+    "zh-Hant": "目前的工作階段"
+  },
+  "saved host": {
+    "de": "gespeicherter Host",
+    "es": "host guardado",
+    "fr": "hôte enregistré",
+    "ja": "保存済みのホスト",
+    "zh-Hans": "已保存的主机",
+    "zh-Hant": "已儲存的主機"
+  },
+  "Preparing for Tessera...": {
+    "de": "Wird für Tessera vorbereitet …",
+    "es": "Preparando para Tessera…",
+    "fr": "Préparation pour Tessera…",
+    "ja": "Tessera 用に準備しています…",
+    "zh-Hans": "正在为 Tessera 准备…",
+    "zh-Hant": "正在為 Tessera 準備…"
+  },
+  "Choose the Tessera host for this upload.": {
+    "de": "Wähle den Tessera-Host für diesen Upload.",
+    "es": "Elige el host de Tessera para esta subida.",
+    "fr": "Choisissez l'hôte Tessera pour ce téléversement.",
+    "ja": "このアップロード先の Tessera ホストを選んでください。",
+    "zh-Hans": "请选择此次上传的 Tessera 主机。",
+    "zh-Hant": "請選擇此次上傳的 Tessera 主機。"
+  },
+  "Open Tessera once to refresh the host list.": {
+    "de": "Öffne Tessera einmal, um die Hostliste zu aktualisieren.",
+    "es": "Abre Tessera una vez para actualizar la lista de hosts.",
+    "fr": "Ouvrez Tessera une fois pour actualiser la liste des hôtes.",
+    "ja": "Tessera を一度開いてホスト一覧を更新してください。",
+    "zh-Hans": "请打开一次 Tessera 以刷新主机列表。",
+    "zh-Hant": "請開啟一次 Tessera 以更新主機列表。"
+  },
+  "Could not queue upload: %@": {
+    "de": "Upload konnte nicht vorgemerkt werden: %@",
+    "es": "No se pudo poner la subida en cola: %@",
+    "fr": "Impossible de mettre le téléversement en file : %@",
+    "ja": "アップロードを予約できませんでした: %@",
+    "zh-Hans": "无法加入上传队列：%@",
+    "zh-Hant": "無法加入上傳佇列：%@"
+  },
+  "Shared container is unavailable.": {
+    "de": "Der gemeinsame Container ist nicht verfügbar.",
+    "es": "El contenedor compartido no está disponible.",
+    "fr": "Le conteneur partagé est indisponible.",
+    "ja": "共有コンテナを利用できません。",
+    "zh-Hans": "共享容器不可用。",
+    "zh-Hant": "共用容器無法使用。"
+  },
+  "The image could not be prepared.": {
+    "de": "Das Bild konnte nicht vorbereitet werden.",
+    "es": "No se pudo preparar la imagen.",
+    "fr": "Impossible de préparer l'image.",
+    "ja": "画像を準備できませんでした。",
+    "zh-Hans": "无法准备图像。",
+    "zh-Hant": "無法準備影像。"
+  }
+}

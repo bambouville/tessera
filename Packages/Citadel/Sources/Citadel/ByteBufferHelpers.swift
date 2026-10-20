@@ -2,6 +2,27 @@ import NIO
 import Foundation
 
 extension ByteBuffer {
+    // These general SSH-string writers also serve Ed25519 key import/export.
+    // They used to live inside the unused fork-only RSA/DH implementation.
+    @discardableResult
+    mutating func writeSSHString<Bytes: Collection>(_ value: Bytes) -> Int where Bytes.Element == UInt8 {
+        let length = writeInteger(UInt32(value.count))
+        return length + writeBytes(value)
+    }
+
+    @discardableResult
+    mutating func writeCompositeSSHString(_ body: (inout ByteBuffer) throws -> Int) rethrows -> Int {
+        let originalWriterIndex = writerIndex
+        writeInteger(UInt32(0))
+        do {
+            let length = try body(&self)
+            return length + setInteger(UInt32(length), at: originalWriterIndex)
+        } catch {
+            moveWriterIndex(to: originalWriterIndex)
+            throw error
+        }
+    }
+
     mutating func writeSFTPDate(_ date: Date) {
         writeInteger(UInt32(date.timeIntervalSince1970))
     }

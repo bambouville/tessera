@@ -1,0 +1,29 @@
+scenario d1-stamp-session-scope
+# D1: an untargeted stamp is a session option. Grouped sessions share windows
+# but not options, so the owner (SSH+tmux) and the view (mosh+tmux) never see
+# each other's stamp; list-clients -t lists only exact-session clients; any
+# detach reaches every control client. A window-scoped stamp is shared.
+session O 80x24 w0
+group O-tessera-view O
+session other 80x24 x0
+control ssh O
+control mosh O-tessera-view no-output
+send ssh set-option @tessera_authority 'v1 A 1 iPad'
+expect ssh %end 1
+send mosh show-options -qv @tessera_authority
+expect-not mosh v1 A 1 iPad
+send mosh display-message -p 'stamp=#{@tessera_authority}'
+expect mosh stamp=
+send mosh set-option @tessera_authority 'v1 B 1 Pixel'
+send ssh show-options -v @tessera_authority
+expect ssh v1 A 1 iPad
+send mosh list-clients -t O-tessera-view -F 'listed #{session_name}'
+expect mosh listed O-tessera-view
+expect-not mosh listed O
+send ssh set-option -w @tessera_authority 'v1 A 2 iPad'
+send mosh display-message -p 'stamp=#{@tessera_authority}'
+expect mosh stamp=v1 A 2 iPad
+control bystander other
+detach bystander
+expect mosh %client-detached bystander
+expect ssh %client-detached bystander

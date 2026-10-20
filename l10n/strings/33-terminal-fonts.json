@@ -1,0 +1,106 @@
+{
+  "terminal font": {
+    "de": "Terminal-Schriftart",
+    "es": "fuente del terminal",
+    "fr": "police du terminal",
+    "ja": "ターミナルフォント",
+    "zh-Hans": "终端字体",
+    "zh-Hant": "終端機字型"
+  },
+  "applies to the terminal grid only — app chrome keeps its own face": {
+    "de": "gilt nur für das Terminalraster – die App-Oberfläche behält ihre eigene Schrift",
+    "es": "solo afecta a la cuadrícula del terminal: la interfaz de la app conserva su propia tipografía",
+    "fr": "s'applique uniquement à la grille du terminal — l'interface de l'app conserve sa propre police",
+    "ja": "ターミナルのグリッドにのみ適用されます。アプリの画面は独自のフォントのままです",
+    "zh-Hans": "仅作用于终端网格 — 应用界面保留自己的字体",
+    "zh-Hant": "僅作用於終端機格線 — 應用程式介面保留自己的字型"
+  },
+  "tall x-height, coding ligatures": {
+    "de": "große x-Höhe, Programmier-Ligaturen",
+    "es": "altura de x grande, ligaduras de código",
+    "fr": "grande hauteur d'x, ligatures de code",
+    "ja": "大きなエックスハイト、コーディング合字",
+    "zh-Hans": "x 高度大，含编程连字",
+    "zh-Hant": "x 高度大，含程式連字"
+  },
+  "the widest ligature set": {
+    "de": "der größte Ligaturensatz",
+    "es": "el conjunto de ligaduras más amplio",
+    "fr": "le jeu de ligatures le plus complet",
+    "ja": "最も豊富な合字セット",
+    "zh-Hans": "最丰富的连字集",
+    "zh-Hant": "最豐富的連字集"
+  },
+  "wide, plain, built for small sizes": {
+    "de": "breit, schnörkellos, für kleine Größen gemacht",
+    "es": "ancha, sobria, pensada para tamaños pequeños",
+    "fr": "large, sobre, conçue pour les petites tailles",
+    "ja": "幅広でクセがなく、小さいサイズ向け",
+    "zh-Hans": "字身宽、无修饰，为小字号设计",
+    "zh-Hant": "字身寬、無修飾，為小字級設計"
+  },
+  "Windows Terminal's face, no ligatures": {
+    "de": "die Schrift von Windows Terminal, ohne Ligaturen",
+    "es": "la tipografía de Windows Terminal, sin ligaduras",
+    "fr": "la police de Windows Terminal, sans ligatures",
+    "ja": "Windows Terminal のフォント、合字なし",
+    "zh-Hans": "Windows Terminal 的字体，无连字",
+    "zh-Hant": "Windows Terminal 的字型，無連字"
+  },
+  "Adobe's classic, humanist shapes": {
+    "de": "Adobes Klassiker, humanistische Formen",
+    "es": "el clásico de Adobe, formas humanistas",
+    "fr": "le classique d'Adobe, formes humanistes",
+    "ja": "Adobe の定番、ヒューマニスト系の字形",
+    "zh-Hans": "Adobe 经典，人文风格字形",
+    "zh-Hant": "Adobe 經典，人文風格字形"
+  },
+  "warm and slightly narrow": {
+    "de": "warm und etwas schmal",
+    "es": "cálida y algo estrecha",
+    "fr": "chaleureuse et un peu étroite",
+    "ja": "温かみがあり、やや細身",
+    "zh-Hans": "温和，略窄",
+    "zh-Hant": "溫和，略窄"
+  },
+  "geometric, very open counters": {
+    "de": "geometrisch, sehr offene Punzen",
+    "es": "geométrica, contrapunzones muy abiertos",
+    "fr": "géométrique, contrepoinçons très ouverts",
+    "ja": "幾何学的で、字面の空きが広い",
+    "zh-Hans": "几何风格，字怀非常开阔",
+    "zh-Hant": "幾何風格，字懷非常開闊"
+  },
+  "narrow — fits the most columns": {
+    "de": "schmal – passt die meisten Spalten",
+    "es": "estrecha: entran más columnas",
+    "fr": "étroite — le plus de colonnes",
+    "ja": "細身で、最も多くの桁が入る",
+    "zh-Hans": "窄体 — 可容纳最多列",
+    "zh-Hant": "窄體 — 可容納最多欄"
+  },
+  "light and compact": {
+    "de": "leicht und kompakt",
+    "es": "ligera y compacta",
+    "fr": "légère et compacte",
+    "ja": "軽くコンパクト",
+    "zh-Hans": "轻盈紧凑",
+    "zh-Hant": "輕盈緊湊"
+  },
+  "the broadest Unicode coverage": {
+    "de": "die größte Unicode-Abdeckung",
+    "es": "la mayor cobertura Unicode",
+    "fr": "la plus large couverture Unicode",
+    "ja": "最も広い Unicode カバレッジ",
+    "zh-Hans": "最广的 Unicode 覆盖",
+    "zh-Hant": "最廣的 Unicode 涵蓋範圍"
+  },
+  "SF Mono, whatever the OS ships": {
+    "de": "SF Mono – was das Betriebssystem mitbringt",
+    "es": "SF Mono, la que traiga el sistema",
+    "fr": "SF Mono, celle fournie par le système",
+    "ja": "SF Mono — OS 標準のもの",
+    "zh-Hans": "SF Mono，系统自带的那一款",
+    "zh-Hant": "SF Mono，系統內建的那一款"
+  }
+}

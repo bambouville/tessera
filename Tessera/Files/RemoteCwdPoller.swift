@@ -1,9 +1,13 @@
 // Tessera/Files/RemoteCwdPoller.swift
 //
-// Shared cwd-poll loop for transports where the terminal delivers no
-// (reliable) in-band cwd signal. It asks the host — over the FileBridge,
-// never the terminal transport — where the session's interactive shell
-// currently sits, and pushes the answer into the panel's follow state:
+// iOS-facing name for the shared cwd poll. The command policy — the three
+// discovery modes, the `sh -c` wrapping, the TESSERA_CWD marker, the miss
+// debounce and the poll interval — lives in
+// `TesseraDomainCore.RemoteCwdProbe` so Android probes a host with the
+// exact same shell text. What stays here is the loop itself: the
+// FileBridge exec, the sleep, and the push into the panel's follow state.
+//
+// Why the loop exists at all (verbatim from the shared core):
 //
 //   - plain mosh: a stock remote mosh-server drops OSC 7 before it ever
 //     enters the state sync, so polling is the ONLY follow source unless
@@ -18,29 +22,15 @@
 // key their poll task off `tmux.mode` so this loop never runs attached.
 
 import Foundation
+import TesseraDomainCore
 
 enum RemoteCwdPoller {
 
     /// How to find the shell whose cwd the panel should follow.
-    enum ShellDiscovery {
-        /// mosh: the shell is the remote mosh-server's child, and the
-        /// bootstrap banner captured the server PID.
-        case moshServerChild(serverPID: Int)
-        /// Plain SSH: nothing ties our terminal channel to a remote PID,
-        /// so follow the newest tty-attached shell owned by the user.
-        /// With several interactive sessions on one host this can pick a
-        /// sibling's shell — OSC 7 stays the precise, instant source;
-        /// this is the works-without-setup net underneath it.
-        case newestLoginShell
-        /// tmux launch modes: ask tmux itself for the named session's
-        /// active pane. Session-scoped (safe with several tmux sessions
-        /// on the host) and independent of the -CC side channel — which
-        /// is deliberately DOWN for backgrounded sessions, so pane
-        /// metadata can't answer there (the Upload sheet's case).
-        case tmuxSession(name: String)
-    }
+    typealias ShellDiscovery = RemoteCwdProbe.ShellDiscovery
 
-    static let pollIntervalNanoseconds: UInt64 = 2_500_000_000
+    static let pollIntervalNanoseconds: UInt64 =
+        UInt64(RemoteCwdProbe.pollIntervalSeconds * 1_000_000_000)
 
     /// Identity string for the `.task(id:)` driving a poll loop: any
     /// change (panel toggled, tab switched, tmux attached/detached,
@@ -52,89 +42,25 @@ enum RemoteCwdPoller {
         tmuxAttached: Bool,
         serverPID: Int? = nil
     ) -> String {
-        [
-            panelOpen ? "open" : "closed",
-            sessionActive ? "active" : "bg",
-            tmuxAttached ? "tmux" : "plain",
-            serverPID.map(String.init) ?? "nopid",
-        ].joined(separator: ":")
+        RemoteCwdProbe.taskKey(
+            panelOpen: panelOpen,
+            sessionActive: sessionActive,
+            tmuxAttached: tmuxAttached,
+            serverPID: serverPID
+        )
     }
 
-    /// Marker prefixing the cwd line so parsing survives login-shell
-    /// noise: exec output merges stderr, and rc files sourced by the
-    /// remote shell (zshenv, SSH_SOURCE_BASHRC bashrc, nvm, motd) can
-    /// print ahead of our own output.
-    static let pathMarker = "TESSERA_CWD="
-
-    /// Resolve the shell's PID in `$sp` into a marker-tagged cwd line —
-    /// `readlink /proc/<pid>/cwd` on Linux, `lsof` fallback for
-    /// macOS/BSD hosts. Trailing `exit 0` per the OSDetectionProbe
-    /// pattern so a miss doesn't surface as an exec error.
-    private static let cwdLookup =
-        #"[ -n "$sp" ] && d=$(readlink "/proc/$sp/cwd" 2>/dev/null "#
-        + #"|| lsof -a -p "$sp" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n1); "#
-        + #"[ -n "$d" ] && printf 'TESSERA_CWD=%s\n' "$d"; exit 0"#
-
-    /// sshd runs exec requests as `<login shell> -c <cmd>`, and fish /
-    /// (t)csh reject POSIX `sp=$(...)` outright — so the payload always
-    /// rides an explicit `sh -c` (embedded single quotes escaped with
-    /// the `'\''` idiom, which fish and csh parse the same way).
-    private static func posixWrapped(_ payload: String) -> String {
-        "sh -c '" + payload.replacingOccurrences(of: "'", with: "'\\''") + "'"
-    }
+    /// Marker prefixing the cwd line so parsing survives login-shell noise.
+    static let pathMarker = RemoteCwdProbe.pathMarker
 
     static func discoveryCommand(for discovery: ShellDiscovery) -> String {
-        switch discovery {
-        case .moshServerChild(let serverPID):
-            return posixWrapped(
-                #"sp=$(pgrep -P \#(serverPID) 2>/dev/null | head -n1); "# + cwdLookup
-            )
-        case .newestLoginShell:
-            // tty filter (`pts/` Linux, `ttys` macOS) drops daemons AND
-            // the bridge's own tty-less exec wrapper shell, which would
-            // otherwise always be the newest match. comm ending in "sh"
-            // covers bash/zsh/fish/dash/ksh/tcsh (incl. `-` login and
-            // path-prefixed forms); `!~ /ssh$/` keeps ssh clients out.
-            // Explicit max-PID pick: row order is NOT pid order on
-            // macOS (BSD ps sorts by controlling tty first). Highest
-            // PID ≈ newest — a heuristic, not an anchor; see
-            // ShellDiscovery.newestLoginShell.
-            return posixWrapped(
-                #"sp=$(ps -u "${USER:-$(id -un)}" -o pid= -o tty= -o comm= 2>/dev/null "#
-                + #"| awk '$2 ~ /^(pts\/|ttys)/ && $3 ~ /sh$/ && $3 !~ /ssh$/ "#
-                + #"{ if ($1+0 > p) p = $1+0 } END { if (p) print p }'); "#
-                + cwdLookup
-            )
-        case .tmuxSession(let name):
-            // display-message -p answers with the session's active pane
-            // in its current window — the same pane the -CC
-            // subscription would report. Bare target name: tmux matches
-            // exact names before prefixes, and the `=` exact-match
-            // prefix comes back EMPTY from display-message on tmux 3.6a
-            // (verified empirically — don't "fix" this back).
-            // PATH prefix: non-interactive sshd exec PATH omits the
-            // homebrew/local prefixes, so a macOS host's tmux
-            // (/opt/homebrew/bin/tmux) is invisible without it.
-            let quotedTarget = "'" + name.replacingOccurrences(of: "'", with: "'\\''") + "'"
-            return posixWrapped(
-                #"PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"; "#
-                + #"d=$(tmux display-message -p -t "# + quotedTarget
-                + #" '#{pane_current_path}' 2>/dev/null); "#
-                + #"[ -n "$d" ] && printf 'TESSERA_CWD=%s\n' "$d"; exit 0"#
-            )
-        }
+        RemoteCwdProbe.discoveryCommand(for: discovery)
     }
 
     /// The marker-tagged line as an absolute path, or nil on a miss
     /// (empty output, error/rc noise, no marker). First marker wins.
     static func reportedPath(in output: String) -> String? {
-        for line in output.split(whereSeparator: \.isNewline) {
-            let line = line.trimmingCharacters(in: .whitespaces)
-            guard line.hasPrefix(pathMarker) else { continue }
-            let path = String(line.dropFirst(pathMarker.count))
-            return path.hasPrefix("/") ? path : nil
-        }
-        return nil
+        RemoteCwdProbe.reportedPath(in: output)
     }
 
     /// Poll loop body — call from a `.task(id: taskKey(...))` after the
@@ -157,24 +83,28 @@ enum RemoteCwdPoller {
         oscSignal: (() -> String?)? = nil
     ) async {
         let command = discoveryCommand(for: discovery)
-        var consecutiveMisses = 0
+        // Debounce transient misses (shell mid-exec, pgrep hiccup) so
+        // follow doesn't flicker to "no signal" — the streak rule lives in
+        // the shared core.
+        var debounce = RemoteCwdProbe.FollowDebounce()
         while !Task.isCancelled {
+            let tick: RemoteCwdProbe.FollowDebounce.Tick
             if let oscSignal, oscSignal() != nil {
-                consecutiveMisses = 0
+                tick = .oscSignalLive
             } else if let bridge = panel.bridge, bridge.state == .connected {
                 let output = (try? await bridge.exec(command, inShell: false)) ?? ""
                 if Task.isCancelled { return }
-                if let path = reportedPath(in: output) {
-                    consecutiveMisses = 0
-                    panel.terminalReportedDirectory(path)
-                } else {
-                    // Debounce transient misses (shell mid-exec, pgrep
-                    // hiccup) so follow doesn't flicker to "no signal".
-                    consecutiveMisses += 1
-                    if consecutiveMisses == 2 {
-                        panel.terminalReportedDirectory(nil)
-                    }
-                }
+                tick = .probed(output: output)
+            } else {
+                tick = .notPolled
+            }
+            switch debounce.step(tick) {
+            case .report(let path):
+                panel.terminalReportedDirectory(path)
+            case .clearFollow:
+                panel.terminalReportedDirectory(nil)
+            case .hold:
+                break
             }
             try? await Task.sleep(nanoseconds: pollIntervalNanoseconds)
         }

@@ -19,7 +19,7 @@ elif [[ -n "${2:-}" ]]; then
 fi
 
 udid=''
-derived_data="${TESSERA_INTEGRATION_DERIVED_DATA:-$FIXTURE_STATE/DerivedData}"
+derived_data="$(integration_derived_data)"
 result_bundle="$RUN_DIR/programmatic/compact-navigation-transition.xcresult"
 mkdir -p "$derived_data" "$(dirname "$result_bundle")"
 rm -rf "$result_bundle"
@@ -29,7 +29,7 @@ cleanup() {
     delete_owned_test_simulator "$SIMULATOR_STATE/simulator_udid" || true
   fi
 }
-trap cleanup EXIT
+trap 'fail_closed_trap cleanup' EXIT
 
 udid="$("$HERE/ensure-test-simulator.sh" | tail -n 1)"
 
@@ -43,3 +43,4 @@ xcodebuild "$BUILD_ACTION" \
   -parallel-testing-enabled NO \
   -only-testing:TesseraTests/CompactNavigationPresentationTests \
   -only-testing:TesseraUITests/CompactNavigationTransitionHarnessTests
+script_completed=1

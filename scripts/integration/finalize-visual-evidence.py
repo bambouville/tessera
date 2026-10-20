@@ -14,6 +14,10 @@ from typing import Any
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 INLINE_TEXT_SUFFIXES = {".json", ".csv", ".txt", ".log"}
 MAX_INLINE_TEXT_BYTES = 128 * 1024
+# The review prompt (this manifest plus visual-review-prompt.md) must stay under
+# the Codex CLI's 1 MiB input limit. Inline text fills what the rest of the
+# manifest leaves, smallest files first; the reviewer reads the others by path.
+MAX_MANIFEST_CHARS = 960 * 1024
 
 
 def digest(path: pathlib.Path) -> str:
@@ -45,6 +49,35 @@ def artifact(root: pathlib.Path, path: pathlib.Path) -> dict[str, Any]:
                 ">II", header[16:24]
             )
     return result
+
+
+def render(manifest: dict[str, Any]) -> str:
+    return json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+
+
+def fit_inline_text(manifest: dict[str, Any]) -> None:
+    note = "inline text budget; read the file at path"
+    inlined = [
+        item
+        for case in manifest["cases"]
+        for item in case["artifacts"]
+        if "content" in item
+    ]
+    contents = {id(item): item.pop("content") for item in inlined}
+    for item in inlined:
+        item["content_omitted"] = note
+    remaining = MAX_MANIFEST_CHARS - len(render(manifest))
+    if remaining < 0:
+        raise SystemExit("aggregate manifest exceeds the review input budget without inline text")
+    for item in sorted(inlined, key=lambda item: (item["bytes"], item["path"])):
+        content = contents[id(item)]
+        # `"content": <text>` replaces `"content_omitted": <note>` on one line.
+        cost = len(json.dumps(content)) - len(json.dumps(note)) - len("_omitted")
+        if cost > remaining:
+            continue
+        del item["content_omitted"]
+        item["content"] = content
+        remaining -= cost
 
 
 def main() -> int:
@@ -98,11 +131,9 @@ def main() -> int:
         "image_count": len(image_paths),
         "cases": cases,
     }
+    fit_inline_text(manifest)
     manifest_path = visual_root / "aggregate-manifest.json"
-    manifest_path.write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    manifest_path.write_text(render(manifest), encoding="utf-8")
     image_list_path = visual_root / "image-list.txt"
     image_list_path.write_text("\n".join(image_paths) + "\n", encoding="utf-8")
     print(manifest_path)

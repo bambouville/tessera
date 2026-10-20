@@ -68,6 +68,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     case tmuxPreviousWindow
     case tmuxNextWindow
     case tmuxSelectWindow
+    case tmuxMoveWindowLeft
+    case tmuxMoveWindowRight
     // panes
     case paneSplitSideBySide
     case paneSplitStacked
@@ -95,7 +97,9 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .tmuxCloseWindow:     return String(localized: "close pane / window")
         case .tmuxPreviousWindow:  return String(localized: "previous window")
         case .tmuxNextWindow:      return String(localized: "next window")
-        case .tmuxSelectWindow:    return String(localized: "jump to window 1–9")
+        case .tmuxSelectWindow:    return String(localized: "jump to window 1–8 / last")
+        case .tmuxMoveWindowLeft:  return String(localized: "move window left")
+        case .tmuxMoveWindowRight: return String(localized: "move window right")
         case .paneSplitSideBySide: return String(localized: "split side-by-side")
         case .paneSplitStacked:    return String(localized: "split stacked")
         case .panePrevious:        return String(localized: "previous pane")
@@ -127,7 +131,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
             return .sessions
         case .findOpen, .findNext, .findPrevious:
             return .find
-        case .tmuxNewWindow, .tmuxCloseWindow, .tmuxPreviousWindow, .tmuxNextWindow, .tmuxSelectWindow:
+        case .tmuxNewWindow, .tmuxCloseWindow, .tmuxPreviousWindow, .tmuxNextWindow, .tmuxSelectWindow, .tmuxMoveWindowLeft, .tmuxMoveWindowRight:
             return .tmux
         case .paneSplitSideBySide, .paneSplitStacked, .panePrevious, .paneNext, .paneZoom:
             return .panes
@@ -139,7 +143,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .refreshTerminal: return .padOnly
         case .connect:         return .hostEditor
         case .tmuxNewWindow, .tmuxCloseWindow, .tmuxPreviousWindow,
-             .tmuxNextWindow, .tmuxSelectWindow, .paneSplitSideBySide, .paneSplitStacked:
+             .tmuxNextWindow, .tmuxSelectWindow, .tmuxMoveWindowLeft, .tmuxMoveWindowRight, .paneSplitSideBySide, .paneSplitStacked:
             return .tmuxAttached
         case .panePrevious, .paneNext, .paneZoom:
             return .multiplePanes
@@ -154,7 +158,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
 
     /// The shipped chord. Changing one of these changes what "restore defaults"
     /// means, so the reasons live here rather than in a commit message.
-    var defaultBinding: KeyBinding {
+    var defaultBinding: KeyBinding? {
         switch self {
         case .newHost:            return .cmd("n")
         case .quickSwitchPalette: return .cmd("k")
@@ -176,6 +180,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .tmuxPreviousWindow: return .cmdShift("[")
         case .tmuxNextWindow:     return .cmdShift("]")
         case .tmuxSelectWindow:   return KeyBinding([.command], .character("1"))
+        // Assignable without claiming an unverified iPadOS system chord.
+        case .tmuxMoveWindowLeft, .tmuxMoveWindowRight: return nil
         case .paneSplitSideBySide: return .cmd("d")
         case .paneSplitStacked:    return .cmdShift("d")
         // Bare ⌘[/⌘] cycle panes (iTerm2 parity — pane switching is the
@@ -206,7 +212,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .newHost, .quickSwitchPalette, .openSettings, .connect,
              .findOpen, .findNext, .findPrevious,
              .tmuxNewWindow, .tmuxCloseWindow, .tmuxPreviousWindow,
-             .tmuxNextWindow, .tmuxSelectWindow:
+             .tmuxNextWindow, .tmuxSelectWindow, .tmuxMoveWindowLeft, .tmuxMoveWindowRight:
             return false
         }
     }

@@ -20,6 +20,21 @@ final class ScrollInertiaTests: XCTestCase {
         }
     }
 
+    func test_shortContinuousFlickUsesNativeReleaseVelocity() {
+        var tracker = ScrollVelocityTracker()
+        tracker.record(deltaY: 80, timestamp: 1)
+        XCTAssertNil(tracker.releaseVelocity(at: 1.01))
+        XCTAssertEqual(tracker.releaseVelocity(at: 1.01, reportedVelocity: 1200), 1200)
+        XCTAssertEqual(tracker.releaseVelocity(at: 1.01, reportedVelocity: -900), -900)
+        XCTAssertEqual(tracker.releaseVelocity(at: 1.01, reportedVelocity: 9000), 4500)
+        XCTAssertNil(tracker.releaseVelocity(at: 1.01, reportedVelocity: 0))
+        tracker.reset()
+        XCTAssertNil(tracker.releaseVelocity(at: 1.01, reportedVelocity: 1200), "Discrete wheels have no changed callbacks")
+        XCTAssertEqual(tracker.releaseVelocity(at: 1.01, reportedVelocity: 1200, knownContinuousInput: true), 1200,
+            "UIKit can coalesce a continuous flick into began/ended without changed callbacks")
+        XCTAssertNil(tracker.releaseVelocity(at: 1.01, reportedVelocity: 0, knownContinuousInput: true))
+    }
+
     func test_steadyFling_estimatesVelocity() {
         var tracker = ScrollVelocityTracker()
         // 10 events of 5pt every 8ms (120Hz) → 5/0.008 = 625 pt/s.

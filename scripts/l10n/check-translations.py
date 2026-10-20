@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate l10n/ against the extracted corpus before the catalog is rebuilt.
 
-Three classes of mistake are silent at build time but visible (or crashing) at
+Four classes of mistake are silent at build time but visible (or crashing) at
 runtime, so they are checked here instead:
 
   * format specifiers that drift from the English source — a translation that
@@ -9,8 +9,11 @@ runtime, so they are checked here instead:
   * translations for keys that no longer exist in the app — dead weight that
     hides a rename;
   * empty values and plural categories a language does not have (ja/zh have
-    only `other` in CLDR, so a `one` variation there is never selected).
+    only `other` in CLDR, so a `one` variation there is never selected);
+  * plurals without English variations, in the catalog or in l10n/, which
+    fall back to the source key even for a singular count.
 """
+import argparse
 import json
 import re
 import sys
@@ -39,12 +42,35 @@ def positions(text):
     return [int(m.group(1)) for m in SPEC.finditer(text) if m.group(1)]
 
 
+def catalog_plural_problems(catalog):
+    def has_plural(value):
+        return isinstance(value, dict) and (
+            "plural" in value or any(has_plural(child) for child in value.values()))
+
+    problems = []
+    for key, entry in catalog["strings"].items():
+        localizations = entry.get("localizations", {})
+        if any(has_plural(value) for value in localizations.values()) and not has_plural(localizations.get("en")):
+            problems.append(f"[catalog-plural] {key!r}: missing English plural variations")
+    return problems
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--catalog-only", action="store_true",
+                        help="check English plural coverage without Xcode extraction")
+    args = parser.parse_args()
+    problems = catalog_plural_problems(json.loads(build.CATALOG.read_text(encoding="utf-8")))
+    if args.catalog_only:
+        for problem in problems:
+            print(problem)
+        print(f"\n{len(problems)} problem(s)")
+        return 1 if problems else 0
+
     keys = build.extracted()
     simple = build.load("strings")
     plurals = build.load("plurals")
     subs = build.load("subs")
-    problems = []
 
     for kind, table in (("strings", simple), ("plurals", plurals), ("subs", subs)):
         for key in table:
@@ -69,6 +95,13 @@ def main():
     for key, by_lang in simple.items():
         for lang, text in by_lang.items():
             compare(key, lang, "", text)
+
+    # The catalog check above reads the catalog as last built; these inputs
+    # are what the next build writes into it.
+    for kind, table in (("plurals", plurals), ("subs", subs)):
+        for key, by_lang in table.items():
+            if "en" not in by_lang:
+                problems.append(f"[plural] {kind}: {key!r} has no English variations")
 
     for key, by_lang in plurals.items():
         for lang, variations in by_lang.items():

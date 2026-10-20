@@ -1,0 +1,161 @@
+{
+  "version": 1,
+  "keySequences": [
+    {
+      "name": "normal-up",
+      "key": "up",
+      "modifiers": [],
+      "applicationCursorKeys": false,
+      "hex": "1b5b41"
+    },
+    {
+      "name": "application-left",
+      "key": "left",
+      "modifiers": [],
+      "applicationCursorKeys": true,
+      "hex": "1b4f44"
+    },
+    {
+      "name": "all-terminal-modifiers-up-command-ignored",
+      "key": "up",
+      "modifiers": ["shift", "alternate", "control", "command"],
+      "applicationCursorKeys": true,
+      "hex": "1b5b313b3841"
+    },
+    {
+      "name": "back-tab",
+      "key": "tab",
+      "modifiers": ["shift"],
+      "applicationCursorKeys": false,
+      "hex": "1b5b5a"
+    },
+    {
+      "name": "carriage-return",
+      "key": "enter",
+      "modifiers": [],
+      "applicationCursorKeys": true,
+      "hex": "0d"
+    },
+    {
+      "name": "meta-return",
+      "key": "enter",
+      "modifiers": ["alternate"],
+      "applicationCursorKeys": false,
+      "hex": "1b0d"
+    },
+    {
+      "name": "control-l-form-feed",
+      "key": "controlL",
+      "modifiers": [],
+      "applicationCursorKeys": false,
+      "hex": "0c"
+    },
+    {
+      "name": "control-left-bracket",
+      "key": "leftBracket",
+      "modifiers": ["control"],
+      "applicationCursorKeys": false,
+      "hex": "1b"
+    },
+    {
+      "name": "alternate-slash",
+      "key": "slash",
+      "modifiers": ["alternate"],
+      "applicationCursorKeys": false,
+      "hex": "1b2f"
+    },
+    {
+      "name": "f12",
+      "key": "f12",
+      "modifiers": [],
+      "applicationCursorKeys": false,
+      "hex": "1b5b32347e"
+    }
+  ],
+  "softwareKeys": [
+    {
+      "name": "control-c",
+      "inputHex": "63",
+      "modifiers": ["control"],
+      "outputHex": "03"
+    },
+    {
+      "name": "alternate-f",
+      "inputHex": "66",
+      "modifiers": ["alternate"],
+      "outputHex": "1b66"
+    },
+    {
+      "name": "shift-control-alternate-z",
+      "inputHex": "7a",
+      "modifiers": ["shift", "control", "alternate"],
+      "outputHex": "1b1a"
+    },
+    {
+      "name": "shift-one",
+      "inputHex": "31",
+      "modifiers": ["shift"],
+      "outputHex": "21"
+    }
+  ],
+  "mouse": [
+    {
+      "name": "sgr-primary-press",
+      "event": "press",
+      "button": "primary",
+      "modifiers": [],
+      "column": 5,
+      "row": 7,
+      "encoding": "sgr",
+      "hex": "1b5b3c303b353b374d"
+    },
+    {
+      "name": "sgr-alternate-secondary-release",
+      "event": "release",
+      "button": "secondary",
+      "modifiers": ["alternate"],
+      "column": 2,
+      "row": 3,
+      "encoding": "sgr",
+      "hex": "1b5b3c31303b323b336d"
+    },
+    {
+      "name": "sgr-control-wheel-up",
+      "event": "wheelUp",
+      "modifiers": ["control"],
+      "column": 42,
+      "row": 7,
+      "encoding": "sgr",
+      "hex": "1b5b3c38303b34323b374d"
+    },
+    {
+      "name": "x10-wheel-down",
+      "event": "wheelDown",
+      "modifiers": [],
+      "column": 1,
+      "row": 1,
+      "encoding": "x10",
+      "hex": "1b5b4d612121"
+    },
+    {
+      "name": "x10-shift-release",
+      "event": "release",
+      "button": "primary",
+      "modifiers": ["shift"],
+      "column": 1,
+      "row": 1,
+      "encoding": "x10",
+      "hex": "1b5b4d272121"
+    },
+    {
+      "name": "sgr-alternate-primary-motion",
+      "event": "motion",
+      "button": "primary",
+      "modifiers": ["alternate"],
+      "column": 9,
+      "row": 4,
+      "encoding": "sgr",
+      "hex": "1b5b3c34303b393b344d"
+    }
+  ]
+}

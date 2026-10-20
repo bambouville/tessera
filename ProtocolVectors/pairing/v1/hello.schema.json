@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tessera://protocol-vectors/pairing/v1/hello.schema.json",
+  "title": "Tessera Pairing Hello v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version", "offerID", "purpose", "role", "offerDigest",
+    "ephemeralPublicKey", "supportedPairingVersions",
+    "supportedTransactionVersions", "selectedPairingVersion",
+    "selectedTransactionVersion"
+  ],
+  "properties": {
+    "version": { "const": 1 },
+    "offerID": { "type": "string", "format": "uuid" },
+    "purpose": { "enum": ["continue", "bootstrap", "enroll", "setUpAndContinue"] },
+    "role": { "enum": ["origin", "recipient"] },
+    "offerDigest": { "$ref": "#/$defs/bytes32" },
+    "ephemeralPublicKey": { "$ref": "#/$defs/bytes32" },
+    "supportedPairingVersions": { "$ref": "#/$defs/versionList" },
+    "supportedTransactionVersions": { "$ref": "#/$defs/versionList" },
+    "selectedPairingVersion": { "type": "integer", "minimum": 1 },
+    "selectedTransactionVersion": { "type": "integer", "minimum": 1 }
+  },
+  "$defs": {
+    "bytes32": {
+      "type": "string",
+      "contentEncoding": "base64",
+      "minLength": 44,
+      "maxLength": 44
+    },
+    "versionList": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": { "type": "integer", "minimum": 1 },
+      "uniqueItems": true
+    }
+  }
+}

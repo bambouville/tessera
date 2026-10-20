@@ -1,0 +1,69 @@
+{
+  "%lld minutes": {
+    "en": {
+      "value": "%#@minutes@",
+      "subs": {
+        "minutes": { "argNum": 1, "one": "%lld minute", "other": "%lld minutes" }
+      }
+    }
+  },
+  "%lld windows · %lld sessions": {
+    "de": {
+      "value": "%#@windows@ · %#@sessions@",
+      "subs": {
+        "sessions": { "argNum": 2, "one": "%lld Sitzung", "other": "%lld Sitzungen" },
+        "windows": { "argNum": 1, "one": "%lld Fenster", "other": "%lld Fenster" }
+      }
+    },
+    "en": {
+      "value": "%#@windows@ · %#@sessions@",
+      "subs": {
+        "sessions": { "argNum": 2, "one": "%lld session", "other": "%lld sessions" },
+        "windows": { "argNum": 1, "one": "%lld window", "other": "%lld windows" }
+      }
+    },
+    "es": {
+      "value": "%#@windows@ · %#@sessions@",
+      "subs": {
+        "sessions": { "argNum": 2, "one": "%lld sesión", "other": "%lld sesiones" },
+        "windows": { "argNum": 1, "one": "%lld ventana", "other": "%lld ventanas" }
+      }
+    },
+    "fr": {
+      "value": "%#@windows@ · %#@sessions@",
+      "subs": {
+        "sessions": { "argNum": 2, "one": "%lld session", "other": "%lld sessions" },
+        "windows": { "argNum": 1, "one": "%lld fenêtre", "other": "%lld fenêtres" }
+      }
+    },
+    "ja": {
+      "value": "%#@windows@ · %#@sessions@",
+      "subs": {
+        "sessions": { "argNum": 2, "other": "%lld 個のセッション" },
+        "windows": { "argNum": 1, "other": "%lld 個のウインドウ" }
+      }
+    },
+    "zh-Hans": {
+      "value": "%#@windows@ · %#@sessions@",
+      "subs": {
+        "sessions": { "argNum": 2, "other": "%lld 个会话" },
+        "windows": { "argNum": 1, "other": "%lld 个窗口" }
+      }
+    },
+    "zh-Hant": {
+      "value": "%#@windows@ · %#@sessions@",
+      "subs": {
+        "sessions": { "argNum": 2, "other": "%lld 個工作階段" },
+        "windows": { "argNum": 1, "other": "%lld 個視窗" }
+      }
+    }
+  },
+  "“%@” contains %lld panes. Closing this window will close every pane in it.": {
+    "en": {
+      "value": "“%1$@” contains %#@panes@. Closing this window will close every pane in it.",
+      "subs": {
+        "panes": { "argNum": 2, "one": "%lld pane", "other": "%lld panes" }
+      }
+    }
+  }
+}

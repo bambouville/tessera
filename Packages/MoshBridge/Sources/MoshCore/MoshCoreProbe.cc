@@ -1,4 +1,5 @@
 #include "include/MoshCoreProbe.h"
+#include "MoshFullRepaintFence.h"
 
 #include <array>
 #include <cctype>
@@ -6,13 +7,16 @@
 #include <string>
 #include <vector>
 #include <cstring>
+#if defined(__APPLE__)
 #include <CommonCrypto/CommonCryptor.h>
+#endif
 
 #include <google/protobuf/stubs/strutil.h>
 #include "crypto.h"
 
 namespace {
 
+#if defined(__APPLE__)
 bool hex_to_bytes(const char *hex, unsigned char *out, size_t out_len) {
     static const char *kDigits = "0123456789abcdef";
 
@@ -116,6 +120,7 @@ int aes_ecb_decrypt_create(const unsigned char *key,
     }
     return 0;
 }
+#endif
 
 int direct_ae_roundtrip() {
     const std::string kTestKey = "AAECAwQFBgcICQoLDA0ODw";
@@ -239,11 +244,35 @@ extern "C" int mosh_core_probe(void) {
     return probe_internal();
 }
 
+extern "C" int mosh_full_repaint_fence_probe(void) {
+    using tessera_mosh::full_repaint_fence_ready;
+    using tessera_mosh::full_repaint_fence_token;
+    const uint64_t token = full_repaint_fence_token(20);
+    if (token != 21) return -1;
+    // A pre-fence framebuffer and transport acknowledgement are insufficient.
+    if (full_repaint_fence_ready(token, 20, 20, 80, 24, 80, 24)) return -2;
+    if (full_repaint_fence_ready(token, 20, 21, 80, 24, 80, 24)) return -3;
+    if (full_repaint_fence_ready(token, 21, 20, 80, 24, 80, 24)) return -4;
+    // Output echo may cover the request while its old grid is still visible.
+    if (full_repaint_fence_ready(token, 21, 21, 132, 24, 80, 24)) return -5;
+    if (full_repaint_fence_ready(token, 21, 21, 80, 43, 80, 24)) return -6;
+    if (!full_repaint_fence_ready(token, 21, 21, 80, 24, 80, 24)) return -7;
+    // Ongoing input does not move the minimum target or starve the repaint.
+    if (!full_repaint_fence_ready(token, 500, 21, 80, 24, 80, 24)) return -8;
+    if (full_repaint_fence_ready(0, 500, 500, 80, 24, 80, 24)) return -9;
+    const uint64_t shutdown = std::numeric_limits<uint64_t>::max();
+    if (full_repaint_fence_token(shutdown - 1) != 0) return -10;
+    if (full_repaint_fence_token(shutdown) != 0) return -11;
+    if (full_repaint_fence_ready(shutdown, shutdown, shutdown, 80, 24, 80, 24)) return -12;
+    return 42;
+}
+
 // Independent AES-128 ECB roundtrip using CommonCrypto directly. This is
 // the primitive underneath mosh's OCB Apple path. If the single-block
 // roundtrip here works but mosh_crypto_probe returns -50 (decrypt failed),
 // the bug is in OCB wiring; if this also fails, the primitive is broken.
 extern "C" int mosh_ccrypto_primitive_probe(void) {
+#if defined(__APPLE__)
     unsigned char key[16] = {0};
     unsigned char pt[16] = {0};
     unsigned char expected_ct[16] = {0};
@@ -269,6 +298,9 @@ extern "C" int mosh_ccrypto_primitive_probe(void) {
     if (std::memcmp(wrapped_ct_in_place, expected_ct, sizeof(wrapped_ct_in_place)) != 0) return -21;
 
     return 42;
+#else
+    return -200;
+#endif
 }
 
 extern "C" int mosh_crypto_probe(void) {

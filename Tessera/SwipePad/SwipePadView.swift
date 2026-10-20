@@ -20,10 +20,11 @@ enum SwipePadPalette {
 /// `launchEnvironment["TESSERA_STATIC_RINGS"] = "1"` instead of mutating
 /// simulator accessibility settings. `SwipePadQuiescenceHarnessTests` is the
 /// checked-in driver proving standard taps complete under this gate. Either
-/// switch keeps every ring visible, just static.
+/// switch keeps every ring visible, just static. The gate itself is the
+/// app-wide `ContinuousMotion` switch shared with every other forever
+/// animation.
 enum SwipePadMotion {
-    static let staticRings =
-        ProcessInfo.processInfo.environment["TESSERA_STATIC_RINGS"] == "1"
+    static let staticRings = ContinuousMotion.isSuppressed
 }
 
 /// A completion acknowledgement hides only the visual attention treatment.
@@ -115,6 +116,7 @@ struct SwipePadView: View {
     let diameter: CGFloat
     let position: CGPoint
     let canvasSize: CGSize
+    var safeAreaInsets = EdgeInsets()
     let resolver: SwipePadActiveProfileResolver
     let tmux: TmuxController
     let processNameProvider: SwipePadProcessNameProvider?
@@ -155,6 +157,7 @@ struct SwipePadView: View {
     @State private var relocateCheckTask: Task<Void, Never>? = nil
     @State private var activeProfile: SwipePadProfile? = nil
     @State private var pulse = false
+    @State private var transcriptHeight: CGFloat = 110
     @State private var diagnosticPressID = 0
     @State private var acknowledgedFinishedKey: String? = nil
     /// Hook state the fire guard baselines against: captured at press-begin
@@ -175,7 +178,7 @@ struct SwipePadView: View {
 
     private var controlSize: CGSize {
         usesDictationPill
-            ? CGSize(width: 280, height: 56)
+            ? dictationFrame.size
             : CGSize(width: diameter, height: diameter)
     }
 
@@ -391,6 +394,12 @@ struct SwipePadView: View {
             .padding(.vertical, 12)
             .padding(.horizontal, 14)
             .frame(width: transcriptWidth, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                transcriptHeight = $0
+            }
+            .frame(height: min(transcriptHeight, max(0, floatingBounds.height - 24)))
+            .clipped()
             .floatingGlass(
                 appearance.chromeMaterial,
                 tint: .clear,
@@ -403,7 +412,7 @@ struct SwipePadView: View {
                     .stroke(Color.white.opacity(0.18), lineWidth: 0.5)
             )
             .shadow(color: .black.opacity(0.45), radius: 20, y: 12)
-            .offset(y: usesDictationPill ? -104 : -84)
+            .offset(x: transcriptFrame.midX - position.x, y: transcriptFrame.midY - position.y)
             .transition(.scale(scale: 0.94).combined(with: .opacity))
             .allowsHitTesting(false)
         }
@@ -413,6 +422,7 @@ struct SwipePadView: View {
     private var control: some View {
         if usesDictationPill {
             dictationPill
+                .offset(x: dictationFrame.midX - position.x, y: dictationFrame.midY - position.y)
                 .transition(.scale(scale: 0.94).combined(with: .opacity))
         } else {
             circularPuck
@@ -651,8 +661,19 @@ struct SwipePadView: View {
             SwipePadDiagnostics.log(
                 "petal-action source=\(source) direction=\(model.direction.rawValue) mode=\(hookSnapshot != nil ? "hook" : "profile") macroBytes=\(spec.utf8.count)"
             )
-            onFireMacro(spec)
+            firePetalMacro(spec, model: model)
         }
+    }
+
+    private func firePetalMacro(_ spec: String, model: SwipePadPetalModel) {
+        if let displayed = liveHookSnapshot, displayed.status == .waitingForInput {
+            guard let option = displayed.prompt?.options.first(where: {
+                $0.responseMacro == spec && $0.label == model.label
+            }) else { return }
+            agentContext?.answer(displayed, option: option)
+            return
+        }
+        onFireMacro(spec)
     }
 
     private func showMore(source: String) {
@@ -731,7 +752,9 @@ struct SwipePadView: View {
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(T.accent)
 
-            waveformBars
+            if dictationFrame.width >= 260 {
+                waveformBars
+            }
 
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 Text(elapsedText(at: context.date))
@@ -768,7 +791,7 @@ struct SwipePadView: View {
         }
         .padding(.leading, 14)
         .padding(.trailing, 8)
-        .frame(width: 280, height: 56)
+        .frame(width: dictationFrame.width, height: dictationFrame.height)
         .floatingGlass(
             appearance.chromeMaterial,
             tint: .clear,
@@ -1273,7 +1296,7 @@ struct SwipePadView: View {
                     SwipePadDiagnostics.log(
                         "press#\(diagnosticPressID) fire direction=\(activeDirection.rawValue) source=\(hookSnapshot != nil ? "hook" : "profile") macroBytes=\(spec.utf8.count)"
                     )
-                    onFireMacro(spec)
+                    firePetalMacro(spec, model: model)
                 }
             } else {
                 SwipePadDiagnostics.log(
@@ -1475,7 +1498,37 @@ struct SwipePadView: View {
     }
 
     private var transcriptWidth: CGFloat {
-        min(320, max(180, canvasSize.width - 44))
+        min(320, max(0, floatingBounds.width - 24))
+    }
+
+    private var floatingBounds: CGRect {
+        CGRect(
+            x: safeAreaInsets.leading,
+            y: safeAreaInsets.top,
+            width: max(0, canvasSize.width - safeAreaInsets.leading - safeAreaInsets.trailing),
+            height: max(0, canvasSize.height - safeAreaInsets.top - safeAreaInsets.bottom)
+        )
+    }
+
+    private var dictationFrame: CGRect {
+        SwipePadFloatingLayout.frame(
+            center: position, size: CGSize(width: 280, height: 56), bounds: floatingBounds
+        )
+    }
+
+    private var transcriptFrame: CGRect {
+        let controlCenter = usesDictationPill
+            ? CGPoint(x: dictationFrame.midX, y: dictationFrame.midY)
+            : position
+        let height = min(transcriptHeight, max(0, floatingBounds.height - 24))
+        let gap = (usesDictationPill ? dictationFrame.height : diameter) / 2 + 12 + height / 2
+        let above = controlCenter.y - gap
+        let centerY = above - height / 2 >= floatingBounds.minY + 12
+            ? above : controlCenter.y + gap
+        return SwipePadFloatingLayout.frame(
+            center: CGPoint(x: controlCenter.x, y: centerY),
+            size: CGSize(width: transcriptWidth, height: height), bounds: floatingBounds
+        )
     }
 
     private func caretIsVisible(at date: Date) -> Bool {

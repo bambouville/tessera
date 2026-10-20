@@ -1,5 +1,16 @@
 // swift-tools-version: 5.10
 import PackageDescription
+import Foundation
+
+let androidOpenSSLRoot = ProcessInfo.processInfo.environment[
+    "TESSERA_ANDROID_OPENSSL_ROOT"
+]
+let androidOpenSSLCXXSettings: [CXXSetting] = androidOpenSSLRoot.map {
+    [.unsafeFlags(["-I\($0)/include"])]
+} ?? []
+let androidOpenSSLLinkerSettings: [LinkerSetting] = androidOpenSSLRoot.map {
+    [.unsafeFlags(["-L\($0)/lib", "-lcrypto"])]
+} ?? []
 
 // Upstream libprotobuf-lite source set from protobuf v21.12.
 // The three mosh schemas all declare `option optimize_for = LITE_RUNTIME;`,
@@ -71,7 +82,9 @@ let package = Package(
         .macOS(.v14),
     ],
     products: [
+        .library(name: "MoshCABI", targets: ["MoshCABI"]),
         .library(name: "MoshBridge", targets: ["MoshBridge"]),
+        .executable(name: "MoshCABILinkSmoke", targets: ["MoshCABILinkSmoke"]),
     ],
     targets: [
         .target(
@@ -128,10 +141,10 @@ let package = Package(
                 .headerSearchPath("mosh/src"),
                 .define("HAVE_CONFIG_H", to: "1"),
                 .unsafeFlags(["-fexceptions", "-frtti", "-Wno-everything"]),
-            ],
+            ] + androidOpenSSLCXXSettings,
             linkerSettings: [
                 .linkedLibrary("z"),
-            ]
+            ] + androidOpenSSLLinkerSettings
         ),
         .target(
             name: "MoshCore",
@@ -162,9 +175,23 @@ let package = Package(
                 .headerSearchPath("."),
             ]
         ),
+        .target(
+            name: "MoshCABI",
+            dependencies: ["MoshCore"],
+            path: "Sources/MoshCABI",
+            publicHeadersPath: "include",
+            cxxSettings: [
+                .headerSearchPath("."),
+            ]
+        ),
+        .executableTarget(
+            name: "MoshCABILinkSmoke",
+            dependencies: ["MoshCABI"],
+            path: "Sources/MoshCABILinkSmoke"
+        ),
         .testTarget(
             name: "MoshBridgeSecurityTests",
-            dependencies: ["MoshBridge"],
+            dependencies: ["MoshBridge", "MoshCABI"],
             path: "Tests/MoshBridgeSecurityTests"
         ),
     ],

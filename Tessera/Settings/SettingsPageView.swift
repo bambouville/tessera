@@ -378,9 +378,21 @@ enum DiagnosticLogStore {
     }
 
     static func append(_ category: DiagnosticLogCategory, _ message: @autoclosure () -> String) {
+        let recordedAt = Date()
         let rawMessage = message()
+        let enqueuedAt = DispatchTime.now().uptimeNanoseconds
         queue.async {
-            appendOnQueue(category, rawMessage)
+            appendOnQueue(category, [rawMessage], recordedAt: recordedAt, enqueuedAt: enqueuedAt)
+        }
+    }
+
+    /// One filesystem append for a sampling tick; retain individually bounded,
+    /// sanitized and rate-limited records instead of truncating one huge line.
+    static func appendSSHBatch(_ messages: [String]) {
+        let recordedAt = Date()
+        let enqueuedAt = DispatchTime.now().uptimeNanoseconds
+        queue.async {
+            appendOnQueue(.ssh, messages, recordedAt: recordedAt, enqueuedAt: enqueuedAt)
         }
     }
 
@@ -498,32 +510,30 @@ enum DiagnosticLogStore {
         return base.appendingPathComponent("Diagnostics", isDirectory: true)
     }
 
-    private static func appendOnQueue(_ category: DiagnosticLogCategory, _ rawMessage: String) {
+    private static func appendOnQueue(_ category: DiagnosticLogCategory, _ rawMessages: [String], recordedAt: Date, enqueuedAt: UInt64) {
+        let logQueueMs = Int((DispatchTime.now().uptimeNanoseconds - enqueuedAt) / 1_000_000)
         let manager = FileManager.default
         let directoryURL = diagnosticsDirectoryURL
         let fileURL = logFileURL
-        let safeMessage = bounded(sanitize(rawMessage))
-
-        guard shouldEmit(category: category, message: safeMessage) else {
-            return
-        }
-
-        let signature = "\(category.rawValue):\(signature(for: safeMessage))"
-
         do {
-            let rateLimitSummary = applyRateLimit(category: category, signature: signature)
-            guard rateLimitSummary.shouldEmit else { return }
-
+            var lines = ""
+            for rawMessage in rawMessages {
+                let safeMessage = bounded(sanitize(rawMessage))
+                guard shouldEmit(category: category, message: safeMessage) else { continue }
+                let signature = "\(category.rawValue):\(signature(for: safeMessage))"
+                let rateLimitSummary = applyRateLimit(category: category, signature: signature)
+                guard rateLimitSummary.shouldEmit else { continue }
+                if let suppressionLine = rateLimitSummary.suppressionLine {
+                    lines += suppressionLine
+                }
+                let queueNote = logQueueMs >= 50 ? " logQueueMs=\(logQueueMs)" : ""
+                lines += "\(timestampFormatter.string(from: recordedAt)) [Tessera][\(category.rawValue)] \(safeMessage)\(queueNote)\n"
+            }
+            guard !lines.isEmpty else { return }
             try manager.createDirectory(
                 at: directoryURL,
                 withIntermediateDirectories: true
             )
-
-            var lines = ""
-            if let suppressionLine = rateLimitSummary.suppressionLine {
-                lines += suppressionLine
-            }
-            lines += "\(timestamp()) [Tessera][\(category.rawValue)] \(safeMessage)\n"
 
             var payload = (shouldWriteHeader(fileURL: fileURL, manager: manager) ? headerLine() : "") + lines
             guard var data = payload.data(using: .utf8) else { return }
@@ -611,6 +621,10 @@ enum DiagnosticLogStore {
 
         let maxEntries: Int
         switch category {
+        case .ssh where signature.contains("latency-input-v3"):
+            maxEntries = 240
+        case .app where signature.contains("session-input"):
+            maxEntries = 240
         case .agentCenter, .scroll:
             // Lifecycle/tool transitions and gesture frames are bounded at
             // their producers. Preserve a complete short repro timeline.
@@ -722,9 +736,25 @@ enum DiagnosticLogStore {
             || lower.contains("separator-probe")
             || lower.contains("fallback engaged")
             || lower.contains("force-recovery")
+            || lower.contains("grid-authority")
     }
 
     private static func sanitize(_ message: String) -> String {
+        // First stage is the shared redaction authority
+        // (`TesseraSessionCore.SensitiveDataRedaction`, reached through this
+        // app's `SensitiveDataRedactor` name): the mosh CONNECT-line and
+        // bare-key patterns, in that order.
+        //
+        // The shared list's two later stages are deliberately NOT applied
+        // here. `credentialAssignment` keys on the literal word `token`,
+        // which this file's own traces use for numeric correlation counters
+        // (`token=` in the SwipePad and tmux launch lines) — redacting those
+        // would cost the correlation the lines exist for, exactly as
+        // `LaunchDiagnosticsPrivacyTests` documents for `nameHash=`.
+        // `endpointIdentifier` IS applied, but below, from
+        // `sanitizationRules`, where it has always run: after the field
+        // allowlists and before `failed(…)`, both of which its greedy
+        // `\S+@\S+` match would otherwise reshape.
         var sanitized = SensitiveDataRedactor.redact(message)
             .replacingOccurrences(of: "\r", with: " ")
             .replacingOccurrences(of: "\n", with: " ")

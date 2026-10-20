@@ -56,13 +56,13 @@
     "zh-Hans": "绑定失败：%@",
     "zh-Hant": "綁定失敗：%@"
   },
-  "Port %u is already in use.": {
-    "de": "Port %u ist bereits belegt.",
-    "es": "El puerto %u ya está en uso.",
-    "fr": "Le port %u est déjà utilisé.",
-    "ja": "ポート %u はすでに使用されています。",
-    "zh-Hans": "端口 %u 已被占用。",
-    "zh-Hant": "連接埠 %u 已被佔用。"
+  "Port %@ is already in use.": {
+    "de": "Port %@ ist bereits belegt.",
+    "es": "El puerto %@ ya está en uso.",
+    "fr": "Le port %@ est déjà utilisé.",
+    "ja": "ポート %@ はすでに使用されています。",
+    "zh-Hans": "端口 %@ 已被占用。",
+    "zh-Hant": "連接埠 %@ 已被佔用。"
   },
   "Export failed: %@": {
     "de": "Export fehlgeschlagen: %@",
@@ -187,6 +187,14 @@
     "zh-Hant": "在該主機專屬的 tmux 工作階段 `%@` 中啟動 mosh。"
   },
 
+  "A newer Tessera manages this host's Agent Center integration.": {
+    "de": "Eine neuere Tessera-Version verwaltet die Agent-Center-Integration dieses Hosts.",
+    "es": "Una versión más nueva de Tessera gestiona la integración de Agent Center de este host.",
+    "fr": "Une version plus récente de Tessera gère l'intégration d'Agent Center de cet hôte.",
+    "ja": "このホストの Agent Center 連携は、新しいバージョンの Tessera が管理しています。",
+    "zh-Hans": "此主机的 Agent Center 集成由较新版本的 Tessera 管理。",
+    "zh-Hant": "此主機的 Agent Center 整合由較新版本的 Tessera 管理。"
+  },
   "Could not verify Agent Center integration.": {
     "de": "Die Agent-Center-Integration konnte nicht geprüft werden.",
     "es": "No se pudo verificar la integración de Agent Center.",

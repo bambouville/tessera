@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="agent_context_tokens">%1$s 個詞元</string>
+</resources>

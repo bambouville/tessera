@@ -56,6 +56,22 @@ enum AppLockSettingsPolicy {
     }
 }
 
+/// Whether the scene is covered before iOS captures its app-switcher snapshot.
+///
+/// The user preference is off by default. App lock forces the cover on: the
+/// lock screen only appears on `.background`, through an animated SwiftUI
+/// transition, so it is not guaranteed to be in the snapshot (and idle-only
+/// locking never locks on backgrounding at all). Without the cover, a locked
+/// app would still show its last content in the switcher.
+enum AppSwitcherPrivacyPolicy {
+    static func hidesContent(
+        preference: Bool,
+        requiresOwnerAuthentication: Bool
+    ) -> Bool {
+        preference || requiresOwnerAuthentication
+    }
+}
+
 @Observable
 final class AppearancePreferences {
     /// Baseline used by SessionTopBar to derive a scale factor from the
@@ -78,8 +94,19 @@ final class AppearancePreferences {
     var customAccentRGB: Int = AccentName.defaultCustomRGB {
         didSet { UserDefaults.standard.set(customAccentRGB, forKey: "tessera.pref.customAccentRGB") }
     }
-    var monoFontName: String = "JetBrainsMono-Regular" {
-        didSet { UserDefaults.standard.set(monoFontName, forKey: "tessera.pref.monoFontName") }
+    /// Selected terminal typeface, as a `TerminalFontCatalog` id. Chrome
+    /// typography is deliberately unaffected — this is the grid's face only.
+    /// Setter normalizes, so an id from a newer build arriving over the
+    /// cross-device manifest lands on the default instead of a face CoreText
+    /// cannot resolve.
+    var terminalFontID: String = TerminalFontCatalog.defaultID {
+        didSet {
+            // Setting inside `didSet` deliberately does not re-enter it, so the
+            // persist below has to name `resolved` rather than the property.
+            let resolved = TerminalFontCatalog.resolve(terminalFontID)
+            if resolved != terminalFontID { terminalFontID = resolved }
+            UserDefaults.standard.set(resolved, forKey: "tessera.pref.terminalFontID")
+        }
     }
     var fontSize: Double = 13 {
         didSet { UserDefaults.standard.set(fontSize, forKey: "tessera.pref.fontSize") }
@@ -322,6 +349,18 @@ final class AppearancePreferences {
         lockWhenBackgrounded = selection.locksWhenBackgrounded
         requireFaceIDToUnlock = selection.requiresOwnerAuthentication
     }
+    /// Device-local opt-in for the opaque app-switcher cover. Off by default;
+    /// read `effectiveHideContentInAppSwitcher`, which app lock forces on.
+    var hideContentInAppSwitcher: Bool = false {
+        didSet { UserDefaults.standard.set(hideContentInAppSwitcher, forKey: "tessera.pref.hideContentInAppSwitcher") }
+    }
+
+    var effectiveHideContentInAppSwitcher: Bool {
+        AppSwitcherPrivacyPolicy.hidesContent(
+            preference: hideContentInAppSwitcher,
+            requiresOwnerAuthentication: requireFaceIDToUnlock
+        )
+    }
     /// App-level authorization for a short connection burst. Software-key ACLs
     /// can additionally enforce this in Keychain; device-unlocked Secure
     /// Enclave keys use this mutable Tessera gate while remaining hardware-bound.
@@ -336,6 +375,13 @@ final class AppearancePreferences {
     }
     var bellNotificationEnabled: Bool = true {
         didSet { UserDefaults.standard.set(bellNotificationEnabled, forKey: "tessera.pref.bellNotificationEnabled") }
+    }
+    /// OSC 7501 program status: programs report their own state, so this
+    /// needs no screen parsing and is independent of Agent Center, whose
+    /// fallback parsing keeps its own gate. Off means Tessera neither parses
+    /// reports nor answers the protocol's detection query.
+    var programStatusEnabled: Bool = true {
+        didSet { UserDefaults.standard.set(programStatusEnabled, forKey: "tessera.pref.programStatusEnabled") }
     }
 
     // MARK: - Experimental
@@ -375,7 +421,7 @@ final class AppearancePreferences {
     /// lifecycle-proven agent is `.working`. They govern only the scroll
     /// suppression: detection, cards, and attention notifications stay on
     /// either way, so turning one off costs nothing but the frozen viewport.
-    var agentScrollLockClaudeCodeEnabled: Bool = true {
+    var agentScrollLockClaudeCodeEnabled: Bool = false {
         didSet {
             UserDefaults.standard.set(
                 agentScrollLockClaudeCodeEnabled,
@@ -383,7 +429,7 @@ final class AppearancePreferences {
             )
         }
     }
-    var agentScrollLockCodexEnabled: Bool = true {
+    var agentScrollLockCodexEnabled: Bool = false {
         didSet {
             UserDefaults.standard.set(
                 agentScrollLockCodexEnabled,
@@ -459,7 +505,12 @@ final class AppearancePreferences {
         if ud.object(forKey: "tessera.pref.customAccentRGB") != nil {
             customAccentRGB = storedCustomRGB
         }
-        if let raw = ud.string(forKey: "tessera.pref.monoFontName") { monoFontName = raw }
+        // The legacy key held a PostScript name; `resolve` maps it onto a
+        // catalog id, so an upgrade keeps rendering the face it already had.
+        if let raw = ud.string(forKey: "tessera.pref.terminalFontID")
+            ?? ud.string(forKey: "tessera.pref.monoFontName") {
+            terminalFontID = TerminalFontCatalog.resolve(raw)
+        }
         if ud.double(forKey: "tessera.pref.fontSize") > 0 { fontSize = ud.double(forKey: "tessera.pref.fontSize") }
         let storedTopBar = ud.double(forKey: "tessera.pref.topBarHeight")
         if AppearancePreferences.topBarHeightRange.contains(storedTopBar) {
@@ -563,6 +614,9 @@ final class AppearancePreferences {
         if ud.object(forKey: "tessera.pref.lockWhenBackgrounded") != nil {
             lockWhenBackgrounded = ud.bool(forKey: "tessera.pref.lockWhenBackgrounded")
         }
+        if ud.object(forKey: "tessera.pref.hideContentInAppSwitcher") != nil {
+            hideContentInAppSwitcher = ud.bool(forKey: "tessera.pref.hideContentInAppSwitcher")
+        }
         if ud.object(forKey: "tessera.pref.requireBiometricForKeyUse") != nil {
             requireBiometricForKeyUse = ud.bool(forKey: "tessera.pref.requireBiometricForKeyUse")
         }
@@ -574,6 +628,9 @@ final class AppearancePreferences {
         }
         if ud.object(forKey: "tessera.pref.bellNotificationEnabled") != nil {
             bellNotificationEnabled = ud.bool(forKey: "tessera.pref.bellNotificationEnabled")
+        }
+        if ud.object(forKey: "tessera.pref.programStatusEnabled") != nil {
+            programStatusEnabled = ud.bool(forKey: "tessera.pref.programStatusEnabled")
         }
 
         if ud.object(forKey: "tessera.pref.agentCenterNotificationsEnabled") != nil {

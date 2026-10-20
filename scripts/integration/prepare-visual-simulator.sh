@@ -14,7 +14,7 @@ require_command xcrun
 
 VISUAL_ROOT="$RUN_DIR/visual"
 BUILD_LOG="$VISUAL_ROOT/build-for-testing.log"
-DERIVED_DATA="$FIXTURE_STATE/VisualDerivedData"
+DERIVED_DATA="$(integration_derived_data)"
 mkdir -p "$VISUAL_ROOT" "$DERIVED_DATA"
 
 # Visual capture must not share a simulator with unit/UI tests from another
@@ -27,7 +27,7 @@ cleanup_failed_prepare() {
     delete_owned_test_simulator "$SIMULATOR_STATE/visual_simulator_udid" || true
   fi
 }
-trap cleanup_failed_prepare EXIT
+trap 'fail_closed_trap cleanup_failed_prepare' EXIT
 
 udid="$(
   TESSERA_INTEGRATION_SIMULATOR_NAME="Tessera Visual Integration Tests" \
@@ -35,15 +35,11 @@ udid="$(
     "$HERE/ensure-test-simulator.sh" | tail -n 1
 )"
 
-xcodebuild build-for-testing \
-  -project "$REPO_ROOT/Tessera.xcodeproj" \
-  -scheme Tessera \
-  -configuration Debug \
-  -destination "platform=iOS Simulator,id=$udid" \
-  -derivedDataPath "$DERIVED_DATA" \
-  >"$BUILD_LOG" 2>&1
+# The suite runner builds once for every lane; a standalone invocation
+# builds here into the same shared DerivedData.
+ensure_integration_build "$BUILD_LOG"
 
-app_path="$DERIVED_DATA/Build/Products/Debug-iphonesimulator/Tessera.app"
+app_path="$(integration_app_path)"
 [[ -d "$app_path" ]] || die "visual build did not produce $app_path"
 xcrun simctl install "$udid" "$app_path"
 xcrun simctl spawn "$udid" launchctl setenv TESSERA_VISUAL_CAPTURE 1
@@ -72,3 +68,4 @@ jq -n \
 
 handoff_complete=1
 trap - EXIT
+script_completed=1

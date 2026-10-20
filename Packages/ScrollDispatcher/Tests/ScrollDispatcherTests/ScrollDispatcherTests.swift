@@ -3,6 +3,27 @@ import XCTest
 
 final class ScrollDispatcherTests: XCTestCase {
 
+    func testCappedMotionCannotSendStaleTicksAgainstAReversal() {
+        for mouse in [false, true] {
+            for endGesture in [false, true] {
+                var dispatcher = ScrollDispatcher(config: .init(
+                    pointsPerArrowKey: 3, mouseWheelThresholdPoints: 3, maxEventsPerFlush: 8))
+                let state = ScrollDispatcher.TerminalState(isAltScreen: true,
+                    mouseReporting: mouse ? .vt200OrLater : .off)
+                _ = dispatcher.handle(event: .init(deltaY: -900, phase: .began), terminal: state)
+                if endGesture {
+                    _ = dispatcher.handle(event: .init(deltaY: 0, phase: .ended), terminal: state)
+                }
+                let actions = dispatcher.handle(event: .init(deltaY: 3,
+                    phase: endGesture ? .began : .changed), terminal: state)
+                let expected: [ScrollDispatcher.Action] = mouse
+                    ? [.mouseWheel(buttonFlags: 64, cursorColumn: 1, cursorRow: 1, repeatCount: 1)]
+                    : [.writeBytes([0x1B, 0x5B, 0x41])]
+                XCTAssertEqual(actions, expected, "mouse=\(mouse) endGesture=\(endGesture)")
+            }
+        }
+    }
+
     // MARK: - Primary screen (scrollback pass-through)
 
     func test_primaryScreen_passesDeltaThroughAsScrollback() {

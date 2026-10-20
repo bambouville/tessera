@@ -527,14 +527,6 @@
     "zh-Hans": "未就绪",
     "zh-Hant": "未就緒"
   },
-  "idle prompt": {
-    "de": "Prompt im Leerlauf",
-    "es": "prompt inactivo",
-    "fr": "invite au repos",
-    "ja": "待機中のプロンプト",
-    "zh-Hans": "空闲提示符",
-    "zh-Hant": "閒置提示符"
-  },
   "try again · %@": {
     "de": "erneut versuchen · %@",
     "es": "reintentar · %@",
@@ -575,6 +567,14 @@
     "zh-Hans": "此主机上已有另一条规则占用该本地端口",
     "zh-Hant": "此主機上已有另一條規則占用該本地連接埠"
   },
+  "this rule isn't valid on this device": {
+    "de": "diese Regel ist auf diesem Gerät nicht gültig",
+    "es": "esta regla no es válida en este dispositivo",
+    "fr": "cette règle n'est pas valide sur cet appareil",
+    "ja": "このルールはこのデバイスでは無効です",
+    "zh-Hans": "此规则在本设备上无效",
+    "zh-Hant": "此規則在本裝置上無效"
+  },
   "local port must be at least 1024 (iOS sandbox can't bind below 1024)": {
     "de": "der lokale Port muss mindestens 1024 sein (die iOS-Sandbox kann unterhalb von 1024 nicht binden)",
     "es": "el puerto local debe ser 1024 como mínimo (el sandbox de iOS no puede enlazar por debajo de 1024)",
@@ -606,5 +606,13 @@
     "ja": "リモートポートは 1 〜 65535 の範囲である必要があります",
     "zh-Hans": "远程端口必须介于 1 和 65535 之间",
     "zh-Hant": "遠端連接埠必須介於 1 和 65535 之間"
+  },
+  "The mosh-server for this session is no longer running — the host may have restarted.": {
+    "de": "Der mosh-server dieser Sitzung läuft nicht mehr — der Host wurde möglicherweise neu gestartet.",
+    "es": "El mosh-server de esta sesión ya no se está ejecutando — es posible que el host se haya reiniciado.",
+    "fr": "Le mosh-server de cette session ne tourne plus — l'hôte a peut-être redémarré.",
+    "ja": "このセッションの mosh-server は実行されていません。ホストが再起動した可能性があります。",
+    "zh-Hans": "此会话的 mosh-server 已不再运行 —— 主机可能已重启。",
+    "zh-Hant": "此工作階段的 mosh-server 已不再執行 —— 主機可能已重新啟動。"
   }
 }

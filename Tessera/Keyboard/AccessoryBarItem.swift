@@ -8,6 +8,11 @@
 // predates custom chips drops the entry and keeps the rest of the bar rather
 // than losing the whole array. Forward and backward compatible without a
 // migration; `CustomShortcutTests` pins it.
+//
+// The rule itself is stated portably in
+// `TesseraInputCore.AccessoryKeyCatalog` (`customIDPrefix`, `builtInKeys(in:)`,
+// and the unset-vs-deliberately-empty distinction in `resolveStoredOrder`), so
+// the Android bar decodes a shared layout the same way.
 import SwiftUI
 
 enum AccessoryBarItem: Equatable, Identifiable {

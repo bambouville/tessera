@@ -81,6 +81,25 @@ final class TmuxControllerTests: XCTestCase {
         ].joined(separator: "\t")
     }
 
+    /// Acknowledge the per-pane `refresh-client -B` registrations the
+    /// controller sends on a deferred main-actor turn once it learns the panes.
+    /// Call after awaiting that turn; tmux answers each with an empty block.
+    private func ackSubscriptionRegistrations(_ controller: TmuxController) {
+        while controller._debugPendingCommands.first?.hasPrefix("refresh-client -B") == true {
+            controller.ingest(responseFrame(900))
+        }
+    }
+
+    private func flushSubscriptionRegistrations(_ controller: TmuxController) async {
+        try? await Task.sleep(for: .milliseconds(1))
+        ackSubscriptionRegistrations(controller)
+    }
+
+    private func paneSubscriptionCommand(_ paneId: Int) -> String {
+        "refresh-client -B 'tessera-pane-meta.\(paneId):%\(paneId):\(TmuxPaneMetadataSubscription.format)'"
+            + " -B 'tessera-bell.\(paneId):%\(paneId):#{window_bell_flag}'\n"
+    }
+
     private func responseFrame(
         _ number: Int,
         body: [String] = [],
@@ -101,6 +120,33 @@ final class TmuxControllerTests: XCTestCase {
         time: Int = 0
     ) -> [UInt8] {
         responseFrame(number, body: body, flags: flags, time: time, status: "%error")
+    }
+
+    /// Window-change notifications legitimately enqueue render and topology
+    /// queries before the selection callback can append its causal proof.
+    /// Drain those real FIFO predecessors without baking their count into the
+    /// visible-client tests.
+    private func drainResponses(
+        before command: String,
+        controller: TmuxController,
+        responseNumber: inout Int,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        var remaining = 32
+        while controller._debugPendingCommands.first != command {
+            guard !controller._debugPendingCommands.isEmpty, remaining > 0 else {
+                XCTFail(
+                    "did not reach pending command \(command); fifo=\(controller._debugPendingCommands)",
+                    file: file,
+                    line: line
+                )
+                return
+            }
+            controller.ingest(responseFrame(responseNumber))
+            responseNumber += 1
+            remaining -= 1
+        }
     }
 
     private func expectSent(
@@ -259,8 +305,8 @@ final class TmuxControllerTests: XCTestCase {
     /// Drive the controller all the way through the `-CC` mode entry
     /// dance — DCS prologue, tmux's spontaneous handshake `%begin/%end`,
     /// AND the attach-init query flow (history-limit, optional refresh-client,
-    /// pause-after, bell subscription, list-windows, list-panes,
-    /// display-message active window, and the pane metadata subscription) —
+    /// pause-after, list-windows, list-panes, display-message active
+    /// window) —
     /// leaving the controller in `.tmuxControl` mode
     /// with empty pendingCommands. Tests that just
     /// want a "controller in tmux mode, ready for action" baseline can
@@ -278,39 +324,29 @@ final class TmuxControllerTests: XCTestCase {
         controller.ingest(chunk)
 
         // The handshake drain triggers shared hydration. With no
-        // `lastKnownSize` cached, history-limit, pause-after, bell
-        // subscription, list-windows, list-panes, active-window, and pane
-        // metadata subscription queries go out. (Test cases that DO want to
-        // assert on the refresh-client -C emission set a size before calling
-        // this helper.)
+        // `lastKnownSize` cached, history-limit (inline only), pause-after,
+        // list-windows, list-panes, and active-window queries go out. Tests
+        // asserting refresh-client -C set a size before calling this helper.
         if controller.controlPath == .inline {
             // Empty history-limit response.
             controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8))
             // Empty pause-after response.
             controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8))
-            // Empty bell subscription response.
-            controller.ingest(Array("%begin 0 4 1\r\n%end 0 4 1\r\n".utf8))
             // Empty list-windows response.
             controller.ingest(Array("%begin 0 5 1\r\n%end 0 5 1\r\n".utf8))
             // Empty list-panes response.
             controller.ingest(Array("%begin 0 6 1\r\n%end 0 6 1\r\n".utf8))
             // Empty active-window response.
             controller.ingest(Array("%begin 0 7 1\r\n%end 0 7 1\r\n".utf8))
-            // Empty pane metadata subscription response.
-            controller.ingest(Array("%begin 0 8 1\r\n%end 0 8 1\r\n".utf8))
         } else {
             // Empty pause-after response.
             controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8))
-            // Empty bell subscription response.
-            controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8))
             // Empty list-windows response.
             controller.ingest(Array("%begin 0 4 1\r\n%end 0 4 1\r\n".utf8))
             // Empty list-panes response.
             controller.ingest(Array("%begin 0 5 1\r\n%end 0 5 1\r\n".utf8))
             // Empty active-window response.
             controller.ingest(Array("%begin 0 6 1\r\n%end 0 6 1\r\n".utf8))
-            // Empty pane metadata subscription response.
-            controller.ingest(Array("%begin 0 7 1\r\n%end 0 7 1\r\n".utf8))
         }
     }
 
@@ -323,13 +359,61 @@ final class TmuxControllerTests: XCTestCase {
         chunk.append(contentsOf: Array("%begin 0 1 0\r\n%end 0 1 0\r\n".utf8))
         controller.ingest(chunk)
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8)) // pause-after
-        controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8)) // bell subscription
         controller.ingest(Array("%begin 0 4 1\r\n@\(windowId)\teditor\r\n%end 0 4 1\r\n".utf8)) // windows
         controller.ingest(Array(
             "%begin 0 5 1\r\n@\(windowId)\t%\(paneId)\t1\tzsh\tpane title\thost\r\n%end 0 5 1\r\n".utf8
         )) // panes
         controller.ingest(Array("%begin 0 6 1\r\n@\(windowId)\r\n%end 0 6 1\r\n".utf8)) // active-window
-        controller.ingest(Array("%begin 0 7 1\r\n%end 0 7 1\r\n".utf8)) // pane metadata subscription
+    }
+
+    private func enterHydratedWindowOrderFixture(
+        _ controller: TmuxController,
+        sent: Accumulator<UInt8>,
+        windowRows: [String] = [
+            "@1\t0\tb25d,80x24,0,0,11\tb25d,80x24,0,0,11\t0\tone",
+            "@2\t1\tb25d,80x24,0,0,12\tb25d,80x24,0,0,12\t0\ttwo",
+            "@3\t2\tb25d,80x24,0,0,13\tb25d,80x24,0,0,13\t0\tthree",
+        ],
+        activeWindowID: WindowId = WindowId(2),
+        expectedCanReorder: Bool = true,
+        version: String = "3.6a",
+        subscriptionAnchor: WindowId = WindowId(1)
+    ) async {
+        controller.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
+        controller.ingest(Array("%session-changed $4 owner\r\n".utf8))
+        controller.ingest(responseFrame(1, flags: 0))
+        var responseNumber = 2
+        if controller.controlPath == .inline {
+            controller.ingest(responseFrame(responseNumber)) // history limit
+            responseNumber += 1
+        }
+        controller.ingest(responseFrame(responseNumber)) // pause-after
+        responseNumber += 1
+        controller.ingest(responseFrame(responseNumber, body: windowRows))
+        responseNumber += 1
+        controller.ingest(responseFrame(responseNumber)) // panes
+        responseNumber += 1
+        controller.ingest(responseFrame(
+            responseNumber,
+            body: ["__tessera_active_window__\t\(activeWindowID)\t\(version)"]
+        ))
+        responseNumber += 1
+        while !controller._debugPendingCommands.isEmpty, responseNumber < 20 {
+            controller.ingest(responseFrame(responseNumber))
+            responseNumber += 1
+        }
+        await flushSubscriptionRegistrations(controller)
+        XCTAssertTrue(controller.isWindowListHydrated)
+        XCTAssertEqual(controller.canReorderWindows, expectedCanReorder)
+        XCTAssertTrue(controller.canTidyWindows)
+        XCTAssertEqual(controller.snapshot.sessionID, SessionId(4))
+        XCTAssertEqual(controller._debugPendingCommands, [])
+        XCTAssertEqual(
+            String(decoding: sent.bytes, as: UTF8.self)
+                .contains(" -B 'tessera-window-order:\(subscriptionAnchor):\(TmuxWindowOrderSubscription.format)'"),
+            TmuxWindowCapabilities.forVersion(version).supportsSubscriptions
+        )
+        sent.clear()
     }
 
     private func populateBellFixture(_ controller: TmuxController) {
@@ -498,7 +582,13 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertEqual(fed, Array("shelllive".utf8))
         XCTAssertEqual(contexts.map(\.source), [.passthrough, .paneOutput])
         XCTAssertNil(contexts[0].paneId)
+        XCTAssertNil(contexts[0].windowId)
+        XCTAssertNil(contexts[0].renderOwnerEpoch)
+        XCTAssertNil(contexts[0].generation)
         XCTAssertEqual(contexts[1].paneId, PaneId(0))
+        XCTAssertEqual(contexts[1].windowId, WindowId(0))
+        XCTAssertEqual(contexts[1].renderOwnerEpoch, 0)
+        XCTAssertEqual(contexts[1].generation, 0)
     }
 
     func test_cooperativeIngestSlicesLargeLiveOutputAndPreservesMessageOrder() async throws {
@@ -540,6 +630,44 @@ final class TmuxControllerTests: XCTestCase {
             lastFirstFeed,
             "the next tmux message must not run until the prior renderer payload is complete"
         )
+    }
+
+    func test_cooperativeSmallPacketsDoNotEachForceASchedulerRoundTrip() async {
+        let controller = TmuxController()
+        var rendered = 0
+        controller.feedTerminalWithContext = { bytes, _ in rendered += bytes.count }
+        let packet = Array(repeating: UInt8(ascii: "a"), count: 1024)
+        for _ in 0..<64 { await controller.ingestCooperatively(packet) }
+        XCTAssertEqual(rendered, 64 * 1024)
+        XCTAssertLessThan(controller.ingestStages.yields, 32,
+                          "Cheap network packets must share a work budget, not each wait behind the main actor")
+    }
+
+    func test_cooperativeBudgetStillYieldsAcrossExpensiveSmallPackets() async {
+        let controller = TmuxController()
+        var rendered = 0
+        controller.feedTerminalWithContext = { bytes, _ in
+            Thread.sleep(forTimeInterval: 0.001)
+            rendered += bytes.count
+        }
+        let packet = Array(repeating: UInt8(ascii: "a"), count: 1024)
+        for _ in 0..<32 { await controller.ingestCooperatively(packet) }
+        XCTAssertEqual(rendered, 32 * 1024)
+        XCTAssertGreaterThanOrEqual(controller.ingestStages.yields, 4,
+                                    "Accumulated renderer work must still release the main actor")
+    }
+
+    func test_cooperativeTmuxPacketsShareWorkBudgetWithoutChangingBytes() async {
+        let controller = TmuxController()
+        controller.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
+        controller.ingest(Array("%window-add @0\r\n".utf8))
+        var rendered: [UInt8] = []
+        controller.feedTerminalWithContext = { bytes, _ in rendered.append(contentsOf: bytes) }
+        let payload = String(repeating: "a", count: 1024)
+        let packet = Array("%output %0 \(payload)\r\n".utf8)
+        for _ in 0..<64 { await controller.ingestCooperatively(packet) }
+        XCTAssertTrue(rendered == Array(String(repeating: payload, count: 64).utf8))
+        XCTAssertLessThan(controller.ingestStages.yields, 32)
     }
 
     func test_cooperativeIngestSlicesPassthroughWithoutBreakingSplitDcsEntry() async {
@@ -616,7 +744,7 @@ final class TmuxControllerTests: XCTestCase {
         // usable candidate and `refresh-client -C` freezes — the window stays
         // at a mid-keyboard-animation transient while the PTY and local grid
         // settle elsewhere (blank top-left crop, cursor offscreen). The side
-        // channel must therefore force each window's size directly.
+        // channel must fence itself as latest before restoring the policy.
         let (controller, _, sent) = makeController(controlPath: .sideChannel)
         enterSideChannelWithActivePane(controller, windowId: 5, paneId: 12)
         sent.clear()
@@ -627,6 +755,7 @@ final class TmuxControllerTests: XCTestCase {
             sent,
             "refresh-client -C 49,21\n"
                 + "resize-window -x 49 -y 21 -t @5\n"
+                + "select-window\n"
                 + "set-option -w -u -t @5 window-size\n"
         )
     }
@@ -651,10 +780,9 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertTrue(attachBurst.contains("refresh-client -C 47,20\n"))
         XCTAssertFalse(attachBurst.contains("resize-window"))
 
-        // refresh-client -C, pause-after, and bell-subscription replies.
+        // refresh-client -C and pause-after replies.
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8))
         controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 4 1\r\n%end 0 4 1\r\n".utf8))
         sent.clear()
 
         // The list-windows reply names @7: hydration stamps it immediately.
@@ -663,13 +791,51 @@ final class TmuxControllerTests: XCTestCase {
         expectSent(
             sent,
             "resize-window -x 47 -y 20 -t @7\n"
+                + "select-window\n"
                 + "set-option -w -u -t @7 window-size\n"
         )
     }
 
+    func test_sideChannelForceWaitsForEveryMutationAndRejectsFailedFence() {
+        for failedIndex in [nil, 0, 1, 2] {
+            let (controller, _, sent) = makeController(controlPath: .sideChannel)
+            enterSideChannelWithActivePane(controller, windowId: 5, paneId: 12)
+            sent.clear()
+            controller.updateClientSize(cols: 49, rows: 21)
+            let mutations = ["resize-window -x 49 -y 21 -t @5", "select-window",
+                             "set-option -w -u -t @5 window-size"]
+            var number = 100
+            // The shared ledger's refresh precedes the platform-only debug
+            // FIFO (which lists the three mutations, but omits that -C slot).
+            controller.ingest(responseFrame(number))
+            number += 1
+            drainResponses(before: mutations[0], controller: controller, responseNumber: &number)
+            XCTAssertEqual(Array(controller._debugPendingCommands.prefix(3)), mutations)
+            for index in 0..<3 {
+                XCTAssertFalse(String(decoding: sent.bytes, as: UTF8.self).contains("tessera-window-size"), "query preceded mutation \(index)")
+                controller.ingest(responseFrame(number, status: failedIndex == index ? "%error" : "%end"))
+                number += 1
+            }
+            XCTAssertEqual(String(decoding: sent.bytes, as: UTF8.self).contains("tessera-window-size"), failedIndex == nil)
+            // Even a failed fence consumes exactly its FIFO slot; a later
+            // command must still receive its own reply.
+            var answered = false
+            controller.sendControlCommand("display-message -p 'after-force'") { result in
+                if case .success(let lines) = result { answered = lines == ["after-force"] }
+            }
+            if failedIndex == nil {
+                controller.ingest(responseFrame(number, body: ["tessera-window-size\t@5\t49\t21"]))
+                number += 1
+            }
+            controller.ingest(responseFrame(number, body: ["after-force"]))
+            XCTAssertTrue(answered, "failedIndex=\(String(describing: failedIndex))")
+        }
+    }
+
     func test_inlineClientSizeReplayDoesNotForceWindowSizes() {
         // The inline -CC client has no separate visible PTY, so it cannot
-        // freeze its own session — keep its replay a plain refresh-client.
+        // freeze its own session — its replay is the refresh plus the latest
+        // fence, never a resize-window force.
         let (controller, _, sent) = makeController()
         enterTmuxModeAndDrainAttachInit(controller)
         seedInlineRenderedWindow(controller)
@@ -677,7 +843,7 @@ final class TmuxControllerTests: XCTestCase {
 
         controller.updateClientSize(cols: 80, rows: 24)
 
-        expectSent(sent, "refresh-client -C 80,24\n")
+        expectSent(sent, "refresh-client -C 80,24\nselect-window\n")
     }
 
     func test_paneOutputObserverSeesBackgroundSideChannelBytes() {
@@ -857,8 +1023,8 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertEqual(controller.windows, [.init(id: WindowId(5), name: "logs")])
     }
 
-    func test_windowClose_removesAndReselects() {
-        let (controller, _, _) = makeController()
+    func test_windowClose_preservesTopologyAndSelectionUntilOrderRefresh() {
+        let (controller, _, sent) = makeController()
 
         var chunk: [UInt8] = [0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70]
         chunk.append(contentsOf: Array("%window-add @0\r\n".utf8))
@@ -866,9 +1032,14 @@ final class TmuxControllerTests: XCTestCase {
         chunk.append(contentsOf: Array("%window-close @0\r\n".utf8))
         controller.ingest(chunk)
 
-        XCTAssertEqual(controller.windows.map(\.id), [WindowId(1)])
-        XCTAssertEqual(controller.activeWindowId, WindowId(1),
-                       "closing the active window should fall back to the next remaining one")
+        XCTAssertEqual(controller.windows.map(\.id), [WindowId(0), WindowId(1)])
+        XCTAssertEqual(controller.activeWindowId, WindowId(0))
+        XCTAssertTrue(
+            String(decoding: sent.bytes, as: UTF8.self).contains(
+                TmuxRuntimeHydrationQuery.commands[0]
+            ),
+            "a relink keeps the window but must request authoritative order"
+        )
     }
 
     func test_unlinkedWindowClose_removesWindowFromTabList() {
@@ -955,10 +1126,10 @@ final class TmuxControllerTests: XCTestCase {
 
     // MARK: - Cross-session broadcast filtering
     //
-    // One tmux server hosts many sessions. `%session-window-changed`
-    // and the `%*` pane-metadata subscription are broadcast to EVERY
-    // `-CC` control client in the server, tagged with the session they
-    // refer to. The controller must latch its own session id (from
+    // One tmux server hosts many sessions. `%session-window-changed` is
+    // broadcast to every `-CC` control client. Both it and pane-metadata
+    // subscription updates carry the session they refer to. The controller
+    // must latch its own session id (from
     // `%session-changed` / `%client-session-changed`) and ignore the
     // broadcasts for other sessions — otherwise two clients attached to
     // different sessions of the same server (an iPad + the simulator
@@ -996,11 +1167,10 @@ final class TmuxControllerTests: XCTestCase {
         controller.killWindow(WindowId(7))
         XCTAssertEqual(sent.bytes, [], "an old-session tab must not remain a valid kill target")
 
-        // history-limit, pause-after, bell subscription, then the new
-        // session's authoritative list-windows response.
+        // history-limit, pause-after, then the new session's
+        // authoritative list-windows response.
         controller.ingest(Array("%begin 0 10 1\r\n%end 0 10 1\r\n".utf8))
         controller.ingest(Array("%begin 0 11 1\r\n%end 0 11 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 12 1\r\n%end 0 12 1\r\n".utf8))
         controller.ingest(Array(
             "%begin 0 13 1\r\n@9\tb25d,80x24,0,0,70\tb25d,80x24,0,0,70\t0\twork\r\n%end 0 13 1\r\n".utf8
         ))
@@ -1085,7 +1255,7 @@ final class TmuxControllerTests: XCTestCase {
         let paneBefore = controller.activePaneId
 
         // Pane metadata delivered for a window in another session ($1)
-        // via the server-wide `%*` subscription must not touch our model.
+        // via a pane subscription must not touch our model.
         controller.ingest(Array(
             "%subscription-changed tessera-pane-meta $1 @77 0 %88 : @77\t%88\t1\tbash\tforeign\tlogs\thost\r\n".utf8
         ))
@@ -1281,8 +1451,8 @@ final class TmuxControllerTests: XCTestCase {
 
         XCTAssertEqual(
             String(decoding: sent.bytes, as: UTF8.self),
-            "display-message -p -t @5 '#{window_index}\t#{window_layout}\t#{window_visible_layout}\t#{window_zoomed_flag}\t#{window_name}'\n",
-            "windowAdd should query index, layout, and window_name while any is unknown"
+            TmuxRuntimeHydrationQuery.windowDetailsCommand(windowID: WindowId(5)) + "\n",
+            "windowAdd should send the shared details query while any half is unknown"
         )
         XCTAssertEqual(controller.windows.first?.name, "@5",
                        "name stays on placeholder until the query response arrives")
@@ -1301,7 +1471,7 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertNil(controller.windows.first?.layout)
 
         controller.ingest(Array(
-            "%begin 1 1 1\r\nb25d,80x24,0,0,10\tb25d,80x24,0,0,10\t0\teditor\r\n%end 1 1 1\r\n".utf8
+            "%begin 1 1 1\r\n__tessera_window_details__\t@5\t0\t%10\tb25d,80x24,0,0,10\tb25d,80x24,0,0,10\t0\teditor\r\n%end 1 1 1\r\n".utf8
         ))
 
         XCTAssertEqual(controller.windows.first?.name, "editor",
@@ -1320,7 +1490,7 @@ final class TmuxControllerTests: XCTestCase {
 
         controller.ingest(Array("%window-add @5\r\n".utf8))
         controller.ingest(Array(
-            "%begin 1 1 1\r\n8205,80x24,0,0{40x24,0,0,20,39x24,41,0,21}\t8205,80x24,0,0{40x24,0,0,20,39x24,41,0,21}\t0\tdashboard\r\n%end 1 1 1\r\n".utf8
+            "%begin 1 1 1\r\n__tessera_window_details__\t@5\t0\t%20\t8205,80x24,0,0{40x24,0,0,20,39x24,41,0,21}\t8205,80x24,0,0{40x24,0,0,20,39x24,41,0,21}\t0\tdashboard\r\n%end 1 1 1\r\n".utf8
         ))
 
         XCTAssertEqual(controller.windows.first?.paneCount, 2,
@@ -1338,7 +1508,6 @@ final class TmuxControllerTests: XCTestCase {
         controller.ingest(chunk)
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8)) // history-limit
         controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8)) // pause-after
-        controller.ingest(Array("%begin 0 4 1\r\n%end 0 4 1\r\n".utf8)) // bell subscription
         controller.ingest(Array((
             "%begin 0 5 1\r\n"
             + "@11\t0\tb25d,80x24,0,0,12\tb25d,80x24,0,0,12\t0\tmain\r\n"
@@ -1355,6 +1524,249 @@ final class TmuxControllerTests: XCTestCase {
                        "layouts must still parse after the index widening")
     }
 
+    func test_hydrationActiveQueryRebasesLaterFallbackLayoutsFromSameRead() {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeAndStartAttachInit(controller)
+        controller.ingest(responseFrame(2)) // history-limit
+        controller.ingest(responseFrame(3)) // pause-after
+        var burst = responseFrame(5, body: [
+            "@0\t0\tb25d,120x40,0,0,0\tb25d,120x40,0,0,0\t0\tW1",
+            "@1\t1\t8205,120x40,0,0{60x40,0,0,1,59x40,61,0,2}\t8205,120x40,0,0{60x40,0,0,1,59x40,61,0,2}\t0\tW2",
+        ])
+        burst.append(contentsOf: responseFrame(6, body: [
+            "@0\t%0\t1\t/home/test\tshell\thost",
+            "@1\t%1\t1\t/home/test\tleft\thost",
+            "@1\t%2\t0\t/home/test\tright\thost",
+        ]))
+
+        // RuntimeEngine parses this entire read before the controller handles
+        // any legacy hydration reply. The active and layout steps therefore
+        // lack the earlier callback-published windows even though the query
+        // proves @0 and the preceding frames fully describe its topology.
+        burst.append(contentsOf: responseFrame(7, body: ["@0"]))
+        burst.append(contentsOf: Array(
+            "%layout-change @0 b25d,100x30,0,0,0 b25d,100x30,0,0,0 *\r\n".utf8
+        ))
+        burst.append(contentsOf: Array(
+            "%layout-change @1 8205,120x40,0,0{60x40,0,0,1,59x40,61,0,2} 8205,120x40,0,0{60x40,0,0,1,59x40,61,0,2} *\r\n".utf8
+        ))
+        controller.ingest(burst)
+
+        XCTAssertEqual(controller.activeWindowId, WindowId(0))
+        XCTAssertEqual(controller.windows.first?.layout?.root.rect.width, 100)
+        XCTAssertEqual(controller.windows.first?.layout?.root.rect.height, 30)
+        sent.clear()
+        controller.ingest(responseFrame(
+            9,
+            body: [renderedPaneMetadataLine(paneId: 0, historySize: 300)]
+        ))
+        let afterMetadata = String(decoding: sent.bytes, as: UTF8.self)
+        XCTAssertTrue(afterMetadata.contains("capture-pane"), afterMetadata)
+        XCTAssertTrue(afterMetadata.contains("-t @0"), afterMetadata)
+        XCTAssertFalse(afterMetadata.contains("-t @1"), afterMetadata)
+    }
+
+    func test_hydrationActiveQueryDoesNotOverwriteLaterAuthoritativeWindowFromSameRead() {
+        let (controller, _, _) = makeController()
+        enterTmuxModeAndStartAttachInit(controller)
+        controller.ingest(responseFrame(2))
+        controller.ingest(responseFrame(3))
+        controller.ingest(responseFrame(4))
+        controller.ingest(responseFrame(5, body: [
+            "@1\t0\tb25d,120x40,0,0,1\tb25d,120x40,0,0,1\t0\tW2",
+            "@0\t1\tb25d,120x40,0,0,0\tb25d,120x40,0,0,0\t0\tW1",
+        ]))
+        controller.ingest(responseFrame(6, body: [
+            "@0\t%0\t1\t/home/test\tshell\thost",
+            "@1\t%1\t1\t/home/test\tshell\thost",
+        ]))
+
+        var burst = responseFrame(7, body: ["@0"])
+        burst.append(contentsOf: responseFrame(8))
+        burst.append(contentsOf: Array(
+            "%session-window-changed $0 @1\r\n".utf8
+        ))
+        controller.ingest(burst)
+
+        XCTAssertEqual(controller.activeWindowId, WindowId(1))
+    }
+
+    func test_hydrationActiveQueryDoesNotCrossLaterSessionBoundaryFromSameRead() {
+        let (controller, _, _) = makeController()
+        enterTmuxModeAndStartAttachInit(controller)
+        controller.ingest(responseFrame(2))
+        controller.ingest(responseFrame(3))
+        controller.ingest(responseFrame(4))
+        controller.ingest(responseFrame(5, body: [
+            "@0\t0\tb25d,120x40,0,0,0\tb25d,120x40,0,0,0\t0\tW1",
+            "@1\t1\tb25d,120x40,0,0,1\tb25d,120x40,0,0,1\t0\tW2",
+        ]))
+        controller.ingest(responseFrame(6, body: [
+            "@0\t%0\t1\t/home/test\tshell\thost",
+            "@1\t%1\t1\t/home/test\tshell\thost",
+        ]))
+
+        // The old-session reply selects @1, but the later session boundary
+        // must leave the new session on RuntimeEngine's existing @0 fallback
+        // until that session's own active-window hydration arrives.
+        var burst = responseFrame(7, body: ["@1"])
+        burst.append(contentsOf: responseFrame(8))
+        burst.append(contentsOf: Array("%session-changed $1 other\r\n".utf8))
+        controller.ingest(burst)
+
+        XCTAssertEqual(controller.ownSessionId, SessionId(1))
+        XCTAssertNil(controller.activeWindowId)
+        XCTAssertNotEqual(controller.activeWindowId, WindowId(1))
+    }
+
+    func test_hydrationActiveQueryCannotFinalizeAfterSideChannelDisconnectMidBatch() {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        enterTmuxModeAndStartAttachInit(controller)
+        controller.ingest(responseFrame(2))
+        controller.ingest(responseFrame(3))
+        controller.ingest(responseFrame(4))
+        controller.ingest(responseFrame(5, body: [
+            "@0\t0\tb25d,120x40,0,0,0\tb25d,120x40,0,0,0\t0\tW1",
+            "@1\t1\tb25d,120x40,0,0,1\tb25d,120x40,0,0,1\t0\tW2",
+        ]))
+        controller.ingest(responseFrame(6, body: [
+            "@0\t%0\t1\t/home/test\tshell\thost",
+            "@1\t%1\t1\t/home/test\tshell\thost",
+        ]))
+
+        sent.clear()
+        controller.paneDidOutput = { _ in controller.sideChannelDisconnected() }
+        var burst = responseFrame(7, body: ["@1"])
+        burst.append(contentsOf: responseFrame(8))
+        burst.append(contentsOf: Array("%output %0 disconnect-now\r\n".utf8))
+        controller.ingest(burst)
+
+        XCTAssertEqual(controller.mode, .passthrough)
+        XCTAssertNotEqual(controller.activeWindowId, WindowId(1))
+        XCTAssertTrue(sent.bytes.isEmpty, String(decoding: sent.bytes, as: UTF8.self))
+    }
+
+    func test_hydrationActiveQueryClassifiesLaterBellFromSameReadAsForeground() {
+        let (controller, _, _) = makeController()
+        enterTmuxModeAndStartAttachInit(controller)
+        controller.ingest(responseFrame(2))
+        controller.ingest(responseFrame(3))
+        controller.ingest(responseFrame(5, body: [
+            "@0\t0\tb25d,120x40,0,0,0\tb25d,120x40,0,0,0\t0\tW1",
+            "@1\t1\tb25d,120x40,0,0,1\tb25d,120x40,0,0,1\t0\tW2",
+        ]))
+        controller.ingest(responseFrame(6, body: [
+            "@0\t%0\t1\t/home/test\tshell\thost",
+            "@1\t%1\t1\t/home/test\tshell\thost",
+        ]))
+        var observedActive: Bool?
+        controller.onBell = { _, isActive, _ in observedActive = isActive }
+        var burst = responseFrame(7, body: ["@0"])
+        burst.append(contentsOf: Array("%output %0 \u{07}\r\n".utf8))
+        controller.ingest(burst)
+
+        XCTAssertEqual(observedActive, true)
+        XCTAssertEqual(controller.activeWindowId, WindowId(0))
+    }
+
+    func test_legacyHydrationReplayDoesNotResurrectWindowClosedLaterInSameRead() {
+        let (controller, _, _) = makeController()
+        enterTmuxModeAndStartAttachInit(controller)
+        controller.ingest(responseFrame(2))
+        controller.ingest(responseFrame(3))
+        controller.ingest(responseFrame(4))
+
+        var burst = responseFrame(5, body: [
+            "@0\t0\tb25d,120x40,0,0,0\tb25d,120x40,0,0,0\t0\tW1",
+            "@1\t1\tb25d,120x40,0,0,1\tb25d,120x40,0,0,1\t0\tW2",
+        ])
+        burst.append(contentsOf: responseFrame(6, body: [
+            "@0\t%0\t1\t/home/test\tshell\thost",
+            "@1\t%1\t1\t/home/test\tshell\thost",
+        ]))
+        burst.append(contentsOf: responseFrame(7, body: ["@0"]))
+        burst.append(contentsOf: responseFrame(8))
+        burst.append(contentsOf: Array(
+            "%layout-change @0 b25d,100x30,0,0,0 b25d,100x30,0,0,0 *\r\n".utf8
+        ))
+        burst.append(contentsOf: Array("%unlinked-window-close @0\r\n".utf8))
+        controller.ingest(burst)
+
+        XCTAssertFalse(controller.windows.contains { $0.id == WindowId(0) })
+        XCTAssertNotEqual(controller.activeWindowId, WindowId(0))
+    }
+
+    func test_legacyHydrationReplaySurvivesSynchronousNestedIngestUntilOuterClose() {
+        let (controller, _, _) = makeController()
+        enterTmuxModeAndStartAttachInit(controller)
+        controller.ingest(responseFrame(2))
+        controller.ingest(responseFrame(3))
+        controller.ingest(responseFrame(4))
+
+        controller.onBell = { _, _, _ in
+            controller.ingest(Array("%sessions-changed\r\n".utf8))
+        }
+        var burst = responseFrame(5, body: [
+            "@0\t0\tb25d,120x40,0,0,0\tb25d,120x40,0,0,0\t0\tW1",
+            "@1\t1\tb25d,120x40,0,0,1\tb25d,120x40,0,0,1\t0\tW2",
+        ])
+        burst.append(contentsOf: responseFrame(6, body: [
+            "@0\t%0\t1\t/home/test\tshell\thost",
+            "@1\t%1\t1\t/home/test\tshell\thost",
+        ]))
+        burst.append(contentsOf: responseFrame(7, body: ["@0"]))
+        burst.append(contentsOf: responseFrame(8))
+        burst.append(contentsOf: Array("%output %1 \u{07}\r\n".utf8))
+        burst.append(contentsOf: Array(
+            "%layout-change @0 b25d,100x30,0,0,0 b25d,100x30,0,0,0 *\r\n".utf8
+        ))
+        burst.append(contentsOf: Array("%unlinked-window-close @0\r\n".utf8))
+        controller.ingest(burst)
+
+        XCTAssertFalse(controller.windows.contains { $0.id == WindowId(0) })
+        XCTAssertNotEqual(controller.activeWindowId, WindowId(0))
+    }
+
+    func test_hydrationActiveQueryClassifiesLaterBellSubscriptionsFromSameRead() {
+        let (controller, _, _) = makeController()
+        enterTmuxModeAndStartAttachInit(controller)
+        controller.ingest(responseFrame(2))
+        controller.ingest(responseFrame(3))
+        controller.ingest(responseFrame(5, body: [
+            "@0\t0\tb25d,120x40,0,0,0\tb25d,120x40,0,0,0\t0\tW1",
+            "@1\t1\tb25d,120x40,0,0,1\tb25d,120x40,0,0,1\t0\tW2",
+        ]))
+        controller.ingest(responseFrame(6, body: [
+            "@0\t%0\t1\t/home/test\tshell\thost",
+            "@1\t%1\t1\t/home/test\tshell\thost",
+        ]))
+
+        var bells: [(Int, Bool)] = []
+        controller.onBell = { windowID, isActive, _ in
+            bells.append((windowID, isActive))
+        }
+        var burst = responseFrame(7, body: ["@0"])
+        burst.append(contentsOf: Array(
+            "%subscription-changed tessera-bell $0 @0 0 %0 : 0\r\n".utf8
+        ))
+        burst.append(contentsOf: Array(
+            "%subscription-changed tessera-bell $0 @0 0 %0 : 1\r\n".utf8
+        ))
+        burst.append(contentsOf: Array(
+            "%subscription-changed tessera-bell $0 @1 1 %1 : 0\r\n".utf8
+        ))
+        burst.append(contentsOf: Array(
+            "%subscription-changed tessera-bell $0 @1 1 %1 : 1\r\n".utf8
+        ))
+        controller.ingest(burst)
+
+        XCTAssertEqual(bells.count, 1)
+        XCTAssertEqual(bells.first?.0, WindowId(1).rawValue)
+        XCTAssertEqual(bells.first?.1, false)
+        XCTAssertFalse(controller.bellingWindows.contains(WindowId(0).rawValue))
+        XCTAssertTrue(controller.bellingWindows.contains(WindowId(1).rawValue))
+    }
+
     func test_windowAdd_indexGapFill_resortsToTmuxOrder() {
         // The restore-reversal repro: a session hydrates windows @11 (index
         // 0) and @14 (index 2) — the gap at index 1 was left by an earlier
@@ -1369,7 +1781,6 @@ final class TmuxControllerTests: XCTestCase {
         controller.ingest(chunk)
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8)) // history-limit
         controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8)) // pause-after
-        controller.ingest(Array("%begin 0 4 1\r\n%end 0 4 1\r\n".utf8)) // bell subscription
         controller.ingest(Array((
             "%begin 0 5 1\r\n"
             + "@11\t0\tb25d,80x24,0,0,12\tb25d,80x24,0,0,12\t0\tmain\r\n"
@@ -1383,7 +1794,6 @@ final class TmuxControllerTests: XCTestCase {
             + "%end 0 6 1\r\n"
         ).utf8)) // list-panes
         controller.ingest(Array("%begin 0 7 1\r\n%end 0 7 1\r\n".utf8)) // active-window
-        controller.ingest(Array("%begin 0 8 1\r\n%end 0 8 1\r\n".utf8)) // pane metadata subscription
 
         controller.ingest(Array("%window-add @15\r\n".utf8))
         XCTAssertEqual(controller.windows.map(\.id),
@@ -1392,7 +1802,7 @@ final class TmuxControllerTests: XCTestCase {
 
         // Details reply: @15 took the free index 1 — between @11 and @14.
         controller.ingest(Array(
-            "%begin 1 1 1\r\n1\tb25d,80x24,0,0,16\tb25d,80x24,0,0,16\t0\tbuild\r\n%end 1 1 1\r\n".utf8
+            "%begin 1 1 1\r\n__tessera_window_details__\t@15\t1\t%16\tb25d,80x24,0,0,16\tb25d,80x24,0,0,16\t0\tbuild\r\n%end 1 1 1\r\n".utf8
         ))
 
         XCTAssertEqual(controller.windows.map(\.id),
@@ -1410,9 +1820,11 @@ final class TmuxControllerTests: XCTestCase {
         )
     }
 
-    func test_windowAdd_legacyDetailsReplyWithoutIndex_stillApplies() {
-        // Defensive: a 4-field details reply (no index — pre-widening shape)
-        // must still hydrate name and layout, leaving order untouched.
+    func test_windowAdd_untaggedDetailsReplyIsIgnored() {
+        // The details reply is now the shared tagged row, so there is no
+        // "legacy shape" to tolerate — only a foreign frame to refuse. A
+        // reply that does not carry the core's tag must leave the window
+        // undescribed rather than misparse someone else's command output.
         let (controller, _, _) = makeController()
         enterTmuxModeAndDrainAttachInit(controller)
 
@@ -1421,129 +1833,9 @@ final class TmuxControllerTests: XCTestCase {
             "%begin 1 1 1\r\nb25d,80x24,0,0,10\tb25d,80x24,0,0,10\t0\teditor\r\n%end 1 1 1\r\n".utf8
         ))
 
-        XCTAssertEqual(controller.windows.first?.windowName, "editor")
-        XCTAssertNotNil(controller.windows.first?.layout)
-        XCTAssertNil(controller.windows.first?.index,
-                     "a legacy reply carries no index; it must stay unknown, not misparse")
-    }
-
-    func test_windowAdd_queryResponseDoesNotOverwriteRealRename() {
-        // Race: tmux sends %window-renamed (e.g. shell-startup
-        // auto-rename for default `new-window`) between our query and
-        // its reply. The rename arrives first, replacing the
-        // placeholder. Our subsequent query response must not overwrite
-        // the confirmed name.
-        let (controller, _, _) = makeController()
-        enterTmuxModeAndDrainAttachInit(controller)
-
-        controller.ingest(Array(
-            "%window-add @5\r\n%window-renamed @5 hello\r\n".utf8
-        ))
-        XCTAssertEqual(controller.windows.first?.name, "hello",
-                       "rename should land before the query response")
-
-        // Late query response carrying a different (stale) name.
-        controller.ingest(Array(
-            "%begin 1 1 1\r\nb25d,80x24,0,0,10\tb25d,80x24,0,0,10\t0\teditor\r\n%end 1 1 1\r\n".utf8
-        ))
-
-        XCTAssertEqual(controller.windows.first?.name, "hello",
-                       "query response must not overwrite a real %window-renamed")
-        XCTAssertEqual(controller.windows.first?.paneCount, 1,
-                       "the layout half of the reply still applies")
-    }
-
-    func test_windowAdd_queryResponseDoesNotOverwriteLayoutChange() {
-        // Race: the window is split between our query and its reply, so
-        // a real %layout-change lands first. The stale single-pane reply
-        // must not clobber the fresher two-pane layout.
-        let (controller, _, _) = makeController()
-        enterTmuxModeAndDrainAttachInit(controller)
-
-        controller.ingest(Array("%window-add @5\r\n".utf8))
-        controller.ingest(Array(
-            "%layout-change @5 8205,80x24,0,0{40x24,0,0,20,39x24,41,0,21} 8205,80x24,0,0{40x24,0,0,20,39x24,41,0,21} *\r\n".utf8
-        ))
-        XCTAssertEqual(controller.windows.first?.paneCount, 2)
-
-        // Stale single-pane reply from before the split.
-        controller.ingest(Array(
-            "%begin 1 1 1\r\nb25d,80x24,0,0,10\tb25d,80x24,0,0,10\t0\teditor\r\n%end 1 1 1\r\n".utf8
-        ))
-
-        XCTAssertEqual(controller.windows.first?.paneCount, 2,
-                       "query response must not overwrite a real %layout-change")
-    }
-
-    func test_windowAdd_doesNotQueryWhenAttachInitAlreadyHydratedTheWindow() {
-        // The attach-init list-windows response populates window names,
-        // indexes, and layouts up front. If %window-add arrives afterwards
-        // for the same id (idempotent dedupe), the handler must NOT issue a
-        // redundant details query — all three halves are already known.
-        let (controller, _, sent) = makeController()
-
-        // Drive the attach-init flow with a populated list-windows.
-        controller.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
-        controller.ingest(Array("%begin 0 1 0\r\n%end 0 1 0\r\n".utf8))
-        controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 4 1\r\n%end 0 4 1\r\n".utf8))
-        controller.ingest(Array(
-            "%begin 0 5 1\r\n@5\t0\tb25d,80x24,0,0,10\tb25d,80x24,0,0,10\t0\teditor\r\n%end 0 5 1\r\n".utf8
-        ))
-        XCTAssertEqual(controller.windows.first?.name, "editor")
-        XCTAssertNotNil(controller.windows.first?.layout)
-        XCTAssertEqual(controller.windows.first?.index, 0)
-        sent.clear()
-
-        // Idempotent windowAdd. The entry already has a name, index, and layout.
-        controller.ingest(Array("%window-add @5\r\n".utf8))
-
-        XCTAssertEqual(
-            sent.bytes,
-            [],
-            "windowAdd must NOT re-query when name, index, and layout are already known"
-        )
-    }
-
-    // MARK: - Layout-pending window (close must fail closed during the gap)
-
-    func test_windowCloseHarnessFIFO_drainsSplitBordersBeforeFreshWindowDetails() {
-        let (controller, _, sent) = makeController(controlPath: .sideChannel)
-        controller.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
-        controller.ingest(responseFrame(1, flags: 0))
-        controller.ingest(responseFrame(2))
-        controller.ingest(responseFrame(3))
-        controller.ingest(responseFrame(4, body: [
-            "@1\tb25d,80x24,0,0,10\tb25d,80x24,0,0,10\t0\teditor",
-            "@2\t8205,80x24,0,0{40x24,0,0,20,39x24,41,0,21}\t8205,80x24,0,0{40x24,0,0,20,39x24,41,0,21}\t0\tdashboard",
-            "@3\t9205,80x24,0,0{40x24,0,0,30,39x24,41,0,31}\tb25d,80x24,0,0,30\t1\tlogs",
-        ]))
-        controller.ingest(responseFrame(5, body: [
-            "@1\t%10\t1\t\teditor\thost",
-            "@2\t%20\t1\t\tdashboard-left\thost",
-            "@2\t%21\t0\t\tdashboard-right\thost",
-            "@3\t%30\t1\t\tlogs-top\thost",
-            "@3\t%31\t0\t\tlogs-bottom\thost",
-        ]))
-        controller.ingest(responseFrame(6, body: ["@2"]))
-        controller.ingest(responseFrame(7))
-        controller.ingest(Array("%window-add @4\r\n%window-renamed @4 scratch\r\n".utf8))
-        XCTAssertTrue(controller.isWindowLayoutPending(WindowId(4)))
-
-        // @2 and @3 each queue pane-border-status + pane-border-format after
-        // hydration. Their four replies precede @4's details reply on the
-        // command FIFO, even though the window-add notification arrives later.
-        controller.ingest(responseFrame(8))
-        controller.ingest(responseFrame(9))
-        controller.ingest(responseFrame(10))
-        controller.ingest(responseFrame(11))
-        XCTAssertTrue(controller.isWindowLayoutPending(WindowId(4)))
-        controller.ingest(responseFrame(12))
-
-        XCTAssertFalse(controller.isWindowLayoutPending(WindowId(4)))
-        XCTAssertEqual(controller.windows.first(where: { $0.id == WindowId(4) })?.paneCount, 1)
-        XCTAssertEqual(sent.chunks.count, 11)
+        XCTAssertEqual(controller.windows.first?.windowName, nil)
+        XCTAssertNil(controller.windows.first?.layout)
+        XCTAssertNil(controller.windows.first?.index)
     }
 
     func test_windowAdd_layoutPendingUntilQueryReply() {
@@ -1559,7 +1851,7 @@ final class TmuxControllerTests: XCTestCase {
                       "pane count is provisional until the details reply lands")
 
         controller.ingest(Array(
-            "%begin 1 1 1\r\n8205,80x24,0,0{40x24,0,0,20,39x24,41,0,21}\t8205,80x24,0,0{40x24,0,0,20,39x24,41,0,21}\t0\tdashboard\r\n%end 1 1 1\r\n".utf8
+            "%begin 1 1 1\r\n__tessera_window_details__\t@5\t0\t%20\t8205,80x24,0,0{40x24,0,0,20,39x24,41,0,21}\t8205,80x24,0,0{40x24,0,0,20,39x24,41,0,21}\t0\tdashboard\r\n%end 1 1 1\r\n".utf8
         ))
 
         XCTAssertFalse(controller.isWindowLayoutPending(WindowId(5)),
@@ -1660,7 +1952,7 @@ final class TmuxControllerTests: XCTestCase {
 
         // The second query's reply carries the recreated window's truth.
         controller.ingest(Array(
-            "%begin 1 2 1\r\n8205,80x24,0,0{40x24,0,0,20,39x24,41,0,21}\t8205,80x24,0,0{40x24,0,0,20,39x24,41,0,21}\t0\tdashboard\r\n%end 1 2 1\r\n".utf8
+            "%begin 1 2 1\r\n__tessera_window_details__\t@5\t0\t%20\t8205,80x24,0,0{40x24,0,0,20,39x24,41,0,21}\t8205,80x24,0,0{40x24,0,0,20,39x24,41,0,21}\t0\tdashboard\r\n%end 1 2 1\r\n".utf8
         ))
         XCTAssertFalse(controller.isWindowLayoutPending(WindowId(5)))
         XCTAssertEqual(controller.windows.first?.paneCount, 2)
@@ -1748,7 +2040,9 @@ final class TmuxControllerTests: XCTestCase {
 
         controller.ingest(Array("%window-add @5\r\n".utf8))
         // Feed the details query response — this locks the window name.
-        controller.ingest(Array("%begin 0 99 1\r\n\t\t0\teditor\r\n%end 0 99 1\r\n".utf8))
+        controller.ingest(Array(
+            "%begin 0 99 1\r\n__tessera_window_details__\t@5\t0\t%10\tb25d,80x24,0,0,10\t\t0\teditor\r\n%end 0 99 1\r\n".utf8
+        ))
         XCTAssertEqual(controller.windows.first?.name, "editor")
 
         controller.updateActiveWindowName("htop - monitoring")
@@ -1764,7 +2058,9 @@ final class TmuxControllerTests: XCTestCase {
 
         // Named window: queryWindowDetails locks the name.
         controller.ingest(Array("%window-add @5\r\n".utf8))
-        controller.ingest(Array("%begin 0 99 1\r\n\t\t0\teditor\r\n%end 0 99 1\r\n".utf8))
+        controller.ingest(Array(
+            "%begin 0 99 1\r\n__tessera_window_details__\t@5\t0\t%10\tb25d,80x24,0,0,10\t\t0\teditor\r\n%end 0 99 1\r\n".utf8
+        ))
         XCTAssertEqual(controller.windows.first?.name, "editor")
 
         controller.updateActiveWindowName("pane-title")
@@ -1834,7 +2130,10 @@ final class TmuxControllerTests: XCTestCase {
 
         controller.newWindow()
 
-        XCTAssertEqual(sent.bytes, Array("new-window -e COLORTERM=truecolor\n".utf8))
+        XCTAssertEqual(
+            sent.bytes,
+            Array("new-window -a -t '{end}' -e COLORTERM=truecolor\n".utf8)
+        )
     }
 
     func test_newWindow_replaysCachedClientSizeBeforeCommand() {
@@ -1847,7 +2146,262 @@ final class TmuxControllerTests: XCTestCase {
 
         XCTAssertEqual(
             String(decoding: sent.bytes, as: UTF8.self),
-            "refresh-client -C 166,54\nnew-window -e COLORTERM=truecolor\n"
+            "refresh-client -C 166,54\nnew-window -a -t '{end}' -e COLORTERM=truecolor\n"
+        )
+    }
+
+    func test_moveWindow_preservesEveryGroupSelectionAndWaitsForFullRefresh() async {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        await enterHydratedWindowOrderFixture(controller, sent: sent)
+
+        controller.moveWindow(WindowId(3), to: 0)
+        XCTAssertEqual(
+            String(decoding: sent.bytes, as: UTF8.self),
+            TmuxSessionGroupQuery.command + "\n"
+        )
+
+        let groupRows = [
+            "$4\tgroup-a\t@2",
+            "$5\tgroup-a\t@1",
+            "$6\tgroup-a\t@3",
+            "$9\tother\t@9",
+        ]
+        sent.clear()
+        controller.ingest(responseFrame(11, body: groupRows))
+        XCTAssertEqual(controller.windows.map(\.id), [WindowId(3), WindowId(1), WindowId(2)])
+        XCTAssertTrue(controller.isWindowReorderPending)
+        XCTAssertEqual(
+            String(decoding: sent.bytes, as: UTF8.self),
+            "move-window -d -b -s $4:@3 -t $4:@1\n"
+                + "select-window -t $5:@1\n"
+                + "select-window -t $6:@3\n"
+                + "select-window -t $4:@2\n"
+        )
+
+        sent.clear()
+        for number in 12...15 { controller.ingest(responseFrame(number)) }
+        XCTAssertTrue(
+            controller.isWindowReorderPending,
+            "command ACK must not confirm optimistic order"
+        )
+        XCTAssertEqual(
+            String(decoding: sent.bytes, as: UTF8.self),
+            TmuxRuntimeHydrationQuery.commands[0] + "\n"
+        )
+
+        controller.ingest(responseFrame(16, body: [
+            "__tessera_windows__\t@3\t0\t%13\tb25d,80x24,0,0,13\tb25d,80x24,0,0,13\t0\tthree",
+            "__tessera_windows__\t@1\t1\t%11\tb25d,80x24,0,0,11\tb25d,80x24,0,0,11\t0\tone",
+            "__tessera_windows__\t@2\t2\t%12\tb25d,80x24,0,0,12\tb25d,80x24,0,0,12\t0\ttwo",
+        ]))
+        XCTAssertFalse(controller.isWindowReorderPending)
+        XCTAssertNil(controller.windowOrderError)
+        XCTAssertEqual(controller.windows.map(\.id), [WindowId(3), WindowId(1), WindowId(2)])
+    }
+
+    func test_moveWindow_rejectsStalePlanAfterExternalOrderChangeDuringDiscovery() async {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        await enterHydratedWindowOrderFixture(controller, sent: sent)
+        controller.moveWindow(WindowId(3), to: 0)
+        controller.ingest(Array("%subscription-changed tessera-window-order $4 - - - : 0=@2* 1=@1 2=@3 \r\n".utf8))
+        sent.clear()
+        controller.ingest(responseFrame(11, body: ["$4\t\t@2"]))
+        XCTAssertFalse(String(decoding: sent.bytes, as: UTF8.self).contains("move-window"))
+        XCTAssertFalse(controller.isWindowReorderPending)
+        XCTAssertEqual(controller.windows.map(\.id), [WindowId(2), WindowId(1), WindowId(3)])
+        XCTAssertNotNil(controller.windowOrderError)
+    }
+
+    func test_moveWindow_failedPeerRestoreStillReconcilesSuccessfulMove() async {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        await enterHydratedWindowOrderFixture(controller, sent: sent)
+        controller.moveWindow(WindowId(3), to: 0)
+        controller.ingest(responseFrame(11, body: ["$4\tgroup\t@2", "$5\tgroup\t@1"]))
+        controller.ingest(responseFrame(12))
+        controller.ingest(errorFrame(13, body: ["can't find session: $5"]))
+        controller.ingest(responseFrame(14))
+        XCTAssertTrue(controller.isWindowReorderPending)
+        XCTAssertNil(controller.windowOrderError)
+        controller.ingest(responseFrame(15, body: [
+            "__tessera_windows__\t@3\t0\t%13\tb25d,80x24,0,0,13\tb25d,80x24,0,0,13\t0\tthree",
+            "__tessera_windows__\t@1\t1\t%11\tb25d,80x24,0,0,11\tb25d,80x24,0,0,11\t0\tone",
+            "__tessera_windows__\t@2\t2\t%12\tb25d,80x24,0,0,12\tb25d,80x24,0,0,12\t0\ttwo",
+        ]))
+        XCTAssertFalse(controller.isWindowReorderPending)
+        XCTAssertNil(controller.windowOrderError)
+        XCTAssertEqual(controller.windows.first?.id, WindowId(3))
+    }
+
+    func test_orderSubscriptionIsVersionGatedAndRegisteredOnFreshConnection() async {
+        for version in ["3.1c", "3.6a", "next-3.6", "openbsd-7.6"] {
+            let (controller, _, sent) = makeController(controlPath: .sideChannel)
+            await enterHydratedWindowOrderFixture(controller, sent: sent, version: version)
+        }
+    }
+
+    func test_windowOrderSubscriptionAppliesSilentExternalSwap() async {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        await enterHydratedWindowOrderFixture(controller, sent: sent)
+
+        controller.ingest(Array(
+            "%subscription-changed tessera-window-order $4 - - - : 0=@1 1=@3 2=@2* \r\n".utf8
+        ))
+
+        XCTAssertEqual(controller.windows.map(\.id), [WindowId(1), WindowId(3), WindowId(2)])
+        XCTAssertEqual(controller.windows.map(\.index), [0, 1, 2])
+        XCTAssertEqual(controller.activeWindowId, WindowId(2))
+        XCTAssertTrue(sent.bytes.isEmpty)
+    }
+
+    func test_moveWindow_errorAbandonsOptimismSurfacesErrorAndRefreshes() async {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        await enterHydratedWindowOrderFixture(controller, sent: sent)
+
+        controller.moveWindow(WindowId(3), to: 0)
+        controller.ingest(responseFrame(11, body: ["$4\t\t@2"]))
+        XCTAssertEqual(controller.windows.map(\.id), [WindowId(3), WindowId(1), WindowId(2)])
+
+        sent.clear()
+        controller.ingest(errorFrame(12, body: ["index in use"]))
+        controller.ingest(responseFrame(13)) // attached-session restore
+        XCTAssertFalse(controller.isWindowReorderPending)
+        XCTAssertEqual(controller.windowOrderError, "index in use")
+        XCTAssertEqual(controller.windows.map(\.id), [WindowId(1), WindowId(2), WindowId(3)])
+        XCTAssertEqual(
+            String(decoding: sent.bytes, as: UTF8.self),
+            TmuxRuntimeHydrationQuery.commands[0] + "\n"
+        )
+    }
+
+    func test_moveWindow_deadlineAbandonsQuietPreflightAndRequestsTruth() async {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        await enterHydratedWindowOrderFixture(controller, sent: sent)
+        controller.windowOrderDeadlineInterval = 0.02
+
+        controller.moveWindow(WindowId(3), to: 0)
+        XCTAssertEqual(controller.windows.map(\.id), [WindowId(3), WindowId(1), WindowId(2)])
+        XCTAssertTrue(controller.isWindowReorderPending)
+
+        try? await Task.sleep(for: .milliseconds(60))
+
+        XCTAssertFalse(controller.isWindowReorderPending)
+        XCTAssertEqual(controller.windows.map(\.id), [WindowId(1), WindowId(2), WindowId(3)])
+        XCTAssertEqual(
+            controller.windowOrderError,
+            "The tmux window order did not update in time."
+        )
+        let wire = String(decoding: sent.bytes, as: UTF8.self)
+        XCTAssertTrue(wire.contains(TmuxSessionGroupQuery.command + "\n"))
+        XCTAssertTrue(wire.contains(TmuxRuntimeHydrationQuery.commands[0] + "\n"))
+    }
+
+    func test_moveWindow_eachCausalPhaseGetsItsOwnDeadline() async {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        await enterHydratedWindowOrderFixture(controller, sent: sent)
+        controller.windowOrderDeadlineInterval = 0.2
+        controller.moveWindow(WindowId(3), to: 0)
+        try? await Task.sleep(for: .milliseconds(120))
+        controller.ingest(responseFrame(11, body: ["$4\t\t@2"]))
+        try? await Task.sleep(for: .milliseconds(120))
+        XCTAssertTrue(controller.isWindowReorderPending, "healthy discovery must not consume the command phase deadline")
+        controller.ingest(responseFrame(12))
+        controller.ingest(responseFrame(13))
+        try? await Task.sleep(for: .milliseconds(120))
+        XCTAssertTrue(controller.isWindowReorderPending, "the correlated truth query has its own deadline")
+        XCTAssertNil(controller.windowOrderError)
+    }
+
+    func test_renumberWindows_quietDiscoveryHasBoundedDeadline() async {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        await enterHydratedWindowOrderFixture(controller, sent: sent)
+        controller.windowOrderDeadlineInterval = 0.02
+        controller.renumberWindows()
+        XCTAssertTrue(controller.isWindowReorderPending)
+        try? await Task.sleep(for: .milliseconds(60))
+        XCTAssertFalse(controller.isWindowReorderPending)
+        XCTAssertNotNil(controller.windowOrderError)
+    }
+
+    func test_moveWindow_authorityChangeDuringPreflightAbandonsImmediately() async {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        await enterHydratedWindowOrderFixture(controller, sent: sent)
+        controller.gridAuthorityIdentity = .init(id: "local-device", displayName: "iPad")
+
+        controller.moveWindow(WindowId(3), to: 0)
+        XCTAssertTrue(controller.isWindowReorderPending)
+        XCTAssertEqual(controller.windows.map(\.id), [WindowId(3), WindowId(1), WindowId(2)])
+
+        controller.ingest(Array(
+            "%subscription-changed tessera-authority $4 @2 0 %12 : v1 peer-device 3 iPhone\r\n".utf8
+        ))
+        sent.clear()
+        controller.ingest(responseFrame(11, body: ["$4\t\t@2"]))
+
+        XCTAssertFalse(controller.isWindowReorderPending)
+        XCTAssertEqual(controller.windows.map(\.id), [WindowId(1), WindowId(2), WindowId(3)])
+        XCTAssertEqual(
+            controller.windowOrderError,
+            "The tmux session changed before the window could move."
+        )
+        XCTAssertEqual(
+            String(decoding: sent.bytes, as: UTF8.self),
+            TmuxRuntimeHydrationQuery.commands[0] + "\n"
+        )
+    }
+
+    func test_renumberWindows_discoversEveryMemberAndRestoresAttachedLast() async {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        await enterHydratedWindowOrderFixture(controller, sent: sent)
+
+        controller.renumberWindows()
+        XCTAssertEqual(
+            String(decoding: sent.bytes, as: UTF8.self),
+            TmuxSessionGroupQuery.command + "\n"
+        )
+
+        sent.clear()
+        controller.ingest(responseFrame(11, body: [
+            "$4\tgroup-a\t@2",
+            "$5\tgroup-a\t@1",
+            "$6\tgroup-a\t@3",
+        ]))
+        XCTAssertEqual(
+            String(decoding: sent.bytes, as: UTF8.self),
+            "move-window -r -t '$4'\n"
+                + "move-window -r -t '$5'\n"
+                + "move-window -r -t '$6'\n"
+                + "select-window -t $5:@1\n"
+                + "select-window -t $6:@3\n"
+                + "select-window -t $4:@2\n"
+        )
+    }
+
+    func test_renumberWindows_allowsSingleWindowWithGappedIndex() async {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        await enterHydratedWindowOrderFixture(
+            controller,
+            sent: sent,
+            windowRows: [
+                "@7\t8\tb25d,80x24,0,0,17\tb25d,80x24,0,0,17\t0\tonly",
+            ],
+            activeWindowID: WindowId(7),
+            expectedCanReorder: false,
+            subscriptionAnchor: WindowId(7)
+        )
+
+        XCTAssertFalse(controller.canReorderWindows)
+        XCTAssertTrue(controller.canTidyWindows)
+        controller.renumberWindows()
+        XCTAssertEqual(
+            String(decoding: sent.bytes, as: UTF8.self),
+            TmuxSessionGroupQuery.command + "\n"
+        )
+
+        sent.clear()
+        controller.ingest(responseFrame(11, body: ["$4\t\t@7"]))
+        XCTAssertEqual(
+            String(decoding: sent.bytes, as: UTF8.self),
+            "move-window -r -t '$4'\nselect-window -t $4:@7\n"
         )
     }
 
@@ -1936,9 +2490,8 @@ final class TmuxControllerTests: XCTestCase {
 
         XCTAssertEqual(sent.bytes, [], "a stale preserved tab must not emit a targeted kill")
 
-        // pause-after, bell subscription, then authoritative list-windows.
+        // pause-after, then authoritative list-windows.
         controller.ingest(Array("%begin 0 11 1\r\n%end 0 11 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 12 1\r\n%end 0 12 1\r\n".utf8))
         controller.ingest(Array(
             "%begin 0 13 1\r\n@7\tb25d,80x24,0,0,70\tb25d,80x24,0,0,70\t0\tlogs\r\n%end 0 13 1\r\n".utf8
         ))
@@ -2026,6 +2579,463 @@ final class TmuxControllerTests: XCTestCase {
         sent.clear()
         controller.selectWindow(WindowId(99))
         XCTAssertEqual(sent.bytes, [])
+    }
+
+    /// W2: once tmux has named our session, every tab switch names it too,
+    /// so a grouped sibling that was active more recently (the mosh view
+    /// session, a user's `tmux new -t`) never receives our switch.
+    func test_tabSwitchesNameOurOwnSessionOnceKnown() {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        controller.ingest(Array(
+            "%session-changed $3 dev\r\n%window-add @5\r\n%window-add @7\r\n".utf8
+        ))
+        var responseNumber = 300
+        for _ in 0..<30 where controller._debugPendingCommandCount > 0 {
+            controller.ingest(responseFrame(responseNumber))
+            responseNumber += 1
+        }
+        sent.clear()
+
+        controller.selectWindow(WindowId(7))
+        XCTAssertEqual(sent.bytes, Array("select-window -t '$3:@7'\n".utf8))
+
+        sent.clear()
+        controller.selectWindow(atPosition: 1)
+        XCTAssertEqual(sent.bytes, Array("select-window -t '$3:@5'\n".utf8))
+    }
+
+    func test_sideChannelSelectWindowMirrorsToExactlyVerifiedVisibleMoshClient() {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        enterTmuxModeAndDrainAttachInit(controller)
+        controller.gridAuthorityIdentity = .init(id: "device-1", displayName: "iPhone")
+        controller.ingest(Array(
+            ("%session-changed $0 dev\r\n" +
+             "%window-add @5\r\n%window-add @7\r\n" +
+             "%session-window-changed $0 @5\r\n").utf8
+        ))
+        var responseNumber = 100
+        for _ in 0..<30 where controller._debugPendingCommandCount > 0 {
+            controller.ingest(responseFrame(responseNumber))
+            responseNumber += 1
+        }
+        XCTAssertEqual(controller._debugPendingCommandCount, 0, "fixture command queue did not drain")
+        sent.clear()
+
+        controller.selectWindow(WindowId(7))
+
+        XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).contains("select-window -t '$0:@7'\n"))
+        XCTAssertFalse(String(decoding: sent.bytes, as: UTF8.self).contains("show-options -qv"))
+        controller.ingest(responseFrame(responseNumber)) // select-window
+        responseNumber += 1
+        XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).contains(
+            TmuxRuntimeHydrationQuery.activeWindowCommand + "\n"
+        ))
+        controller.ingest(responseFrame(
+            responseNumber,
+            body: ["__tessera_active_window__\t@7"]
+        ))
+        responseNumber += 1
+        XCTAssertEqual(controller.activeWindowId, WindowId(7))
+        XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).contains(
+            "show-options -qv -t $0 @tessera-visible-device-1\n"
+        ))
+        let stamped = "/dev/ttys-visible|222|1700000002"
+        controller.ingest(responseFrame(responseNumber, body: [stamped]))
+        responseNumber += 1
+        XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).contains(
+            "list-clients -t $0 -F '#{client_name}|#{client_pid}|#{client_created}'\n"
+        ))
+        controller.ingest(responseFrame(responseNumber, body: [
+            "/dev/ttys-control|111|1700000001",
+            stamped,
+        ]))
+
+        XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).contains(
+            "switch-client -c '/dev/ttys-visible' -t '$0:@7'\n"
+        ), "wire commands:\n\(String(decoding: sent.bytes, as: UTF8.self))")
+    }
+
+    func test_sideChannelNewWindowMirrorsItsDynamicallyProvenVisibleTarget() {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        enterTmuxModeAndDrainAttachInit(controller)
+        controller.gridAuthorityIdentity = .init(id: "device-1", displayName: "iPhone")
+        controller.ingest(Array(
+            "%session-changed $0 dev\r\n%window-add @5\r\n%session-window-changed $0 @5\r\n".utf8
+        ))
+        var responseNumber = 150
+        for _ in 0..<30 where controller._debugPendingCommandCount > 0 {
+            controller.ingest(responseFrame(responseNumber))
+            responseNumber += 1
+        }
+        sent.clear()
+
+        controller.newWindow()
+        controller.ingest(Array(
+            "%window-add @7\r\n%session-window-changed $0 @7\r\n".utf8
+        ))
+        controller.ingest(responseFrame(responseNumber))
+        responseNumber += 1
+        drainResponses(
+            before: TmuxRuntimeHydrationQuery.activeWindowCommand,
+            controller: controller,
+            responseNumber: &responseNumber
+        )
+        controller.ingest(responseFrame(
+            responseNumber,
+            body: ["__tessera_active_window__\t@7"]
+        ))
+        responseNumber += 1
+        let stamped = "/dev/ttys-visible|222|1700000002"
+        controller.ingest(responseFrame(responseNumber, body: [stamped]))
+        responseNumber += 1
+        controller.ingest(responseFrame(responseNumber, body: [stamped]))
+
+        let commands = String(decoding: sent.bytes, as: UTF8.self)
+        XCTAssertTrue(commands.hasPrefix("new-window -a -t '$0:{end}' -e COLORTERM=truecolor\n"))
+        XCTAssertTrue(commands.contains(TmuxRuntimeHydrationQuery.activeWindowCommand + "\n"))
+        XCTAssertTrue(
+            commands.contains("switch-client -c '/dev/ttys-visible' -t '$0:@7'\n"),
+            "wire commands:\n\(commands)"
+        )
+    }
+
+    func test_sideChannelNextAndPreviousWindowUseDynamicActiveWindowProof() {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        enterTmuxModeAndDrainAttachInit(controller)
+        controller.gridAuthorityIdentity = .init(id: "device-1", displayName: "iPhone")
+        controller.ingest(Array(
+            ("%session-changed $0 dev\r\n" +
+             "%window-add @5\r\n%window-add @7\r\n" +
+             "%session-window-changed $0 @5\r\n").utf8
+        ))
+        var responseNumber = 170
+        for _ in 0..<30 where controller._debugPendingCommandCount > 0 {
+            controller.ingest(responseFrame(responseNumber))
+            responseNumber += 1
+        }
+        sent.clear()
+
+        controller.nextWindow()
+        controller.ingest(Array("%session-window-changed $0 @7\r\n".utf8))
+        controller.ingest(responseFrame(responseNumber))
+        responseNumber += 1
+        drainResponses(
+            before: TmuxRuntimeHydrationQuery.activeWindowCommand,
+            controller: controller,
+            responseNumber: &responseNumber
+        )
+        controller.ingest(responseFrame(
+            responseNumber,
+            body: ["__tessera_active_window__\t@7"]
+        ))
+        responseNumber += 1
+        let stamped = "/dev/ttys-visible|222|1700000002"
+        controller.ingest(responseFrame(responseNumber, body: [stamped]))
+        responseNumber += 1
+        controller.ingest(responseFrame(responseNumber, body: [stamped]))
+        responseNumber += 1
+        XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).contains(
+            "switch-client -c '/dev/ttys-visible' -t '$0:@7'\n"
+        ))
+
+        // Drain the final switch reply before exercising the same dynamic
+        // pipeline in the opposite direction.
+        controller.ingest(responseFrame(responseNumber))
+        responseNumber += 1
+        sent.clear()
+        controller.previousWindow()
+        controller.ingest(Array("%session-window-changed $0 @5\r\n".utf8))
+        controller.ingest(responseFrame(responseNumber))
+        responseNumber += 1
+        drainResponses(
+            before: TmuxRuntimeHydrationQuery.activeWindowCommand,
+            controller: controller,
+            responseNumber: &responseNumber
+        )
+        controller.ingest(responseFrame(
+            responseNumber,
+            body: ["__tessera_active_window__\t@5"]
+        ))
+        responseNumber += 1
+        controller.ingest(responseFrame(responseNumber, body: [stamped]))
+        responseNumber += 1
+        controller.ingest(responseFrame(responseNumber, body: [stamped]))
+
+        XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).contains(
+            "switch-client -c '/dev/ttys-visible' -t '$0:@5'\n"
+        ), "wire commands:\n\(String(decoding: sent.bytes, as: UTF8.self))")
+    }
+
+    func test_sideChannelKillCurrentWindowMirrorsItsSuccessor() {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        enterTmuxModeAndDrainAttachInit(controller)
+        controller.gridAuthorityIdentity = .init(id: "device-1", displayName: "iPhone")
+        controller.ingest(Array(
+            ("%session-changed $0 dev\r\n" +
+             "%window-add @5\r\n%window-add @7\r\n" +
+             "%session-window-changed $0 @5\r\n").utf8
+        ))
+        var responseNumber = 190
+        for _ in 0..<30 where controller._debugPendingCommandCount > 0 {
+            controller.ingest(responseFrame(responseNumber))
+            responseNumber += 1
+        }
+        sent.clear()
+
+        controller.killCurrentWindow()
+        controller.ingest(Array(
+            "%unlinked-window-close @5\r\n%session-window-changed $0 @7\r\n".utf8
+        ))
+        controller.ingest(responseFrame(responseNumber))
+        responseNumber += 1
+        drainResponses(
+            before: TmuxRuntimeHydrationQuery.activeWindowCommand,
+            controller: controller,
+            responseNumber: &responseNumber
+        )
+        controller.ingest(responseFrame(
+            responseNumber,
+            body: ["__tessera_active_window__\t@7"]
+        ))
+        responseNumber += 1
+        let stamped = "/dev/ttys-visible|222|1700000002"
+        controller.ingest(responseFrame(responseNumber, body: [stamped]))
+        responseNumber += 1
+        controller.ingest(responseFrame(responseNumber, body: [stamped]))
+
+        let commands = String(decoding: sent.bytes, as: UTF8.self)
+        XCTAssertTrue(commands.hasPrefix("kill-window\n"))
+        XCTAssertTrue(
+            commands.contains("switch-client -c '/dev/ttys-visible' -t '$0:@7'\n"),
+            "wire commands:\n\(commands)"
+        )
+    }
+
+    func test_sideChannelTargetedKillMirrorsOnlyWhenPreflightProvesItWasActive() {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        enterTmuxModeAndDrainAttachInit(controller)
+        controller.gridAuthorityIdentity = .init(id: "device-1", displayName: "iPhone")
+        controller.ingest(Array(
+            ("%session-changed $0 dev\r\n" +
+             "%window-add @5\r\n%window-add @7\r\n" +
+             "%session-window-changed $0 @5\r\n").utf8
+        ))
+        var responseNumber = 210
+        for _ in 0..<30 where controller._debugPendingCommandCount > 0 {
+            controller.ingest(responseFrame(responseNumber))
+            responseNumber += 1
+        }
+        sent.clear()
+
+        controller.killWindow(WindowId(7))
+        controller.ingest(responseFrame(
+            responseNumber,
+            body: ["__tessera_active_window__\t@5"]
+        ))
+        responseNumber += 1
+        XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).hasSuffix(
+            "kill-window -t @7\n"
+        ))
+        controller.ingest(responseFrame(responseNumber))
+        responseNumber += 1
+        XCTAssertEqual(
+            String(decoding: sent.bytes, as: UTF8.self)
+                .components(separatedBy: TmuxRuntimeHydrationQuery.activeWindowCommand).count - 1,
+            1,
+            "closing an inactive target must stop after its preflight"
+        )
+        XCTAssertFalse(String(decoding: sent.bytes, as: UTF8.self).contains("switch-client"))
+
+        sent.clear()
+        controller.killWindow(WindowId(5))
+        controller.ingest(responseFrame(
+            responseNumber,
+            body: ["__tessera_active_window__\t@5"]
+        ))
+        responseNumber += 1
+        controller.ingest(Array(
+            "%unlinked-window-close @5\r\n%session-window-changed $0 @7\r\n".utf8
+        ))
+        controller.ingest(responseFrame(responseNumber))
+        responseNumber += 1
+        drainResponses(
+            before: TmuxRuntimeHydrationQuery.activeWindowCommand,
+            controller: controller,
+            responseNumber: &responseNumber
+        )
+        controller.ingest(responseFrame(
+            responseNumber,
+            body: ["__tessera_active_window__\t@7"]
+        ))
+        responseNumber += 1
+        let stamped = "/dev/ttys-visible|222|1700000002"
+        controller.ingest(responseFrame(responseNumber, body: [stamped]))
+        responseNumber += 1
+        controller.ingest(responseFrame(responseNumber, body: [stamped]))
+
+        let activeKillCommands = String(decoding: sent.bytes, as: UTF8.self)
+        XCTAssertTrue(activeKillCommands.contains("kill-window -t @5\n"))
+        XCTAssertTrue(activeKillCommands.contains(
+            "switch-client -c '/dev/ttys-visible' -t '$0:@7'\n"
+        ), "wire commands:\n\(activeKillCommands)")
+    }
+
+    func test_sideChannelTargetedKillDropsWhenPreflightContextBecomesStale() {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        enterTmuxModeAndDrainAttachInit(controller)
+        controller.gridAuthorityIdentity = .init(id: "device-1", displayName: "iPhone")
+        controller.ingest(Array(
+            "%session-changed $0 dev\r\n%window-add @5\r\n%session-window-changed $0 @5\r\n".utf8
+        ))
+        var responseNumber = 230
+        for _ in 0..<30 where controller._debugPendingCommandCount > 0 {
+            controller.ingest(responseFrame(responseNumber))
+            responseNumber += 1
+        }
+        sent.clear()
+
+        controller.killWindow(WindowId(5))
+        controller.sideChannelDisconnected()
+        controller.ingest(responseFrame(
+            responseNumber,
+            body: ["__tessera_active_window__\t@5"]
+        ))
+
+        XCTAssertFalse(
+            String(decoding: sent.bytes, as: UTF8.self).contains("kill-window"),
+            "a disconnect or authority change during preflight must revoke the destructive mutation"
+        )
+    }
+
+    func test_sideChannelSelectWindowRejectsDetachedOrReusedVisibleClientIdentity() {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        enterTmuxModeAndDrainAttachInit(controller)
+        controller.gridAuthorityIdentity = .init(id: "device-1", displayName: "iPhone")
+        controller.ingest(Array(
+            "%session-changed $0 dev\r\n%window-add @7\r\n%session-window-changed $0 @7\r\n".utf8
+        ))
+        var responseNumber = 200
+        for _ in 0..<30 where controller._debugPendingCommandCount > 0 {
+            controller.ingest(responseFrame(responseNumber))
+            responseNumber += 1
+        }
+        XCTAssertEqual(controller._debugPendingCommandCount, 0, "fixture command queue did not drain")
+        sent.clear()
+
+        controller.selectWindow(WindowId(7))
+        controller.ingest(responseFrame(responseNumber))
+        responseNumber += 1
+        controller.ingest(responseFrame(
+            responseNumber,
+            body: ["__tessera_active_window__\t@7"]
+        ))
+        responseNumber += 1
+        controller.ingest(responseFrame(
+            responseNumber,
+            body: ["/dev/ttys-visible|222|1700000002"]
+        ))
+        responseNumber += 1
+        controller.ingest(responseFrame(
+            responseNumber,
+            body: ["/dev/ttys-visible|999|1700000999"]
+        ))
+
+        XCTAssertFalse(String(decoding: sent.bytes, as: UTF8.self).contains("switch-client"))
+    }
+
+    func test_sideChannelSelectWindowDoesNotOverrideANewerExternalSelection() {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        enterTmuxModeAndDrainAttachInit(controller)
+        controller.gridAuthorityIdentity = .init(id: "device-1", displayName: "iPhone")
+        controller.ingest(Array(
+            ("%session-changed $0 dev\r\n" +
+             "%window-add @7\r\n%window-add @9\r\n" +
+             "%session-window-changed $0 @7\r\n").utf8
+        ))
+        var responseNumber = 300
+        for _ in 0..<30 where controller._debugPendingCommandCount > 0 {
+            controller.ingest(responseFrame(responseNumber))
+            responseNumber += 1
+        }
+        XCTAssertEqual(controller._debugPendingCommandCount, 0, "fixture command queue did not drain")
+        sent.clear()
+
+        controller.selectWindow(WindowId(7))
+        controller.ingest(responseFrame(responseNumber))
+        responseNumber += 1
+
+        // A different attached client advances the shared session before the
+        // causal query answers. The query now names @9, so the old local
+        // intent must not even begin the visible-client identity proof.
+        controller.ingest(Array("%session-window-changed $0 @9\r\n".utf8))
+        controller.ingest(responseFrame(
+            responseNumber,
+            body: ["__tessera_active_window__\t@9"]
+        ))
+
+        XCTAssertFalse(String(decoding: sent.bytes, as: UTF8.self).contains("switch-client"))
+        XCTAssertFalse(String(decoding: sent.bytes, as: UTF8.self).contains("show-options -qv"))
+    }
+
+    func test_sideChannelRapidSelectWindowOnlyMirrorsNewestIntent() {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        enterTmuxModeAndDrainAttachInit(controller)
+        controller.gridAuthorityIdentity = .init(id: "device-1", displayName: "iPhone")
+        controller.ingest(Array(
+            ("%session-changed $0 dev\r\n" +
+             "%window-add @5\r\n%window-add @7\r\n" +
+             "%session-window-changed $0 @7\r\n").utf8
+        ))
+        var responseNumber = 400
+        for _ in 0..<30 where controller._debugPendingCommandCount > 0 {
+            controller.ingest(responseFrame(responseNumber))
+            responseNumber += 1
+        }
+        XCTAssertEqual(controller._debugPendingCommandCount, 0, "fixture command queue did not drain")
+        sent.clear()
+
+        controller.selectWindow(WindowId(5))
+        controller.selectWindow(WindowId(7))
+
+        let stamped = "/dev/ttys-visible|222|1700000002"
+        controller.ingest(responseFrame(responseNumber)) // select @5
+        responseNumber += 1
+        controller.ingest(responseFrame(responseNumber)) // select @7
+        responseNumber += 1
+        controller.ingest(responseFrame(
+            responseNumber,
+            body: ["__tessera_active_window__\t@7"]
+        )) // current active-window proof
+        responseNumber += 1
+        controller.ingest(responseFrame(responseNumber, body: [stamped])) // current option @7
+        responseNumber += 1
+        controller.ingest(responseFrame(responseNumber, body: [stamped])) // attached-client proof
+
+        let commands = String(decoding: sent.bytes, as: UTF8.self)
+        XCTAssertFalse(commands.contains("switch-client -c '/dev/ttys-visible' -t '$0:@5'"))
+        XCTAssertEqual(
+            commands.components(separatedBy: "switch-client -c '/dev/ttys-visible' -t '$0:@7'").count - 1,
+            1
+        )
+    }
+
+    func test_visibleMoshClientIdentityParserRejectsMalformedTuples() {
+        XCTAssertEqual(
+            TmuxController.visibleClientName(
+                from: "/dev/ttys-visible|222|1700000002"
+            ),
+            "/dev/ttys-visible"
+        )
+        XCTAssertNil(TmuxController.visibleClientName(from: "/dev/ttys-visible|222"))
+        XCTAssertNil(TmuxController.visibleClientName(from: "|222|1700000002"))
+        XCTAssertNil(TmuxController.visibleClientName(from: "/dev/ttys-visible|not-pid|1700000002"))
+        XCTAssertNil(TmuxController.visibleClientName(from: "/dev/ttys-visible|٢٢٢|1700000002"))
+        XCTAssertNil(TmuxController.visibleClientName(from: "/dev/ttys-visible|222|0"))
+        XCTAssertNil(TmuxController.visibleClientName(from: "/dev/ttys\u{0}-visible|222|1700000002"))
+        XCTAssertNil(TmuxController.visibleClientName(
+            from: "\(String(repeating: "x", count: 101))|222|1700000002"
+        ))
     }
 
     // MARK: - Command-response (§3.2 commit C)
@@ -2120,6 +3130,23 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertEqual(linesB, ["beta", "gamma"])
     }
 
+    func test_sendControlCommand_malformedBeginFlagsUseMatchingValidEndWithoutStrandingFIFO() {
+        let (controller, _, _) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        let captureA = CompletionCapture<[String], TmuxController.CommandError>()
+        let captureB = CompletionCapture<[String], TmuxController.CommandError>()
+        controller.sendControlCommand("query-a") { captureA.store($0) }
+        controller.sendControlCommand("query-b") { captureB.store($0) }
+        controller.ingest(Array("%begin 1789101986 3250429 1\u{0}\r\nalpha\r\n%end 1789101986 3250429 1\r\n".utf8))
+        controller.ingest(Array("%begin 1789101986 3250430 1\r\nbeta\r\n%end 1789101986 3250430 1\r\n".utf8))
+        guard case .success(let linesA) = captureA.result,
+              case .success(let linesB) = captureB.result else {
+            return XCTFail("Malformed opening flags must not strand or shift the command FIFO")
+        }
+        XCTAssertEqual(linesA, ["alpha"])
+        XCTAssertEqual(linesB, ["beta"])
+    }
+
     func test_sendControlCommand_mismatchedEndFlagsClassifyFromBeginAndKeepFIFOAligned() {
         // Regression for an attach hang where a viewport capture opened as a
         // client-command frame (flags=1) but its closing guard was decoded as
@@ -2155,7 +3182,7 @@ final class TmuxControllerTests: XCTestCase {
                     && $0.contains("timeValid=true")
                     && $0.contains("numberValid=true")
                     && $0.contains("flagsValid=false")
-                    && $0.contains("fallbackFlags=0")
+                    && $0.contains("fallbackFlags=-1")
             },
             "diagnostics must distinguish a malformed flags token from a real zero"
         )
@@ -2168,7 +3195,7 @@ final class TmuxControllerTests: XCTestCase {
                     && $0.contains("beginFlags=1")
                     && $0.contains("endTime=100")
                     && $0.contains("endNumber=50")
-                    && $0.contains("endFlags=0")
+                    && $0.contains("endFlags=-1")
                     && $0.contains("recovery=classify-from-begin")
                     && $0.contains("effectiveFlags=1")
             },
@@ -2242,22 +3269,52 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertEqual(lines, ["%1"])
     }
 
-    func test_captureActivePrimaryPaneScrollback_sideChannelReturnsRepaintBytes() {
+
+    func test_sideChannelLedgerCapturesAndFeedsHistoryThroughSurfaceExecutor() {
         let (controller, _, sent) = makeController(controlPath: .sideChannel)
         enterSideChannelWithActivePane(controller)
-        XCTAssertEqual(controller.activePaneId, PaneId(12))
         sent.clear()
 
-        var capture: TmuxController.ScrollbackCapture?
-        controller.captureActivePrimaryPaneScrollback(depth: 42) { value in
-            capture = value
+        var boundOwner: RenderOwner?
+        var feedOwner: RenderOwner?
+        var fedBytes: [UInt8] = []
+        var readyDepth: Int?
+        var readyHistorySize: Int?
+        var readyPlacement: RenderHistoryPlacement?
+        var bindCount = 0
+        var feedCount = 0
+        controller.renderSurfaceState = { _ in
+            (altScreen: false, mouseMode: .off, columns: 80, rows: 10)
+        }
+        controller.renderBindSurface = { surfaceID, owner in
+            XCTAssertEqual(surfaceID, .live)
+            bindCount += 1
+            boundOwner = owner
+        }
+        controller.renderFeedSurface = { surfaceID, owner, bytes, source in
+            XCTAssertEqual(surfaceID, .live)
+            XCTAssertEqual(source, .moshHistory)
+            feedCount += 1
+            feedOwner = owner
+            fedBytes.append(contentsOf: bytes)
+            return true
+        }
+        controller.renderHistoryReady = { surfaceID, owner, depth, historySize, placement in
+            XCTAssertEqual(surfaceID, .live)
+            XCTAssertEqual(owner, feedOwner)
+            readyDepth = depth
+            readyHistorySize = historySize
+            readyPlacement = placement
         }
 
-        XCTAssertEqual(
-            String(decoding: sent.bytes, as: UTF8.self),
-            "display-message -p -t %12 '\(TmuxController.renderedPaneMetadataFormat)'\n"
-        )
-        XCTAssertNil(capture)
+        controller.submitRenderFact(.scrollbackRequested(
+            .live,
+            pointsY: 1,
+            isInertial: false
+        ))
+        expectSent(sent, RenderCommands.renderedPaneMetadata(target: PaneId(12)) + "\n" +
+                   RenderCommands.moshHistory(target: PaneId(12), depth: 512) + "\n")
+        controller.ingest(Array("%output %12 heartbeat-before-metadata\r\n".utf8))
 
         sent.clear()
         controller.ingest(responseFrame(
@@ -2266,143 +3323,305 @@ final class TmuxControllerTests: XCTestCase {
                 paneId: 12,
                 cursorX: 3,
                 cursorY: 4,
-                alternateOn: false,
-                historySize: 400
-            )]
-        ))
-
-        XCTAssertEqual(
-            String(decoding: sent.bytes, as: UTF8.self),
-            "capture-pane -p -e -N -S -42 -t %12\n"
-        )
-        XCTAssertNil(capture)
-
-        controller.ingest(responseFrame(101, body: ["history 1", "history 2", "visible"]))
-
-        XCTAssertEqual(capture?.paneId, PaneId(12))
-        XCTAssertEqual(capture?.requestedDepth, 42)
-        XCTAssertEqual(capture?.historySize, 400)
-        XCTAssertEqual(capture?.capturedLineCount, 3)
-        let repaint = String(decoding: capture?.repaintBytes ?? [], as: UTF8.self)
-        XCTAssertTrue(repaint.contains("\u{1B}[2J"))
-        XCTAssertTrue(repaint.contains("history 1\r\nhistory 2\r\nvisible"))
-        XCTAssertTrue(repaint.contains("\u{1B}[5;4H"))
-    }
-
-    func test_captureActivePrimaryPaneScrollback_zeroRowGridFailsClosed() {
-        let (controller, _, sent) = makeController(controlPath: .sideChannel)
-        enterSideChannelWithActivePane(controller)
-        sent.clear()
-
-        var result: TmuxController.ScrollbackCaptureResult?
-        controller.captureActivePrimaryPaneScrollbackResult(depth: 42) { value in
-            result = value
-        }
-        sent.clear()
-        controller.ingest(responseFrame(
-            100,
-            body: [renderedPaneMetadataLine(
-                paneId: 12,
-                cursorX: 3,
-                cursorY: 4,
-                alternateOn: false,
-                historySize: 400
-            )]
-        ))
-        expectSent(sent, "capture-pane -p -e -N -S -42 -t %12\n")
-
-        controller.ingest(responseFrame(101, body: []))
-
-        XCTAssertEqual(result, .skipped(.captureFailed))
-    }
-
-    func test_captureActivePrimaryPaneScrollback_clientRowsOverrideSuppressesFullPaneScrollRegion() {
-        let (controller, _, sent) = makeController(controlPath: .sideChannel)
-        enterSideChannelWithActivePane(controller)
-        sent.clear()
-
-        var capture: TmuxController.ScrollbackCapture?
-        controller.captureActivePrimaryPaneScrollback(depth: 42, clientRows: 10) { value in
-            capture = value
-        }
-
-        sent.clear()
-        controller.ingest(responseFrame(
-            100,
-            body: [renderedPaneMetadataLine(
-                paneId: 12,
+                historySize: 800,
                 scrollRegionUpper: 0,
                 scrollRegionLower: 9
             )]
         ))
+        expectSent(sent, "")
+        controller.ingest(Array("%output %12 heartbeat-before-capture\r\n".utf8))
 
-        XCTAssertEqual(
-            String(decoding: sent.bytes, as: UTF8.self),
-            "capture-pane -p -e -N -S -42 -t %12\n"
-        )
+        controller.ingest(responseFrame(101, body: ["history 1", "history 2", "visible"]))
 
-        controller.ingest(responseFrame(101, body: ["visible"]))
-
-        let repaint = String(decoding: capture?.repaintBytes ?? [], as: UTF8.self)
-        XCTAssertFalse(
-            repaint.contains("\u{1B}[1;10r"),
-            "a full-pane scroll region should be suppressed against the pane row count"
-        )
+        XCTAssertEqual(bindCount, 1)
+        XCTAssertEqual(feedCount, 1)
+        XCTAssertEqual(boundOwner?.paneID, PaneId(12))
+        XCTAssertEqual(feedOwner, boundOwner)
+        XCTAssertEqual(readyDepth, 512)
+        XCTAssertEqual(readyHistorySize, 800)
+        XCTAssertEqual(readyPlacement, .bottom)
+        let repaint = String(decoding: fedBytes, as: UTF8.self)
+        XCTAssertTrue(repaint.contains("\u{1B}[2J"))
+        XCTAssertTrue(repaint.contains("history 1\r\nhistory 2\r\nvisible"))
+        XCTAssertTrue(repaint.contains("\u{1B}[5;4H"))
+        XCTAssertFalse(repaint.contains("\u{1B}[1;10r"))
     }
 
-    func test_captureActivePrimaryPaneScrollback_altScreenDoesNotCapture() {
+    func test_sideChannelCaptureRepliesUseTheirOrderedSnapshotBeforeLaterWindowSwitch() {
         let (controller, _, sent) = makeController(controlPath: .sideChannel)
         enterSideChannelWithActivePane(controller)
         sent.clear()
 
-        var captureWasCalled = false
-        controller.captureActivePrimaryPaneScrollback(depth: 42) { value in
-            captureWasCalled = true
-            XCTAssertNil(value)
+        controller.renderSurfaceState = { _ in
+            (altScreen: false, mouseMode: .off, columns: 80, rows: 10)
+        }
+        controller.submitRenderFact(.scrollbackRequested(
+            .live,
+            pointsY: 1,
+            isInertial: false
+        ))
+        expectSent(sent, RenderCommands.renderedPaneMetadata(target: PaneId(12)) + "\n" +
+                   RenderCommands.moshHistory(target: PaneId(12), depth: 512) + "\n")
+        sent.clear()
+
+        var capturedPane: PaneId?
+        controller.renderFeedSurface = { _, owner, _, _ in
+            capturedPane = owner.paneID
+            return true
+        }
+        // tmux can batch command replies with later topology notifications.
+        // The reply belongs to pane 12 at the point it appears on the wire;
+        // reducing it against the batch-final window 7 snapshot would discard
+        // the valid history request before the later switch is processed.
+        var burst = responseFrame(
+            100,
+            body: [renderedPaneMetadataLine(paneId: 12, historySize: 400)]
+        )
+        burst.append(contentsOf: responseFrame(101, body: ["history before switch"]))
+        burst.append(contentsOf: Array((
+            "%window-add @7\r\n" +
+            "%window-pane-changed @7 %21\r\n" +
+            "%session-window-changed $0 @7\r\n"
+        ).utf8))
+        controller.ingest(burst)
+
+        XCTAssertEqual(capturedPane, PaneId(12),
+                       "the capture must reduce before the later window switch")
+        XCTAssertEqual(controller.activeWindowId, WindowId(7))
+    }
+
+    func test_sideChannelLedgerKeepsLivePainterAndDetachedOverlayAsSeparateSurfaces() {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        enterSideChannelWithActivePane(controller)
+        sent.clear()
+
+        let overlay = SurfaceId("overlay:%12")
+        var boundOwners: [SurfaceId: RenderOwner] = [:]
+        var fedSurfaceIDs: [SurfaceId] = []
+        controller.renderSurfaceState = { _ in
+            (altScreen: false, mouseMode: .off, columns: 80, rows: 10)
+        }
+        controller.renderBindSurface = { surfaceID, owner in
+            boundOwners[surfaceID] = owner
+        }
+        controller.renderFeedSurface = { surfaceID, _, _, _ in
+            fedSurfaceIDs.append(surfaceID)
+            return true
         }
 
-        XCTAssertEqual(
-            String(decoding: sent.bytes, as: UTF8.self),
-            "display-message -p -t %12 '\(TmuxController.renderedPaneMetadataFormat)'\n"
-        )
+        // An iPad split has both physical destinations: native mosh output
+        // remains in `.live`, while fetched pane history uses the overlay.
+        controller.declareRenderSurfaces([
+            .init(surfaceID: .live, presentation: .single),
+            .init(
+                surfaceID: overlay,
+                presentation: .overlay,
+                windowID: WindowId(5),
+                paneID: PaneId(12)
+            ),
+        ])
 
+        controller.submitRenderFact(.scrollbackRequested(
+            .live,
+            pointsY: 1,
+            isInertial: false
+        ))
+        expectSent(sent, RenderCommands.renderedPaneMetadata(target: PaneId(12)) + "\n" +
+                   RenderCommands.moshHistory(target: PaneId(12), depth: 512) + "\n")
         sent.clear()
         controller.ingest(responseFrame(
+            100,
+            body: [renderedPaneMetadataLine(paneId: 12, historySize: 400)]
+        ))
+        expectSent(sent, "")
+        sent.clear()
+        controller.ingest(responseFrame(101, body: ["live history"]))
+
+        controller.submitRenderFact(.scrollbackRequested(
+            overlay,
+            pointsY: 1,
+            isInertial: false
+        ))
+        expectSent(sent, RenderCommands.renderedPaneMetadata(target: PaneId(12)) + "\n" +
+                   RenderCommands.moshHistory(target: PaneId(12), depth: 512) + "\n")
+        sent.clear()
+        controller.ingest(responseFrame(
+            102,
+            body: [renderedPaneMetadataLine(paneId: 12, historySize: 400)]
+        ))
+        expectSent(sent, "")
+        sent.clear()
+        controller.ingest(responseFrame(103, body: ["overlay history"]))
+
+        guard let liveOwner = boundOwners[.live],
+              let overlayOwner = boundOwners[overlay]
+        else {
+            return XCTFail("each declared physical surface must receive its own bind")
+        }
+        XCTAssertEqual(liveOwner.windowID, WindowId(5))
+        XCTAssertEqual(liveOwner.paneID, PaneId(12))
+        XCTAssertEqual(overlayOwner.windowID, WindowId(5))
+        XCTAssertEqual(overlayOwner.paneID, PaneId(12))
+        XCTAssertNotEqual(liveOwner, overlayOwner, "independent destinations require independent owner epochs")
+        XCTAssertEqual(fedSurfaceIDs, [.live, overlay])
+    }
+
+    func test_sideChannelWindowSwitchRebindsLivePainterBesideDetachedOverlay() {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        enterSideChannelWithActivePane(controller)
+        sent.clear()
+
+        let overlay = SurfaceId("overlay:%12")
+        var liveBindings: [RenderOwner] = []
+        var overlayBindings: [RenderOwner] = []
+        controller.renderSurfaceState = { _ in
+            (altScreen: false, mouseMode: .off, columns: 80, rows: 10)
+        }
+        controller.renderBindSurface = { surfaceID, owner in
+            if surfaceID == .live {
+                liveBindings.append(owner)
+            } else if surfaceID == overlay {
+                overlayBindings.append(owner)
+            }
+        }
+        controller.declareRenderSurfaces([
+            .init(surfaceID: .live, presentation: .single),
+            .init(
+                surfaceID: overlay,
+                presentation: .overlay,
+                windowID: WindowId(5),
+                paneID: PaneId(12)
+            ),
+        ])
+
+        // Establish a real `.live` owner before moving to the next tmux
+        // window. A detached overlay declaration alone must not replace it.
+        controller.submitRenderFact(.scrollbackRequested(
+            .live,
+            pointsY: 1,
+            isInertial: false
+        ))
+        sent.clear()
+        controller.ingest(responseFrame(
+            100,
+            body: [renderedPaneMetadataLine(paneId: 12, historySize: 400)]
+        ))
+        sent.clear()
+        controller.ingest(responseFrame(101, body: ["window five history"]))
+        guard let beforeSwitch = liveBindings.last else {
+            return XCTFail("the initial live history must establish the painter owner")
+        }
+        liveBindings.removeAll()
+        overlayBindings.removeAll()
+
+        controller.ingest(Array("%window-add @7\r\n".utf8))
+        sent.clear()
+        controller.ingest(responseFrame(102, body: ["logs"]))
+        sent.clear()
+        controller.ingest(Array("%window-pane-changed @7 %21\r\n".utf8))
+        controller.ingest(Array("%session-window-changed $0 @7\r\n".utf8))
+
+        guard let afterSwitch = liveBindings.last else {
+            return XCTFail("a real window switch must bind the native live painter")
+        }
+        XCTAssertEqual(afterSwitch.windowID, WindowId(7))
+        XCTAssertEqual(afterSwitch.paneID, PaneId(21))
+        XCTAssertNotEqual(afterSwitch.epoch, beforeSwitch.epoch)
+        XCTAssertTrue(overlayBindings.isEmpty, "the fixed old-pane overlay must not clear the whole mosh painter")
+    }
+
+    func test_sideChannelReconnectRebindsSamePaneAtFreshEpoch() {
+        let (controller, _, sent) = makeController(controlPath: .sideChannel)
+        enterSideChannelWithActivePane(controller)
+        sent.clear()
+
+        var boundOwners: [RenderOwner] = []
+        controller.renderSurfaceState = { _ in
+            (altScreen: false, mouseMode: .off, columns: 80, rows: 10)
+        }
+        controller.renderBindSurface = { surfaceID, owner in
+            guard surfaceID == .live else { return }
+            boundOwners.append(owner)
+        }
+
+        controller.submitRenderFact(.scrollbackRequested(
+            .live,
+            pointsY: 1,
+            isInertial: false
+        ))
+        sent.clear()
+        controller.ingest(responseFrame(
+            100,
+            body: [renderedPaneMetadataLine(paneId: 12, historySize: 400)]
+        ))
+        sent.clear()
+        controller.ingest(responseFrame(101, body: ["before reconnect"]))
+        guard let beforeReconnect = boundOwners.last else {
+            return XCTFail("the initial history capture must bind the live painter")
+        }
+
+        controller.sideChannelDisconnected()
+        XCTAssertEqual(controller.activeWindowId, WindowId(5), "the live mosh session keeps its stale tab model")
+        XCTAssertEqual(controller.windows.first?.activePaneId, PaneId(12))
+        boundOwners.removeAll()
+
+        // Re-entering -CC on the same pane must bind a new owner, which clears
+        // stale synthesized history before a replacement capture can feed.
+        controller.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
+        guard let afterReconnect = boundOwners.last else {
+            return XCTFail("side-channel reattach must bind the preserved live surface")
+        }
+        XCTAssertEqual(afterReconnect.windowID, beforeReconnect.windowID)
+        XCTAssertEqual(afterReconnect.paneID, beforeReconnect.paneID)
+        XCTAssertNotEqual(afterReconnect.epoch, beforeReconnect.epoch)
+    }
+
+    func test_sideChannelLedgerRejectsEmptyAndAlternateScreenCaptures() {
+        let (emptyController, _, emptySent) = makeController(controlPath: .sideChannel)
+        enterSideChannelWithActivePane(emptyController)
+        emptySent.clear()
+        var emptyFed = false
+        emptyController.renderSurfaceState = { _ in
+            (altScreen: false, mouseMode: .off, columns: 80, rows: 24)
+        }
+        emptyController.renderFeedSurface = { _, _, _, _ in
+            emptyFed = true
+            return true
+        }
+        emptyController.submitRenderFact(.scrollbackRequested(
+            .live,
+            pointsY: 1,
+            isInertial: false
+        ))
+        emptySent.clear()
+        emptyController.ingest(responseFrame(
+            100,
+            body: [renderedPaneMetadataLine(paneId: 12, historySize: 400)]
+        ))
+        emptyController.ingest(responseFrame(101, body: []))
+        XCTAssertFalse(emptyFed)
+
+        let (alternateController, _, alternateSent) = makeController(controlPath: .sideChannel)
+        enterSideChannelWithActivePane(alternateController)
+        alternateSent.clear()
+        var alternateFed = false
+        alternateController.renderFeedSurface = { _, _, _, _ in
+            alternateFed = true
+            return true
+        }
+        alternateController.submitRenderFact(.scrollbackRequested(
+            .live,
+            pointsY: 1,
+            isInertial: false
+        ))
+        alternateSent.clear()
+        alternateController.ingest(responseFrame(
             100,
             body: [renderedPaneMetadataLine(paneId: 12, alternateOn: true)]
         ))
 
-        XCTAssertTrue(captureWasCalled)
-        XCTAssertEqual(sent.bytes, [], "alt-screen gate must not issue capture-pane")
-    }
-
-    func test_captureActivePrimaryPaneScrollbackResult_reportsAltScreenAndCachesState() {
-        let (controller, _, sent) = makeController(controlPath: .sideChannel)
-        enterSideChannelWithActivePane(controller)
-        XCTAssertEqual(controller.windows.first?.panes.first?.isAlternateScreen, nil)
-        sent.clear()
-
-        var result: TmuxController.ScrollbackCaptureResult?
-        controller.captureActivePrimaryPaneScrollbackResult(depth: 42) { value in
-            result = value
-        }
-
-        sent.clear()
-        controller.ingest(responseFrame(
-            100,
-            body: [renderedPaneMetadataLine(
-                paneId: 12,
-                alternateOn: true,
-                mouseStandard: true,
-                mouseSgr: true
-            )]
-        ))
-
-        XCTAssertEqual(result, .skipped(.alternateScreen))
-        XCTAssertEqual(controller.windows.first?.panes.first?.isAlternateScreen, true)
-        XCTAssertEqual(controller.windows.first?.panes.first?.isMouseReporting, true)
-        XCTAssertEqual(controller.windows.first?.panes.first?.isSgrMouse, true)
-        XCTAssertEqual(sent.bytes, [], "alt-screen gate must not issue capture-pane")
+        XCTAssertFalse(alternateFed)
+        XCTAssertEqual(alternateSent.bytes, [], "alternate-screen history must not issue capture-pane")
     }
 
     func test_queryActivePaneInteractionState_reportsAltScreenMouseAndCachesState() {
@@ -2598,7 +3817,7 @@ final class TmuxControllerTests: XCTestCase {
         let (plain, _, plainSent) = makeController()
         plain.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
         plain.ingest(responseFrame(1, flags: 0))
-        for number in 2...8 { plain.ingest(responseFrame(number)) }
+        for number in 2...6 { plain.ingest(responseFrame(number)) }
         XCTAssertFalse(
             String(decoding: plainSent.bytes, as: UTF8.self).contains("tessera-sep"),
             "hydration must not add the probe slot unless the session wiring opts in"
@@ -2610,7 +3829,7 @@ final class TmuxControllerTests: XCTestCase {
         defer { TmuxDiagnostics.sink = nil }
         controller.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
         controller.ingest(responseFrame(1, flags: 0))
-        for number in 2...8 { controller.ingest(responseFrame(number)) }
+        for number in 2...6 { controller.ingest(responseFrame(number)) }
         XCTAssertTrue(
             String(decoding: sent.bytes, as: UTF8.self).contains("tessera-sep")
         )
@@ -2623,7 +3842,7 @@ final class TmuxControllerTests: XCTestCase {
 
         controller.ingest(Array("%window-add @1\r\n".utf8))
         controller.ingest(responseFrame(10, body: [
-            "1\tb25d,80x24,0,0,5\tb25d,80x24,0,0,5\t0\tbuild",
+            "__tessera_window_details__\t@1\t1\t%5\tb25d,80x24,0,0,5\tb25d,80x24,0,0,5\t0\tbuild",
         ]))
         XCTAssertEqual(
             controller.windows.first(where: { $0.id == WindowId(1) })?.name,
@@ -2673,10 +3892,9 @@ final class TmuxControllerTests: XCTestCase {
         chunk.append(contentsOf: Array("%begin 0 1 0\r\n%end 0 1 0\r\n".utf8))
         controller.ingest(chunk)
 
-        // history-limit, pause-after, bell subscription: empty replies.
+        // history-limit, pause-after: empty replies.
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8))
         controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 4 1\r\n%end 0 4 1\r\n".utf8))
         // list-windows, every tab replaced by `_` — the window name itself
         // contains an underscore and must survive via the name-last split.
         controller.ingest(Array(
@@ -2688,8 +3906,6 @@ final class TmuxControllerTests: XCTestCase {
         ))
         // active-window: single-field reply, immune to the mangle.
         controller.ingest(Array("%begin 0 7 1\r\n@1\r\n%end 0 7 1\r\n".utf8))
-        // pane metadata subscription: empty reply.
-        controller.ingest(Array("%begin 0 8 1\r\n%end 0 8 1\r\n".utf8))
 
         XCTAssertEqual(controller.windows.count, 1)
         XCTAssertEqual(controller.windows.first?.windowName, "build_logs")
@@ -2811,6 +4027,7 @@ final class TmuxControllerTests: XCTestCase {
         let (controller, fed, sent) = makeController()
         enterTmuxModeAndDrainAttachInit(controller)
         seedInlineRenderedWindow(controller)
+        await flushSubscriptionRegistrations(controller)
         fed.clear()
         sent.clear()
 
@@ -2827,7 +4044,7 @@ final class TmuxControllerTests: XCTestCase {
         // The keyboard/layout settles mid-refresh: a size replay goes out
         // while the capture is still in flight.
         controller.updateClientSize(cols: 80, rows: 24)
-        expectSent(sent, "refresh-client -C 80,24\n")
+        expectSent(sent, "refresh-client -C 80,24\nselect-window\n")
         sent.clear()
 
         // The capture reply describes the pre-resize grid — it must be
@@ -2836,12 +4053,13 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertEqual(fed.bytes, [], "capture raced by a resize must not be painted")
 
         // The re-run waits for the FIFO to drain (exclusive-queue guard on an
-        // established render): drain the refresh-client reply and let the
-        // bounded wait fire.
+        // established render): drain the refresh-client reply and its
+        // select-window fence and let the bounded wait fire.
         controller.ingest(responseFrame(3, time: 1))
+        controller.ingest(responseFrame(30, time: 1))
         try await Task.sleep(nanoseconds: 150_000_000)
         XCTAssertEqual(fed.bytes, [], "no paint may land before the resynced capture")
-        expectSent(sent, renderedMetadataCommand(windowId: 1))
+        expectSent(sent, renderedMetadataCommand(windowId: 1) + paneSubscriptionCommand(31))
         sent.clear()
 
         // Answer the re-run with the post-resize snapshot: this one paints,
@@ -2852,6 +4070,8 @@ final class TmuxControllerTests: XCTestCase {
         expectSent(sent, "capture-pane -p -e -N -t @1\n")
         sent.clear()
 
+        // The deferred registration follows metadata and precedes capture.
+        ackSubscriptionRegistrations(controller)
         let freshLines = ["fresh one", "fresh two"]
         controller.ingest(responseFrame(5, body: freshLines, time: 1))
         XCTAssertEqual(
@@ -2862,10 +4082,10 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertEqual(controller.renderedPaneId, PaneId(31))
     }
 
-    func test_persistentResizeChurnStillPaintsAfterBoundedResyncs() async throws {
-        // The resync is bounded: if every round-trip keeps racing a resize,
-        // the last frame paints anyway — a misplaced cursor beats a terminal
-        // that never renders at all.
+    func test_persistentResizeChurnFailsClosedAfterBoundedResyncs() async throws {
+        // The resync is bounded, but exhausting it must not paint a frame from
+        // a size epoch we know is stale. Keep the pending repaint latched for
+        // a later explicit recovery instead of binding mixed geometry.
         let (controller, fed, sent) = makeController()
         enterTmuxModeAndDrainAttachInit(controller)
         seedInlineRenderedWindow(controller)
@@ -2885,25 +4105,32 @@ final class TmuxControllerTests: XCTestCase {
             controller.ingest(responseFrame(frame, body: ["churn \(attempt)"], time: 1))
             frame += 1
             XCTAssertEqual(fed.bytes, [], "attempt \(attempt) must be discarded")
-            // Drain the refresh-client reply, then let the exclusive-queue
-            // wait re-issue the metadata query.
+            // Drain the refresh-client reply and its select-window fence,
+            // then let the exclusive-queue wait re-issue the metadata query.
+            controller.ingest(responseFrame(frame, time: 1))
+            frame += 1
             controller.ingest(responseFrame(frame, time: 1))
             frame += 1
             try await Task.sleep(nanoseconds: 150_000_000)
             sent.clear()
         }
 
-        // Fourth round: yet another mid-flight resize, but the bound is
-        // exhausted — the frame paints regardless.
+        // Fourth round: yet another mid-flight resize exhausts the bound. The
+        // stale frame remains rejected and the existing owner stays intact.
+        let renderedWindowBeforeExhaustion = controller.renderedWindowId
+        let renderedPaneBeforeExhaustion = controller.renderedPaneId
         controller.ingest(responseFrame(frame, body: [
             renderedPaneMetadataLine(paneId: 31, cursorX: 1, cursorY: 1)
         ], time: 1))
         frame += 1
         controller.updateClientSize(cols: 81, rows: 30)
         controller.ingest(responseFrame(frame, body: ["exhausted frame"], time: 1))
+        XCTAssertEqual(fed.bytes, [], "bounded resync must never paint a known-stale frame")
+        XCTAssertEqual(controller.renderedWindowId, renderedWindowBeforeExhaustion)
+        XCTAssertEqual(controller.renderedPaneId, renderedPaneBeforeExhaustion)
         XCTAssertTrue(
-            String(decoding: fed.bytes, as: UTF8.self).contains("exhausted frame"),
-            "bounded resync must fall back to painting the stale frame"
+            controller.isAuthoritativeRenderRefreshPending,
+            "a later explicit recovery must still be able to repair the surface"
         )
     }
 
@@ -2912,6 +4139,7 @@ final class TmuxControllerTests: XCTestCase {
         controller.renderRefreshRetryDelay = 0.01
         enterTmuxModeAndDrainAttachInit(controller)
         seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        await flushSubscriptionRegistrations(controller)
         var willSwapCount = 0
         controller.displayWillSwap = { _, _, _ in willSwapCount += 1 }
         fed.clear()
@@ -2942,6 +4170,9 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertNil(controller.renderedPaneId)
         XCTAssertTrue(controller.isAuthoritativeRenderRefreshPending)
 
+        await flushSubscriptionRegistrations(controller)
+        expectSent(sent, paneSubscriptionCommand(32))
+        sent.clear()
         try await Task.sleep(nanoseconds: 100_000_000)
         expectSent(sent, renderedMetadataCommand(windowId: 2))
         sent.clear()
@@ -2963,6 +4194,7 @@ final class TmuxControllerTests: XCTestCase {
         controller.renderCommandQueueMaxWait = 0.04
         enterTmuxModeAndDrainAttachInit(controller)
         seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        await flushSubscriptionRegistrations(controller)
         sent.clear()
 
         controller.sendControlCommand("refresh-client -C 166,54")
@@ -2980,7 +4212,7 @@ final class TmuxControllerTests: XCTestCase {
         try await Task.sleep(nanoseconds: 150_000_000)
         XCTAssertEqual(
             String(decoding: sent.bytes, as: UTF8.self),
-            renderedMetadataCommand(windowId: 2),
+            paneSubscriptionCommand(32) + renderedMetadataCommand(windowId: 2),
             "authoritative recovery must reserve a FIFO position after a bounded drain wait"
         )
         sent.clear()
@@ -2989,6 +4221,7 @@ final class TmuxControllerTests: XCTestCase {
         // metadata/capture pair reaches an authoritative repaint.
         controller.ingest(responseFrame(1, time: 1))
         controller.ingest(responseFrame(2, body: ["two"], time: 1))
+        ackSubscriptionRegistrations(controller)
         controller.ingest(responseFrame(3, body: [
             renderedPaneMetadataLine(paneId: 32, cursorX: 2, cursorY: 10)
         ], time: 1))
@@ -3006,6 +4239,7 @@ final class TmuxControllerTests: XCTestCase {
         controller.renderRefreshRetryDelay = 0.01
         enterTmuxModeAndDrainAttachInit(controller)
         seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        await flushSubscriptionRegistrations(controller)
         XCTAssertEqual(controller.activeWindowId, WindowId(1))
         XCTAssertEqual(controller.activePaneId, PaneId(31))
         XCTAssertEqual(controller.renderedWindowId, WindowId(1))
@@ -3092,7 +4326,12 @@ final class TmuxControllerTests: XCTestCase {
         controller.ingest(responseFrame(2, body: ["current viewport"], time: 1))
 
         let retained = Array("queued-one-queued-two-queued-three".utf8)
-        XCTAssertEqual(fed.chunks.count, 2, "retained output and repaint should be atomic feed calls")
+        XCTAssertEqual(
+            fed.chunks.count,
+            2,
+            "retained output and repaint should be atomic feed calls"
+        )
+        guard fed.chunks.count == 2 else { return }
         XCTAssertEqual(fed.chunks[0], retained)
         XCTAssertEqual(
             fed.chunks[1],
@@ -3104,12 +4343,13 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertEqual(fed.bytes, Array("live-after-refresh".utf8))
     }
 
-    func test_foregroundRefreshKeepsRetryingAndRetainingAfterOrdinaryAttemptLimit() async throws {
+    func test_foregroundRefreshStopsAtRetryLimitWhileRetainingUntilExplicitRecovery() async throws {
         let (controller, fed, sent) = makeController()
         controller.maxRenderRefreshAttempts = 2
         controller.renderRefreshRetryDelay = 0.01
         enterTmuxModeAndDrainAttachInit(controller)
         seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        await flushSubscriptionRegistrations(controller)
         fed.clear()
         sent.clear()
 
@@ -3128,8 +4368,11 @@ final class TmuxControllerTests: XCTestCase {
         controller.ingest(errorFrame(3, body: ["exhausted"], time: 1))
 
         controller.ingest(Array("%output %31 live-after-failure\r\n".utf8))
-        XCTAssertEqual(fed.bytes, [], "foreground recovery must remain gated past the ordinary retry limit")
+        XCTAssertEqual(fed.bytes, [], "foreground recovery must remain gated at the retry limit")
         try await Task.sleep(nanoseconds: 150_000_000)
+        XCTAssertEqual(sent.bytes, [], "a failed control path must not retry forever")
+
+        controller.refreshActiveWindowOnForeground()
         expectSent(sent, renderedMetadataCommand(windowId: 1))
         sent.clear()
         controller.ingest(responseFrame(4, body: [
@@ -3150,6 +4393,7 @@ final class TmuxControllerTests: XCTestCase {
         let (controller, fed, sent) = makeController()
         enterTmuxModeAndDrainAttachInit(controller)
         seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        await flushSubscriptionRegistrations(controller)
         fed.clear()
         sent.clear()
 
@@ -3302,6 +4546,29 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertEqual(fed.bytes, Array("live-after-overflow".utf8))
     }
 
+    func test_defaultForegroundBudgetDropsFullScreenRedrawStormBeforeViewportRepaint() {
+        let (controller, fed, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        fed.clear()
+        sent.clear()
+
+        controller.prepareForAppInactivity()
+        let redrawStorm = "\u{1B}[2J" + String(repeating: "x", count: 64 * 1024)
+        controller.ingest(Array("%output %31 \(redrawStorm)\r\n".utf8))
+        controller.refreshActiveWindowOnForeground()
+        sent.clear()
+        controller.ingest(responseFrame(1, body: [
+            renderedPaneMetadataLine(paneId: 31, cursorX: 2, cursorY: 3)
+        ], time: 1))
+        sent.clear()
+        controller.ingest(responseFrame(2, body: ["bounded foreground viewport"], time: 1))
+
+        XCTAssertEqual(fed.chunks.count, 1)
+        XCTAssertTrue(String(decoding: fed.bytes, as: UTF8.self).contains("bounded foreground viewport"))
+        XCTAssertFalse(String(decoding: fed.bytes, as: UTF8.self).contains(String(repeating: "x", count: 128)))
+    }
+
     func test_enteringTmuxWhileInactiveKeepsFirstOutputBehindForegroundCapture() {
         let (controller, fed, sent) = makeController()
         controller.prepareForAppInactivity()
@@ -3328,6 +4595,7 @@ final class TmuxControllerTests: XCTestCase {
         controller.renderRefreshRetryDelay = 0.01
         enterTmuxModeAndDrainAttachInit(controller)
         seedInlineRenderedWindow(controller, windowId: 1, paneId: 1)
+        await flushSubscriptionRegistrations(controller)
         fed.clear()
         sent.clear()
 
@@ -3342,6 +4610,9 @@ final class TmuxControllerTests: XCTestCase {
         sent.clear()
 
         controller.ingest(errorFrame(1, body: ["metadata unavailable"], time: 1))
+        await flushSubscriptionRegistrations(controller)
+        expectSent(sent, paneSubscriptionCommand(2))
+        sent.clear()
         try await Task.sleep(nanoseconds: 100_000_000)
         expectSent(sent, renderedMetadataCommand(windowId: 2))
         sent.clear()
@@ -3361,9 +4632,11 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertNil(controller.renderedWindowId)
         XCTAssertNil(controller.renderedPaneId)
 
-        // Established swaps also keep retrying past the ordinary cap rather
-        // than leaving the selected tab stale forever.
+        // The exhausted swap stays fail-closed and quiet until an explicit
+        // lifecycle/manual refresh supersedes it.
         try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(sent.bytes, [], "a permanently failing control path must have a hard retry bound")
+        controller.refreshActiveWindowOnForeground()
         expectSent(sent, renderedMetadataCommand(windowId: 2))
         sent.clear()
         controller.ingest(responseFrame(4, body: [
@@ -3431,8 +4704,8 @@ final class TmuxControllerTests: XCTestCase {
         controller.ingest(errorFrame(1, body: ["metadata unavailable"], time: 1))
         XCTAssertTrue(controller.isAuthoritativeRenderRefreshPending)
 
-        controller.ingest(Array("%window-close @2\r\n".utf8))
-        controller.ingest(Array("%window-close @1\r\n".utf8))
+        controller.ingest(Array("%unlinked-window-close @2\r\n".utf8))
+        controller.ingest(Array("%unlinked-window-close @1\r\n".utf8))
 
         XCTAssertNil(controller.activeWindowId)
         XCTAssertFalse(
@@ -3445,6 +4718,7 @@ final class TmuxControllerTests: XCTestCase {
         let (controller, fed, sent) = makeController()
         enterTmuxModeAndDrainAttachInit(controller)
         seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        await flushSubscriptionRegistrations(controller)
         fed.clear()
         sent.clear()
 
@@ -3470,6 +4744,9 @@ final class TmuxControllerTests: XCTestCase {
         controller.ingest(responseFrame(1, body: [
             renderedPaneMetadataLine(paneId: 31)
         ], time: 1))
+        await flushSubscriptionRegistrations(controller)
+        expectSent(sent, paneSubscriptionCommand(32))
+        sent.clear()
         try await Task.sleep(nanoseconds: 100_000_000)
         expectSent(sent, "display-message -p -t %31 '\(TmuxController.renderedPaneMetadataFormat)'\n")
         sent.clear()
@@ -3632,6 +4909,7 @@ final class TmuxControllerTests: XCTestCase {
         controller.renderCommandQueueMaxWait = 0.04
         enterTmuxModeAndDrainAttachInit(controller)
         seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        await flushSubscriptionRegistrations(controller)
         controller.ingest(Array(
             "%layout-change @1 8205,80x24,0,0{40x24,0,0,31,39x24,41,0,32} 8205,80x24,0,0{40x24,0,0,31,39x24,41,0,32} *\r\n".utf8
         ))
@@ -3648,10 +4926,11 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertEqual(sent.bytes, [])
 
         try await Task.sleep(nanoseconds: 150_000_000)
-        expectSent(sent, "display-message -p -t %31 '\(TmuxController.renderedPaneMetadataFormat)'\n")
+        expectSent(sent, paneSubscriptionCommand(32) + "display-message -p -t %31 '\(TmuxController.renderedPaneMetadataFormat)'\n")
         sent.clear()
 
         controller.ingest(responseFrame(1, body: ["10"], time: 1))
+        ackSubscriptionRegistrations(controller)
         controller.ingest(responseFrame(2, body: [
             renderedPaneMetadataLine(paneId: 31)
         ], time: 1))
@@ -3683,7 +4962,7 @@ final class TmuxControllerTests: XCTestCase {
         controller.prepareForAppInactivity()
         controller.ingest(Array("%output %31 retained-before-close\r\n".utf8))
         controller.refreshActiveWindowOnForeground()
-        controller.ingest(Array("%window-close @1\r\n".utf8))
+        controller.ingest(Array("%unlinked-window-close @1\r\n".utf8))
 
         controller.ingest(Array("%window-add @2\r\n".utf8))
         sent.clear()
@@ -3705,6 +4984,11 @@ final class TmuxControllerTests: XCTestCase {
         controller.displayWillSwap = { _, _, _ in willSwapCount += 1 }
         controller.displayDidSwap = { _ in didSwapCount += 1 }
         controller.displayDidRefresh = { _ in didRefreshCount += 1 }
+        var refreshContexts: [TmuxController.TerminalFeedContext] = []
+        controller.feedTerminalWithContext = { slice, context in
+            refreshContexts.append(context)
+            fed.append(contentsOf: slice)
+        }
         fed.clear()
         sent.clear()
 
@@ -3733,6 +5017,14 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertEqual(willSwapCount, 0)
         XCTAssertEqual(didSwapCount, 0)
         XCTAssertEqual(didRefreshCount, 1)
+        XCTAssertEqual(refreshContexts.count, 1)
+        XCTAssertEqual(refreshContexts[0].source, .viewportRefresh)
+        XCTAssertEqual(refreshContexts[0].generation, 2)
+        XCTAssertEqual(
+            refreshContexts[0].renderOwnerEpoch,
+            0,
+            "an in-place foreground repair must keep the current surface owner"
+        )
     }
 
     func test_foregroundRefreshFallsBackToDeepRebuildWhenPaneIdentityChanged() {
@@ -3827,6 +5119,7 @@ final class TmuxControllerTests: XCTestCase {
         seedInlineRenderedWindow(controller)
         controller.updateClientSize(cols: 80, rows: 2)
         controller.ingest(responseFrame(60)) // drain refresh-client -C
+        controller.ingest(responseFrame(61)) // drain the select-window fence
         fed.clear()
         sent.clear()
 
@@ -3930,6 +5223,7 @@ final class TmuxControllerTests: XCTestCase {
         seedInlineRenderedWindow(controller)
         controller.updateClientSize(cols: 47, rows: 20)
         controller.ingest(responseFrame(60)) // drain refresh-client -C
+        controller.ingest(responseFrame(61)) // drain the select-window fence
         fed.clear()
         sent.clear()
 
@@ -3990,12 +5284,11 @@ final class TmuxControllerTests: XCTestCase {
         sent.clear()
         controller.ingest(responseFrame(2)) // history-limit
         controller.ingest(responseFrame(3)) // refresh-client -C
+        controller.ingest(responseFrame(31)) // its select-window fence
         controller.ingest(responseFrame(4)) // pause-after
-        controller.ingest(responseFrame(5)) // bell subscription
         controller.ingest(responseFrame(6, body: ["@1 editor"]))
         controller.ingest(responseFrame(7, body: ["@1\t%91\t1\t\tpane title\thost"]))
         controller.ingest(responseFrame(8, body: ["@1"]))
-        controller.ingest(responseFrame(9)) // pane metadata subscription
         sent.clear()
 
         let staleMetadata = renderedPaneMetadataLine(
@@ -4043,6 +5336,7 @@ final class TmuxControllerTests: XCTestCase {
         seedInlineRenderedWindow(controller)
         controller.updateClientSize(cols: 47, rows: 20)
         controller.ingest(responseFrame(60))
+        controller.ingest(responseFrame(61)) // drain the select-window fence
         fed.clear()
         sent.clear()
 
@@ -4073,6 +5367,7 @@ final class TmuxControllerTests: XCTestCase {
         seedInlineRenderedWindow(controller)
         controller.updateClientSize(cols: 47, rows: 20)
         controller.ingest(responseFrame(60))
+        controller.ingest(responseFrame(61)) // drain the select-window fence
         sent.clear()
 
         controller.ingest(Array("%session-window-changed $0 @1\r\n".utf8))
@@ -4114,6 +5409,7 @@ final class TmuxControllerTests: XCTestCase {
         seedInlineRenderedWindow(controller)
         controller.updateClientSize(cols: 80, rows: 30)
         controller.ingest(responseFrame(60)) // drain refresh-client -C
+        controller.ingest(responseFrame(61)) // drain the select-window fence
         fed.clear()
         sent.clear()
 
@@ -4155,8 +5451,10 @@ final class TmuxControllerTests: XCTestCase {
         controller.deepRepaintHistoryDepth = 42
         enterTmuxModeAndDrainAttachInit(controller)
         seedInlineRenderedWindow(controller, windowId: 1, paneId: 1)
+        await flushSubscriptionRegistrations(controller)
         controller.updateClientSize(cols: 80, rows: 2)
         controller.ingest(responseFrame(60)) // drain refresh-client -C
+        controller.ingest(responseFrame(61)) // drain the select-window fence
         fed.clear()
         sent.clear()
 
@@ -4201,6 +5499,9 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertEqual(controller.renderedPaneId, PaneId(2))
         XCTAssertEqual(sent.bytes, [])
 
+        await flushSubscriptionRegistrations(controller)
+        expectSent(sent, paneSubscriptionCommand(2))
+        sent.clear()
         try await Task.sleep(nanoseconds: 300_000_000)
         expectSent(sent, renderedMetadataCommand(windowId: 2))
     }
@@ -4213,14 +5514,12 @@ final class TmuxControllerTests: XCTestCase {
         sent.clear()
         controller.ingest(responseFrame(2))
         controller.ingest(responseFrame(3))
-        controller.ingest(responseFrame(4))
         controller.ingest(responseFrame(5, body: ["@4 editor"]))
         controller.ingest(responseFrame(6, body: ["@4\t%44\t1\t\tpane title\thost"]))
         controller.ingest(responseFrame(7, body: ["@4"]))
         expectSent(sent, renderedMetadataCommand(windowId: 4))
         sent.clear()
 
-        controller.ingest(responseFrame(8))
         let metadata = renderedPaneMetadataLine(
             paneId: 44,
             cursorX: 6,
@@ -4280,12 +5579,10 @@ final class TmuxControllerTests: XCTestCase {
         sent.clear()
         controller.ingest(responseFrame(2))
         controller.ingest(responseFrame(3))
-        controller.ingest(responseFrame(4))
         controller.ingest(responseFrame(5, body: ["@4 editor"]))
         controller.ingest(responseFrame(6, body: ["@4\t%52\t1\t\tpane title\thost"]))
         controller.ingest(responseFrame(7, body: ["@4"]))
         sent.clear()
-        controller.ingest(responseFrame(8))
 
         let staleMetadata = renderedPaneMetadataLine(
             paneId: 52,
@@ -4329,12 +5626,10 @@ final class TmuxControllerTests: XCTestCase {
         sent.clear()
         controller.ingest(responseFrame(2))
         controller.ingest(responseFrame(3))
-        controller.ingest(responseFrame(4))
         controller.ingest(responseFrame(5, body: ["@4 editor"]))
         controller.ingest(responseFrame(6, body: ["@4\t%52\t1\t\tpane title\thost"]))
         controller.ingest(responseFrame(7, body: ["@4"]))
         sent.clear()
-        controller.ingest(responseFrame(8))
         controller.ingest(responseFrame(9, body: [
             renderedPaneMetadataLine(
                 paneId: 52,
@@ -4559,6 +5854,7 @@ final class TmuxControllerTests: XCTestCase {
         let (controller, fed, sent) = makeController()
         enterTmuxModeAndDrainAttachInit(controller)
         seedInlineRenderedWindow(controller)
+        await flushSubscriptionRegistrations(controller)
         fed.clear()
         sent.clear()
 
@@ -4579,6 +5875,9 @@ final class TmuxControllerTests: XCTestCase {
         controller.ingest(Array("%session-window-changed $0 @2\r\n".utf8))
         XCTAssertEqual(sent.bytes, [], "replacement metadata waits for the stale deep command to drain")
         controller.ingest(responseFrame(4, body: ["stale deep"], time: 1))
+        await flushSubscriptionRegistrations(controller)
+        expectSent(sent, paneSubscriptionCommand(81))
+        sent.clear()
         try await Task.sleep(nanoseconds: 100_000_000)
         expectSent(sent, renderedMetadataCommand(windowId: 2))
 
@@ -4602,14 +5901,12 @@ final class TmuxControllerTests: XCTestCase {
         sent.clear()
         controller.ingest(responseFrame(2))
         controller.ingest(responseFrame(3))
-        controller.ingest(responseFrame(4))
         controller.ingest(responseFrame(5, body: ["@1 editor"]))
         controller.ingest(responseFrame(6, body: ["@1\t%91\t1\t\tpane title\thost"]))
         controller.ingest(responseFrame(7, body: ["@1"]))
         expectSent(sent, renderedMetadataCommand(windowId: 1))
         sent.clear()
 
-        controller.ingest(responseFrame(8))
         let metadata = renderedPaneMetadataLine(
             paneId: 91,
             cursorX: 5,
@@ -4647,14 +5944,12 @@ final class TmuxControllerTests: XCTestCase {
 
         controller.ingest(responseFrame(2))
         controller.ingest(responseFrame(3))
-        controller.ingest(responseFrame(4))
         controller.ingest(responseFrame(5, body: ["@1 editor"]))
         controller.ingest(responseFrame(6, body: ["@1\t%1\t1\t\tpane title\thost"]))
         controller.ingest(responseFrame(7, body: ["@1"]))
         expectSent(sent, renderedMetadataCommand(windowId: 1))
         sent.clear()
 
-        controller.ingest(responseFrame(8))
         let metadata = renderedPaneMetadataLine(
             paneId: 1,
             cursorX: 2,
@@ -4724,6 +6019,7 @@ final class TmuxControllerTests: XCTestCase {
         controller.renderRefreshRetryDelay = 0.05
         enterTmuxModeAndDrainAttachInit(controller)
         seedInlineRenderedWindow(controller)
+        await flushSubscriptionRegistrations(controller)
         sent.clear()
 
         controller.ingest(Array("%session-window-changed $0 @2\r\n".utf8))
@@ -4806,7 +6102,9 @@ final class TmuxControllerTests: XCTestCase {
         controller.ingest(responseFrame(6, body: ["window one"], time: 1))
 
         let feedIndex = events.firstIndex { $0.hasPrefix("feed:") && $0.contains("window one") }
-        let continueIndex = events.firstIndex { $0 == "send:refresh-client -A '%1:continue'\n" }
+        let continueIndex = events.firstIndex {
+            $0.hasPrefix("send:refresh-client -A '%1:continue'\n")
+        }
         XCTAssertNotNil(feedIndex)
         XCTAssertNotNil(continueIndex)
         if let feedIndex, let continueIndex {
@@ -4822,6 +6120,7 @@ final class TmuxControllerTests: XCTestCase {
         controller.renderRefreshRetryDelay = 0.05
         enterTmuxModeAndDrainAttachInit(controller)
         seedInlineRenderedWindow(controller, windowId: 1, paneId: 1)
+        await flushSubscriptionRegistrations(controller)
         fed.clear()
         sent.clear()
 
@@ -4868,14 +6167,12 @@ final class TmuxControllerTests: XCTestCase {
 
         controller.ingest(responseFrame(2))
         controller.ingest(responseFrame(3))
-        controller.ingest(responseFrame(4))
         controller.ingest(responseFrame(5, body: ["@1 editor"]))
         controller.ingest(responseFrame(6, body: ["@1\t%9\t1\t\tpane title\thost"]))
         controller.ingest(responseFrame(7, body: ["@1"]))
         expectSent(sent, renderedMetadataCommand(windowId: 1))
         sent.clear()
 
-        controller.ingest(responseFrame(8))
         controller.ingest(errorFrame(9, body: ["metadata failed"], time: 1))
         XCTAssertFalse(controller.isInitialRenderReady)
         XCTAssertNil(controller.renderedPaneId)
@@ -4885,6 +6182,9 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertEqual(fed.bytes, [])
         XCTAssertFalse(controller.isInitialRenderReady)
 
+        await flushSubscriptionRegistrations(controller)
+        expectSent(sent, paneSubscriptionCommand(9))
+        sent.clear()
         try await Task.sleep(nanoseconds: 300_000_000)
         expectSent(sent, renderedMetadataCommand(windowId: 1))
         sent.clear()
@@ -4999,7 +6299,9 @@ final class TmuxControllerTests: XCTestCase {
         controller.ingest(responseFrame(2, body: ["window three"], time: 1))
 
         let feedIndex = events.firstIndex { $0.hasPrefix("feed:") && $0.contains("window three") }
-        let continueIndex = events.firstIndex { $0 == "send:refresh-client -A '%3:continue'\n" }
+        let continueIndex = events.firstIndex {
+            $0.hasPrefix("send:refresh-client -A '%3:continue'\n")
+        }
         XCTAssertNotNil(feedIndex)
         XCTAssertNotNil(continueIndex)
         if let feedIndex, let continueIndex {
@@ -5028,7 +6330,7 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertEqual(sent.bytes, [])
     }
 
-    func test_hydrateCommandsIncludePauseAfterAndBellSubscriptionInOrder() {
+    func test_hydrateCommandsIncludePauseAfterAndBellSubscriptionInOrder() async {
         let (controller, _, sent) = makeController()
         controller.updateClientSize(cols: 100, rows: 30)
 
@@ -5038,14 +6340,28 @@ final class TmuxControllerTests: XCTestCase {
         let actual = String(decoding: sent.bytes, as: UTF8.self)
         let resize = "refresh-client -C 100,30\n"
         let pauseAfter = "refresh-client -f pause-after=5\n"
-        let bell = "refresh-client -B 'tessera-bell:%*:#{window_bell_flag}'\n"
         let listWindows = "list-windows -F"
 
         XCTAssertTrue(actual.contains(pauseAfter))
-        XCTAssertTrue(actual.contains(bell))
+        XCTAssertFalse(actual.contains("refresh-client -B"))
         assertMarker(resize, precedes: pauseAfter, in: actual)
-        assertMarker(pauseAfter, precedes: bell, in: actual)
-        assertMarker(bell, precedes: listWindows, in: actual)
+        assertMarker(pauseAfter, precedes: listWindows, in: actual)
+
+        controller.ingest(responseFrame(2)) // history-limit
+        controller.ingest(responseFrame(3)) // resize
+        controller.ingest(responseFrame(4)) // select-window fence
+        controller.ingest(responseFrame(5)) // pause-after
+        controller.ingest(responseFrame(6, body: ["@5 editor"]))
+        controller.ingest(responseFrame(7, body: ["@5\t%12\t1\tzsh\tpane title\thost"]))
+        controller.ingest(responseFrame(8)) // active-window unknown: no render query
+        XCTAssertEqual(String(decoding: sent.bytes, as: UTF8.self), actual)
+
+        await flushSubscriptionRegistrations(controller)
+        let registration = "refresh-client -B 'tessera-pane-meta.12:%12:\(TmuxPaneMetadataSubscription.format)'"
+            + " -B 'tessera-bell.12:%12:#{window_bell_flag}'\n"
+        expectSent(sent, actual + registration)
+        assertMarker(listWindows, precedes: registration, in: String(decoding: sent.bytes, as: UTF8.self))
+        XCTAssertEqual(controller._debugPendingCommands, [])
     }
 
     func test_deepStageFailureKeepsRenderedIdsAndRetriesOnceThenGivesUp() async throws {
@@ -5053,6 +6369,7 @@ final class TmuxControllerTests: XCTestCase {
         controller.renderRefreshRetryDelay = 0.05
         enterTmuxModeAndDrainAttachInit(controller)
         seedInlineRenderedWindow(controller, windowId: 1, paneId: 1)
+        await flushSubscriptionRegistrations(controller)
         fed.clear()
         sent.clear()
 
@@ -5084,6 +6401,9 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertEqual(controller.renderedPaneId, PaneId(2))
         XCTAssertEqual(sent.bytes, [])
 
+        await flushSubscriptionRegistrations(controller)
+        expectSent(sent, paneSubscriptionCommand(2))
+        sent.clear()
         try await Task.sleep(nanoseconds: 300_000_000)
         expectSent(sent, renderedMetadataCommand(windowId: 2))
         sent.clear()
@@ -5110,6 +6430,7 @@ final class TmuxControllerTests: XCTestCase {
         controller.renderRefreshRetryDelay = 0.02
         enterTmuxModeAndDrainAttachInit(controller)
         seedInlineRenderedWindow(controller, windowId: 1, paneId: 1)
+        await flushSubscriptionRegistrations(controller)
         fed.clear()
         sent.clear()
 
@@ -5271,12 +6592,16 @@ final class TmuxControllerTests: XCTestCase {
         let (controller, fed, sent) = makeController()
 
         var events: [String] = []
+        var swapContexts: [TmuxController.TerminalFeedContext] = []
         controller.feedTerminal = { slice in
             events.append("feed")
             fed.append(contentsOf: slice)
         }
-        controller.displayWillSwap = { from, to, paneInAltScreen in
-            events.append("hook:\(from?.description ?? "nil")->\(to.description):\(paneInAltScreen)")
+        controller.displayWillSwapWithContext = { from, context, paneInAltScreen in
+            swapContexts.append(context)
+            events.append(
+                "hook:\(from?.description ?? "nil")->\(context.windowId?.description ?? "nil"):\(paneInAltScreen)"
+            )
         }
 
         // Attach init with two known windows and @5 as the active
@@ -5288,7 +6613,6 @@ final class TmuxControllerTests: XCTestCase {
 
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8))
         controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 4 1\r\n%end 0 4 1\r\n".utf8))
         controller.ingest(Array("%begin 0 5 1\r\n@5 editor\r\n@7 logs\r\n%end 0 5 1\r\n".utf8))
         controller.ingest(Array(
             "%begin 0 6 1\r\n@5\t%12\t1\t\tpane title\thost\r\n@7\t%99\t1\t\tlogs title\thost\r\n%end 0 6 1\r\n".utf8
@@ -5296,9 +6620,6 @@ final class TmuxControllerTests: XCTestCase {
         controller.ingest(Array("%begin 0 7 1\r\n@5\r\n%end 0 7 1\r\n".utf8))
         sent.clear()
 
-        // The pane metadata subscription was queued before the render
-        // metadata query, so its response drains first.
-        controller.ingest(Array("%begin 0 8 1\r\n%end 0 8 1\r\n".utf8))
         controller.ingest(responseFrame(9, body: [
             renderedPaneMetadataLine(
                 paneId: 12,
@@ -5373,6 +6694,17 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertEqual(controller.renderedWindowId, WindowId(7))
         XCTAssertEqual(controller.renderedPaneId, PaneId(99))
         XCTAssertTrue(String(decoding: fed.bytes, as: UTF8.self).contains("logs body"))
+        XCTAssertEqual(swapContexts.count, 2)
+        XCTAssertEqual(swapContexts[0].source, .deepRepaint)
+        XCTAssertEqual(swapContexts[0].windowId, WindowId(5))
+        XCTAssertEqual(swapContexts[0].paneId, PaneId(12))
+        XCTAssertEqual(swapContexts[0].generation, 1)
+        XCTAssertEqual(swapContexts[0].renderOwnerEpoch, 1)
+        XCTAssertEqual(swapContexts[1].source, .viewportRepaint)
+        XCTAssertEqual(swapContexts[1].windowId, WindowId(7))
+        XCTAssertEqual(swapContexts[1].paneId, PaneId(99))
+        XCTAssertEqual(swapContexts[1].generation, 2)
+        XCTAssertEqual(swapContexts[1].renderOwnerEpoch, 2)
     }
 
     func test_displayWillSwap_sameWindowLegacyMetadataDefaultsAltScreenFalse() {
@@ -5485,8 +6817,14 @@ final class TmuxControllerTests: XCTestCase {
             "%begin 1 1 1\r\ngarbage response\r\n%end 1 1 1\r\n".utf8
         ))
 
-        XCTAssertEqual(sent.bytes, [],
-                       "malformed response should not produce a capture-pane follow-up")
+        // A reply it cannot read is also the ledger's evidence that its reply
+        // FIFO may have drifted onto the wrong purposes, so it probes to
+        // realign. That probe is the only thing that goes out: the refresh
+        // still aborts rather than capturing against an unparsed response.
+        expectSent(
+            sent,
+            RenderCommands.fifoSync(marker: RenderCommands.fifoSyncMarker(sequence: 1)) + "\n"
+        )
         XCTAssertNil(controller.activePaneId,
                      "activePaneId should not keep targeting the old pane when the response can't be parsed")
         XCTAssertNil(controller.renderedWindowId)
@@ -5497,6 +6835,7 @@ final class TmuxControllerTests: XCTestCase {
         let (controller, fed, sent) = makeController()
         enterTmuxModeAndDrainAttachInit(controller)
         seedInlineRenderedWindow(controller)
+        await flushSubscriptionRegistrations(controller)
         fed.clear()
         sent.clear()
 
@@ -5783,7 +7122,6 @@ final class TmuxControllerTests: XCTestCase {
         controller.ingest(Array("%window-pane-changed @9 %77\r\n".utf8)) // stash before hydration
 
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8)) // pause-after
-        controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8)) // bell subscription
         controller.ingest(Array("%begin 0 4 1\r\n@5 editor\r\n%end 0 4 1\r\n".utf8)) // list-windows (no @9)
         controller.ingest(Array(
             "%begin 0 5 1\r\n@5\t%12\t1\thtop\tremote.example.com\tremote.example.com\r\n%end 0 5 1\r\n".utf8
@@ -5816,7 +7154,6 @@ final class TmuxControllerTests: XCTestCase {
         controller.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
         controller.ingest(Array("%begin 0 1 0\r\n%end 0 1 0\r\n".utf8))
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8)) // pause-after
-        controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8)) // bell subscription
         controller.ingest(Array("%begin 0 4 1\r\n@5 editor\r\n%end 0 4 1\r\n".utf8)) // list-windows
         controller.ingest(Array(
             "%begin 0 5 1\r\n@5\t%12\t1\thtop\tremote.example.com\tremote.example.com\r\n%end 0 5 1\r\n".utf8
@@ -5858,8 +7195,12 @@ final class TmuxControllerTests: XCTestCase {
 
         XCTAssertEqual(
             sent.bytes,
-            Array("refresh-client -C 130,40\n".utf8),
-            "tmux -CC needs refresh-client -C <cols>,<rows> — SIGWINCH to the PTY is ignored"
+            Array("refresh-client -C 130,40\nselect-window\n".utf8),
+            """
+            tmux -CC needs refresh-client -C <cols>,<rows> — SIGWINCH to the PTY is \
+            ignored — and the targetless select-window fence that makes this client \
+            the window's latest, without which tmux applies neither.
+            """
         )
     }
 
@@ -5890,7 +7231,7 @@ final class TmuxControllerTests: XCTestCase {
         controller.adoptPreservedServerSize(cols: 126, rows: 44)
         XCTAssertEqual(
             sent.bytes,
-            Array("refresh-client -C 126,44\n".utf8)
+            Array("refresh-client -C 126,44\nselect-window\n".utf8)
         )
     }
 
@@ -5908,14 +7249,14 @@ final class TmuxControllerTests: XCTestCase {
         sent.clear()
         controller.ingest(responseFrame(9, body: ["attached,focused"]))
         XCTAssertTrue(controller.compactClientOwnsSize)
-        expectSent(sent, "refresh-client -C 48,34\n")
+        expectSent(sent, "refresh-client -C 48,34\nselect-window\n")
 
         sent.clear()
         controller.ingest(responseFrame(10))
         controller.updateClientSize(cols: 48, rows: 17)
         expectSent(
             sent,
-            "refresh-client -C 48,17\n",
+            "refresh-client -C 48,17\nselect-window\n",
             file: #filePath,
             line: #line
         )
@@ -5972,7 +7313,7 @@ final class TmuxControllerTests: XCTestCase {
         controller.ingest(responseFrame(10, body: ["attached,focused"]))
         XCTAssertTrue(controller.compactClientSizeRoleResolved)
         XCTAssertTrue(controller.compactClientOwnsSize)
-        expectSent(sent, "refresh-client -C 48,17\n")
+        expectSent(sent, "refresh-client -C 48,17\nselect-window\n")
     }
 
     func test_enteringTmuxMode_pushesCachedSizeAfterHandshake() {
@@ -5999,8 +7340,12 @@ final class TmuxControllerTests: XCTestCase {
 
         let actual = String(decoding: sent.bytes, as: UTF8.self)
         XCTAssertTrue(
-            actual.contains("set-option -g history-limit 10000\n"),
-            "inline attach should raise history-limit for windows created after attach"
+            actual.contains("display-message -p '#{history-limit}'\n"),
+            "inline attach should read the effective history-limit before changing it"
+        )
+        XCTAssertFalse(
+            actual.contains("set-option -g history-limit"),
+            "the user's server-wide scrollback is not Tessera's to set"
         )
         XCTAssertTrue(
             actual.contains("refresh-client -C 130,40\n"),
@@ -6023,8 +7368,8 @@ final class TmuxControllerTests: XCTestCase {
 
         let actual = String(decoding: sent.bytes, as: UTF8.self)
         XCTAssertTrue(
-            actual.contains("set-option -g history-limit 10000\n"),
-            "inline attach should set history-limit even when no size is cached"
+            actual.contains("display-message -p '#{history-limit}'\n"),
+            "inline attach should read the history-limit even when no size is cached"
         )
         XCTAssertFalse(
             actual.contains("refresh-client -C"),
@@ -6059,7 +7404,7 @@ final class TmuxControllerTests: XCTestCase {
         )
     }
 
-    func test_attachInit_sideChannelPopulatesTabsWithoutDisplaySwap() {
+    func test_attachInit_sideChannelPopulatesTabsWithoutDisplaySwap() async {
         let (controller, fed, sent) = makeController(controlPath: .sideChannel)
 
         controller.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
@@ -6068,13 +7413,12 @@ final class TmuxControllerTests: XCTestCase {
         let initialCommands = String(decoding: sent.bytes, as: UTF8.self)
         XCTAssertTrue(initialCommands.contains("list-windows -F"))
         XCTAssertTrue(initialCommands.contains("list-panes -s -F"))
-        XCTAssertTrue(initialCommands.contains("display-message -p '#{window_id}'"))
-        XCTAssertTrue(initialCommands.contains("refresh-client -B 'tessera-pane-meta:%*"))
+        XCTAssertTrue(initialCommands.contains(TmuxRuntimeHydrationQuery.activeWindowCommand))
+        XCTAssertFalse(initialCommands.contains("refresh-client -B"))
         XCTAssertFalse(initialCommands.contains("refresh-client -C"))
         sent.clear()
 
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8))
         controller.ingest(Array(
             "%begin 0 4 1\r\n@5 editor\r\n@7 logs\r\n%end 0 4 1\r\n".utf8
         ))
@@ -6100,6 +7444,17 @@ final class TmuxControllerTests: XCTestCase {
                        "attach-init in side-channel mode must not repaint the terminal")
         XCTAssertEqual(sent.bytes, [],
                        "no capture-pane/display-swap follow-up should be sent in side-channel mode")
+
+        await flushSubscriptionRegistrations(controller)
+        expectSent(
+            sent,
+            "refresh-client -B 'tessera-pane-meta.41:%41:\(TmuxPaneMetadataSubscription.format)'"
+                + " -B 'tessera-bell.41:%41:#{window_bell_flag}'\n"
+                + "refresh-client -B 'tessera-pane-meta.42:%42:\(TmuxPaneMetadataSubscription.format)'"
+                + " -B 'tessera-bell.42:%42:#{window_bell_flag}'\n"
+        )
+        XCTAssertEqual(controller._debugPendingCommands, [])
+        XCTAssertEqual(fed.bytes, [])
     }
 
     func test_attachInit_defaultPaneTitleFallsBackToWindowName() {
@@ -6110,7 +7465,6 @@ final class TmuxControllerTests: XCTestCase {
         sent.clear()
 
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8))
         controller.ingest(Array("%begin 0 4 1\r\n@5 htop\r\n%end 0 4 1\r\n".utf8))
         controller.ingest(Array(
             "%begin 0 5 1\r\n@5\t%41\t1\t\tremote.example.com\tremote.example.com\r\n%end 0 5 1\r\n".utf8
@@ -6133,7 +7487,6 @@ final class TmuxControllerTests: XCTestCase {
         controller.ingest(Array("%begin 0 1 0\r\n%end 0 1 0\r\n".utf8))
 
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8))
         controller.ingest(Array("%begin 0 4 1\r\n@5 editor\r\n%end 0 4 1\r\n".utf8))
         controller.ingest(Array(
             "%begin 0 5 1\r\n@5\t%12\t1\thtop\tremote.example.com\tremote.example.com\r\n%end 0 5 1\r\n".utf8
@@ -6153,7 +7506,6 @@ final class TmuxControllerTests: XCTestCase {
         sent.clear()
 
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8))
         controller.ingest(Array("%begin 0 4 1\r\n@5 editor\r\n%end 0 4 1\r\n".utf8))
         controller.ingest(Array(
             "%begin 0 5 1\r\n@5\t%12\t1\t\tremote.example.com\tremote.example.com\r\n%end 0 5 1\r\n".utf8
@@ -6179,7 +7531,6 @@ final class TmuxControllerTests: XCTestCase {
         sent.clear()
 
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8))
         controller.ingest(Array("%begin 0 4 1\r\n@5 editor\r\n%end 0 4 1\r\n".utf8))
         controller.ingest(Array(
             "%begin 0 5 1\r\n@5\t%12\t1\t\tremote.example.com\tremote.example.com\r\n%end 0 5 1\r\n".utf8
@@ -6204,7 +7555,6 @@ final class TmuxControllerTests: XCTestCase {
         controller.ingest(Array("%begin 0 1 0\r\n%end 0 1 0\r\n".utf8))
 
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8))
         controller.ingest(Array("%begin 0 4 1\r\n@5 editor\r\n%end 0 4 1\r\n".utf8))
         controller.ingest(Array(
             "%begin 0 5 1\r\n@5\t%12\t1\t\tremote.example.com\tremote.example.com\r\n%end 0 5 1\r\n".utf8
@@ -6227,7 +7577,6 @@ final class TmuxControllerTests: XCTestCase {
         controller.ingest(Array("%begin 0 1 0\r\n%end 0 1 0\r\n".utf8))
 
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8))
         controller.ingest(Array("%begin 0 4 1\r\n@5 editor\r\n%end 0 4 1\r\n".utf8))
         controller.ingest(Array(
             "%begin 0 5 1\r\n@5\t%12\t1\t41\t1\t39\t23\tzsh\tpane title\tremote.example.com\r\n%end 0 5 1\r\n".utf8
@@ -6258,7 +7607,6 @@ final class TmuxControllerTests: XCTestCase {
         sent.clear()
 
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8))
         controller.ingest(Array("%begin 0 4 1\r\n@5 editor\r\n%end 0 4 1\r\n".utf8))
         controller.ingest(Array("%begin 0 5 1\r\n@5\t%12\t1\t\t\t\r\n%end 0 5 1\r\n".utf8))
         controller.ingest(Array("%begin 0 6 1\r\n@5\r\n%end 0 6 1\r\n".utf8))
@@ -6319,7 +7667,7 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertEqual(sent.bytes, [], "geometry-only %layout-change must not resend pane-border")
     }
 
-    func test_moshPaneBorder_collapseEmitsOff() {
+    func test_moshPaneBorder_collapseRestoresTheUsersOwnSetting() {
         let (controller, _, sent) = makeController(controlPath: .sideChannel)
         enterTmuxModeAndDrainAttachInit(controller)
         controller.ingest(Array("%window-add @1\r\n".utf8))
@@ -6328,8 +7676,10 @@ final class TmuxControllerTests: XCTestCase {
 
         controller.ingest(onePaneLayoutChange(1))
 
+        // `-u`, not `off`: forcing our preference into the user's window left
+        // it there for every client of that session.
         XCTAssertEqual(String(decoding: sent.bytes, as: UTF8.self),
-                       "set -t @1 pane-border-status off\n",
+                       "set -u -t @1 pane-border-status\nset -u -t @1 pane-border-format\n",
                        "collapsing N→1 panes must turn the title row back off")
     }
 
@@ -6444,7 +7794,6 @@ final class TmuxControllerTests: XCTestCase {
         controller.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
         controller.ingest(Array("%begin 0 1 0\r\n%end 0 1 0\r\n".utf8))
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8))
         controller.ingest(Array("%begin 0 4 1\r\n@1 old\r\n%end 0 4 1\r\n".utf8))
         controller.ingest(Array("%begin 0 5 1\r\n@1\t%11\t1\t\told title\thost\r\n%end 0 5 1\r\n".utf8))
         controller.ingest(Array("%begin 0 6 1\r\n@1\r\n%end 0 6 1\r\n".utf8))
@@ -6471,7 +7820,6 @@ final class TmuxControllerTests: XCTestCase {
         sent.clear()
 
         controller.ingest(Array("%begin 0 5 1\r\n%end 0 5 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 6 1\r\n%end 0 6 1\r\n".utf8))
         controller.ingest(Array("%begin 0 7 1\r\n@9 fresh\r\n%end 0 7 1\r\n".utf8))
         controller.ingest(Array("%begin 0 8 1\r\n@9\t%19\t1\t\tfresh title\thost\r\n%end 0 8 1\r\n".utf8))
         controller.ingest(Array("%begin 0 9 1\r\n@9\r\n%end 0 9 1\r\n".utf8))
@@ -6490,7 +7838,6 @@ final class TmuxControllerTests: XCTestCase {
         controller.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
         controller.ingest(Array("%begin 0 1 0\r\n%end 0 1 0\r\n".utf8))
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8))
         controller.ingest(Array("%begin 0 4 1\r\n@5 editor\r\n@7 logs\r\n%end 0 4 1\r\n".utf8))
         controller.ingest(Array("%begin 0 5 1\r\n@5\t%51\t1\t\teditor title\thost\r\n@7\t%71\t1\t\tlogs title\thost\r\n%end 0 5 1\r\n".utf8))
         controller.ingest(Array("%begin 0 6 1\r\n@7\r\n%end 0 6 1\r\n".utf8))
@@ -6547,7 +7894,6 @@ final class TmuxControllerTests: XCTestCase {
         sent.clear()
 
         controller.ingest(Array("%begin 0 5 1\r\n%end 0 5 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 6 1\r\n%end 0 6 1\r\n".utf8))
         controller.ingest(Array("%begin 0 7 1\r\n@9 fresh\r\n%end 0 7 1\r\n".utf8))
         controller.ingest(Array("%begin 0 8 1\r\n@9\t%91\t1\t\tfresh title\thost\r\n%end 0 8 1\r\n".utf8))
         controller.ingest(Array("%begin 0 9 1\r\n@9\r\n%end 0 9 1\r\n".utf8))
@@ -6561,6 +7907,29 @@ final class TmuxControllerTests: XCTestCase {
             controller.activeWindowId,
             WindowId(9),
             "reattach should replace stale degraded tabs with tmux's current state"
+        )
+    }
+
+    func test_renderDropSummaryHookSeesLifecycleBoundariesBeforeTeardown() {
+        let (controller, _, _) = makeController(controlPath: .sideChannel)
+        var boundaries: [String] = []
+        controller.renderDropSummaryBoundary = { boundaries.append($0) }
+
+        controller.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
+        controller.prepareForAppInactivity()
+        controller.refreshActiveWindowOnForeground()
+        controller.sideChannelDisconnected()
+        controller.reset()
+
+        XCTAssertEqual(
+            boundaries,
+            [
+                "transport-attached",
+                "app-background",
+                "app-foreground",
+                "side-channel-disconnected",
+                "transport-lost",
+            ]
         )
     }
 
@@ -6581,7 +7950,7 @@ final class TmuxControllerTests: XCTestCase {
         controller.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
         controller.ingest(Array("%begin 0 1 0\r\n%end 0 1 0\r\n".utf8))
 
-        // Drain history-limit, pause-after, and bell subscription, then feed
+        // Drain history-limit and pause-after, then feed
         // the list-windows response with a real window list. If the FIFO was
         // misaligned, my list-windows callback would have fired on the empty
         // handshake body above and the controller's `windows` would still be
@@ -6589,7 +7958,6 @@ final class TmuxControllerTests: XCTestCase {
         // windows.
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8))
         controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 4 1\r\n%end 0 4 1\r\n".utf8))
         controller.ingest(Array(
             "%begin 0 5 1\r\n@5 editor\r\n@7 logs\r\n%end 0 5 1\r\n".utf8
         ))
@@ -6618,26 +7986,31 @@ final class TmuxControllerTests: XCTestCase {
         // (cached size), plus the shared hydration queries before we feed responses.
         let postHandshakeSent = String(decoding: sent.bytes, as: UTF8.self)
         XCTAssertTrue(
-            postHandshakeSent.contains("set-option -g history-limit 10000\n"),
-            "should set history-limit before creating post-attach windows"
+            postHandshakeSent.contains("display-message -p '#{history-limit}'\n"),
+            "should read the effective history-limit before creating post-attach windows"
+        )
+        XCTAssertFalse(
+            postHandshakeSent.contains("set-option -g history-limit"),
+            "a global write would truncate every future pane on the user's server"
         )
         XCTAssertTrue(
-            postHandshakeSent.contains("refresh-client -C 100,30\n"),
-            "should have sent refresh-client with the cached size"
+            postHandshakeSent.contains("refresh-client -C 100,30\nselect-window\n"),
+            "should have sent refresh-client with the cached size, plus its latest fence"
         )
         XCTAssertTrue(
             postHandshakeSent.contains("list-windows -F '#{window_id}\t#{window_index}\t#{window_layout}\t#{window_visible_layout}\t#{window_zoomed_flag}\t#{window_name}'\n"),
             "should have sent the widened list-windows (name last) to discover existing windows + indexes + layouts"
         )
         XCTAssertTrue(postHandshakeSent.contains("list-panes -s -F"))
-        XCTAssertTrue(postHandshakeSent.contains("display-message -p '#{window_id}'"))
+        XCTAssertTrue(postHandshakeSent.contains(TmuxRuntimeHydrationQuery.activeWindowCommand))
         sent.clear()
 
-        // Drain history-limit, refresh-client, pause-after, and bell subscription.
+        // Drain history-limit, refresh-client and its select-window fence,
+        // and pause-after.
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8))
         controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8))
+        controller.ingest(Array("%begin 0 31 1\r\n%end 0 31 1\r\n".utf8))
         controller.ingest(Array("%begin 0 4 1\r\n%end 0 4 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 5 1\r\n%end 0 5 1\r\n".utf8))
         // Feed the list-windows response with two windows.
         controller.ingest(Array(
             "%begin 0 6 1\r\n@5 editor\r\n@7 logs\r\n%end 0 6 1\r\n".utf8
@@ -6672,11 +8045,6 @@ final class TmuxControllerTests: XCTestCase {
             "active-window callback should trigger the guarded render metadata query"
         )
         sent.clear()
-
-        // The pane metadata subscription was sent during attach init
-        // before the render metadata query could be queued, so its
-        // command response drains first.
-        controller.ingest(Array("%begin 0 9 1\r\n%end 0 9 1\r\n".utf8))
 
         let metadata = renderedPaneMetadataLine(
             paneId: 12,
@@ -6731,25 +8099,24 @@ final class TmuxControllerTests: XCTestCase {
         // Inject %output before the init responses come back — this
         // mimics tmux's create-path notification burst.
         // pendingCommands at this point:
-        // [history-limit, pause-after, bell-subscription, list-windows,
-        //  list-panes, active-window, pane-subscription]
+        // [history-limit, pause-after, list-windows,
+        //  list-panes, active-window]
         controller.ingest(Array("%window-add @0\r\n%output %0 boot\r\n".utf8))
         // C3: %window-add @0 queued a window-name query.
         // pendingCommands:
-        // [history-limit, pause-after, bell-subscription, list-windows,
-        //  list-panes, active-window, pane-subscription, name@0]
+        // [history-limit, pause-after, list-windows,
+        //  list-panes, active-window, name@0]
         XCTAssertEqual(controller.activePaneId, PaneId(0),
                        "%output should latch activePaneId even mid-init")
         fed.clear()
 
-        // Drain history-limit, pause-after, bell subscription, then
+        // Drain history-limit, pause-after, then
         // list-windows. The handler parses
         // "@0 zsh", updates the name, and chains the active-window
         // pendingCommands after:
-        // [list-panes, active-window, pane-subscription, name@0]
+        // [list-panes, active-window, name@0]
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8))
         controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 4 1\r\n%end 0 4 1\r\n".utf8))
         controller.ingest(Array("%begin 0 5 1\r\n@0 zsh\r\n%end 0 5 1\r\n".utf8))
 
         // Drain list-panes, then active-window.
@@ -6765,10 +8132,8 @@ final class TmuxControllerTests: XCTestCase {
         )
         sent.clear()
 
-        // Drain the pane metadata subscription and C3 window-name
-        // query before the render metadata response because both were
-        // queued earlier.
-        controller.ingest(Array("%begin 0 97 1\r\n%end 0 97 1\r\n".utf8))
+        // Drain the C3 window-name query before the render metadata
+        // response because it was queued earlier.
         controller.ingest(Array("%begin 0 98 1\r\nzsh\r\n%end 0 98 1\r\n".utf8))
         controller.ingest(responseFrame(8, body: [
             renderedPaneMetadataLine(
@@ -6837,7 +8202,7 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertEqual(window?.panes.first(where: { $0.isActive })?.id, PaneId(20))
     }
 
-    func test_layoutChange_zoomKeepsFullLayoutAndGridMode() {
+    func test_layoutChange_zoomKeepsFullLayoutButUsesSingleSurfaceMode() {
         let (controller, _, _) = makeController()
         enterTmuxModeAndDrainAttachInit(controller)
         populateBellFixture(controller)
@@ -6848,9 +8213,10 @@ final class TmuxControllerTests: XCTestCase {
 
         let window = controller.windows.first(where: { $0.id == WindowId(2) })
         XCTAssertEqual(window?.isZoomed, true)
-        // FULL layout stays multi-pane while zoomed → still renders as a grid.
+        // FULL layout stays multi-pane for unzoom, while the visible zoomed
+        // leaf renders through the shared single surface.
         XCTAssertEqual(window?.layout?.paneCount, 2)
-        XCTAssertEqual(window?.rendersAsPaneGrid, true)
+        XCTAssertEqual(window?.rendersAsPaneGrid, false)
         // visibleLayout collapses to the single zoomed leaf.
         XCTAssertEqual(window?.visibleLayout?.paneCount, 1)
         XCTAssertEqual(window?.visibleLayout?.paneIds, [PaneId(20)])
@@ -6991,9 +8357,8 @@ final class TmuxControllerTests: XCTestCase {
         let (controller, _, _) = makeController(controlPath: .sideChannel)
         controller.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
         controller.ingest(Array("%begin 0 1 0\r\n%end 0 1 0\r\n".utf8))
-        // pause-after, bell-subscription drained.
+        // pause-after drained.
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8))
         // Widened list-windows: id \t layout \t visible \t zoom \t name.
         controller.ingest(Array(
             "%begin 0 4 1\r\n@5\t8205,80x24,0,0{40x24,0,0,50,39x24,41,0,51}\t8205,80x24,0,0{40x24,0,0,50,39x24,41,0,51}\t0\teditor\r\n%end 0 4 1\r\n".utf8
@@ -7019,7 +8384,6 @@ final class TmuxControllerTests: XCTestCase {
         controller.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
         controller.ingest(Array("%begin 0 1 0\r\n%end 0 1 0\r\n".utf8))
         controller.ingest(Array("%begin 0 2 1\r\n%end 0 2 1\r\n".utf8))
-        controller.ingest(Array("%begin 0 3 1\r\n%end 0 3 1\r\n".utf8))
         // Window name itself contains tabs — it is LAST so it can't shift the
         // fixed-grammar columns. The single-pane layout must still decode.
         controller.ingest(Array(
@@ -7032,6 +8396,487 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertEqual(window?.windowName, "weird\tname\twith\ttabs")
         XCTAssertEqual(window?.layout?.paneCount, 1)
         XCTAssertEqual(window?.rendersAsPaneGrid, false)
+    }
+
+    // MARK: - Command-queue poisoning detection and recovery
+
+    private func occurrences(of needle: String, in bytes: [UInt8]) -> Int {
+        let haystack = String(decoding: bytes, as: UTF8.self)
+        var count = 0
+        var search = haystack.startIndex
+        while let range = haystack.range(of: needle, range: search..<haystack.endIndex) {
+            count += 1
+            search = range.upperBound
+        }
+        return count
+    }
+
+    func test_commandQueue_serverOriginatedFrameDoesNotPopPendingClientCommand() {
+        let (controller, _, _) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+
+        let capture = CompletionCapture<[String], TmuxController.CommandError>()
+        controller.sendControlCommand("display-message -p probe") { capture.store($0) }
+        XCTAssertEqual(controller._debugPendingCommandCount, 1)
+
+        // A genuinely server-originated frame (flags bit0 clear) arrives while
+        // the client command is pending — e.g. a hook running on the server.
+        // It must be drained without consuming the client's FIFO entry.
+        controller.ingest(responseFrame(90, body: ["hook-noise"], flags: 0))
+        XCTAssertNil(capture.result)
+        XCTAssertEqual(controller._debugPendingCommandCount, 1)
+
+        // The real client response still correlates exactly.
+        controller.ingest(responseFrame(91, body: ["probe"], flags: 1))
+        XCTAssertEqual(capture.result, .success(["probe"]))
+        XCTAssertEqual(controller._debugPendingCommandCount, 0)
+    }
+
+    func test_commandQueue_missingResponseWithLiveOutputTimesOutWithoutReplay() async {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        controller.ingest(Array("%window-add @0\r\n".utf8))
+        controller.ingest(Array("%output %3 seed\r\n".utf8))
+        XCTAssertEqual(controller.activePaneId, PaneId(3))
+        controller.commandResponsePoisonThreshold = 0.05
+        controller.commandResponseOutputQuietPeriod = 0.05
+        controller.commandResponseHardTimeout = 5
+
+        sent.clear()
+        let capture = CompletionCapture<[String], TmuxController.CommandError>()
+        controller.sendControlCommand("display-message -p never-answered") {
+            capture.store($0)
+        }
+        controller.sendInput([0x61])
+        XCTAssertEqual(occurrences(of: "send-keys", in: sent.bytes), 1)
+
+        // The server keeps emitting pane output but never answers the client
+        // commands — the poisoned-queue signature from the field log.
+        for _ in 0..<20 {
+            controller.ingest(Array("%output %3 tick\r\n".utf8))
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertNil(capture.result, "live output must defer poison recovery")
+        XCTAssertEqual(controller.commandQueueRecoveries, 0)
+        for _ in 0..<100 where capture.result == nil {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+
+        XCTAssertEqual(capture.result, .failure(.timedOut))
+        XCTAssertEqual(controller._debugPendingCommandCount, 0)
+        XCTAssertNotNil(controller._debugPendingCommandFenceNonce)
+        XCTAssertEqual(controller.commandQueueRecoveries, 1)
+        // At-most-once: the ambiguous send-keys is failed, never retransmitted.
+        XCTAssertEqual(occurrences(of: "send-keys", in: sent.bytes), 1)
+        // Correlation resync is on the wire as a fence probe.
+        if let nonce = controller._debugPendingCommandFenceNonce {
+            XCTAssertEqual(
+                occurrences(of: "display-message -p \(nonce)", in: sent.bytes),
+                1
+            )
+        }
+    }
+
+    func test_commandQueue_fenceDiscardsStaleFramesThenResyncsExactly() async {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        controller.commandResponsePoisonThreshold = 0.05
+        controller.commandResponseOutputQuietPeriod = 0.05
+        controller.commandResponseHardTimeout = 5
+
+        let stuck = CompletionCapture<[String], TmuxController.CommandError>()
+        controller.sendControlCommand("display-message -p stuck") { stuck.store($0) }
+        controller.ingest(Array("%output %3 tick\r\n".utf8))
+        for _ in 0..<100 where stuck.result == nil {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(stuck.result, .failure(.timedOut))
+        guard let nonce = controller._debugPendingCommandFenceNonce else {
+            XCTFail("expected an armed recovery fence")
+            return
+        }
+
+        // A command transmitted while the fence is armed correlates only
+        // after the nonce drains.
+        sent.clear()
+        let fresh = CompletionCapture<[String], TmuxController.CommandError>()
+        controller.sendControlCommand("display-message -p fresh") { fresh.store($0) }
+        XCTAssertEqual(controller._debugPendingCommandCount, 1)
+
+        // The stuck command's response arrives late — pre-nonce, so it is
+        // discarded instead of being misattributed to the fresh command.
+        controller.ingest(responseFrame(70, body: ["stuck"], flags: 1))
+        XCTAssertNil(fresh.result)
+        XCTAssertEqual(controller._debugPendingCommandCount, 1)
+
+        // The fence response resynchronizes correlation regardless of its
+        // classification flags (a misclassifying server still matches).
+        controller.ingest(responseFrame(71, body: [nonce], flags: 0))
+        XCTAssertNil(controller._debugPendingCommandFenceNonce)
+
+        // The next client frame maps exactly onto the post-fence command.
+        controller.ingest(responseFrame(72, body: ["fresh"], flags: 1))
+        XCTAssertEqual(fresh.result, .success(["fresh"]))
+    }
+
+    func test_agentPaneWriteDeadlineKeepsTheReplySlotAndNeverSubmitsAfterLateAck() async {
+        for path in [TmuxController.ControlPath.inline, .sideChannel] {
+            for keyOnly in [false, true] {
+                let (controller, _, sent) = makeController(controlPath: path)
+                enterTmuxModeAndDrainAttachInit(controller)
+                controller.commandResponsePoisonThreshold = 5
+                controller.commandResponseInteractivePoisonThreshold = 5
+                sent.clear()
+                var completed: Bool?
+                let sending = Task { @MainActor in
+                    let acknowledged = keyOnly
+                        ? await controller.sendKeyAcknowledged(.escape, toPane: PaneId(3), completionTimeout: .milliseconds(40))
+                        : await controller.sendInputAcknowledged([0x61], toPane: PaneId(3), completionTimeout: .milliseconds(40))
+                    completed = acknowledged
+                    if acknowledged {
+                        _ = await controller.sendKeyAcknowledged(.enter, toPane: PaneId(3))
+                    }
+                }
+                for _ in 0..<30 where completed == nil {
+                    controller.ingest(Array("%output %3 busy\r\n".utf8))
+                    try? await Task.sleep(for: .milliseconds(10))
+                }
+                XCTAssertEqual(completed, false, "continuous output must not extend the caller's deadline")
+                XCTAssertEqual(controller.commandQueueRecoveries, 0)
+                XCTAssertEqual(controller._debugPendingCommandCount, 1)
+                let tail = CompletionCapture<[String], TmuxController.CommandError>()
+                controller.sendControlCommand("display-message -p tail") { tail.store($0) }
+                controller.ingest(responseFrame(81, body: [], flags: 1))
+                XCTAssertNil(tail.result, "the late ACK still belongs to the timed-out write")
+                XCTAssertEqual(controller._debugPendingCommandCount, 1)
+                controller.ingest(responseFrame(82, body: ["tail"], flags: 1))
+                XCTAssertEqual(tail.result, .success(["tail"]))
+                await sending.value
+                XCTAssertEqual(completed, false)
+                XCTAssertEqual(occurrences(of: "send-keys", in: sent.bytes), 1)
+                XCTAssertFalse(String(decoding: sent.bytes, as: UTF8.self).contains(" Enter"))
+                XCTAssertEqual(controller._debugPendingCommandCount, 0)
+            }
+        }
+    }
+
+    func test_agentPaneWriteResetCompletesTheCallerBeforeItsDeadline() async {
+        let (controller, _, _) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        let sending = Task { await controller.sendKeyAcknowledged(.enter, toPane: PaneId(3), completionTimeout: .seconds(1)) }
+        for _ in 0..<50 where controller._debugPendingCommandCount == 0 { await Task.yield() }
+        XCTAssertEqual(controller._debugPendingCommandCount, 1)
+        controller.reset()
+        let acknowledged = await sending.value
+        XCTAssertFalse(acknowledged)
+        XCTAssertEqual(controller._debugPendingCommandCount, 0)
+    }
+
+    func test_agentNamedPromptKeysUseThePaneKeyboardProtocol() async {
+        let keys: [PaneInputKey] = [.enter, .escape, .tab, .backTab, .up, .down, .left, .right, .shiftLeft, .controlRightBracket]
+        for path in [TmuxController.ControlPath.inline, .sideChannel] {
+            let (controller, _, sent) = makeController(controlPath: path)
+            enterTmuxModeAndDrainAttachInit(controller)
+            for (number, key) in keys.enumerated() {
+                sent.clear()
+                let sending = Task { await controller.sendKeyAcknowledged(key, toPane: PaneId(3)) }
+                for _ in 0..<50 where controller._debugPendingCommandCount == 0 { await Task.yield() }
+                XCTAssertEqual(String(decoding: sent.bytes, as: UTF8.self), "send-keys -t %3 \(key.rawValue)\n")
+                controller.ingest(responseFrame(90 + number, body: [], flags: 1))
+                let acknowledged = await sending.value
+                XCTAssertTrue(acknowledged)
+            }
+        }
+    }
+
+    func test_agentPaneWriteAckBehindLargeOutputStillSucceedsWithinTheDeadline() async {
+        let (controller, _, _) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        controller.commandResponseInteractivePoisonThreshold = 0.05
+        controller.commandResponsePoisonThreshold = 0.05
+        controller.commandResponseOutputQuietPeriod = 0.05
+        controller.commandResponseHardTimeout = 0.15
+        controller.feedTerminal = { _ in Thread.sleep(forTimeInterval: 0.001) }
+        let sending = Task { await controller.sendInputAcknowledged([0x61], toPane: PaneId(3), completionTimeout: .seconds(2)) }
+        for _ in 0..<50 where controller._debugPendingCommandCount == 0 { await Task.yield() }
+        let output = "%output %3 " + String(repeating: "x", count: 256 * 1024) + "\r\n"
+        let response = String(decoding: responseFrame(80, body: [], flags: 1), as: UTF8.self)
+        await controller.ingestCooperatively(Array((output + response).utf8))
+        let acknowledged = await sending.value
+        XCTAssertTrue(acknowledged)
+        XCTAssertEqual(controller.commandQueueRecoveries, 0)
+        XCTAssertEqual(controller._debugPendingCommandCount, 0)
+    }
+
+    func test_commandQueue_ownerRecoveryBlocksOldTransportWithoutFence() async {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        controller.commandResponseInteractivePoisonThreshold = 0.05
+        controller.commandResponsePoisonThreshold = 5
+        controller.commandResponseOutputQuietPeriod = 0.05
+        controller.commandResponseHardTimeout = 0.15
+        var requestedRecoveries: [Int] = []
+        controller.onCommandQueueTransportRecoveryRequired = {
+            requestedRecoveries.append($0)
+        }
+
+        sent.clear()
+        let stuck = CompletionCapture<[String], TmuxController.CommandError>()
+        controller.sendControlCommand("send-keys -t %3 -H 61") { stuck.store($0) }
+        // Even past the absolute timeout, continuous ordered pane output is
+        // congestion evidence: the command response may still be behind it.
+        for _ in 0..<20 {
+            controller.ingest(Array("%output %3 tick\r\n".utf8))
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertNil(stuck.result)
+        XCTAssertEqual(requestedRecoveries, [])
+
+        // Once output drains and remains quiet, a genuinely missing response
+        // recovers immediately without replaying the ambiguous input.
+        for _ in 0..<100 where stuck.result == nil {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+
+        XCTAssertEqual(stuck.result, .failure(.timedOut))
+        XCTAssertEqual(requestedRecoveries, [1])
+        XCTAssertNil(controller._debugPendingCommandFenceNonce)
+        XCTAssertEqual(controller._debugPendingCommandCount, 0)
+        XCTAssertFalse(
+            String(decoding: sent.bytes, as: UTF8.self).contains("tessera-cq-fence")
+        )
+
+        sent.clear()
+        let rejected = CompletionCapture<[String], TmuxController.CommandError>()
+        controller.sendControlCommand("display-message -p must-not-cross") {
+            rejected.store($0)
+        }
+        XCTAssertEqual(rejected.result, .failure(.timedOut))
+        XCTAssertEqual(sent.bytes, [])
+
+        controller.reset()
+        enterTmuxModeAndDrainAttachInit(controller)
+        sent.clear()
+        controller.sendControlCommand("display-message -p fresh") { _ in }
+        XCTAssertEqual(
+            String(decoding: sent.bytes, as: UTF8.self),
+            "display-message -p fresh\n"
+        )
+    }
+
+    func test_commandQueue_responseBehindLargeCooperativeOutputIsNotPoisoned() async {
+        let (controller, _, _) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        controller.commandResponseInteractivePoisonThreshold = 0.05
+        controller.commandResponsePoisonThreshold = 0.05
+        controller.commandResponseOutputQuietPeriod = 0.05
+        controller.commandResponseHardTimeout = 0.15
+        controller.feedTerminal = { _ in
+            // Model the renderer work seen in the field log. Cooperative
+            // delivery yields every few slices, allowing the watchdog to run
+            // while the response is still ordered behind this output batch.
+            Thread.sleep(forTimeInterval: 0.001)
+        }
+
+        let capture = CompletionCapture<[String], TmuxController.CommandError>()
+        controller.sendControlCommand("send-keys -t %3 -H 61") {
+            capture.store($0)
+        }
+        let output = "%output %3 " + String(repeating: "x", count: 256 * 1024) + "\r\n"
+        let response = String(decoding: responseFrame(80, body: [], flags: 1), as: UTF8.self)
+        await controller.ingestCooperatively(Array((output + response).utf8))
+
+        XCTAssertEqual(capture.result, .success([]))
+        XCTAssertEqual(controller.commandQueueRecoveries, 0)
+        XCTAssertEqual(controller._debugPendingCommandCount, 0)
+    }
+
+    func test_commandQueue_hardTimeoutRecoversEvenWithoutServerActivity() async {
+        let (controller, _, _) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        controller.commandResponsePoisonThreshold = 0.05
+        controller.commandResponseHardTimeout = 0.15
+
+        // Let attach-time wire activity go stale so the poison check cannot
+        // classify the server as active.
+        try? await Task.sleep(for: .milliseconds(200))
+        let capture = CompletionCapture<[String], TmuxController.CommandError>()
+        controller.sendControlCommand("display-message -p never-answered") {
+            capture.store($0)
+        }
+        for _ in 0..<100 where capture.result == nil {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+
+        XCTAssertEqual(capture.result, .failure(.timedOut))
+        XCTAssertEqual(controller.commandQueueRecoveries, 1)
+    }
+
+    func test_commandQueue_resetClearsFenceAndAllowsCleanReattach() async {
+        let (controller, _, _) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        controller.commandResponsePoisonThreshold = 0.05
+        controller.commandResponseOutputQuietPeriod = 0.05
+        controller.commandResponseHardTimeout = 5
+
+        let capture = CompletionCapture<[String], TmuxController.CommandError>()
+        controller.sendControlCommand("display-message -p stuck") { capture.store($0) }
+        controller.ingest(Array("%output %3 tick\r\n".utf8))
+        for _ in 0..<100 where capture.result == nil {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertNotNil(controller._debugPendingCommandFenceNonce)
+
+        controller.reset()
+        XCTAssertNil(controller._debugPendingCommandFenceNonce)
+        XCTAssertEqual(controller.mode, .passthrough)
+
+        // A fresh attach correlates normally with no leftover fence state.
+        enterTmuxModeAndDrainAttachInit(controller)
+        let fresh = CompletionCapture<[String], TmuxController.CommandError>()
+        controller.sendControlCommand("display-message -p fresh") { fresh.store($0) }
+        controller.ingest(responseFrame(40, body: ["fresh"], flags: 1))
+        XCTAssertEqual(fresh.result, .success(["fresh"]))
+    }
+
+    // MARK: - Paste buffers and colour reports
+
+    func test_pasteBufferChangedFetchesBufferAndForwardsText() {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        sent.clear()
+        var received: (name: String, text: String)?
+        controller.onPasteBufferChanged = { name, text in received = (name, text) }
+
+        controller.ingest(Array("%paste-buffer-changed buffer0\r\n".utf8))
+        XCTAssertEqual(
+            String(decoding: sent.bytes, as: UTF8.self),
+            "show-buffer -b 'buffer0'\n"
+        )
+
+        controller.ingest(Array("%begin 0 60 1\r\nline one\r\nline \"two\" \\ tail\r\n%end 0 60 1\r\n".utf8))
+        XCTAssertEqual(received?.name, "buffer0")
+        XCTAssertEqual(received?.text, "line one\nline \"two\" \\ tail")
+    }
+
+    func test_pasteBufferChangedWithoutOwnerSendsNothing() {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        sent.clear()
+        controller.ingest(Array("%paste-buffer-changed buffer0\r\n%paste-buffer-deleted buffer0\r\n".utf8))
+        XCTAssertTrue(sent.bytes.isEmpty)
+    }
+
+    func test_combinedColorReportIsSplitIntoOneClientReportPerSequence() {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller)
+        sent.clear()
+        controller.terminalResponseForOutput = { _, data in
+            guard String(decoding: data, as: UTF8.self).contains("\u{1B}]10;?") else { return nil }
+            return Array("\u{1B}]10;rgb:d4d4/d4d4/d4d4\u{1B}\\\u{1B}]11;rgb:0000/0000/0000\u{1B}\\".utf8)
+        }
+
+        controller.ingest(Array("%output %0 \u{1B}]10;?\u{07}\r\n".utf8))
+
+        XCTAssertEqual(
+            String(decoding: sent.bytes, as: UTF8.self),
+            "refresh-client -r '%0:\u{1B}]10;rgb:d4d4/d4d4/d4d4\u{1B}\\'\n"
+                + "refresh-client -r '%0:\u{1B}]11;rgb:0000/0000/0000\u{1B}\\'\n"
+        )
+    }
+
+    func test_tmuxWithoutClientReportsUsesPaneStyleFallback() {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller)
+        controller.terminalResponseForOutput = { _, _ in
+            Array("\u{1B}]10;rgb:d4d4/d4d4/d4d4\u{1B}\\\u{1B}]11;rgb:1e1e/1e1e/1e1e\u{1B}\\".utf8)
+        }
+        sent.clear()
+
+        controller.noteServerVersion("3.4")
+
+        // Pane options only: `select-pane -P` would also make the pane active.
+        let paneStyle = "set-option -p -t %0 window-style 'fg=#d4d4d4,bg=#1e1e1e'\n"
+            + "set-option -p -t %0 window-active-style 'fg=#d4d4d4,bg=#1e1e1e'\n"
+        XCTAssertEqual(String(decoding: sent.bytes, as: UTF8.self), paneStyle)
+        sent.clear()
+
+        // Later queries keep using the fallback on this server.
+        controller.ingest(Array("%output %0 \u{1B}]11;?\u{07}\r\n".utf8))
+        XCTAssertEqual(String(decoding: sent.bytes, as: UTF8.self), paneStyle)
+    }
+
+    func test_tmuxBeforePaneOptionsStylesOnlyTheActivePane() {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller)
+        controller.ingest(Array("%window-pane-changed @0 %0\r\n".utf8))
+        controller.terminalResponseForOutput = { _, _ in
+            Array("\u{1B}]10;rgb:d4d4/d4d4/d4d4\u{1B}\\\u{1B}]11;rgb:1e1e/1e1e/1e1e\u{1B}\\".utf8)
+        }
+        sent.clear()
+
+        // Only `select-pane -P` exists before tmux 3.0; on the pane the user
+        // is in, it selects nothing new.
+        controller.noteServerVersion("2.9a")
+        XCTAssertEqual(
+            String(decoding: sent.bytes, as: UTF8.self),
+            "select-pane -t %0 -P 'fg=#d4d4d4,bg=#1e1e1e'\n"
+        )
+
+        // Once the user is in another pane, styling %0 would select it.
+        controller.ingest(Array("%window-pane-changed @0 %1\r\n".utf8))
+        XCTAssertEqual(controller.activePaneId, PaneId(1))
+        sent.clear()
+        controller.ingest(Array("%output %0 \u{1B}]11;?\u{07}\r\n".utf8))
+        let sentText = String(decoding: sent.bytes, as: UTF8.self)
+        XCTAssertFalse(sentText.contains("select-pane"), sentText)
+        XCTAssertFalse(sentText.contains("set-option"), sentText)
+    }
+
+    func test_serverVersionParsingAndClientReportSupport() {
+        XCTAssertEqual(
+            TmuxController.parseServerVersion(.success(["tessera-sep\t3.6a"])),
+            "3.6a"
+        )
+        XCTAssertEqual(
+            TmuxController.parseServerVersion(.success(["tessera-sep 3.4"])),
+            "3.4"
+        )
+        XCTAssertNil(TmuxController.parseServerVersion(.success(["unrelated"])))
+        XCTAssertNil(TmuxController.parseServerVersion(.failure(.cancelled)))
+
+        XCTAssertFalse(TmuxController.versionSupportsClientReports("3.4"))
+        XCTAssertFalse(TmuxController.versionSupportsClientReports("3.3a"))
+        XCTAssertTrue(TmuxController.versionSupportsClientReports("3.5"))
+        XCTAssertTrue(TmuxController.versionSupportsClientReports("3.6a"))
+        XCTAssertTrue(TmuxController.versionSupportsClientReports("next-3.7"))
+        XCTAssertTrue(TmuxController.versionSupportsClientReports("master"))
+
+        XCTAssertFalse(TmuxController.versionSupportsPaneOptions("2.9a"))
+        XCTAssertFalse(TmuxController.versionSupportsPaneOptions("2.6"))
+        XCTAssertTrue(TmuxController.versionSupportsPaneOptions("3.0"))
+        XCTAssertTrue(TmuxController.versionSupportsPaneOptions("3.4"))
+        XCTAssertTrue(TmuxController.versionSupportsPaneOptions("master"))
+    }
+
+    func test_oscColorReportParsing() {
+        let split = TmuxController.splitOSCSequences(
+            Array("\u{1B}]10;rgb:d4d4/d4d4/d4d4\u{1B}\\junk\u{1B}]11;rgb:00/00/00\u{07}".utf8)
+        )
+        XCTAssertEqual(split.count, 2)
+        XCTAssertEqual(
+            TmuxController.parseOSCColorReport(split[0]).map { "\($0.code) \($0.rgb)" },
+            "10 #d4d4d4"
+        )
+        XCTAssertEqual(
+            TmuxController.parseOSCColorReport(split[1]).map { "\($0.code) \($0.rgb)" },
+            "11 #000000"
+        )
+        XCTAssertTrue(TmuxController.splitOSCSequences([0x52]).isEmpty)
+        XCTAssertNil(TmuxController.parseOSCColorReport(Array("\u{1B}]52;c;abc\u{07}".utf8)))
     }
 }
 

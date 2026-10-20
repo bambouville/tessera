@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 /// Measures Markdown-preview scrolling on a document the size of the one that
 /// scrolled badly in the field. Host-free: the harness writes a synthetic
@@ -43,6 +44,19 @@ final class MarkdownScrollProbe: XCTestCase {
             guard parts.count == 2 else { return }
             result[String(parts[0])] = String(parts[1])
         }
+    }
+
+    func testLocalImages() throws {
+        app.launchEnvironment["TESSERA_MARKDOWN_IMAGE_HARNESS"] = "1"
+        app.launchArguments += ["-tessera.pref.quickLookPresentation", "fullScreen"]
+        if UIDevice.current.userInterfaceIdiom == .pad { XCUIDevice.shared.orientation = .landscapeLeft }
+        app.launch()
+        XCTAssertTrue(app.images["Relative image"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "Absolute image").firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.images["Table image"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Missing image"].exists)
+        NSLog("markdown-images-ready")
+        sleep(6) // External simctl capture, never an XCUIScreenshot of Metal.
     }
 
     func testScrollThroughALargeDocument() throws {

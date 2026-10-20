@@ -1,0 +1,9 @@
+{
+  "captureLines": [
+    "\u001b[42mready"
+  ],
+  "clientRows": 24,
+  "expectedBase64": "G1s/MjAyNmwbWz8xMDAzbBtbPzEwMDJsG1s/MTAwMGwbWz8xMDA2bBtbPzZsG1s/N2gbWzRsG1tyG1swbRtbSBtbMkobWz8yNWgbWzQybXJlYWR5G1swbRtbPzEwMDNoG1s/MTAwNmgbPhtbPzFsG1s/MjVoG1syOzNI",
+  "renderedStateLine": "%7\t2\t1\tvim\tmain\thost\t0\t0\t0\t23\t1\t0\t0\t0\t1\t0\t0\t1\t1\t0\t0\t0",
+  "terminalIsInAltScreen": false
+}

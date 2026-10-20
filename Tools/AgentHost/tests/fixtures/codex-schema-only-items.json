@@ -1,0 +1,31 @@
+[
+  {
+    "item": {"type":"hookPrompt","id":"synthetic-hook","fragments":[{"hookRunId":"synthetic-run","text":"Synthetic hook context"}]},
+    "blocks": ["text"]
+  },
+  {
+    "item": {"type":"functionCallOutput","id":"synthetic-function","name":"fixture","output":[
+      {"type":"input_text","text":"Synthetic result"},
+      {"type":"input_image","image_url":"https://example.invalid/image"},
+      {"type":"input_audio","audio_url":"https://example.invalid/audio"},
+      {"type":"encrypted_content","encrypted_content":"synthetic-opaque-not-for-display"}
+    ]},
+    "blocks": ["tool_result","attachment","attachment","attachment"]
+  },
+  {
+    "item": {"type":"dynamicToolCall","id":"synthetic-dynamic","tool":"fixture","arguments":{},"status":"completed","success":true,"contentItems":[
+      {"type":"inputText","text":"Synthetic result"},
+      {"type":"inputImage","imageUrl":"https://example.invalid/image"},
+      {"type":"inputAudio","audioUrl":"https://example.invalid/audio"}
+    ]},
+    "blocks": ["tool_call","tool_result","attachment","attachment"]
+  },
+  {
+    "item": {"type":"enteredReviewMode","id":"synthetic-enter","review":"Synthetic review"},
+    "blocks": ["text"]
+  },
+  {
+    "item": {"type":"exitedReviewMode","id":"synthetic-exit","review":"Synthetic review"},
+    "blocks": ["text"]
+  }
+]

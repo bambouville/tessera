@@ -3,109 +3,34 @@ import Crypto
 import Logging
 import NIOSSH
 
-extension SSHAlgorithms.Modification<NIOSSHTransportProtection.Type> {
-    func apply(to configuration: inout [any NIOSSHTransportProtection.Type]) {
-        switch self {
-        case .add(let algorithms):
-            configuration.append(contentsOf: algorithms)
-
-            for algorithm: any NIOSSHTransportProtection.Type in algorithms {
-                NIOSSHAlgorithms.register(transportProtectionScheme: algorithm)
-            }
-        case .replace(with: let algorithms):
-            configuration = algorithms
-
-            for algorithm in algorithms {
-                NIOSSHAlgorithms.register(transportProtectionScheme: algorithm)
-            }
-        }
-    }
-}
-
-extension SSHAlgorithms.Modification<NIOSSHKeyExchangeAlgorithmProtocol.Type> {
-    func apply(to configuration: inout [any NIOSSHKeyExchangeAlgorithmProtocol.Type]) {
-        switch self {
-        case .add(let algorithms):
-            configuration.append(contentsOf: algorithms)
-
-            for algorithm in algorithms {
-                NIOSSHAlgorithms.register(keyExchangeAlgorithm: algorithm)
-            }
-        case .replace(with: let algorithms):
-            configuration = algorithms
-
-            for algorithm in algorithms {
-                NIOSSHAlgorithms.register(keyExchangeAlgorithm: algorithm)
-            }
-        }
-    }
-}
-
-extension SSHAlgorithms.Modification<(NIOSSHPublicKeyProtocol.Type, NIOSSHSignatureProtocol.Type)>{
-    func register() {
-        switch self {
-        case .add(let algorithms):
-            for (publicKey, signature) in algorithms {
-                NIOSSHAlgorithms.register(publicKey: publicKey, signature: signature)
-            }
-        case .replace(with: let algorithms):
-            for (publicKey, signature) in algorithms {
-                NIOSSHAlgorithms.register(publicKey: publicKey, signature: signature)
-            }
-        }
-    }
-}
-
+/// Configuration supported by upstream NIOSSH. Tessera leaves this at its
+/// default, preserving the upstream cipher set. Fork-only custom KEX/RSA
+/// registration and the unused legacy `.all` preset are intentionally absent.
 public struct SSHAlgorithms: Sendable {
-    /// Represents a modification to a list of items.
-    ///
-    /// - replace: Replaces the existing list of items with the given list of items.
-    /// - add: Adds the given list of items to the list of items.
     public enum Modification<T: Sendable>: Sendable {
         case replace(with: [T])
         case add([T])
     }
 
-    /// The enabled TransportProtectionSchemes.
     public var transportProtectionSchemes: Modification<NIOSSHTransportProtection.Type>?
-
-    /// The enabled KeyExchangeAlgorithms
-    public var keyExchangeAlgorithms: Modification<NIOSSHKeyExchangeAlgorithmProtocol.Type>?
-
-    public var publicKeyAlgorihtms: Modification<(NIOSSHPublicKeyProtocol.Type, NIOSSHSignatureProtocol.Type)>?
-
-    func apply(to clientConfiguration: inout SSHClientConfiguration) {
-        transportProtectionSchemes?.apply(to: &clientConfiguration.transportProtectionSchemes)
-        keyExchangeAlgorithms?.apply(to: &clientConfiguration.keyExchangeAlgorithms)
-        publicKeyAlgorihtms?.register()
-    }
-
-    func apply(to serverConfiguration: inout SSHServerConfiguration) {
-        transportProtectionSchemes?.apply(to: &serverConfiguration.transportProtectionSchemes)
-        keyExchangeAlgorithms?.apply(to: &serverConfiguration.keyExchangeAlgorithms)
-        publicKeyAlgorihtms?.register()
-    }
 
     public init() {}
 
-    public static let all: SSHAlgorithms = {
-        var algorithms = SSHAlgorithms()
+    func apply(to clientConfiguration: inout SSHClientConfiguration) {
+        apply(to: &clientConfiguration.transportProtectionSchemes)
+    }
 
-        algorithms.transportProtectionSchemes = .add([
-            AES128CTR.self
-        ])
+    func apply(to serverConfiguration: inout SSHServerConfiguration) {
+        apply(to: &serverConfiguration.transportProtectionSchemes)
+    }
 
-        algorithms.keyExchangeAlgorithms = .add([
-            DiffieHellmanGroup14Sha1.self,
-            DiffieHellmanGroup14Sha256.self
-        ])
-
-        algorithms.publicKeyAlgorihtms = .add([
-            (Insecure.RSA.PublicKey.self, Insecure.RSA.Signature.self),
-        ])
-
-        return algorithms
-    }()
+    private func apply(to schemes: inout [NIOSSHTransportProtection.Type]) {
+        switch transportProtectionSchemes {
+        case .add(let additions): schemes.append(contentsOf: additions)
+        case .replace(let replacements): schemes = replacements
+        case nil: break
+        }
+    }
 }
 
 /// Represents an SSH connection.

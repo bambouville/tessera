@@ -391,6 +391,22 @@
     "zh-Hans": "正在取回控制权…",
     "zh-Hant": "正在取回控制權…"
   },
+  "takes control when reconnected": {
+    "de": "übernimmt die Steuerung nach dem Neuverbinden",
+    "es": "tomará el control al reconectar",
+    "fr": "reprendra la main à la reconnexion",
+    "ja": "再接続後に操作を引き継ぎます",
+    "zh-Hans": "重新连接后接管控制权",
+    "zh-Hant": "重新連線後接管控制權"
+  },
+  "resuming…": {
+    "de": "wird fortgesetzt…",
+    "es": "reanudando…",
+    "fr": "reprise…",
+    "ja": "再開しています…",
+    "zh-Hans": "正在恢复…",
+    "zh-Hant": "正在恢復…"
+  },
   "tap anywhere": {
     "de": "irgendwo tippen",
     "es": "toca en cualquier parte",

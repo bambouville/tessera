@@ -44,8 +44,6 @@ struct ExperimentalSettingsView: View {
             .onChange(of: appearance.agentCenterNotificationsEnabled) { _, enabled in
                 if enabled {
                     requestAgentNotificationPermission()
-                } else {
-                    bellController.cancelAgentNotifications()
                 }
             }
 
@@ -667,7 +665,7 @@ private struct CustomAgentRuleEditor: View {
         updated.agentDetection = enabled ? AgentDetectionRules(
             blockingPromptPatterns: [],
             idlePromptPatterns: [],
-            responseTemplate: "{index}↵"
+            responseTemplate: "{index}"
         ) : nil
         onUpdate(updated)
     }
@@ -691,8 +689,7 @@ private extension View {
     func agentRuleFieldStyle(tokens: DesignTokens) -> some View {
         self
             .font(Typography.tesseraMono(size: 10.5))
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
+            .literalTextInput()
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(tokens.inputBg)
@@ -843,8 +840,7 @@ private struct MacroEditorSheet: View {
             TextField("macro spec", text: $macro)
                 .font(Typography.tesseraMono(size: 13))
                 .foregroundStyle(T.fg)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
+                .literalTextInput()
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
                 .background(T.inputBg)

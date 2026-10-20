@@ -346,9 +346,9 @@ private struct AccessoryBarEditor: View {
 
     // Chip catalogs by category. Single source of truth lives in
     // AccessoryChip; here we just group for the palette UI.
-    private let navChips: [AccessoryChip] = [.esc, .tab, .left, .down, .up, .right, .home, .end, .pgup, .pgdn]
+    private let navChips: [AccessoryChip] = [.esc, .enter, .tab, .left, .down, .up, .right, .home, .end, .pgup, .pgdn]
     private let modifierChips: [AccessoryChip] = [.ctrl, .alt, .shift, .cmd]
-    private let controlChips: [AccessoryChip] = [.ctrlC, .ctrlJ]
+    private let controlChips: [AccessoryChip] = [.ctrlC, .ctrlJ, .ctrlL]
     private let fkeyChips: [AccessoryChip] = [.f1, .f2, .f3, .f4, .f5, .f6, .f7, .f8, .f9, .f10, .f11, .f12]
     private let symbolChips: [AccessoryChip] = [.pipe, .tilde, .slash, .backslash, .dollar, .lbrace, .rbrace, .lbracket, .rbracket, .lt, .gt]
 }

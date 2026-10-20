@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="program_status_needs_input">入力待ち</string>
+    <string name="program_status_needs_approval">承認待ち</string>
+    <string name="program_status_needs_answer">回答待ち</string>
+    <string name="program_status_sign_in_needed">サインインが必要</string>
+    <string name="program_status_failed">失敗</string>
+    <string name="program_status_finished">完了</string>
+    <string name="program_status_working">実行中</string>
+    <string name="program_status_ready">準備完了</string>
+    <string name="program_status_unavailable">ステータスを取得できません</string>
+    <string name="program_status_program">プログラム</string>
+    <string name="program_status_programs">プログラム</string>
+    <string name="program_status_needs_attention">対応が必要</string>
+    <string name="program_status_visit_checks">ペインを開くと確認済みになります</string>
+    <string name="program_status_open_pane">ペインを開く</string>
+    <plurals name="program_status_count_need_input">
+        <item quantity="other">%d 件が入力待ち</item>
+    </plurals>
+    <plurals name="program_status_count_need_approval">
+        <item quantity="other">%d 件が承認待ち</item>
+    </plurals>
+    <plurals name="program_status_count_need_answer">
+        <item quantity="other">%d 件が回答待ち</item>
+    </plurals>
+    <plurals name="program_status_count_need_sign_in">
+        <item quantity="other">%d 件がサインイン待ち</item>
+    </plurals>
+    <plurals name="program_status_count_failed">
+        <item quantity="other">%d 件が失敗</item>
+    </plurals>
+    <plurals name="program_status_count_finished">
+        <item quantity="other">%d 件が完了</item>
+    </plurals>
+    <string name="program_status_open_agent_center">エージェントセンターを開く</string>
+    <string name="program_status_raw_session">素のセッション</string>
+    <string name="program_status_window">ウインドウ %1$d</string>
+    <string name="program_status_named_window">ウインドウ %1$d「%2$s」</string>
+    <string name="program_status_pane">ペイン %1$s</string>
+    <string name="program_status_pane_unavailable">ペインを利用できません</string>
+    <string name="program_status_all_caught_up">すべて対応済み</string>
+    <plurals name="program_status_pane_count">
+        <item quantity="other">%d ペイン</item>
+    </plurals>
+</resources>

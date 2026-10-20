@@ -4,6 +4,30 @@ import XCTest
 /// Custom shortcuts: what they send, where they apply, and how they share the
 /// accessory bar's storage with built-in chips.
 final class CustomShortcutTests: XCTestCase {
+    func testExplicitStraighteningConvertsQuotesAndBothDashes() {
+        XCTAssertEqual(straightenedShortcutLiteral("‘’‚‛“”„‟—–"), "''''\"\"\"\"----")
+        XCTAssertEqual(straightenedShortcutLiteral("npm test — ‘billing’ –flag"), "npm test -- 'billing' --flag")
+        XCTAssertEqual(straightenedShortcutLiteral("regex:“worker”—child"), "regex:\"worker\"--child")
+        XCTAssertEqual(straightenedShortcutLiteral("Release – v2 · „Hallo“"), "Release -- v2 · \"Hallo\"")
+    }
+
+    func testExplicitStraighteningPreservesOtherTextAndIsIdempotent() {
+        let literal = "npm test -- billing -x 'a' \"b\"\n\t部署 👩🏽‍💻 … −"
+        XCTAssertEqual(straightenedShortcutLiteral(literal), literal)
+        XCTAssertEqual(straightenedShortcutLiteral(""), "")
+        let straightened = straightenedShortcutLiteral("npm — “test”")
+        XCTAssertEqual(straightenedShortcutLiteral(straightened), straightened)
+    }
+
+    func testTypographicPunctuationDetection() {
+        for character in "‘’‚‛“”„‟—–" {
+            XCTAssertTrue(containsTypographicShortcutPunctuation("before \(character) after"))
+        }
+        XCTAssertTrue(containsTypographicShortcutPunctuation("Release – v2 · „Hallo“"))
+        XCTAssertFalse(containsTypographicShortcutPunctuation("--flag -x 'a' \"b\" … − 部署 👩🏽‍💻\n\t"))
+        XCTAssertFalse(containsTypographicShortcutPunctuation(""))
+    }
+
 
     // MARK: - Encoding
 
@@ -407,7 +431,8 @@ final class CommandChipTests: XCTestCase {
         XCTAssertEqual(BindingKey.from(chip: .left), .left)
         XCTAssertEqual(BindingKey.from(chip: .pipe), .character("|"))
         XCTAssertEqual(BindingKey.from(chip: .f5), .function(5))
-        for chip in [AccessoryChip.ctrl, .alt, .shift, .cmd, .ctrlC, .ctrlJ] {
+        XCTAssertEqual(BindingKey.from(chip: .enter), .return)
+        for chip in [AccessoryChip.ctrl, .alt, .shift, .cmd, .ctrlC, .ctrlJ, .ctrlL] {
             XCTAssertNil(BindingKey.from(chip: chip), "\(chip.rawValue) is not a single key")
         }
     }
@@ -434,7 +459,7 @@ final class AppShortcutResolutionTests: XCTestCase {
     func testShippedDefaultsShareNoChord() {
         var seen: [KeyBinding: ShortcutAction] = [:]
         for action in ShortcutAction.allCases where !action.isDigitBlock {
-            let binding = action.defaultBinding
+            guard let binding = action.defaultBinding else { continue }
             XCTAssertNil(
                 seen[binding],
                 "\(action.rawValue) collides with \(seen[binding]?.rawValue ?? "") on \(binding.rendered(.glyph))"

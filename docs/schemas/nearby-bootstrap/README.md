@@ -9,7 +9,13 @@ encrypted envelope and every JSON payload it carries (`manifest`,
 and the Bonjour TXT-record contract (`txt-record.md`).
 
 **Freeze rule: files under a shipped version's folder are immutable.** Any
-wire change — adding, renaming, or removing a key on any message — requires:
+wire change — adding, renaming, or removing a key on any message — requires
+the steps below, except the authenticated receiver-declared optional mechanism
+in [v2-extensions.md](v2-extensions.md). That mechanism uses an already-lenient
+payload and gates every extended strict manifest on the recipient declaration.
+Frozen schemas are never edited for an extension.
+
+Other wire changes require:
 
 1. bumping `NearbyBootstrapProtocol.version`
    (`Tessera/Bootstrap/NearbyBootstrapCompatibility.swift`, the canonical

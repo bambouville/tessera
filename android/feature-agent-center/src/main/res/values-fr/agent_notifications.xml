@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="agent_notification_channel_name">Alertes des agents</string>
+    <string name="agent_notification_channel_description">Demandes et fins de tâche du centre d\'agents</string>
+    <string name="agent_notification_needs_input">L\'agent attend une saisie</string>
+    <string name="agent_notification_finished">L\'agent a terminé</string>
+    <string name="agent_notification_body">Ouvrez Tessera pour vérifier.</string>
+    <string name="agent_notification_review">Vérifier</string>
+</resources>

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="program_status_needs_input">Braucht Eingabe</string>
+    <string name="program_status_needs_approval">Braucht Freigabe</string>
+    <string name="program_status_needs_answer">Braucht eine Antwort</string>
+    <string name="program_status_sign_in_needed">Anmeldung erforderlich</string>
+    <string name="program_status_failed">fehlgeschlagen</string>
+    <string name="program_status_finished">fertig</string>
+    <string name="program_status_working">Arbeitet</string>
+    <string name="program_status_ready">Bereit</string>
+    <string name="program_status_unavailable">Status nicht verfügbar</string>
+    <string name="program_status_program">Programm</string>
+    <string name="program_status_programs">Programme</string>
+    <string name="program_status_needs_attention">Braucht Aufmerksamkeit</string>
+    <string name="program_status_visit_checks">Ein Bereich gilt als geprüft, sobald du ihn aufrufst</string>
+    <string name="program_status_open_pane">Bereich öffnen</string>
+    <plurals name="program_status_count_need_input">
+        <item quantity="one">%d braucht Eingabe</item>
+        <item quantity="other">%d brauchen Eingabe</item>
+    </plurals>
+    <plurals name="program_status_count_need_approval">
+        <item quantity="one">%d braucht Freigabe</item>
+        <item quantity="other">%d brauchen Freigabe</item>
+    </plurals>
+    <plurals name="program_status_count_need_answer">
+        <item quantity="one">%d braucht eine Antwort</item>
+        <item quantity="other">%d brauchen eine Antwort</item>
+    </plurals>
+    <plurals name="program_status_count_need_sign_in">
+        <item quantity="one">%d braucht eine Anmeldung</item>
+        <item quantity="other">%d brauchen eine Anmeldung</item>
+    </plurals>
+    <plurals name="program_status_count_failed">
+        <item quantity="one">%d fehlgeschlagen</item>
+        <item quantity="other">%d fehlgeschlagen</item>
+    </plurals>
+    <plurals name="program_status_count_finished">
+        <item quantity="one">%d fertig</item>
+        <item quantity="other">%d fertig</item>
+    </plurals>
+    <string name="program_status_open_agent_center">Agent-Center öffnen</string>
+    <string name="program_status_raw_session">einfache Sitzung</string>
+    <string name="program_status_window">Fenster %1$d</string>
+    <string name="program_status_named_window">Fenster %1$d „%2$s“</string>
+    <string name="program_status_pane">Bereich %1$s</string>
+    <string name="program_status_pane_unavailable">Bereich nicht verfügbar</string>
+    <string name="program_status_all_caught_up">Alles erledigt</string>
+    <plurals name="program_status_pane_count">
+        <item quantity="one">%d Bereich</item>
+        <item quantity="other">%d Bereiche</item>
+    </plurals>
+</resources>

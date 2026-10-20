@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="program_status_needs_input">necesita entrada</string>
+    <string name="program_status_needs_approval">necesita aprobación</string>
+    <string name="program_status_needs_answer">necesita una respuesta</string>
+    <string name="program_status_sign_in_needed">requiere inicio de sesión</string>
+    <string name="program_status_failed">falló</string>
+    <string name="program_status_finished">terminado</string>
+    <string name="program_status_working">trabajando</string>
+    <string name="program_status_ready">listo</string>
+    <string name="program_status_unavailable">estado no disponible</string>
+    <string name="program_status_program">programa</string>
+    <string name="program_status_programs">programas</string>
+    <string name="program_status_needs_attention">necesita atención</string>
+    <string name="program_status_visit_checks">visitar un panel lo marca como revisado</string>
+    <string name="program_status_open_pane">abrir panel</string>
+    <plurals name="program_status_count_need_input">
+        <item quantity="one">%d necesita entrada</item>
+        <item quantity="other">%d necesitan entrada</item>
+        <item quantity="many">%d necesitan entrada</item>
+    </plurals>
+    <plurals name="program_status_count_need_approval">
+        <item quantity="one">%d necesita aprobación</item>
+        <item quantity="other">%d necesitan aprobación</item>
+        <item quantity="many">%d necesitan aprobación</item>
+    </plurals>
+    <plurals name="program_status_count_need_answer">
+        <item quantity="one">%d necesita una respuesta</item>
+        <item quantity="other">%d necesitan una respuesta</item>
+        <item quantity="many">%d necesitan una respuesta</item>
+    </plurals>
+    <plurals name="program_status_count_need_sign_in">
+        <item quantity="one">%d requiere inicio de sesión</item>
+        <item quantity="other">%d requieren inicio de sesión</item>
+        <item quantity="many">%d requieren inicio de sesión</item>
+    </plurals>
+    <plurals name="program_status_count_failed">
+        <item quantity="one">%d falló</item>
+        <item quantity="other">%d fallaron</item>
+        <item quantity="many">%d fallaron</item>
+    </plurals>
+    <plurals name="program_status_count_finished">
+        <item quantity="one">%d terminado</item>
+        <item quantity="other">%d terminados</item>
+        <item quantity="many">%d terminados</item>
+    </plurals>
+    <string name="program_status_open_agent_center">abrir el centro de agentes</string>
+    <string name="program_status_raw_session">sesión simple</string>
+    <string name="program_status_window">ventana %1$d</string>
+    <string name="program_status_named_window">ventana %1$d «%2$s»</string>
+    <string name="program_status_pane">panel %1$s</string>
+    <string name="program_status_pane_unavailable">panel no disponible</string>
+    <string name="program_status_all_caught_up">todo al día</string>
+    <plurals name="program_status_pane_count">
+        <item quantity="one">%d panel</item>
+        <item quantity="many">%d paneles</item>
+        <item quantity="other">%d paneles</item>
+    </plurals>
+</resources>

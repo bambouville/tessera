@@ -1,0 +1,18 @@
+{
+  "optionalCategories": [
+    "launchCommands",
+    "notes",
+    "environmentVariables",
+    "startupSnippets",
+    "trustedHostKeys"
+  ],
+  "authorizedSelection": ["notes", "trustedHostKeys"],
+  "changedAuthorizedNote": "changed after authorization",
+  "expectedErrors": {
+    "rawOptionalManifest": "optionalTransferAuthorizationRequired",
+    "authorizationBindingMismatch": "optionalTransferAuthorizationRequired",
+    "changedCategorySelection": "optionalTransferAuthorizationRequired",
+    "changedApprovedSnapshot": "optionalTransferAuthorizationRequired",
+    "repeatedManifest": "invalidTransition"
+  }
+}

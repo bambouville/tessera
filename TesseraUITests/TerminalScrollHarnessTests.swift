@@ -1,6 +1,181 @@
 import XCTest
 import CoreFoundation
 
+final class SetupFlowPresentationHarnessTests: XCTestCase {
+    func testNearbyZeroGrantReviewAndConfigureLater() { exercise(mode: "nearby") }
+    func testQRCopySelectionReview() { exercise(mode: "qr") }
+    func testLargeTextReviewAndRecovery() { exercise(mode: "nearby", large: true) }
+
+    private func exercise(mode: String, large: Bool = false) {
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = UIDevice.current.userInterfaceIdiom == .pad ? .landscapeLeft : .portrait
+        let app = XCUIApplication()
+        app.launchEnvironment["TESSERA_SETUP_FLOW_HARNESS"] = "1"
+        app.launchEnvironment["TESSERA_SETUP_FLOW_MODE"] = mode
+        app.launchEnvironment["TESSERA_SETUP_FLOW_LARGE_TEXT"] = large ? "1" : "0"
+        app.launch()
+        defer { app.terminate() }
+        func capture(_ stage: String) {
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "setup-\(mode)-\(large ? "accessibility" : "standard")-\(stage)"
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
+        func tap(_ identifier: String) {
+            let button = app.buttons[identifier]
+            XCTAssertTrue(button.waitForExistence(timeout: 8), identifier)
+            for _ in 0..<10 {
+                if button.isHittable && app.frame.contains(button.frame) { break }
+                app.swipeUp()
+            }
+            XCTAssertTrue(button.isHittable, identifier)
+            button.tap()
+        }
+        XCTAssertTrue(app.staticTexts["harness.code"].waitForExistence(timeout: 8))
+        capture("verify")
+        if large {
+            tap("harness.reject")
+            capture("mismatch")
+            tap("start again")
+        }
+        tap("harness.match")
+        capture("hosts")
+        let next = app.buttons["next: choose data"]
+        XCTAssertEqual(next.isEnabled, mode == "nearby", "Zero grants allowed nearby; empty copy disallowed for QR")
+        if mode == "qr" {
+            tap("harness.grant.11111111-1111-1111-1111-111111111111")
+            tap("harness.grant.22222222-2222-2222-2222-222222222222")
+        }
+        tap("next: choose data")
+        capture("include")
+        tap("next: review transfer")
+        capture("review")
+        tap("harness.approve")
+        capture("receipt")
+        tap("harness.configure")
+        XCTAssertTrue(app.staticTexts["harness.configured"].exists)
+        capture("configure")
+    }
+}
+
+final class QRLiveFixtureInspectionTests: XCTestCase {
+    func testPerformApprovedFixtureStep() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["TESSERA_QR_INSPECT"] == "1",
+              let step = env["TESSERA_QR_STEP"] else {
+            throw XCTSkip("Opt-in native driver for the disposable QR fixture")
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.bambouville.TesseraApp")
+        XCTAssertEqual(app.state, .runningForeground)
+        // The live terminal cursor keeps XCTest's animation-idle heuristic
+        // busy. Disable only that runner heuristic, not product animations.
+        // Availability is checked because this is a simulator-only test hook.
+        if app.responds(to: NSSelectorFromString("setIdleAnimationWaitEnabled:")) {
+            app.setValue(false, forKey: "idleAnimationWaitEnabled")
+        }
+        func tap(_ label: String) {
+            let button = app.buttons[label]
+            XCTAssertTrue(button.waitForExistence(timeout: 10), "Missing fixture control: \(label)")
+            button.tap()
+        }
+        switch step {
+        case "remove-fixture-and-open-scan", "open-scan":
+            if step == "remove-fixture-and-open-scan" {
+                // Only the imported host on this disposable recipient. Keep
+                // its generated local key so the retry proves a new model save.
+                tap("hosts")
+                let fixture = app.staticTexts["QR live VPS"].firstMatch
+                XCTAssertTrue(fixture.waitForExistence(timeout: 5))
+                fixture.press(forDuration: 1)
+                tap("remove…")
+                tap("remove host")
+                XCTAssertTrue(fixture.waitForNonExistence(timeout: 5))
+            }
+            tap("settings")
+            tap("sync & continuity")
+            let scan = app.buttons["scan pairing code"]
+            for _ in 0..<8 where !scan.isHittable { app.swipeUp() }
+            tap("scan pairing code")
+        case "enter-invitation":
+            let invitation = try XCTUnwrap(env["TESSERA_QR_INVITATION"])
+            let field = app.textViews["pairing.manual-text"]
+            if !field.isHittable { tap("Enter a pairing code instead") }
+            XCTAssertTrue(field.waitForExistence(timeout: 5))
+            field.tap()
+            field.typeText(invitation)
+            tap("use code")
+        case "import": tap("pairing.import")
+        case "landscape":
+            XCUIDevice.shared.orientation = .landscapeLeft
+            let geometry = XCTNSPredicateExpectation(
+                predicate: NSPredicate { _, _ in app.frame.width > app.frame.height },
+                object: nil
+            )
+            XCTAssertEqual(XCTWaiter.wait(for: [geometry], timeout: 5), .completed)
+        case "reopen":
+            XCTAssertTrue(app.staticTexts.matching(identifier: "QR live VPS").firstMatch.exists)
+            tap("reopen")
+        case "trust-fixture":
+            let fingerprint = try XCTUnwrap(env["TESSERA_QR_EXPECTED_HOST_FINGERPRINT"])
+            let digest = String(fingerprint.dropFirst("SHA256:".count))
+            XCTAssertTrue(fingerprint.hasPrefix("SHA256:") && digest.count == 43)
+            XCTAssertEqual(Data(base64Encoded: digest + "=")?.count, 32)
+            XCTAssertTrue(app.staticTexts["192.0.2.10:2222"].exists)
+            XCTAssertTrue(app.staticTexts.containing(NSPredicate(
+                format: "label == %@ OR label == %@", fingerprint, fingerprint + "="
+            )).firstMatch.exists, "Fixture host key must match independently verified full fingerprint")
+            tap("Trust & Connect")
+            XCTAssertTrue(app.buttons["Trust & Connect"].waitForNonExistence(timeout: 10))
+        case "offer":
+            XCTAssertTrue(app.staticTexts["QR live VPS"].exists)
+            if app.buttons["Hide keyboard"].isHittable { tap("Hide keyboard") }
+            tap("session-continuity-menu")
+            tap("session-continuity-setup")
+        case "verify":
+            let expected = try XCTUnwrap(env["TESSERA_QR_EXPECTED_SAS"])
+            let code = app.staticTexts["pairing.security-code"]
+            XCTAssertTrue(code.waitForExistence(timeout: 10))
+            XCTAssertEqual(code.label.filter(\.isNumber), expected)
+            tap("pairing.codes-match")
+        case "choose-data": tap("next: choose data")
+        case "select-and-review":
+            tap("next: choose data")
+            tap("pairing.optional.trustedHostKeys")
+            tap("next: review transfer")
+        case "review": tap("next: review transfer")
+        case "verify-and-select":
+            let expected = try XCTUnwrap(env["TESSERA_QR_EXPECTED_SAS"])
+            let code = app.staticTexts["pairing.security-code"]
+            XCTAssertTrue(code.waitForExistence(timeout: 10))
+            XCTAssertEqual(code.label.filter(\.isNumber), expected)
+            tap("pairing.codes-match")
+            tap("next: choose data")
+            tap("pairing.optional.trustedHostKeys")
+            tap("next: review transfer")
+        case "approve":
+            XCTAssertTrue(app.staticTexts.matching(identifier: "QR live VPS").firstMatch.exists)
+            tap("pairing.approve")
+        case "done": tap("done")
+        case "restart-offer":
+            tap("done")
+            tap("session-continuity-menu")
+            tap("session-continuity-setup")
+        default: XCTFail("Unknown fixture step")
+        }
+        print("QR_FIXTURE_NATIVE_UI_BEGIN\n\(app.debugDescription)\nQR_FIXTURE_NATIVE_UI_END")
+    }
+
+    func testInspectRunningFixtureWithoutLaunchingOrConnecting() throws {
+        guard ProcessInfo.processInfo.environment["TESSERA_QR_INSPECT"] == "1" else {
+            throw XCTSkip("Read-only inspection of an explicitly selected disposable QR fixture")
+        }
+        let app = XCUIApplication(bundleIdentifier: "com.bambouville.TesseraApp")
+        XCTAssertEqual(app.state, .runningForeground)
+        print("QR_FIXTURE_NATIVE_UI_BEGIN\n\(app.debugDescription)\nQR_FIXTURE_NATIVE_UI_END")
+    }
+}
+
 final class CompactNavigationTransitionHarnessTests: XCTestCase {
     private var app: XCUIApplication!
 
@@ -121,6 +296,10 @@ final class CompactNavigationTransitionHarnessTests: XCTestCase {
         app.launchEnvironment["TESSERA_COMPACT_NAVIGATION_HARNESS"] = "1"
         app.launchEnvironment["TESSERA_COMPACT_NAVIGATION_INITIAL_SIZE"] = initialSize
         app.launchEnvironment["TESSERA_COMPACT_NAVIGATION_INITIAL_ROUTE"] = initialRoute
+        // Hold every forever animation (launch-overlay halo, status-dot
+        // pulses) static: each width toggle otherwise pays two 60 s XCUITest
+        // idle timeouts, ~16 minutes across this class.
+        app.launchEnvironment["TESSERA_STATIC_RINGS"] = "1"
         app.launchArguments += [
             "-tessera.nearbyBootstrap.completed.v1", "YES",
             "-tessera.pref.hasSeenWelcome", "YES",
@@ -324,6 +503,42 @@ final class KeyImportPickerHarnessTests: XCTestCase {
 /// projected through accessibility as `bottom` / `history`; Metal screenshots,
 /// external typing, and live-session idle waits are intentionally absent.
 final class TerminalScrollHarnessTests: XCTestCase {
+    func testMarkdownPreviewDismissalPreservesPrompt() throws {
+        guard ProcessInfo.processInfo.environment["TESSERA_SCROLL_CAPTURE"] == "1" else {
+            throw XCTSkip("driven by the disposable scroll integration lane")
+        }
+        XCUIDevice.shared.orientation = XCUIDevice.shared.supportsPointerInteraction ? .landscapeLeft : .portrait
+        let app = XCUIApplication()
+        app.launchEnvironment["TESSERA_SCROLL_HARNESS"] = "1"
+        app.launchEnvironment["TESSERA_TOUCH_SCROLL_HARNESS"] = "0"
+        app.launchEnvironment["TESSERA_IDLE_REDRAW_HARNESS"] = "preview"
+        app.launchEnvironment["TESSERA_PREVIEW_RESIZE_PULSE"] = "1"
+        app.launchEnvironment["TESSERA_PREVIEW_MODE"] = "popup"
+        app.launch()
+        defer { app.terminate() }
+        let terminal = app.descendants(matching: .any)["terminal-scroll-harness"]
+        XCTAssertTrue(terminal.waitForExistence(timeout: 8))
+        try waitForValue("preview-clean", on: terminal, timeout: 30)
+    }
+
+    func testIdleRedrawAndSplitColorRepaint() throws {
+        guard ProcessInfo.processInfo.environment["TESSERA_SCROLL_CAPTURE"] == "1" else {
+            throw XCTSkip("driven by the disposable scroll integration lane")
+        }
+        XCUIDevice.shared.orientation = XCUIDevice.shared.supportsPointerInteraction ? .landscapeLeft : .portrait
+        let app = XCUIApplication()
+        for (mode, expected) in [("1", "redraw-stable"), ("color", "repaint-clean")] {
+            app.launchEnvironment["TESSERA_SCROLL_HARNESS"] = "1"
+            app.launchEnvironment["TESSERA_TOUCH_SCROLL_HARNESS"] = "0"
+            app.launchEnvironment["TESSERA_IDLE_REDRAW_HARNESS"] = mode
+            app.launch()
+            let terminal = app.descendants(matching: .any)["terminal-scroll-harness"]
+            XCTAssertTrue(terminal.waitForExistence(timeout: 8))
+            try waitForValue(expected, on: terminal, timeout: 20)
+            app.terminate()
+        }
+    }
+
     func testPrimaryScrollMovesIntoHistoryAndBackToBottom() throws {
         guard ProcessInfo.processInfo.environment["TESSERA_SCROLL_CAPTURE"] == "1" else {
             throw XCTSkip(
@@ -459,6 +674,106 @@ final class TerminalTouchScrollHarnessTests: XCTestCase {
             app.descendants(matching: .any)["agent-scroll-prevention-notice"]
                 .waitForExistence(timeout: 2)
         )
+    }
+
+    /// mosh+tmux primary screen: finger pans reach the host's history hook
+    /// the way a trackpad's do.
+    func testMoshPrimaryFingerPanRequestsHistory() throws {
+        let (_, terminal) = try launchPrimaryHarness(.moshPrimary, blocksAgentScrolling: false)
+        terminal.swipeDown()
+        try waitForValue("primary-history-requested", on: terminal, timeout: 5)
+    }
+
+    /// SSH+tmux primary screen: UIScrollView's own finger pan and its glide
+    /// reach the host frame by frame, until a fling's glide carries past the
+    /// oldest row. SwiftTerm reports none of them, and without them a finger
+    /// never asked the inline history ladder for more than its 2000-row
+    /// attach capture.
+    func testInlinePrimaryFingerFramesReachTheHostThroughTheGlide() throws {
+        let (_, terminal) = try launchPrimaryHarness(.inlinePrimary, blocksAgentScrolling: false)
+        for _ in 0..<6 where terminal.value as? String != "native-frames-crossed-oldest" {
+            terminal.swipeDown(velocity: .fast)
+            sleep(2)
+        }
+        try waitForValue("native-frames-crossed-oldest", on: terminal, timeout: 5)
+    }
+
+    /// The blocker takes vertical-dominant finger pans only. A diagonal one
+    /// must not reach UIScrollView's own pan on a primary screen either, where
+    /// it would move history and, under SSH+tmux, ask for more.
+    func testHookProvenWorkingAgentConsumesDiagonalInlinePrimaryFingerPan() throws {
+        let (app, terminal) = try launchPrimaryHarness(.inlinePrimary, blocksAgentScrolling: true)
+        terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.35)).press(
+            forDuration: 0.05,
+            thenDragTo: terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)),
+            withVelocity: XCUIGestureVelocity(600),
+            thenHoldForDuration: 0.1
+        )
+        try waitForValue("agent-scroll-blocked", on: terminal, timeout: 5)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["agent-scroll-prevention-notice"]
+                .waitForExistence(timeout: 2)
+        )
+        sleep(1)
+        XCTAssertEqual(
+            terminal.value as? String,
+            "agent-scroll-blocked",
+            "a diagonal finger pan moved primary history while an agent works"
+        )
+    }
+
+    /// The blocker takes vertical-dominant finger pans. A diagonal one still
+    /// carries a vertical component and must not reach the history hook.
+    func testHookProvenWorkingAgentConsumesDiagonalMoshPrimaryFingerPan() throws {
+        let (app, terminal) = try launchPrimaryHarness(.moshPrimary, blocksAgentScrolling: true)
+        terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.35)).press(
+            forDuration: 0.05,
+            thenDragTo: terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)),
+            withVelocity: XCUIGestureVelocity(600),
+            thenHoldForDuration: 0.1
+        )
+        try waitForValue("agent-scroll-blocked", on: terminal, timeout: 5)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["agent-scroll-prevention-notice"]
+                .waitForExistence(timeout: 2)
+        )
+        sleep(1)
+        XCTAssertEqual(
+            terminal.value as? String,
+            "agent-scroll-blocked",
+            "a diagonal finger pan moved primary history while an agent works"
+        )
+    }
+
+    private enum PrimaryHarness: String {
+        case moshPrimary = "TESSERA_TOUCH_SCROLL_HARNESS_MOSH_PRIMARY"
+        case inlinePrimary = "TESSERA_TOUCH_SCROLL_HARNESS_INLINE_PRIMARY"
+    }
+
+    private func launchPrimaryHarness(
+        _ harness: PrimaryHarness,
+        blocksAgentScrolling: Bool
+    ) throws -> (XCUIApplication, XCUIElement) {
+        guard ProcessInfo.processInfo.environment["TESSERA_TOUCH_SCROLL_CAPTURE"] == "1" else {
+            throw XCTSkip(
+                "touch scroll wiring is driven by scripts/integration/run-scroll-harness-tests.sh"
+            )
+        }
+        XCUIDevice.shared.orientation = .portrait
+
+        let app = XCUIApplication()
+        app.launchEnvironment["TESSERA_TOUCH_SCROLL_HARNESS"] = "1"
+        app.launchEnvironment[harness.rawValue] = "1"
+        if blocksAgentScrolling {
+            app.launchEnvironment["TESSERA_AGENT_SCROLL_BLOCK_HARNESS"] = "1"
+        }
+        app.launch()
+        addTeardownBlock { app.terminate() }
+
+        let terminal = app.descendants(matching: .any)["terminal-touch-scroll-harness"]
+        XCTAssertTrue(terminal.waitForExistence(timeout: 8))
+        try waitForValue("ready", on: terminal, timeout: 5)
+        return (app, terminal)
     }
 
     private func waitForValue(
@@ -1055,6 +1370,161 @@ final class IPhoneCollapsedAccessorySafeAreaHarnessTests: XCTestCase {
 }
 
 final class IPhoneCompanionHarnessTests: XCTestCase {
+    func testIntegrationRepairIsPresentedByExactSessionChrome() throws {
+        XCUIDevice.shared.orientation = UIDevice.current.userInterfaceIdiom == .phone
+            ? .portrait
+            : .landscapeLeft
+        let app = XCUIApplication()
+        app.launchEnvironment["TESSERA_IPHONE_SESSION_HARNESS"] = "1"
+        app.launchEnvironment["TESSERA_IPHONE_SESSION_HARNESS_MODE"] =
+            UIDevice.current.userInterfaceIdiom == .phone ? "integration" : "integration-popover"
+        // Idle waits must not stretch into the presentation delay.
+        app.launchEnvironment["TESSERA_STATIC_RINGS"] = "1"
+        // The chrome starts its delay no earlier than this, so the warning can
+        // appear no earlier than `launched` + the delay. Absence is asserted
+        // only while that is still provably true.
+        let delay = 5.0 // Core: AgentIntegrationCheckPolicy.warningPresentationDelayMilliseconds
+        let launched = Date()
+        app.launch()
+        defer { app.terminate() }
+        func withinDelay() -> Bool { Date().timeIntervalSince(launched) < delay - 1 }
+
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            // The phone bar has no warning control: the status dot carries it,
+            // and only after the warning has held for the presentation delay.
+            let switcher = app.buttons["compact-session-switcher"]
+            XCTAssertTrue(switcher.waitForExistence(timeout: 10))
+            let early = XCUIScreen.main.screenshot()
+            let earlyLabel = switcher.label
+            if withinDelay() {
+                XCTAssertFalse(earlyLabel.contains("Agent integration inactive here"),
+                               "the warning must wait out the presentation delay")
+                if let early = Self.attentionRingPixels(around: switcher.frame, in: early) {
+                    XCTAssertLessThan(early, 20, "no ring before the delay")
+                }
+            }
+            expectation(
+                for: NSPredicate(format: "label CONTAINS %@", "Agent integration inactive here"),
+                evaluatedWith: switcher
+            )
+            waitForExpectations(timeout: 15)
+            XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(launched), delay)
+            XCTAssertFalse(app.buttons["agent-integration-warning"].exists)
+            // The dot keeps its connection colour and gains an amber ring.
+            let ring = try XCTUnwrap(
+                Self.attentionRingPixels(around: switcher.frame, in: XCUIScreen.main.screenshot()),
+                "the connected (green) status dot must still be visible"
+            )
+            XCTAssertGreaterThan(ring, 100, "the status dot must carry the warning ring")
+            switcher.tap()
+        } else {
+            if withinDelay() {
+                XCTAssertFalse(app.buttons["agent-integration-warning"].exists,
+                               "the warning must wait out the presentation delay")
+            }
+            XCTAssertTrue(app.buttons["agent-integration-warning"].waitForExistence(timeout: 15))
+            XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(launched), delay)
+        }
+        XCTAssertTrue(app.staticTexts["Agent integration inactive here"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["Enable in this shell"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["agent-center-v2-integration-status"].exists)
+    }
+
+    /// Amber pixels in the ring's annulus around the green status dot at the
+    /// leading edge of `frame`, or nil when no green dot is visible there.
+    private static func attentionRingPixels(around frame: CGRect, in screenshot: XCUIScreenshot) -> Int? {
+        let image = screenshot.image
+        guard let cgImage = image.cgImage, image.size.width > 0 else { return nil }
+        let scale = CGFloat(cgImage.width) / image.size.width
+        let region = CGRect(x: (frame.minX - 8) * scale, y: frame.minY * scale,
+                            width: 48 * scale, height: frame.height * scale)
+            .integral
+            .intersection(CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
+        guard !region.isEmpty, let crop = cgImage.cropping(to: region) else { return nil }
+        let width = crop.width, height = crop.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(
+            data: &pixels, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        context.draw(crop, in: CGRect(x: 0, y: 0, width: width, height: height))
+        func rgb(_ x: Int, _ y: Int) -> (Int, Int, Int) {
+            let i = (y * width + x) * 4
+            return (Int(pixels[i]), Int(pixels[i + 1]), Int(pixels[i + 2]))
+        }
+        var greenX = 0, greenY = 0, green = 0
+        for y in 0..<height { for x in 0..<width {
+            let (r, g, b) = rgb(x, y)
+            if g > 150, r < 130, b < 150 { greenX += x; greenY += y; green += 1 }
+        } }
+        guard green > 20 else { return nil }
+        let centerX = Double(greenX) / Double(green), centerY = Double(greenY) / Double(green)
+        // The dot is 7pt across and the steady ring 13pt; count between them.
+        let inner = 4.5 * Double(scale), outer = 8 * Double(scale)
+        var amber = 0
+        for y in 0..<height { for x in 0..<width {
+            let distance = ((Double(x) - centerX) * (Double(x) - centerX) + (Double(y) - centerY) * (Double(y) - centerY)).squareRoot()
+            guard distance >= inner, distance <= outer else { continue }
+            let (r, g, b) = rgb(x, y)
+            if r > 150, g > 80, b < 90, r - b > 100 { amber += 1 }
+        } }
+        return amber
+    }
+
+    func testContinuityPopoverKeepsTerminalBarVisibleAndRunsBothActions() throws {
+        XCUIDevice.shared.orientation = UIDevice.current.userInterfaceIdiom == .phone
+            ? .portrait
+            : .landscapeLeft
+        let app = XCUIApplication()
+        app.launchEnvironment["TESSERA_IPHONE_SESSION_HARNESS"] = "1"
+        app.launchEnvironment["TESSERA_IPHONE_SESSION_HARNESS_MODE"] = "continuity"
+        app.launch()
+        defer { app.terminate() }
+
+        let continuity = app.buttons["session-continuity-menu"]
+        let trailingControl = UIDevice.current.userInterfaceIdiom == .phone
+            ? app.buttons["session-disconnect"]
+            : app.buttons["session-home"]
+        XCTAssertTrue(continuity.waitForExistence(timeout: 10))
+        XCTAssertTrue(trailingControl.waitForExistence(timeout: 10))
+        XCTAssertTrue(continuity.isHittable)
+        XCTAssertTrue(trailingControl.isHittable)
+        XCTAssertFalse(
+            continuity.frame.intersects(trailingControl.frame),
+            "continuity and the trailing session control need distinct hit targets"
+        )
+        let continuityFrame = continuity.frame
+        let trailingFrame = trailingControl.frame
+
+        continuity.tap()
+        let continueAction = app.buttons["session-continuity-continue"]
+        let setUpAction = app.buttons["session-continuity-setup"]
+        XCTAssertTrue(continueAction.waitForExistence(timeout: 5))
+        XCTAssertTrue(setUpAction.exists)
+        XCTAssertTrue(continuity.exists, "the popover must retain its bar anchor")
+        XCTAssertTrue(trailingControl.exists, "opening continuity must not hide the terminal bar")
+        XCTAssertEqual(continuity.frame, continuityFrame)
+        XCTAssertEqual(trailingControl.frame, trailingFrame)
+
+        let result = app.staticTexts["continuity-action-result"]
+        XCTAssertTrue(result.waitForExistence(timeout: 5))
+        continueAction.tap()
+        expectation(
+            for: NSPredicate(format: "value == %@", "continue"),
+            evaluatedWith: result
+        )
+        waitForExpectations(timeout: 5)
+
+        continuity.tap()
+        XCTAssertTrue(setUpAction.waitForExistence(timeout: 5))
+        setUpAction.tap()
+        expectation(
+            for: NSPredicate(format: "value == %@", "set-up"),
+            evaluatedWith: result
+        )
+        waitForExpectations(timeout: 5)
+    }
+
     func testTmuxWindowLongPressOffersSwitchRenameAndCloseActions() throws {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
@@ -1215,7 +1685,7 @@ final class AccessoryEditorHarnessTests: XCTestCase {
         XCTAssertFalse(escape.waitForExistence(timeout: 2))
     }
 
-    func testPreviewScrollsHorizontallyOverReorderGestures() {
+    func testPreviewScrollsHorizontallyOverReorderGestures() throws {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         app.launchEnvironment["TESSERA_ACCESSORY_EDITOR_HARNESS"] = "1"
@@ -1224,15 +1694,30 @@ final class AccessoryEditorHarnessTests: XCTestCase {
 
         let preview = app.scrollViews["accessory-bar-preview"]
         XCTAssertTrue(preview.waitForExistence(timeout: 8))
-        let trailingChip = preview.descendants(matching: .any)["tilde"]
+        // Chips surface under their display name, not their raw value — the
+        // sibling tests above match "Escape" and "Left arrow" the same way
+        // (AccessoryChip.displayName, Keyboard/AccessoryChip.swift:171).
+        // Matching "tilde" found nothing, so this case had been red since it
+        // was written.
+        let trailingChip = preview.descendants(matching: .any)["Tilde"]
         XCTAssertTrue(trailingChip.waitForExistence(timeout: 5))
+
+        // The behaviour under test only exists when the chip row overflows its
+        // container. On a regular-width iPad all ten seeded chips fit, so there
+        // is nothing to scroll and the swipe is a no-op — that is a property of
+        // the device, not a defect, so skip rather than fail. Verified: passes
+        // on iPhone 17 Pro, fits without overflow on iPad Pro 11-inch.
+        try XCTSkipUnless(
+            trailingChip.frame.maxX > preview.frame.maxX,
+            "chip row fits without overflow on this device; horizontal scrolling is not exercised"
+        )
 
         let initialX = trailingChip.frame.minX
         preview.swipeLeft()
 
         let movedLeft = NSPredicate(
             block: { _, _ in
-                preview.descendants(matching: .any)["tilde"].frame.minX < initialX - 20
+                preview.descendants(matching: .any)["Tilde"].frame.minX < initialX - 20
             }
         )
         let expectation = XCTNSPredicateExpectation(
@@ -1280,6 +1765,104 @@ final class AccessoryEditorHarnessTests: XCTestCase {
     }
 }
 
+/// Host-free regression for the takeover veil. The tmux chip and the veil
+/// read the controller's one presentation (S3′), so they react to the same
+/// peer authority update, and a tap reaches the shared reducer.
+final class GridAuthorityEventHarnessTests: XCTestCase {
+    func testPeerAuthorityShowsFullTakeoverOverlayInLandscape() {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        app.launchEnvironment["TESSERA_GRID_AUTHORITY_HARNESS"] = "1"
+        app.launch()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["grid-authority.direct-chip"]
+                .waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any)["grid-authority.portable-overlay"]
+                .waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(app.buttons["take back control"].exists)
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "grid-authority-takeover-landscape"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    func testTakeBackFromTheVeilPresentsProgress() {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        app.launchEnvironment["TESSERA_GRID_AUTHORITY_HARNESS"] = "1"
+        app.launch()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["grid-authority.direct-chip"]
+                .waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any)["grid-authority.portable-overlay"]
+                .waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(app.buttons["take back control"].exists)
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "grid-authority-take-back-landscape"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+
+        app.buttons["take back control"].tap()
+        XCTAssertTrue(
+            app.staticTexts["taking back control…"].waitForExistence(timeout: 2),
+            "a tap on the veil starts the claim through the command facade"
+        )
+        XCTAssertFalse(app.buttons["take back control"].exists)
+    }
+}
+
+/// Host-free check of the production shell's show-edge app facts. A cold
+/// launch posts no willEnterForeground and reads `applicationState` as
+/// background while ContentView is built: fed only by those, the coordinator
+/// stayed in the background, so a restored session was never shown (and never
+/// took control) until the app had been backgrounded once.
+final class SessionShowEdgeLaunchTests: XCTestCase {
+    func testColdLaunchAndReturnCountAsForeground() {
+        let app = XCUIApplication()
+        app.launchEnvironment["TESSERA_SHOW_EDGE_PROBE"] = "1"
+        app.launch()
+
+        let probe = app.descendants(matching: .any)["show-edges.app-facts"]
+        XCTAssertTrue(probe.waitForExistence(timeout: 10), "the production shell publishes its app facts")
+        // The lock is its own fact; only the foreground fact and its
+        // transitions are graded here.
+        XCTAssertTrue(
+            wait(for: probe, labelContains: ["foreground=true", "foregroundChanges=1"]),
+            "a cold launch is a foreground, with no background round trip: \(probe.label)"
+        )
+
+        XCUIDevice.shared.press(.home)
+        let left = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "state != %d", XCUIApplication.State.runningForeground.rawValue),
+            object: app
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [left], timeout: 10), .completed, "home backgrounds the app")
+        app.activate()
+        XCTAssertTrue(
+            wait(for: probe, labelContains: ["foreground=true", "foregroundChanges=3"]),
+            "the background and the return each reach the coordinator once: \(probe.label)"
+        )
+    }
+
+    private func wait(for element: XCUIElement, labelContains texts: [String]) -> Bool {
+        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: texts.map {
+            NSPredicate(format: "label CONTAINS %@", $0)
+        })
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
+        return XCTWaiter.wait(for: [expectation], timeout: 10) == .completed
+    }
+}
+
 /// Host-free coverage for the simulator-only Handoff descriptor injector.
 ///
 /// A never-seen descriptor must stop at local credential setup. These tests
@@ -1288,6 +1871,83 @@ final class AccessoryEditorHarnessTests: XCTestCase {
 /// plain-shell forms are the UI-observable continuation distinction available
 /// without seeding a credentialed SwiftData host inside production code.
 final class ContinuityHarnessTests: XCTestCase {
+    func testQROfferKeepsGuidanceAndCancelReachable() {
+        assertQROffer(orientation: .landscapeLeft)
+    }
+
+    func testQROfferCompactPortrait() throws {
+        try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .phone)
+        assertQROffer(orientation: .portrait)
+    }
+
+    private func assertQROffer(orientation: UIDeviceOrientation) {
+        XCUIDevice.shared.orientation = orientation
+        let app = XCUIApplication()
+        app.launchEnvironment["TESSERA_QR_REVIEW"] = "send"
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Scan with your other device"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["cancel"].isHittable)
+        XCTAssertTrue(app.staticTexts["Next, compare a six-digit code on both screens."].exists)
+        // app.screenshot() crops a portrait-sized region out of landscape on
+        // iPhone in this Xcode runtime. Capture the actual display instead.
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "QR offer native layout"
+        capture.lifetime = .keepAlways
+        add(capture)
+        let code = app.images["Pairing QR code"]
+        XCTAssertTrue(code.waitForExistence(timeout: 8))
+        app.swipeUp()
+        let scrolled = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        scrolled.name = "QR offer scrolled code and next step"
+        scrolled.lifetime = .keepAlways
+        add(scrolled)
+        app.swipeDown()
+        XCTAssertTrue(app.buttons["cancel"].isHittable)
+        app.buttons["cancel"].tap()
+    }
+
+    func testQRManualEntryRemainsUsableWithSoftwareKeyboard() {
+        assertQRManualEntry(orientation: .landscapeLeft)
+    }
+
+    func testQRManualEntryCompactPortrait() throws {
+        try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .phone)
+        assertQRManualEntry(orientation: .portrait)
+    }
+
+    private func assertQRManualEntry(orientation: UIDeviceOrientation) {
+        XCUIDevice.shared.orientation = orientation
+        let app = XCUIApplication()
+        app.launchEnvironment["TESSERA_QR_REVIEW"] = "receive"
+        app.launch()
+        // Resolve the first-use permission sheet before finding/tapping the
+        // disclosure. XCTest's default interruption handler otherwise replays
+        // the tap after unavailable-camera handling has already expanded it,
+        // accidentally collapsing the fallback again.
+        let permission = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            .alerts["“Tessera” would like to access the Camera."]
+        if permission.waitForExistence(timeout: 3) {
+            permission.buttons["Allow"].tap()
+        }
+        let entry = app.descendants(matching: .any)["pairing.manual-text"]
+        XCTAssertTrue(app.buttons["Enter a pairing code instead"].waitForExistence(timeout: 10))
+        if !entry.waitForExistence(timeout: 2) { app.buttons["Enter a pairing code instead"].tap() }
+        XCTAssertTrue(app.buttons["use code"].waitForExistence(timeout: 5))
+        XCTAssertTrue(entry.waitForExistence(timeout: 5))
+        entry.tap()
+        entry.typeText("not-a-valid-pairing-code")
+        XCTAssertTrue(app.keyboards.firstMatch.exists, "exercise the actual software keyboard")
+        XCTAssertTrue(app.buttons["use code"].isHittable)
+        app.buttons["use code"].tap()
+        XCTAssertTrue(app.staticTexts["This code is invalid or expired. Ask the other device to show a new pairing code."].waitForExistence(timeout: 5))
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "QR invalid manual entry with keyboard"
+        capture.lifetime = .keepAlways
+        add(capture)
+        // Invalid input must remain on the inert scanner, never open a socket.
+        XCTAssertTrue(app.staticTexts["scan pairing code"].exists)
+    }
+
     func testSSHContinueDescriptorUsesNamedTmuxAndCredentialGate() throws {
         try assertCredentialRoute(
             // Include a non-base64 separator so the DEBUG hook selects its
@@ -1715,5 +2375,391 @@ final class OrientationButtonSweepTests: XCTestCase {
         )
         let png = XCUIScreen.main.screenshot().pngRepresentation
         try? png.write(to: URL(fileURLWithPath: "/tmp/tessera-sweep-fail-\(slug).png"))
+    }
+}
+
+/// A plain UIKit-backed input control, with no terminal mounted, distinguishes
+/// Simulator keyboard restoration failures from Tessera focus-policy failures.
+final class NativeKeyboardEnvironmentProbeTests: XCTestCase {
+    enum Result { case restored, initialPresentationUnavailable, reopeningUnavailable }
+
+    func testNativeTextFieldReopensAfterSystemHideWithoutATerminal() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { throw XCTSkip("iPad keyboard control") }
+        let result = Self.probeReopen(in: self)
+        XCTAssertNotEqual(result, .initialPresentationUnavailable, "Fresh native reference must first show usable input")
+        #if targetEnvironment(simulator)
+        if result == .reopeningUnavailable { throw XCTSkip("Native UITextField cannot reopen after system Hide in this Simulator; verify on physical iPad") }
+        #endif
+        XCTAssertEqual(result, .restored, "No TerminalSurfaceBound or keyboard coordinator exists in this native control")
+    }
+
+    static func probeReopen(in test: XCTestCase) -> Result {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        app.launchEnvironment["TESSERA_HARDWARE_KEY_HARNESS"] = "1"
+        app.launchEnvironment["TESSERA_SOFTWARE_KEYBOARD_HARNESS"] = "1"
+        app.launchEnvironment["TESSERA_SOFTWARE_KEYBOARD_REFERENCE"] = "1"
+        app.launch()
+        defer { app.terminate() }
+        let field = app.textFields["hardware-key-local-input"]
+        field.tap()
+        guard app.keyboards.keys["a"].waitForExistence(timeout: 5),
+              app.keyboards.keys["a"].isHittable else {
+            print("TESSERA_NATIVE_REFERENCE_INITIAL_PRESENTATION_UNAVAILABLE")
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            attachment.name = "native-reference-initial-unavailable"
+            attachment.lifetime = .keepAlways
+            test.add(attachment)
+            return .initialPresentationUnavailable
+        }
+        let hide = app.keyboards.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'hide' OR label CONTAINS[c] 'dismiss'")).firstMatch
+        hide.tap()
+        app.buttons["hardware-key-focus"].tap()
+        field.tap()
+        Thread.sleep(forTimeInterval: 2)
+        let restored = app.keyboards.keys["a"].firstMatch.isHittable
+        print("TESSERA_NATIVE_REFERENCE_REOPEN \(restored)")
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "native-reference-reopen"
+        attachment.lifetime = .keepAlways
+        test.add(attachment)
+        return restored ? .restored : .reopeningUnavailable
+    }
+}
+
+final class SoftwareKeyboardDismissalHarnessTests: XCTestCase {
+    private var app: XCUIApplication!
+
+    override func setUpWithError() throws {
+        continueAfterFailure = false
+    }
+
+    override func tearDownWithError() throws {
+        app?.terminate()
+        app = nil
+    }
+
+    func testSystemKeyboardDismissalSurvivesUpdatesAndForegroundUntilTerminalTap() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("The system dismiss key belongs to the iPad keyboard")
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        launchHarness(softwareKeyboard: true)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        let keyboard = app.keyboards.firstMatch
+        let hide = keyboard.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'hide' OR label CONTAINS[c] 'dismiss'")).firstMatch
+        XCTAssertTrue(hide.exists, "System keyboard controls: \(keyboard.debugDescription)")
+        hide.tap()
+        app.buttons["keyboard-refresh"].tap()
+        captureKeyboardMilestone("system-dismissed")
+        XCTAssertEqual(app.staticTexts["keyboard-intent"].label, "dismissed")
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "System dismissal must survive SwiftUI updates")
+        let terminal = app.descendants(matching: .any)["hardware-key-harness"]
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        app.buttons["keyboard-refresh"].tap()
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "Foreground must preserve dismissal")
+        terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.45)).tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["keyboard-intent"].label, "automatic")
+        #if targetEnvironment(simulator)
+        if !app.keyboards.keys["b"].firstMatch.isHittable {
+            captureKeyboardMilestone("native-restore-unavailable")
+            app.terminate()
+            // Do not call a missing keyboard a passing restoration. Establish
+            // native input unavailable with no terminal mounted before marking
+            // this final visual/delivery assertion as environment-limited.
+            let reference = NativeKeyboardEnvironmentProbeTests.probeReopen(in: self)
+            if reference != .restored {
+                throw XCTSkip("Dismissal/foreground/tap policy passed; native UITextField control is also unusable (\(reference)). Physical iPad visual check required")
+            }
+            XCTFail("Terminal keyboard did not reopen although the native reference control did")
+            return
+        }
+        #endif
+        assertSoftwareKeyReachesTerminal("b")
+        captureKeyboardMilestone("tap-restored")
+    }
+
+    func testExplicitDismissalSurvivesOutputVisibilityRotationAndLocalInput() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { throw XCTSkip("iPad transition fixture") }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        launchHarness(softwareKeyboard: true)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        app.buttons["keyboard-dismiss"].tap()
+        for _ in 0..<3 { app.buttons["keyboard-refresh"].tap() }
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        XCTAssertEqual(app.staticTexts["keyboard-intent"].label, "dismissed")
+        app.buttons["hardware-key-toggle"].tap()
+        app.buttons["hardware-key-toggle"].tap()
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "Revealing a terminal preserves user dismissal")
+        XCUIDevice.shared.orientation = .landscapeRight
+        // Rotation can finish after XCTest reports the new orientation. Capture
+        // and settle before resolving the next button: a stale screen-space
+        // coordinate can otherwise tap the terminal and legitimately reopen it.
+        captureKeyboardMilestone("explicit-dismissed")
+        XCTAssertEqual(app.staticTexts["keyboard-intent"].label, "dismissed")
+        app.buttons["keyboard-refresh"].tap()
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "Rotation must not restore dismissed input")
+        let field = app.textFields["hardware-key-local-input"]
+        field.tap()
+        field.typeText("local")
+        app.buttons["keyboard-refresh"].tap()
+        XCTAssertEqual(field.value as? String, "local")
+        XCTAssertEqual(app.staticTexts["keyboard-intent"].label, "dismissed")
+        captureKeyboardMilestone("local-input")
+        app.buttons["hardware-key-focus"].tap()
+        app.buttons["keyboard-refresh"].tap()
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "Closing another input preserves terminal dismissal")
+        app.buttons["keyboard-show"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["keyboard-intent"].label, "automatic")
+        assertSoftwareKeyReachesTerminal()
+    }
+
+    func testDismissedMouseReportingTerminalRestoresOnFirstTapWithoutSendingClick() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { throw XCTSkip("iPad transition fixture") }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        launchHarness(mouseReporting: true, softwareKeyboard: true)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        app.buttons["keyboard-dismiss"].tap()
+        app.buttons["keyboard-refresh"].tap()
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        let terminal = app.descendants(matching: .any)["hardware-key-harness"]
+        let point = terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.45))
+        point.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "1B 5B 3C")).firstMatch.exists)
+        assertSoftwareKeyReachesTerminal()
+        captureKeyboardMilestone("mouse-restored")
+        point.tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "1B 5B 3C")).firstMatch.waitForExistence(timeout: 5))
+    }
+
+    private func launchHarness(mouseReporting: Bool = false, softwareKeyboard: Bool = true) {
+        app = XCUIApplication()
+        app.launchArguments += ["-tessera.pref.cursorBlink", "NO"]
+        app.launchEnvironment["TESSERA_HARDWARE_KEY_HARNESS"] = "1"
+        app.launchEnvironment["TESSERA_HARDWARE_KEY_MOUSE"] = mouseReporting ? "1" : "0"
+        app.launchEnvironment["TESSERA_SOFTWARE_KEYBOARD_HARNESS"] = softwareKeyboard ? "1" : "0"
+        app.launch()
+    }
+
+    private func captureKeyboardMilestone(_ name: String) {
+        Thread.sleep(forTimeInterval: 1)
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        print("TESSERA_KEYBOARD_CAPTURE \(name)")
+        Thread.sleep(forTimeInterval: 3)
+    }
+
+    private func assertSoftwareKeyReachesTerminal(_ character: String = "a") {
+        let key = app.keyboards.keys[character].firstMatch
+        XCTAssertTrue(key.waitForExistence(timeout: 5))
+        XCTAssertTrue(key.isHittable)
+        key.tap()
+        let hex = String(format: "%02X", character.utf8.first!)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", hex)).firstMatch.waitForExistence(timeout: 5),
+                      "Restoration must show a usable software keyboard, not just an accessibility node")
+    }
+}
+
+/// Hardware-keyboard modifier chords against the real UIKit dispatch order.
+/// Only XCUITest can produce a modified UIPress; encoder unit tests cannot pin
+/// the dispatch gate that must deliver the chord.
+final class HardwareKeyChordHarnessTests: XCTestCase {
+    private var app: XCUIApplication!
+
+    override func setUpWithError() throws { continueAfterFailure = false }
+
+    override func tearDownWithError() throws {
+        app?.terminate()
+        app = nil
+    }
+
+    func testTypingSurvivesVisibilityAndForegroundTransitions() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        launchHarness()
+        XCTAssertTrue(app.buttons["hardware-key-toggle"].waitForExistence(timeout: 10))
+        app.typeKey("a", modifierFlags: [])
+        assertSent("61", "Initial hardware typing")
+        for key in ["b", "c", "d"] {
+            app.buttons["hardware-key-toggle"].tap()
+            app.buttons["hardware-key-toggle"].tap()
+            app.typeKey(key, modifierFlags: [])
+            assertSent(String(format: "%02X", key.utf8.first!), "Typing after terminal reveal")
+        }
+        for key in ["e", "h", "i"] {
+            XCUIDevice.shared.press(.home)
+            app.activate()
+            // iPhone Home is portrait. Activation reports runningForeground
+            // before the landscape input service has completed its transition;
+            // an event injected in that interval is dropped by Simulator even
+            // though the responder is restored (a later key works untouched).
+            Thread.sleep(forTimeInterval: 3)
+            app.typeKey(key, modifierFlags: [])
+            assertSent(String(format: "%02X", key.utf8.first!), "Typing after foreground")
+        }
+        let field = app.textFields["hardware-key-local-input"]
+        field.tap()
+        app.typeKey("f", modifierFlags: [])
+        XCTAssertEqual(field.value as? String, "f")
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        Thread.sleep(forTimeInterval: 3)
+        app.typeKey("j", modifierFlags: [])
+        XCTAssertEqual(field.value as? String, "fj", "Foreground recovery must not steal local text input")
+        app.buttons["hardware-key-focus"].tap()
+        app.typeKey("g", modifierFlags: [])
+        assertSent("67", "Typing after local text entry")
+        captureKeyboardMilestone("foreground")
+    }
+
+    func testForegroundRecoveryRespectsLiveInputPermission() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        launchHarness(blockOnWake: true)
+        app.typeKey("a", modifierFlags: [])
+        assertSent("61", "Initial hardware typing")
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        Thread.sleep(forTimeInterval: 3)
+        app.typeKey("z", modifierFlags: [])
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "7A")).firstMatch.exists,
+                       "A locked input policy must block activation reclaim")
+    }
+
+    func testMouseReportingTapRestoresHardwareTypingAfterFocusLoss() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        launchHarness(mouseReporting: true)
+        XCTAssertTrue(app.buttons["hardware-key-release"].waitForExistence(timeout: 10))
+        app.typeKey("a", modifierFlags: [])
+        assertSent("61", "Initial hardware typing")
+        // Model a transient UIKit interaction ending the input session without
+        // changing SwiftUI state. The next terminal tap must restore typing.
+        app.buttons["hardware-key-release"].tap()
+        let terminal = app.descendants(matching: .any)["hardware-key-harness"]
+        XCTAssertEqual(terminal.value as? String, "unfocused")
+        let point = terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.05))
+        point.tap()
+        app.typeKey("z", modifierFlags: [])
+        assertSent("7A", "A mouse-reporting terminal tap must reclaim keyboard focus")
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "1B 5B 3C")).firstMatch.exists,
+                       "The first tap restores focus without clicking the remote TUI")
+        point.tap()
+        for suffix in [" 4D   ", " 6D   "] {
+            XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "1B 5B 3C", suffix)).firstMatch.waitForExistence(timeout: 5),
+                          "The next tap must deliver both SGR press and release")
+        }
+        captureKeyboardMilestone("mouse-focus")
+    }
+
+    func testBackgroundTerminalCleanupPreservesForegroundHardwareTyping() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        launchHarness()
+        XCTAssertTrue(app.buttons["hardware-key-background-cleanup"].waitForExistence(timeout: 10))
+        app.typeKey("a", modifierFlags: [])
+        assertSent("61", "Initial hardware typing")
+        app.buttons["hardware-key-background-cleanup"].tap()
+        app.typeKey("q", modifierFlags: [])
+        assertSent("71", "Background session cleanup must preserve the foreground terminal's input")
+
+        let field = app.textFields["hardware-key-local-input"]
+        field.tap()
+        app.typeKey("x", modifierFlags: [])
+        XCTAssertEqual(field.value as? String, "x")
+        app.buttons["hardware-key-background-cleanup"].tap()
+        app.typeKey("y", modifierFlags: [])
+        XCTAssertEqual(field.value as? String, "xy", "Background cleanup must preserve local text entry too")
+        captureKeyboardMilestone("background-cleanup")
+    }
+
+    func testShiftReachesTheWireAsAModifier() throws {
+        launchHarness()
+
+        let terminal = app.descendants(matching: .any)["hardware-key-harness"]
+        XCTAssertTrue(terminal.waitForExistence(timeout: 10))
+
+        // A bare arrow is SwiftTerm's own path and must be untouched.
+        app.typeKey(XCUIKeyboardKey.upArrow.rawValue, modifierFlags: [])
+        assertSent("1B 5B 41", "a bare ↑ must still ride SwiftTerm's own path")
+
+        app.typeKey(XCUIKeyboardKey.upArrow.rawValue, modifierFlags: .shift)
+        assertSent("1B 5B 31 3B 32 41", "⇧↑ must encode CSI 1;2 A, not a bare CSI A")
+
+        app.typeKey(XCUIKeyboardKey.leftArrow.rawValue, modifierFlags: .shift)
+        assertSent("1B 5B 31 3B 32 44", "⇧← must encode CSI 1;2 D")
+
+        app.typeKey(XCUIKeyboardKey.downArrow.rawValue, modifierFlags: [.shift, .control])
+        assertSent("1B 5B 31 3B 36 42", "⇧⌃↓ must carry both modifiers (parameter 6)")
+
+        // ⌥← stays meta word-motion: readline binds ESC b, and re-encoding it
+        // as CSI 1;3 D would break word jumps in every shell.
+        app.typeKey(XCUIKeyboardKey.leftArrow.rawValue, modifierFlags: .option)
+        assertSent("1B 62", "⌥← must stay ESC b")
+    }
+
+    /// The regression this whole change could plausibly have caused.
+    ///
+    /// Shift on an ordinary key is not a terminal modifier at all — it is how
+    /// the keyboard picks a character, and that character arrives through
+    /// `UITextInput`, not through the keyCode switch the fix sits in front of.
+    /// A letter or digit matches neither encoding table, so the modified-key
+    /// path declines it and the press falls through exactly as before. Typing
+    /// is too load-bearing to leave that as an argument.
+    func testShiftStillTypesCapitalsAndShiftedPunctuation() throws {
+        launchHarness()
+
+        let terminal = app.descendants(matching: .any)["hardware-key-harness"]
+        XCTAssertTrue(terminal.waitForExistence(timeout: 10))
+
+        app.typeKey("a", modifierFlags: [])
+        assertSent("61", "a must send lowercase a")
+
+        app.typeKey("a", modifierFlags: .shift)
+        assertSent("41", "⇧a must send capital A, not a modified sequence")
+
+        app.typeKey("1", modifierFlags: .shift)
+        assertSent("21", "⇧1 must send !")
+
+        app.typeKey("2", modifierFlags: .shift)
+        assertSent("40", "⇧2 must send @")
+
+        // ⌃ and ⌥ on a letter are terminal modifiers and keep their own
+        // meanings — the fix must not have swallowed those either.
+        app.typeKey("c", modifierFlags: .control)
+        assertSent("03", "⌃C must still be 0x03")
+    }
+
+    private func launchHarness(mouseReporting: Bool = false, blockOnWake: Bool = false) {
+        app = XCUIApplication()
+        app.launchEnvironment["TESSERA_HARDWARE_KEY_HARNESS"] = "1"
+        app.launchEnvironment["TESSERA_HARDWARE_KEY_MOUSE"] = mouseReporting ? "1" : "0"
+        app.launchEnvironment["TESSERA_HARDWARE_KEY_BLOCK_ON_WAKE"] = blockOnWake ? "1" : "0"
+        app.launch()
+    }
+
+    private func captureKeyboardMilestone(_ name: String) {
+        // The integration runner captures the real Metal framebuffer, not
+        // XCUITest's black terminal attachments, at these settled milestones.
+        print("TESSERA_KEYBOARD_CAPTURE \(name)")
+        Thread.sleep(forTimeInterval: 3)
+    }
+
+    private func assertSent(_ hex: String, _ message: String) {
+        let match = app.staticTexts.containing(
+            NSPredicate(format: "label BEGINSWITH %@", hex)
+        ).firstMatch
+        guard match.waitForExistence(timeout: 5) else {
+            // What actually went on the wire is the whole diagnosis: a bare
+            // `CSI A` means SwiftTerm claimed the chord at gate 4, nothing at
+            // all means it never reached the app.
+            let seen = app.staticTexts.allElementsBoundByIndex
+                .map(\.label)
+                .joined(separator: " | ")
+            XCTFail("\(message) — never saw \(hex). Log held: [\(seen)]")
+            return
+        }
     }
 }

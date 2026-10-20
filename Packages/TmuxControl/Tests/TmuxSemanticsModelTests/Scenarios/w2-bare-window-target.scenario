@@ -1,0 +1,22 @@
+scenario w2-bare-window-target
+# W2: a bare `-t @W` resolves to the most recently active session holding W.
+# After the laptop types in its grouped session, the device's tab switch moves
+# the laptop's window instead of the device's own. `$S:@W` targets the issuer.
+session O 80x24 w0
+window O w1
+group U O
+tty laptop U 200x50
+control device O
+send device select-window -t {w1}
+expect-current O w1
+send device select-window -t {w0}
+expect-current O w0
+key laptop
+send device select-window -t {w1}
+expect device %session-window-changed {U} {w1}
+expect-current U w1
+expect-current O w0
+expect-latest w1 device
+send device select-window -t '{O}:{w1}'
+expect device %session-window-changed {O} {w1}
+expect-current O w1

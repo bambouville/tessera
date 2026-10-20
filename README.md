@@ -32,18 +32,22 @@ your machines. See the [privacy policy](docs/privacy-policy.md).
 
 ## Building from source
 
-You need a Mac with Xcode 26 or later.
+You need a Mac with Xcode 26 or later and Git LFS (`brew install git-lfs`).
 
 ```sh
 git clone --recurse-submodules https://github.com/bambouville/tessera.git
 cd tessera
+git lfs install --local
+git lfs pull
 open Tessera.xcodeproj
 ```
 
 Select your own development team for signing, then build the `Tessera` scheme
 for an iPad (or iPad simulator) destination. The mosh and protobuf runtimes are
 vendored as git submodules under `Packages/MoshBridge/Vendor/` and compiled
-from source — no other toolchain is needed.
+from source — no other toolchain is needed. Bundled Agent Host executables use
+Git LFS; run `git lfs pull` before building an existing checkout, too. Unhydrated
+LFS pointers are not usable binaries.
 
 ### Project layout
 

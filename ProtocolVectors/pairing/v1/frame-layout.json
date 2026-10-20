@@ -1,0 +1,29 @@
+{
+  "protocol": "tessera-pairing-frame-v1",
+  "byteOrder": "big-endian",
+  "maximumEncodedBytes": 65536,
+  "headerByteCount": 18,
+  "fields": [
+    { "name": "magic", "offset": 0, "length": 4, "encoding": "fixed", "valueHex": "54504631" },
+    { "name": "version", "offset": 4, "length": 1, "encoding": "uint8", "value": 1 },
+    { "name": "direction", "offset": 5, "length": 1, "encoding": "uint8", "values": { "originToRecipient": 1, "recipientToOrigin": 2 } },
+    { "name": "sequence", "offset": 6, "length": 8, "encoding": "uint64" },
+    { "name": "sealedPayloadLength", "offset": 14, "length": 4, "encoding": "uint32" },
+    { "name": "sealedPayload", "offset": 18, "length": "sealedPayloadLength", "encoding": "chacha20-poly1305-combined" }
+  ],
+  "sealedPayload": {
+    "noncePrefixBytes": 12,
+    "authenticationTagSuffixBytes": 16,
+    "minimumBytes": 28,
+    "authenticatedData": "header || transcriptHash",
+    "nonceRule": "directionBaseNonce XOR sequence in the final eight nonce bytes"
+  },
+  "example": {
+    "source": "purpose-bound-optical.json#transactionFrameHex",
+    "encodedBytes": 116,
+    "direction": "originToRecipient",
+    "sequence": 1,
+    "sealedPayloadLength": 98,
+    "nonceHex": "6bb2e21ccc23e9b61b6c7265"
+  }
+}

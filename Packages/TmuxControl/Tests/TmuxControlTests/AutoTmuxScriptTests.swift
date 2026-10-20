@@ -21,6 +21,23 @@ final class AutoTmuxScriptTests: XCTestCase {
                       "happy path attach must use exec so the shell exits with tmux")
     }
 
+    func test_command_enablesMouseBeforeAttachingNewOrExistingSession() {
+        for preservesGeometry in [false, true] {
+            let command = AutoTmuxScript.command(
+                sessionName: "tessera-deadbeef",
+                preserveExistingGeometry: preservesGeometry
+            )
+            let mouse = command.range(of: "tmux set-option -t 'tessera-deadbeef' mouse on")
+            let attach = command.range(of: "exec tmux -CC attach")
+            XCTAssertNotNil(mouse)
+            XCTAssertNotNil(attach)
+            if let mouse, let attach {
+                XCTAssertLessThan(mouse.upperBound, attach.lowerBound)
+            }
+            XCTAssertFalse(command.contains("set-option -g"))
+        }
+    }
+
     func test_command_createsMissingSessionWithAPlainDetachedClient() {
         // The create step must NOT be a control-mode client: `tmux -CC new`
         // has to start the server and speak control mode on the same

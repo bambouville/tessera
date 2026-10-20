@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import TesseraSessionCore
 
 enum SessionRestorePolicy: String, CaseIterable, Codable {
     case ask
@@ -20,15 +21,46 @@ enum SessionRestorePolicy: String, CaseIterable, Codable {
     }
 }
 
+extension SessionRestorePolicy {
+    /// The shared spelling of the same three choices.
+    ///
+    /// The two enums stay separate on purpose: this one is persisted, synced
+    /// between the user's devices and localized for the picker, none of which
+    /// the core knows about. What crosses is the rule, not the storage.
+    var shared: ForegroundRestorePolicy {
+        switch self {
+        case .ask:    return .ask
+        case .always: return .always
+        case .never:  return .never
+        }
+    }
+
+    init(_ shared: ForegroundRestorePolicy) {
+        switch shared {
+        case .ask:    self = .ask
+        case .always: self = .always
+        case .never:  self = .never
+        }
+    }
+}
+
 enum SessionRestorePresentationPolicy {
     /// Compact navigation has no multi-session restore chooser. Preserve the
     /// stored cross-device preference, but treat `ask` as restore-on-launch
     /// while presenting the phone shell.
+    ///
+    /// Android spelled this rule out a second time, identically. It lives in
+    /// `ForegroundRestorePresentation` now, and both platforms read it there.
     static func effective(
         stored: SessionRestorePolicy,
         usesCompactShell: Bool
     ) -> SessionRestorePolicy {
-        usesCompactShell && stored == .ask ? .always : stored
+        SessionRestorePolicy(
+            ForegroundRestorePresentation.effectivePolicy(
+                stored: stored.shared,
+                usesCompactShell: usesCompactShell
+            )
+        )
     }
 }
 

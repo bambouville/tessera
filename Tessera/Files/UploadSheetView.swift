@@ -112,7 +112,14 @@ struct UploadSheetView: View {
                     ToggleRow(
                         title: "Paste path into active session",
                         subtitle: pasteSubtitle,
-                        isOn: $pastePath
+                        isOn: Binding(
+                            get: { pastePath && selectionCanReceivePastePath },
+                            set: { value in
+                                pastePath = UploadPastePathMemory.set(
+                                    value, hostID: selection?.id
+                                )
+                            }
+                        )
                     )
                     .disabled(!selectionCanReceivePastePath)
                     .opacity(selectionCanReceivePastePath ? 1 : 0.4)
@@ -472,7 +479,12 @@ struct UploadSheetView: View {
             forcedTempForMissingCwd = false
         }
         destinationKind = kind
-        pastePath = kind == .temp && (candidate.isConnected || candidate.isConnecting)
+        pastePath = UploadPastePathMemory.adopt(
+            hostID: candidate.id,
+            isTemp: kind == .temp,
+            canReceive: candidate.isConnected || candidate.isConnecting,
+            defaults: defaults
+        )
     }
 
     private func persistDestinationChoice(_ kind: DestinationKind) {
@@ -594,4 +606,33 @@ private extension TransferPhase {
         onCancel: {}
     )
     .environment(\.designTokens, DesignTokens.make(mode: .dark, accent: .blue))
+}
+
+/// Automatic defaults never write a preference; only the toggle's setter does.
+enum UploadPastePathPolicy {
+    static func selection(remembered: Bool?, isTemp: Bool, canReceive: Bool) -> Bool {
+        canReceive && (remembered ?? isTemp)
+    }
+}
+
+/// The sheet's per-host adoption and explicit toggle setter. Adoption is read-only.
+enum UploadPastePathMemory {
+    static func adopt(
+        hostID: UUID, isTemp: Bool, canReceive: Bool,
+        defaults: UserDefaults = .standard
+    ) -> Bool {
+        UploadPastePathPolicy.selection(
+            remembered: defaults.object(forKey: RemoteFilesConstants.lastPastePathKey(hostID: hostID)) as? Bool,
+            isTemp: isTemp,
+            canReceive: canReceive
+        )
+    }
+
+    /// Returns the local toggle value even when no host is selected.
+    static func set(_ value: Bool, hostID: UUID?, defaults: UserDefaults = .standard) -> Bool {
+        if let hostID {
+            defaults.set(value, forKey: RemoteFilesConstants.lastPastePathKey(hostID: hostID))
+        }
+        return value
+    }
 }

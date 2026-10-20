@@ -1,0 +1,58 @@
+{
+  "open agent center": {
+    "de": "Agent-Center öffnen",
+    "es": "abrir el centro de agentes",
+    "fr": "ouvrir le centre d'agents",
+    "ja": "エージェントセンターを開く",
+    "zh-Hans": "打开智能体中心",
+    "zh-Hant": "打開智慧體中心"
+  },
+  "open pane": {
+    "de": "Bereich öffnen",
+    "es": "abrir panel",
+    "fr": "ouvrir le volet",
+    "ja": "ペインを開く",
+    "zh-Hans": "打开窗格",
+    "zh-Hant": "打開窗格"
+  },
+  "pane unavailable": {
+    "de": "Bereich nicht verfügbar",
+    "es": "panel no disponible",
+    "fr": "volet indisponible",
+    "ja": "ペインを利用できません",
+    "zh-Hans": "窗格不可用",
+    "zh-Hant": "窗格不可用"
+  },
+  "Shows this agent in Agent Center": {
+    "de": "Zeigt diesen Agenten im Agent-Center",
+    "es": "Muestra este agente en el centro de agentes",
+    "fr": "Affiche cet agent dans le centre d'agents",
+    "ja": "このエージェントをエージェントセンターに表示します",
+    "zh-Hans": "在智能体中心显示此智能体",
+    "zh-Hant": "在智慧體中心顯示此智慧體"
+  },
+  "agent finished": {
+    "de": "Agent fertig",
+    "es": "el agente terminó",
+    "fr": "l'agent a terminé",
+    "ja": "エージェントが完了",
+    "zh-Hans": "智能体已完成",
+    "zh-Hant": "智慧體已完成"
+  },
+  "agent activity": {
+    "de": "Agent-Aktivität",
+    "es": "actividad del agente",
+    "fr": "activité de l'agent",
+    "ja": "エージェントのアクティビティ",
+    "zh-Hans": "智能体活动",
+    "zh-Hant": "智慧體活動"
+  },
+  "Open Tessera to continue.": {
+    "de": "Öffne Tessera, um fortzufahren.",
+    "es": "Abre Tessera para continuar.",
+    "fr": "Ouvrez Tessera pour continuer.",
+    "ja": "続けるには Tessera を開いてください。",
+    "zh-Hans": "打开 Tessera 以继续。",
+    "zh-Hant": "打開 Tessera 以繼續。"
+  }
+}

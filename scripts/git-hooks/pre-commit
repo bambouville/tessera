@@ -1,0 +1,86 @@
+#!/bin/sh
+# Refuses a commit that changes installed Agent Center integration content,
+# including the bundled native host, without a new integrationVersion. Every
+# Tessera build that reaches a host trusts that number to decide which
+# installation is newer, so two builds that install different bytes under one
+# version replace each other's installation on every connection.
+#
+# The shared hooks directory runs this through a wrapper, so every worktree
+# uses its own copy and older branches without it are skipped. To install:
+#   printf '#!/bin/sh\nhook="$(git rev-parse --show-toplevel)/scripts/git-hooks/pre-commit"\n[ -x "$hook" ] || exit 0\nexec "$hook" "$@"\n' > "$(git rev-parse --git-path hooks)/pre-commit"
+#   chmod +x "$(git rev-parse --git-path hooks)/pre-commit"
+#
+# It checks the working tree, which normally matches what is staged. Bypass
+# deliberately with git commit --no-verify.
+set -eu
+
+root=$(git rev-parse --show-toplevel)
+staged=$(git diff --cached --name-only --diff-filter=ACDMR)
+[ -n "$staged" ] || exit 0
+
+# Every source the installed content is built from: the dumper compiles
+# exactly these to print it.
+content_sources=$(sed -n 's#.*"\$REPO_ROOT/\(Packages/[^"]*\.swift\)".*#\1#p' \
+  "$root/scripts/integration/build-agent-integration-dumper.sh")
+[ -n "$content_sources" ] || { echo 'pre-commit: cannot read the integration source list' >&2; exit 1; }
+
+native=0
+content=0
+while IFS= read -r path; do
+  case "$path" in
+    SharedAssets/agent-host/* | Tools/AgentHost/tests/test_artifacts.py) native=1 ;;
+    Packages/TesseraCore/Tests/TesseraAgentCoreTests/AgentIntegrationVersioningTests.swift) content=1 ;;
+    scripts/integration/build-agent-integration-dumper.sh) content=1 ;;
+  esac
+  if printf '%s\n' "$content_sources" | grep -Fqx -- "$path"; then
+    native=1
+    content=1
+  fi
+done <<EOF
+$staged
+EOF
+
+failed=0
+
+if [ "$content" = 1 ]; then
+  # Runs first: after a bump it prints the integrationReleases entry to record.
+  echo 'pre-commit: checking the Agent Center integration version (swift test)...' >&2
+  log=$(mktemp "${TMPDIR:-/tmp}/tessera-integration-version.XXXXXX")
+  # /bin/sh (bash 3.2) enters an EXIT trap with $? = 0 after a set -u abort,
+  # which would let a crashed check pass the commit.
+  cleanup() {
+    status=$?
+    if [ "$status" -eq 0 ] && [ "${script_completed:-0}" != 1 ]; then
+      printf '%s\n' "${0##*/}: aborted before completion (bash set -u abort?)" >&2
+      status=1
+    fi
+    rm -f "$log"
+    exit "$status"
+  }
+  trap cleanup EXIT
+  if ! swift test --package-path "$root/Packages/TesseraCore" \
+      --filter 'AgentIntegrationVersioningTests/test(InstalledContentMatchesItsRecordedVersion|CompatibilityFloorCoversTheHookEventSchema)$' \
+      >"$log" 2>&1 \
+      || ! grep -q 'Executed 2 tests, with 0 failures' "$log"; then
+    grep -E 'error:' "$log" >&2 || tail -30 "$log" >&2
+    failed=1
+  fi
+fi
+
+if [ "$native" = 1 ]; then
+  # Text only, so it is instant: the bundled host's revision must be the one
+  # recorded for the current integrationVersion.
+  if ! output=$(cd "$root/Tools/AgentHost" && python3 tests/test_artifacts.py \
+      ArtifactTests.test_bundled_reader_ships_under_its_own_integration_version 2>&1); then
+    # The assertion and its instructions, without unittest's summary.
+    printf '%s\n' "$output" | sed -n '/^[A-Za-z]*Error/,/^-----/p' | grep -v '^-----' >&2 \
+      || printf '%s\n' "$output" >&2
+    failed=1
+  fi
+fi
+
+if [ "$failed" = 1 ]; then
+  echo 'pre-commit: Agent Center integration content must ship under a new, recorded integrationVersion (see above).' >&2
+  exit 1
+fi
+script_completed=1

@@ -5,6 +5,65 @@ import XCTest
 @testable import Tessera
 
 final class BackgroundUploadCoordinatorTests: XCTestCase {
+    func test_pastePathRestoresExplicitHostChoiceBeforeDestinationConvention() {
+        for isTemp in [false, true] {
+            XCTAssertTrue(UploadPastePathPolicy.selection(remembered: true, isTemp: isTemp, canReceive: true))
+            XCTAssertFalse(UploadPastePathPolicy.selection(remembered: false, isTemp: isTemp, canReceive: true))
+            XCTAssertFalse(UploadPastePathPolicy.selection(remembered: true, isTemp: isTemp, canReceive: false))
+        }
+        XCTAssertTrue(UploadPastePathPolicy.selection(remembered: nil, isTemp: true, canReceive: true))
+        XCTAssertFalse(UploadPastePathPolicy.selection(remembered: nil, isTemp: false, canReceive: true))
+        XCTAssertFalse(UploadPastePathPolicy.selection(remembered: nil, isTemp: true, canReceive: false))
+    }
+
+    func test_pastePathMemoryDistinguishesAbsentFromFalseAndIsScopedPerHost() {
+        let suiteName = "UploadPastePathTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let first = UUID()
+        let second = UUID()
+        let firstKey = RemoteFilesConstants.lastPastePathKey(hostID: first)
+        let secondKey = RemoteFilesConstants.lastPastePathKey(hostID: second)
+
+        for isTemp in [false, true] {
+            for canReceive in [false, true] {
+                XCTAssertEqual(UploadPastePathMemory.adopt(
+                    hostID: first, isTemp: isTemp, canReceive: canReceive, defaults: defaults
+                ), isTemp && canReceive)
+                XCTAssertNil(defaults.object(forKey: firstKey), "adoption must not remember an automatic default")
+            }
+        }
+
+        XCTAssertFalse(UploadPastePathMemory.set(false, hostID: first, defaults: defaults))
+        XCTAssertTrue(UploadPastePathMemory.set(true, hostID: second, defaults: defaults))
+        for isTemp in [false, true] {
+            for canReceive in [false, true] {
+                XCTAssertFalse(UploadPastePathMemory.adopt(
+                    hostID: first, isTemp: isTemp, canReceive: canReceive, defaults: defaults
+                ))
+                XCTAssertEqual(UploadPastePathMemory.adopt(
+                    hostID: second, isTemp: isTemp, canReceive: canReceive, defaults: defaults
+                ), canReceive)
+                XCTAssertEqual(defaults.object(forKey: firstKey) as? Bool, false)
+                XCTAssertEqual(defaults.object(forKey: secondKey) as? Bool, true)
+            }
+        }
+
+        XCTAssertTrue(UploadPastePathMemory.set(true, hostID: first, defaults: defaults))
+        XCTAssertTrue(UploadPastePathMemory.adopt(
+            hostID: first, isTemp: false, canReceive: true, defaults: defaults
+        ))
+        XCTAssertFalse(UploadPastePathMemory.set(false, hostID: second, defaults: defaults))
+        XCTAssertFalse(UploadPastePathMemory.adopt(
+            hostID: second, isTemp: true, canReceive: true, defaults: defaults
+        ))
+
+        let beforeNoHostSet = defaults.dictionaryRepresentation()
+        XCTAssertTrue(UploadPastePathMemory.set(true, hostID: nil, defaults: defaults))
+        XCTAssertFalse(UploadPastePathMemory.set(false, hostID: nil, defaults: defaults))
+        XCTAssertTrue(NSDictionary(dictionary: beforeNoHostSet).isEqual(to: defaults.dictionaryRepresentation()))
+    }
+
     @available(iOS 26.0, *)
     @MainActor
     func test_continuedUploadRegistersExactIdentifierBeforeSubmittingIt() {

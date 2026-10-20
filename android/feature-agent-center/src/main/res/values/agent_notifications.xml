@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Content-free by design: no host, provider, project, or transcript text. -->
+<resources>
+    <string name="agent_notification_channel_name">Agent attention</string>
+    <string name="agent_notification_channel_description">Agent Center requests and completions</string>
+    <string name="agent_notification_needs_input">Agent needs input</string>
+    <string name="agent_notification_finished">Agent finished</string>
+    <string name="agent_notification_body">Open Tessera to review.</string>
+    <string name="agent_notification_review">Review</string>
+</resources>

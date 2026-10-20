@@ -1,0 +1,18 @@
+{
+  "Contains typographic quotes or dashes.": {
+    "de": "Enthält typografische Anführungszeichen oder Gedankenstriche.",
+    "es": "Contiene comillas tipográficas o rayas.",
+    "fr": "Contient des guillemets typographiques ou des tirets.",
+    "ja": "スマート引用符またはダッシュが含まれています。",
+    "zh-Hans": "包含弯引号或破折号。",
+    "zh-Hant": "包含彎引號或破折號。"
+  },
+  "Use straight quotes": {
+    "de": "Gerade Anführungszeichen verwenden",
+    "es": "Usar comillas rectas",
+    "fr": "Utiliser des guillemets droits",
+    "ja": "ストレート引用符を使う",
+    "zh-Hans": "使用直引号",
+    "zh-Hant": "使用直引號"
+  }
+}

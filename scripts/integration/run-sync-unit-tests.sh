@@ -16,7 +16,7 @@ elif [[ -n "${2:-}" ]]; then
 fi
 
 udid=''
-derived_data="${TESSERA_INTEGRATION_DERIVED_DATA:-$FIXTURE_STATE/DerivedData}"
+derived_data="$(integration_derived_data)"
 result_bundle="$RUN_DIR/programmatic/sync-unit-tests.xcresult"
 mkdir -p "$derived_data" "$(dirname "$result_bundle")"
 rm -rf "$result_bundle"
@@ -26,7 +26,7 @@ cleanup() {
     delete_owned_test_simulator "$SIMULATOR_STATE/simulator_udid" || true
   fi
 }
-trap cleanup EXIT
+trap 'fail_closed_trap cleanup' EXIT
 
 udid="$($HERE/ensure-test-simulator.sh | tail -n 1)"
 
@@ -34,7 +34,7 @@ udid="$($HERE/ensure-test-simulator.sh | tail -n 1)"
 # ledger, and continuation route in the comprehensive regression gate. These
 # classes are intentionally listed rather than relying on a broad test target:
 # unrelated app tests may be optional or require their own external fixtures.
-xcodebuild "$BUILD_ACTION" \
+integration_xcodebuild "$BUILD_ACTION" \
   -project "$REPO_ROOT/Tessera.xcodeproj" \
   -scheme Tessera \
   -configuration Debug \
@@ -43,6 +43,8 @@ xcodebuild "$BUILD_ACTION" \
   -resultBundlePath "$result_bundle" \
   -only-testing:TesseraTests/ContinuityFoundationTests \
   -only-testing:TesseraTests/ContinuityLifecycleTests \
+  -only-testing:TesseraTests/CrossDevicePairingCoordinatorTests \
+  -only-testing:TesseraTests/PairingLocalTCPTransportTests \
   -only-testing:TesseraTests/SessionRestoreResolverTests \
   -only-testing:TesseraTests/EnrollmentMessagesTests \
   -only-testing:TesseraTests/EnrollmentServiceTests \
@@ -61,3 +63,4 @@ xcodebuild "$BUILD_ACTION" \
   -only-testing:TesseraTests/MoshBootstrapTests \
   -only-testing:TesseraTests/KeyStoreSecurityTests/test_softwareKeyDefaultIsMigratableButNotSynchronizable \
   -only-testing:TesseraTests/KeyStoreSecurityTests/test_liveBootstrapRecipientKeyUsesAndReusesRecoverableSimulatorEd25519Material
+script_completed=1

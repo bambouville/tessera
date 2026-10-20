@@ -431,14 +431,6 @@
     "zh-Hans": "关闭横幅",
     "zh-Hant": "關閉橫幅"
   },
-  "Shows agents that need attention": {
-    "de": "Zeigt Agenten, die Aufmerksamkeit brauchen",
-    "es": "Muestra los agentes que requieren atención",
-    "fr": "Affiche les agents qui réclament votre attention",
-    "ja": "対応が必要なエージェントを表示します",
-    "zh-Hans": "显示需要关注的智能体",
-    "zh-Hant": "顯示需要關注的智慧體"
-  },
   "Shows the safe action for this terminal": {
     "de": "Zeigt die sichere Aktion für dieses Terminal",
     "es": "Muestra la acción segura para este terminal",
@@ -542,14 +534,6 @@
     "ja": "非表示",
     "zh-Hans": "已隐藏",
     "zh-Hant": "已隱藏"
-  },
-  "arm background completion": {
-    "de": "Hintergrund-Abschluss scharfschalten",
-    "es": "preparar la finalización en segundo plano",
-    "fr": "armer la fin en arrière-plan",
-    "ja": "バックグラウンド完了を準備",
-    "zh-Hans": "启用后台完成检测",
-    "zh-Hant": "啟用背景完成偵測"
   },
   "Simulate device orientation noise": {
     "de": "Störungen der Geräteausrichtung simulieren",

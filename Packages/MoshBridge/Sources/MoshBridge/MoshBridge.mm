@@ -8,6 +8,7 @@
 
 #import "MoshClient.h"
 #import "MoshCoreProbe.h"
+#import "MoshMouseFrameProbe.h"
 
 static NSString *const MoshBridgeErrorDomain = @"com.bambouville.Tessera.MoshBridge";
 
@@ -123,6 +124,22 @@ static NSUInteger MoshBridgePerformTick(NSError **error, Fn &&fn) {
     return (NSInteger)mosh_ccrypto_primitive_probe();
 }
 
++ (NSInteger)reclaimedSocketProbe {
+    return (NSInteger)mosh_reclaimed_socket_probe();
+}
+
++ (NSInteger)fullRepaintFenceProbe {
+    return (NSInteger)mosh_full_repaint_fence_probe();
+}
+
++ (NSData *)mouseFrameProbeWithMode:(NSInteger)mode encoding:(NSInteger)encoding scenario:(NSInteger)scenario {
+    NSMutableData *data = [NSMutableData dataWithLength:8192];
+    const size_t length = mosh_mouse_frame_probe((int)mode, (int)encoding, (int)scenario,
+                                               (uint8_t *)data.mutableBytes, data.length);
+    data.length = length;
+    return data;
+}
+
 @end
 
 @implementation MoshBridgeClient
@@ -212,6 +229,22 @@ static NSUInteger MoshBridgePerformTick(NSError **error, Fn &&fn) {
     });
 }
 
+- (uint64_t)beginFullRepaintFence:(NSError * _Nullable * _Nullable)error {
+    if (_client == nullptr) return 0;
+    try {
+        return _client->begin_full_repaint_fence();
+    } catch (const std::exception &exception) {
+        if (error != nullptr) *error = MoshBridgeErrorFromException(exception);
+    } catch (...) {
+        if (error != nullptr) *error = MoshBridgeUnknownError();
+    }
+    return 0;
+}
+
+- (BOOL)isFullRepaintFenceReady:(uint64_t)token {
+    return _client != nullptr && _client->full_repaint_fence_ready(token);
+}
+
 - (void)shutdown {
     if (_client == nullptr) {
         return;
@@ -255,6 +288,14 @@ static NSUInteger MoshBridgePerformTick(NSError **error, Fn &&fn) {
 
 - (BOOL)isTransportReachable {
     return _client != nullptr && _client->transport_reachable();
+}
+
+- (uint64_t)serverContactAgeMilliseconds {
+    return _client != nullptr ? _client->server_contact_age_ms() : 0;
+}
+
+- (uint64_t)replyAgeMilliseconds {
+    return _client != nullptr ? _client->reply_age_ms() : 0;
 }
 
 - (BOOL)isShutdownComplete {

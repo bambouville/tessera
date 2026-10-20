@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ContinuationDescriptorV1",
+  "description": "Released Apple Continuity schema v1. Unknown fields remain tolerated for byte-compatible JSONDecoder behavior.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["v", "hostID", "connectionKey", "name", "user", "address", "port", "transport", "launchMode", "via"],
+  "properties": {
+    "v": { "const": 1 },
+    "hostID": { "type": "string", "format": "uuid" },
+    "connectionKey": { "type": "string", "minLength": 1 },
+    "name": { "type": "string" },
+    "user": { "type": "string" },
+    "address": { "type": "string" },
+    "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "transport": { "enum": ["ssh", "mosh"] },
+    "launchMode": { "enum": ["autoTmux", "pinnedTmux", "customCommand"] },
+    "tmux": { "type": "string" },
+    "hostKeyFP": { "type": "string" },
+    "via": {
+      "type": "array",
+      "maxItems": 8,
+      "items": { "$ref": "#/$defs/endpoint" }
+    }
+  },
+  "$defs": {
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["hostID", "name", "user", "address", "port", "transport"],
+      "properties": {
+        "hostID": { "type": "string", "format": "uuid" },
+        "name": { "type": "string" },
+        "user": { "type": "string" },
+        "address": { "type": "string" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "transport": { "enum": ["ssh", "mosh"] },
+        "hostKeyFP": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

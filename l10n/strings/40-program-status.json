@@ -1,0 +1,178 @@
+{
+  "needs approval": {
+    "de": "Braucht Freigabe",
+    "es": "necesita aprobación",
+    "fr": "attend une approbation",
+    "ja": "承認待ち",
+    "zh-Hans": "等待批准",
+    "zh-Hant": "等待核准"
+  },
+  "needs an answer": {
+    "de": "Braucht eine Antwort",
+    "es": "necesita una respuesta",
+    "fr": "attend une réponse",
+    "ja": "回答待ち",
+    "zh-Hans": "等待回答",
+    "zh-Hant": "等待回答"
+  },
+  "sign-in needed": {
+    "de": "Anmeldung erforderlich",
+    "es": "requiere inicio de sesión",
+    "fr": "connexion requise",
+    "ja": "サインインが必要",
+    "zh-Hans": "需要登录",
+    "zh-Hant": "需要登入"
+  },
+  "ready": {
+    "de": "Bereit",
+    "es": "listo",
+    "fr": "prêt",
+    "ja": "準備完了",
+    "zh-Hans": "就绪",
+    "zh-Hant": "就緒"
+  },
+  "program": {
+    "de": "Programm",
+    "es": "programa",
+    "fr": "programme",
+    "ja": "プログラム",
+    "zh-Hans": "程序",
+    "zh-Hant": "程式"
+  },
+  "programs": {
+    "de": "Programme",
+    "es": "programas",
+    "fr": "programmes",
+    "ja": "プログラム",
+    "zh-Hans": "程序",
+    "zh-Hant": "程式"
+  },
+  "program status": {
+    "de": "Programmstatus",
+    "es": "estado de programas",
+    "fr": "état des programmes",
+    "ja": "プログラムのステータス",
+    "zh-Hans": "程序状态",
+    "zh-Hant": "程式狀態"
+  },
+  "show needs input, finished and failed on tabs and session lists when programs report it (OSC 7501) · works without agent center": {
+    "de": "Zeigt „Braucht Eingabe“, „fertig“ und „fehlgeschlagen“ auf Tabs und in Sitzungslisten, wenn Programme es melden (OSC 7501) · funktioniert ohne Agent-Center",
+    "es": "muestra «necesita entrada», «terminado» y «falló» en pestañas y listas de sesiones cuando los programas lo informan (OSC 7501) · funciona sin el centro de agentes",
+    "fr": "affiche « attend une saisie », « terminé » et « échec » sur les onglets et les listes de sessions quand les programmes le signalent (OSC 7501) · fonctionne sans le centre d'agents",
+    "ja": "プログラムが報告すると、タブとセッション一覧に入力待ち・完了・失敗を表示します (OSC 7501) · エージェントセンターなしで動作します",
+    "zh-Hans": "程序报告时，在标签页和会话列表中显示等待输入、已完成和失败 (OSC 7501) · 无需智能体中心",
+    "zh-Hant": "程式回報時，在分頁和工作階段清單中顯示等待輸入、已完成和失敗 (OSC 7501) · 無需智慧體中心"
+  },
+  "needs attention": {
+    "de": "Braucht Aufmerksamkeit",
+    "es": "necesita atención",
+    "fr": "demande votre attention",
+    "ja": "対応が必要",
+    "zh-Hans": "需要处理",
+    "zh-Hant": "需要處理"
+  },
+  "visiting a pane marks it checked": {
+    "de": "Ein Bereich gilt als geprüft, sobald du ihn aufrufst",
+    "es": "visitar un panel lo marca como revisado",
+    "fr": "ouvrir un volet le marque comme vu",
+    "ja": "ペインを開くと確認済みになります",
+    "zh-Hans": "访问窗格即标记为已查看",
+    "zh-Hant": "造訪窗格即標記為已查看"
+  },
+  "Shows what needs attention": {
+    "de": "Zeigt, was Aufmerksamkeit braucht",
+    "es": "Muestra lo que requiere atención",
+    "fr": "Affiche ce qui réclame votre attention",
+    "ja": "対応が必要な項目を表示します",
+    "zh-Hans": "显示需要关注的内容",
+    "zh-Hant": "顯示需要關注的內容"
+  },
+  "Opens this pane": {
+    "de": "Öffnet diesen Bereich",
+    "es": "Abre este panel",
+    "fr": "Ouvre ce volet",
+    "ja": "このペインを開きます",
+    "zh-Hans": "打开此窗格",
+    "zh-Hant": "打開此窗格"
+  },
+  "agent failed": {
+    "de": "Agent fehlgeschlagen",
+    "es": "el agente falló",
+    "fr": "échec de l'agent",
+    "ja": "エージェントが失敗しました",
+    "zh-Hans": "智能体失败",
+    "zh-Hant": "智慧體失敗"
+  },
+  "raw session": {
+    "de": "einfache Sitzung",
+    "es": "sesión simple",
+    "fr": "session simple",
+    "ja": "素のセッション",
+    "zh-Hans": "原始会话",
+    "zh-Hant": "原始工作階段"
+  },
+  "Open %@, %@": {
+    "de": "%@ öffnen, %@",
+    "es": "Abrir %@, %@",
+    "fr": "Ouvrir %@, %@",
+    "ja": "%1$@ を開く、%2$@",
+    "zh-Hans": "打开 %1$@，%2$@",
+    "zh-Hant": "打開 %1$@，%2$@"
+  },
+  "%@, %@, %@": {
+    "de": "%@, %@, %@",
+    "es": "%@, %@, %@",
+    "fr": "%@, %@, %@",
+    "ja": "%1$@、%2$@、%3$@",
+    "zh-Hans": "%1$@，%2$@，%3$@",
+    "zh-Hant": "%1$@，%2$@，%3$@"
+  },
+  "%@, agent %@, %@, %@": {
+    "de": "%@, Agent %@, %@, %@",
+    "es": "%@, agente %@, %@, %@",
+    "fr": "%@, agent %@, %@, %@",
+    "ja": "%1$@、エージェント %2$@、%3$@、%4$@",
+    "zh-Hans": "%1$@，智能体 %2$@，%3$@，%4$@",
+    "zh-Hant": "%1$@，智慧體 %2$@，%3$@，%4$@"
+  },
+  "session %@, %@, %@": {
+    "de": "Sitzung %@, %@, %@",
+    "es": "sesión %@, %@, %@",
+    "fr": "session %@, %@, %@",
+    "ja": "セッション %1$@、%2$@、%3$@",
+    "zh-Hans": "会话 %1$@，%2$@，%3$@",
+    "zh-Hant": "工作階段 %1$@，%2$@，%3$@"
+  },
+  "%@, window %lld%@, %@": {
+    "de": "%@, Fenster %lld%@, %@",
+    "es": "%@, ventana %lld%@, %@",
+    "fr": "%@, fenêtre %lld%@, %@",
+    "ja": "%1$@、ウインドウ %2$lld%3$@、%4$@",
+    "zh-Hans": "%1$@，窗口 %2$lld%3$@，%4$@",
+    "zh-Hant": "%1$@，視窗 %2$lld%3$@，%4$@"
+  },
+  "%@, window %lld%@, agent, %@": {
+    "de": "%@, Fenster %lld%@, Agent, %@",
+    "es": "%@, ventana %lld%@, agente, %@",
+    "fr": "%@, fenêtre %lld%@, agent, %@",
+    "ja": "%1$@、ウインドウ %2$lld%3$@、エージェント、%4$@",
+    "zh-Hans": "%1$@，窗口 %2$lld%3$@，智能体，%4$@",
+    "zh-Hant": "%1$@，視窗 %2$lld%3$@，智慧體，%4$@"
+  },
+  "%@, window %lld, %@": {
+    "de": "%@, Fenster %lld, %@",
+    "es": "%@, ventana %lld, %@",
+    "fr": "%@, fenêtre %lld, %@",
+    "ja": "%1$@、ウインドウ %2$lld、%3$@",
+    "zh-Hans": "%1$@，窗口 %2$lld，%3$@",
+    "zh-Hant": "%1$@，視窗 %2$lld，%3$@"
+  },
+  "%@, window %lld, tmux index %lld, %@": {
+    "de": "%1$@, Fenster %2$lld, tmux-Index %3$lld, %4$@",
+    "es": "%1$@, ventana %2$lld, índice de tmux %3$lld, %4$@",
+    "fr": "%1$@, fenêtre %2$lld, indice tmux %3$lld, %4$@",
+    "ja": "%1$@、ウインドウ %2$lld、tmux インデックス %3$lld、%4$@",
+    "zh-Hans": "%1$@，窗口 %2$lld，tmux 索引 %3$lld，%4$@",
+    "zh-Hant": "%1$@，視窗 %2$lld，tmux 索引 %3$lld，%4$@"
+  }
+}

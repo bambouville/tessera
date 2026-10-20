@@ -89,17 +89,77 @@ final class PaneCurrentPathTests: XCTestCase {
         ))
         XCTAssertEqual(controller.paneCurrentPaths[PaneId(12)], "/home/user/src/tessera")
 
-        controller.ingest(Array("%window-close @5\r\n".utf8))
+        controller.ingest(Array("%unlinked-window-close @5\r\n".utf8))
 
         XCTAssertTrue(controller.paneCurrentPaths.isEmpty)
         XCTAssertNil(controller.activePaneCurrentPath)
     }
 
-    func test_paneMetadataSubscriptionFormatEndsWithRetainedAgentState() {
+    func test_paneMetadataSubscriptionFormatEndsWithRetainedAgentStateAndPaneModes() {
         XCTAssertTrue(
-            TmuxController.paneMetadataSubscriptionFormat.hasSuffix("#{pane_current_path}\t#{@tessera_agent_state}"),
-            "pane metadata subscription must replay cwd and retained agent state"
+            TmuxController.paneMetadataSubscriptionFormat.hasSuffix(
+                "#{s/\t/ /:pane_current_path}\t#{s/\t/ /:@tessera_agent_state}"
+                    + "\t#{alternate_on}\t#{mouse_any_flag}\t#{mouse_sgr_flag}"
+            ),
+            "pane metadata subscription must replay cwd and retained agent state, "
+                + "with tabs stripped by the server so neither can shift a field, "
+                + "then the pane's alternate-screen and mouse modes"
         )
+    }
+
+    func test_controllerSubscriptionTracksPaneAlternateScreenAcrossCommandChange() throws {
+        let controller = makeController()
+        enterTmuxMode(controller)
+        controller.ingest(Array("%session-changed $0 main\r\n".utf8))
+        controller.ingest(Array("%window-add @5\r\n".utf8))
+        func report(_ command: String, _ modes: String) {
+            controller.ingest(Array(
+                "%subscription-changed tessera-pane-meta $0 @5 0 %12 : @5\\t%12\\t1\\t0\\t1\\t80\\t24\\t\(command)\\tTitle\\teditor\\tremote.example.com\\t/home/user\\t\(modes)\r\n".utf8
+            ))
+        }
+        func pane() -> TmuxController.PaneInfo? {
+            controller.windows.flatMap(\.panes).first { $0.id == PaneId(12) }
+        }
+
+        report("zsh", "\\t0\\t0\\t0")
+        XCTAssertEqual(pane()?.isAlternateScreen, false)
+
+        // `claude` starting and entering its full-screen view arrive together:
+        // the command change must not wipe the modes read in the same payload.
+        report("claude", "\\t1\\t1\\t1")
+        XCTAssertEqual(pane()?.isAlternateScreen, true)
+        XCTAssertEqual(pane()?.isMouseReporting, true)
+        XCTAssertEqual(pane()?.isSgrMouse, true)
+
+        // A server that predates the fields keeps the last reported modes.
+        report("claude", "")
+        XCTAssertEqual(pane()?.isAlternateScreen, true)
+
+        // Each mode applies on its own: a payload carrying only the
+        // alternate-screen flag leaves the known mouse modes alone.
+        report("claude", "\\t0")
+        XCTAssertEqual(pane()?.isAlternateScreen, false)
+        XCTAssertEqual(pane()?.isMouseReporting, true)
+        XCTAssertEqual(pane()?.isSgrMouse, true)
+
+        report("zsh", "\\t0\\t0\\t0")
+        XCTAssertEqual(pane()?.isAlternateScreen, false)
+        XCTAssertEqual(pane()?.isMouseReporting, false)
+    }
+
+    func test_parsePaneSubscriptionMetadata_readsPaneModes() throws {
+        let metadata = try XCTUnwrap(parse(
+            "@5\t%12\t1\t0\t1\t80\t24\tclaude\tClaude\teditor\thost\t/home/user\t\t1\t1\t0"
+        ))
+        XCTAssertNil(metadata.agentStateJSON)
+        XCTAssertEqual(metadata.isAlternateScreen, true)
+        XCTAssertEqual(metadata.isMouseReporting, true)
+        XCTAssertEqual(metadata.isSgrMouse, false)
+
+        let legacy = try XCTUnwrap(parse("@5\t%12\t1\t0\t1\t80\t24\tvim\tTitle\teditor\thost\t/home/user"))
+        XCTAssertNil(legacy.isAlternateScreen)
+        XCTAssertNil(legacy.isMouseReporting)
+        XCTAssertNil(legacy.isSgrMouse)
     }
 
     func test_parsePaneSubscriptionMetadata_includesRetainedAgentState() throws {

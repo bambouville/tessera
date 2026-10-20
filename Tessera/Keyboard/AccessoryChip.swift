@@ -1,4 +1,5 @@
 import UIKit
+import TesseraInputCore
 
 enum AccessoryChip: String, CaseIterable, Codable {
     // navigation
@@ -11,7 +12,8 @@ enum AccessoryChip: String, CaseIterable, Codable {
     case cmd
     // simple key-bytes modifiers
     case esc
-    case ctrlC, ctrlJ
+    case enter
+    case ctrlC, ctrlJ, ctrlL
     // function keys
     case f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12
     // symbols
@@ -19,11 +21,12 @@ enum AccessoryChip: String, CaseIterable, Codable {
 
     /// Label for the chip under the user's notation preference.
     ///
-    /// Six chips move: the four bare modifiers (ctrl, alt, shift, tab) and the
-    /// two control shortcuts. The control shortcuts were briefly left as caret
-    /// notation on the argument that `^C` is what the shell *echoes* — but a
-    /// bar whose control chip reads ⌃ next to a chip reading ^C is telling the
-    /// user two things about the same key, so they follow the setting too.
+    /// Eight chips move: the four bare modifiers (ctrl, alt, shift, tab), the
+    /// three control shortcuts, and ↩ / ret. The control shortcuts were briefly
+    /// left as caret notation on the argument that `^C` is what the shell
+    /// *echoes* — but a bar whose control chip reads ⌃ next to a chip reading
+    /// ^C is telling the user two things about the same key, so they follow the
+    /// setting too.
     /// They render through `Chord`, so ⌃C / ctrl-c match the rest of the app
     /// exactly rather than being spelled a second way here.
     func displayLabel(_ notation: ModifierNotation) -> String {
@@ -35,6 +38,8 @@ enum AccessoryChip: String, CaseIterable, Codable {
         case .tab:   return KeyToken.tab.rendered(notation)
         case .ctrlC: return Chord([.control], .character("c")).rendered(notation)
         case .ctrlJ: return Chord([.control], .character("j")).rendered(notation)
+        case .ctrlL: return Chord([.control], .character("l")).rendered(notation)
+        case .enter: return Chord([], .return).rendered(notation)
         default:     return displayLabel
         }
     }
@@ -49,6 +54,10 @@ enum AccessoryChip: String, CaseIterable, Codable {
             "⌃J"
         case .ctrlC:
             "⌃C"
+        case .ctrlL:
+            "⌃L"
+        case .enter:
+            "↩"
         // Control unifies on the Mac glyph rather than the terminal caret, so
         // one app has one notation. See docs/keyboard-interception-research.md.
         case .ctrl:
@@ -147,6 +156,8 @@ enum AccessoryChip: String, CaseIterable, Codable {
         case .esc: String(localized: "Escape")
         case .ctrlJ: String(localized: "Control-J")
         case .ctrlC: String(localized: "Control-C")
+        case .ctrlL: String(localized: "Control-L")
+        case .enter: String(localized: "Return")
         case .tab: String(localized: "Tab")
         case .left: String(localized: "Left arrow")
         case .down: String(localized: "Down arrow")
@@ -184,7 +195,10 @@ enum AccessoryChip: String, CaseIterable, Codable {
     /// without a hardware keyboard add it from Settings → Keyboard.
     static func defaultBarOrder(for idiom: UIUserInterfaceIdiom) -> [AccessoryChip] {
         if idiom == .phone {
-            return [.esc, .ctrl, .tab, .left, .right, .down, .up, .alt, .ctrlC, .ctrlJ]
+            return [
+                .esc, .enter, .ctrl, .tab, .left, .right, .down, .up, .alt,
+                .ctrlC, .ctrlJ, .ctrlL,
+            ]
         }
         return [.esc, .ctrl, .alt, .tab, .left, .down, .up, .right, .pipe, .tilde]
     }
@@ -192,4 +206,15 @@ enum AccessoryChip: String, CaseIterable, Codable {
     static func from(rawIDs: [String]) -> [AccessoryChip] {
         rawIDs.compactMap(AccessoryChip.init(rawValue:))
     }
+}
+
+extension AccessoryChip {
+    /// This chip's entry in the shared `AccessoryKeyCatalog`. The lookup is by
+    /// raw value because `AccessoryChip.rawValue` *is* the canonical catalog ID
+    /// — `AccessoryKeyCatalogParityTests` pins that for every case, so this is
+    /// total in practice and nil only if the two lists ever drift.
+    var catalogKey: AccessoryKey? { AccessoryKey(rawValue: rawValue) }
+
+    /// The modifier this chip arms, or nil for a chip that sends bytes.
+    var armedModifier: TerminalModifier? { catalogKey?.modifier }
 }

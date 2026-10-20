@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tmux_move_left">向左移動</string>
+    <string name="tmux_move_right">向右移動</string>
+    <string name="tmux_move_up">向上移動</string>
+    <string name="tmux_move_down">向下移動</string>
+    <string name="tmux_move_start">移至開頭</string>
+    <string name="tmux_move_end">移至結尾</string>
+    <string name="tmux_tidy">整理視窗編號</string>
+    <string name="tmux_order_failed">無法更新 tmux 視窗順序。</string>
+    <string name="tmux_order_changed">視窗順序已變更。請重試。</string>
+    <string name="tmux_order_timeout">視窗排序逾時。</string>
+    <string name="tmux_order_unavailable">暫時無法排列視窗。</string>
+    <string name="tmux_window_label">視窗 %1$d，%2$s</string>
+    <string name="tmux_window_index_label">視窗 %1$d，%2$s，tmux 索引 %3$d</string>
+    <string name="tmux_window_index_detail">tmux 索引 %1$d · %2$s</string>
+    <string name="tmux_split_right">向右分割</string>
+    <string name="tmux_split_left">向左分割</string>
+    <string name="tmux_split_down">向下分割</string>
+    <string name="tmux_split_up">向上分割</string>
+</resources>

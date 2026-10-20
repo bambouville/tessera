@@ -21,6 +21,21 @@ DerivedData/
 build/
 *.o
 *.a
+*.xcresult/
+.deriveddata/
+
+# Android
+.gradle/
+android/.cxx/
+android/**/.cxx/
+android/.idea/
+android/.kotlin/
+android/captures/
+android/local.properties
+
+# Python and local environment
+__pycache__/
+.env
 
 # CocoaPods (not used but noise-proofing)
 Pods/

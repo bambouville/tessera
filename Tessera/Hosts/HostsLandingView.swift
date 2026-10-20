@@ -221,8 +221,7 @@ struct HostsLandingView: View {
                 .font(Typography.tesseraMono(size: 13))
                 .foregroundStyle(T.fg)
                 .textFieldStyle(.plain)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
+                .literalTextInput()
                 .submitLabel(.go)
                 .onSubmit {
                     let value = search.trimmingCharacters(in: .whitespacesAndNewlines)

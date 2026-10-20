@@ -12,6 +12,7 @@
 //
 import Foundation
 import TmuxControl
+import TesseraCore
 
 public typealias SwipePadProcessNameProvider = @MainActor () async -> [String]
 public typealias SwipePadPaneProcessNameProvider = @MainActor (
@@ -582,8 +583,25 @@ enum SwipePadAccessibilityFallbackGate {
 
 enum SwipePadPlainSSHProcessProbe {
     struct Snapshot: Equatable, Sendable {
+        struct Process: Equatable, Sendable {
+            let pid: Int
+            let processNames: [String]
+        }
+
         let processNames: [String]
         let processIDs: Set<Int>
+        let attachedProcesses: [Process]
+        let truncated: Bool
+        let complete: Bool
+
+        init(processNames: [String], processIDs: Set<Int>, attachedProcesses: [Process] = [],
+             truncated: Bool = false, complete: Bool = false) {
+            self.processNames = processNames
+            self.processIDs = processIDs
+            self.attachedProcesses = attachedProcesses
+            self.truncated = truncated
+            self.complete = complete
+        }
     }
     /// Side-channel process snapshot used when the terminal is plain SSH
     /// passthrough rather than tmux control mode. `exit 0` is load-bearing:
@@ -598,43 +616,14 @@ enum SwipePadPlainSSHProcessProbe {
     /// the current connection. Filtering to descendants of that process keeps
     /// codex/claude runs in other SSH sessions from holding this puck in a
     /// stale matched state after the local session returns to the shell.
-    static let outputLineLimit = 64
-    static let outputColumnLimit = 1_000
-    static let maximumExpectedOutputBytes = outputLineLimit * (outputColumnLimit + 1)
+    static let outputLineLimit = AgentProcessSnapshotCommand.outputLineLimit
+    static let outputColumnLimit = AgentProcessSnapshotCommand.outputColumnLimit
+    static let maximumExpectedOutputBytes = AgentProcessSnapshotCommand.maximumExpectedOutputBytes
 
     static var command: String { makeCommand(rootPID: nil) }
 
-    static func makeCommand(rootPID: Int?) -> String {
-        let rootAssignment: String
-        if let rootPID, rootPID > 0 {
-            rootAssignment = "r=\(rootPID); "
-        } else {
-            rootAssignment = "r=$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' '); "
-        }
-
-        return rootAssignment
-        + "u=$(id -un 2>/dev/null || whoami 2>/dev/null || printf ''); "
-        + "{ "
-        + "if [ -n \"$u\" ]; then "
-        + "ps -ww -u \"$u\" -o pid= -o ppid= -o stat= -o tty= -o comm= -o args= 2>/dev/null || "
-        + "ps -u \"$u\" -o pid= -o ppid= -o stat= -o tty= -o comm= -o args= 2>/dev/null || "
-        + "ps -ww -axo pid= -o ppid= -o stat= -o tty= -o comm= -o args= 2>/dev/null || "
-        + "ps -axo pid= -o ppid= -o stat= -o tty= -o comm= -o args= 2>/dev/null; "
-        + "else "
-        + "ps -ww -axo pid= -o ppid= -o stat= -o tty= -o comm= -o args= 2>/dev/null || "
-        + "ps -axo pid= -o ppid= -o stat= -o tty= -o comm= -o args= 2>/dev/null; "
-        + "fi; } | awk '$4 != \"?\" && $4 != \"??\" && $4 != \"-\" { print }' "
-        + "| awk -v root=\"$r\" '"
-        + "$1 ~ /^[0-9]+$/ { parent[$1]=$2; tty[$1]=$4; line[$1]=$0 } "
-        + "function attached(t) { return t != \"?\" && t != \"??\" && t != \"-\" } "
-        + "function inside(pid, depth) { "
-        + "for (depth=0; pid != \"\" && pid != \"0\" && depth < 64; depth++) { "
-        + "if (pid == root) return 1; pid = parent[pid] "
-        + "} return 0 "
-        + "} "
-        + "END { for (pid in line) if (attached(tty[pid]) && root != \"\" && inside(pid)) print line[pid] }"
-        + "' "
-        + "| tail -n \(outputLineLimit) | cut -c 1-\(outputColumnLimit); exit 0"
+    static func makeCommand(rootPID: Int?, expectedPID: Int? = nil) -> String {
+        AgentProcessSnapshotCommand.makeCommand(rootPID: rootPID, expectedPID: expectedPID)
     }
 
     static func processNames(from psOutput: String) -> [String] {
@@ -643,9 +632,9 @@ enum SwipePadPlainSSHProcessProbe {
 
     static func snapshot(from psOutput: String) -> Snapshot {
         let lines = psOutput.split(whereSeparator: \.isNewline)
-        let records = lines
-            .compactMap(parseRecord)
-            .filter { !$0.hasDetachedTTY }
+        let parsed = lines.compactMap(parseRecord)
+        let records = parsed.filter { !$0.hasDetachedTTY }
+        let truncated = lines.count >= outputLineLimit
 
         let foregroundRecords = records.filter(\.isForeground)
         let activeRecords = foregroundRecords.isEmpty ? records : foregroundRecords
@@ -665,7 +654,12 @@ enum SwipePadPlainSSHProcessProbe {
         )
         return Snapshot(
             processNames: result,
-            processIDs: Set(activeRecords.map(\.pid))
+            processIDs: Set(activeRecords.map(\.pid)),
+            attachedProcesses: records.map {
+                .init(pid: $0.pid, processNames: SwipePadProcessNameExtractor.executableNames(comm: $0.comm, args: $0.args))
+            },
+            truncated: truncated,
+            complete: !truncated && !lines.isEmpty && parsed.count == lines.count
         )
     }
 
@@ -740,6 +734,28 @@ enum SwipePadProcessNameExtractor {
                 allowLeadingDash: index == 0
             ) {
                 names.append(name)
+            }
+        }
+        return deduplicated(names)
+    }
+
+    /// The names a process runs as: its `comm`, `argv[0]` and, under a script
+    /// interpreter, the script it runs. Later arguments (a prompt that says
+    /// "claude") never name the executable.
+    static func executableNames(comm: String, args: String) -> [String] {
+        var names: [String] = []
+        if let comm = normalizedProcessName(comm, allowLeadingDash: true) { names.append(comm) }
+        let tokens = argumentTokens(args)
+        if let first = tokens.first, let program = normalizedProcessName(first, allowLeadingDash: true) {
+            names.append(program)
+        }
+        let interpreters: Set<String> = ["node", "nodejs", "bun", "deno", "python", "python3"]
+        if names.contains(where: { interpreters.contains($0) || ($0.hasPrefix("python3.") && $0.dropFirst(8).allSatisfy(\.isNumber)) }),
+           let script = tokens.dropFirst().first(where: { !$0.hasPrefix("-") }),
+           let name = normalizedProcessName(script) {
+            names.append(name)
+            for suffix in [".js", ".mjs", ".cjs", ".py"] where name.hasSuffix(suffix) && name.count > suffix.count {
+                names.append(String(name.dropLast(suffix.count)))
             }
         }
         return deduplicated(names)

@@ -41,8 +41,13 @@ case "$command" in
     ;;
   rotate-host-key)
     systemctl stop "$SERVICE"
-    rm -f "$ROOT/ssh/ssh_host_ed25519_key" "$ROOT/ssh/ssh_host_ed25519_key.pub"
+    rm -f \
+      "$ROOT/ssh/ssh_host_ed25519_key" "$ROOT/ssh/ssh_host_ed25519_key.pub" \
+      "$ROOT/ssh/ssh_host_ecdsa_key" "$ROOT/ssh/ssh_host_ecdsa_key.pub" \
+      "$ROOT/ssh/ssh_host_rsa_key" "$ROOT/ssh/ssh_host_rsa_key.pub"
     ssh-keygen -q -t ed25519 -N '' -f "$ROOT/ssh/ssh_host_ed25519_key"
+    ssh-keygen -q -t ecdsa -b 256 -N '' -f "$ROOT/ssh/ssh_host_ecdsa_key"
+    ssh-keygen -q -t rsa -b 3072 -N '' -f "$ROOT/ssh/ssh_host_rsa_key"
     systemctl start "$SERVICE"
     ;;
   drop-udp)

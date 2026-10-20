@@ -111,22 +111,6 @@
     "zh-Hans": "正在连接 %@。设备名称只是标签；真正验证通道的是下一屏的代码。",
     "zh-Hant": "正在連線 %@。裝置名稱只是標籤；真正驗證通道的是下一畫面的代碼。"
   },
-  "Compare this code": {
-    "de": "Vergleiche diesen Code",
-    "es": "Compara este código",
-    "fr": "Comparez ce code",
-    "ja": "このコードを見比べる",
-    "zh-Hans": "核对此代码",
-    "zh-Hant": "核對此代碼"
-  },
-  "Confirm only if the same code is visible on %@. If either device rejects the code, both devices stop this attempt; retrying creates fresh encryption keys.": {
-    "de": "Bestätige nur, wenn auf %@ derselbe Code steht. Lehnt eines der Geräte den Code ab, brechen beide diesen Versuch ab; ein erneuter Versuch erzeugt neue Verschlüsselungs-Keys.",
-    "es": "Confirma solo si aparece el mismo código en %@. Si cualquiera de los dispositivos rechaza el código, ambos detienen este intento; volver a intentarlo genera claves de cifrado nuevas.",
-    "fr": "Ne confirmez que si le même code s'affiche sur %@. Si l'un des appareils refuse le code, les deux interrompent la tentative ; réessayer génère de nouvelles clés de chiffrement.",
-    "ja": "%@ に同じコードが表示されている場合にのみ確認してください。どちらかのデバイスがコードを拒否すると、両方がこの試行を中止します。やり直すと新しい暗号鍵が生成されます。",
-    "zh-Hans": "只有当 %@ 上显示相同代码时才确认。任何一台设备拒绝该代码，两台都会中止此次尝试；重试会生成新的加密密钥。",
-    "zh-Hant": "只有當 %@ 上顯示相同代碼時才確認。任何一台裝置拒絕該代碼，兩台都會中止此次嘗試；重試會產生新的加密金鑰。"
-  },
   "Waiting for the other device": {
     "de": "Warte auf das andere Gerät",
     "es": "Esperando al otro dispositivo",
@@ -134,14 +118,6 @@
     "ja": "もう一方のデバイスを待っています",
     "zh-Hans": "正在等待另一台设备",
     "zh-Hant": "正在等待另一台裝置"
-  },
-  "You confirmed code %@. %@ must confirm the same code before setup can continue.": {
-    "de": "Du hast den Code %@ bestätigt. %@ muss denselben Code bestätigen, bevor die Einrichtung weitergeht.",
-    "es": "Confirmaste el código %@. %@ debe confirmar el mismo código para que la configuración pueda continuar.",
-    "fr": "Vous avez confirmé le code %@. %@ doit confirmer le même code pour que la configuration se poursuive.",
-    "ja": "コード %1$@ を確認しました。セットアップを続けるには、%2$@ でも同じコードを確認する必要があります。",
-    "zh-Hans": "你已确认代码 %1$@。%2$@ 也必须确认同一代码，设置才能继续。",
-    "zh-Hant": "你已確認代碼 %1$@。%2$@ 也必須確認同一代碼，設定才能繼續。"
   },
   "Stopping nearby setup": {
     "de": "Einrichtung in der Nähe wird abgebrochen",
@@ -255,22 +231,6 @@
     "zh-Hans": "正在校验并导入来自 %@ 的已批准清单。",
     "zh-Hant": "正在檢驗並輸入來自 %@ 的已核准清單。"
   },
-  "Choose what to copy": {
-    "de": "Wähle, was kopiert wird",
-    "es": "Elige qué copiar",
-    "fr": "Choisissez ce qui est copié",
-    "ja": "コピーする内容を選ぶ",
-    "zh-Hans": "选择要复制的内容",
-    "zh-Hant": "選擇要複製的內容"
-  },
-  "Code %@ matched. Optional host text and trust start off. Review this exact setup transfer and where to install %@.": {
-    "de": "Code %@ stimmt überein. Optionaler Host-Text und Vertrauen sind zunächst aus. Prüfe genau diese Übertragung und wo %@ installiert werden soll.",
-    "es": "El código %@ coincide. El texto opcional de los hosts y la confianza empiezan desactivados. Revisa exactamente esta transferencia y dónde instalar %@.",
-    "fr": "Le code %@ correspond. Le texte d'hôte facultatif et la confiance sont désactivés au départ. Vérifiez précisément ce transfert et l'endroit où installer %@.",
-    "ja": "コード %1$@ が一致しました。任意のホストテキストと信頼設定は初期状態でオフです。この転送内容と、%2$@ をどこに設置するかを確認してください。",
-    "zh-Hans": "代码 %1$@ 已匹配。可选的主机文本和信任默认关闭。请核对这次转移的具体内容，以及要把 %2$@ 安装到哪里。",
-    "zh-Hant": "代碼 %1$@ 已相符。選用的主機文字和信任預設關閉。請核對這次轉移的具體內容，以及要把 %2$@ 安裝到哪裡。"
-  },
   "RECIPIENT PUBLIC KEY": {
     "de": "PUBLIC KEY DES EMPFÄNGERS",
     "es": "CLAVE PÚBLICA DEL DESTINATARIO",
@@ -302,14 +262,6 @@
     "ja": "ホスト・踏み台ルート・ポート転送・持ち運べる外観",
     "zh-Hans": "主机、跳板路由、端口转发和可迁移的外观",
     "zh-Hant": "主機、跳板路由、連接埠轉發和可遷移的外觀"
-  },
-  "no passwords or private keys move": {
-    "de": "weder Passwörter noch private Keys wandern mit",
-    "es": "no se mueven contraseñas ni claves privadas",
-    "fr": "aucun mot de passe ni clé privée n'est transféré",
-    "ja": "パスワードと秘密鍵は移りません",
-    "zh-Hans": "不迁移任何密码或私钥",
-    "zh-Hant": "不遷移任何密碼或私密金鑰"
   },
   "launch commands": {
     "de": "Startbefehle",

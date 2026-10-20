@@ -311,30 +311,6 @@
     "zh-Hans": "—— 你的",
     "zh-Hant": "—— 你的"
   },
-  "needs input waiting blocked": {
-    "de": "braucht Eingabe wartet blockiert Rückfrage",
-    "es": "necesita entrada esperando bloqueado pendiente",
-    "fr": "attend une saisie en attente bloqué",
-    "ja": "入力待ち 待機 ブロック 要入力",
-    "zh-Hans": "等待输入 待输入 阻塞 需要输入",
-    "zh-Hant": "等待輸入 待輸入 阻塞 需要輸入"
-  },
-  "working running": {
-    "de": "arbeitet läuft aktiv",
-    "es": "trabajando ejecutando activo",
-    "fr": "en cours en train de tourner actif",
-    "ja": "実行中 稼働中 処理中",
-    "zh-Hans": "运行中 处理中 执行中",
-    "zh-Hant": "執行中 處理中 運行中"
-  },
-  "just finished completed done feedback": {
-    "de": "gerade fertig abgeschlossen erledigt Rückmeldung",
-    "es": "recién terminado completado hecho resultado",
-    "fr": "vient de terminer terminé fini retour",
-    "ja": "完了 終了 完了直後 結果",
-    "zh-Hans": "刚完成 已完成 完成 结果",
-    "zh-Hant": "剛完成 已完成 完成 結果"
-  },
   "Tessera can't notify you when an off-screen agent finishes or needs input while the app is backgrounded. Turn notifications on in Settings, then come back.": {
     "de": "Tessera kann dich nicht benachrichtigen, wenn ein Agent außerhalb des Bildschirms fertig wird oder eine Eingabe braucht, während die App im Hintergrund ist. Aktiviere Mitteilungen in den Einstellungen und komm dann zurück.",
     "es": "Tessera no puede avisarte cuando un agente fuera de pantalla termina o necesita entrada mientras la app está en segundo plano. Activa las notificaciones en Ajustes y vuelve.",

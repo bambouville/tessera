@@ -1,5 +1,5 @@
 import Foundation
-import CryptoKit
+import TesseraEnrollmentCore
 
 /// Public-key algorithms the enrollment wire protocol can authorize. Keeping
 /// this closed prevents an arbitrary authorized_keys line from crossing the
@@ -88,49 +88,56 @@ struct EnrollmentPublicKey: Codable, Equatable, Sendable {
     let fingerprint: String
     let protection: EnrollmentPublicKeyProtection
 
+    init(
+        id: UUID,
+        displayName: String,
+        algorithm: EnrollmentPublicKeyAlgorithm,
+        blob: String,
+        fingerprint: String,
+        protection: EnrollmentPublicKeyProtection
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.algorithm = algorithm
+        self.blob = blob
+        self.fingerprint = fingerprint
+        self.protection = protection
+    }
+
     var authorizedKeysLine: String {
         "\(algorithm.rawValue) \(blob)"
     }
 
+    var core: EnrollmentPublicKeyV1 {
+        EnrollmentPublicKeyV1(
+            id: id,
+            displayName: displayName,
+            algorithm: algorithm == .ed25519 ? .ed25519 : .ecdsaNistP256,
+            blob: blob,
+            fingerprint: fingerprint,
+            protection: protection == .secureEnclave ? .secureEnclave : .software
+        )
+    }
+
+    init(core: EnrollmentPublicKeyV1) {
+        id = core.id
+        displayName = core.displayName
+        algorithm = core.algorithm == .ed25519 ? .ed25519 : .secureEnclaveP256
+        blob = core.blob
+        fingerprint = core.fingerprint
+        protection = core.protection == .secureEnclave ? .secureEnclave : .software
+    }
+
     func validate() throws {
-        let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { throw ValidationError.emptyDisplayName }
-        guard name.count <= Self.maximumDisplayNameLength else {
-            throw ValidationError.displayNameTooLong
-        }
-        guard EnrollmentDisplayMetadata.isSafe(displayName) else {
-            throw ValidationError.unsafeDisplayName
-        }
-        guard !blob.isEmpty,
-              blob.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
-              let decoded = Data(base64Encoded: blob),
-              decoded.base64EncodedString() == blob
-        else { throw ValidationError.invalidBlob }
-        guard decoded.count <= Self.maximumBlobBytes else {
-            throw ValidationError.blobTooLarge
-        }
-        guard Self.sshBlobAlgorithm(decoded) == algorithm.rawValue else {
-            throw ValidationError.algorithmMismatch
-        }
-        guard Self.isStructurallyValidSSHBlob(decoded, algorithm: algorithm) else {
-            throw ValidationError.invalidBlob
-        }
-        guard protection != .secureEnclave || algorithm == .secureEnclaveP256 else {
-            throw ValidationError.protectionMismatch
-        }
-        guard fingerprint.hasPrefix("SHA256:"),
-              fingerprint.count > "SHA256:".count,
-              fingerprint.count <= 160,
-              fingerprint.rangeOfCharacter(from: .whitespacesAndNewlines) == nil
-        else { throw ValidationError.invalidFingerprint }
-        guard fingerprint == Self.fingerprint(forSSHBlob: decoded) else {
-            throw ValidationError.fingerprintMismatch
+        do {
+            try core.validate()
+        } catch let error as DevicePublicKeyValidationError {
+            throw ValidationError(core: error)
         }
     }
 
     static func fingerprint(forSSHBlob blob: Data) -> String {
-        let digest = Data(SHA256.hash(data: blob))
-        return "SHA256:" + digest.base64EncodedString().replacingOccurrences(of: "=", with: "")
+        DevicePublicKeyValidator.fingerprint(forSSHBlob: blob)
     }
 
     private static func sshBlobAlgorithm(_ blob: Data) -> String? {
@@ -229,18 +236,32 @@ struct EnrollmentRequest: Codable, Equatable, Sendable {
         self.publicKey = publicKey
     }
 
+    var core: EnrollmentRequestV1 {
+        EnrollmentRequestV1(
+            id: id,
+            hostID: hostID,
+            hostName: hostName,
+            requestingDeviceName: requestingDeviceName,
+            publicKey: publicKey.core
+        )
+    }
+
+    init(core: EnrollmentRequestV1) {
+        id = core.id
+        hostID = core.hostID
+        hostName = core.hostName
+        requestingDeviceName = core.requestingDeviceName
+        publicKey = EnrollmentPublicKey(core: core.publicKey)
+    }
+
     func validate() throws {
-        let host = hostName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let device = requestingDeviceName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !host.isEmpty else { throw ValidationError.emptyHostName }
-        guard !device.isEmpty else { throw ValidationError.emptyDeviceName }
-        guard host.count <= Self.maximumDisplayNameLength,
-              device.count <= Self.maximumDisplayNameLength
-        else { throw ValidationError.displayNameTooLong }
-        guard EnrollmentDisplayMetadata.isSafe(hostName),
-              EnrollmentDisplayMetadata.isSafe(requestingDeviceName)
-        else { throw ValidationError.unsafeDisplayMetadata }
-        try publicKey.validate()
+        do {
+            try core.validate()
+        } catch let error as EnrollmentRequestValidationError {
+            throw ValidationError(core: error)
+        } catch let error as DevicePublicKeyValidationError {
+            throw EnrollmentPublicKey.ValidationError(core: error)
+        }
     }
 }
 
@@ -318,6 +339,38 @@ enum EnrollmentMessage: Equatable, Sendable {
              .failed(let id, _): return id
         }
     }
+
+    var core: EnrollmentMessageV1 {
+        switch self {
+        case .request(let request): .request(request.core)
+        case .installed(let id): .installed(enrollmentID: id)
+        case .recorded(let id): .recorded(enrollmentID: id)
+        case .completed(let id): .completed(enrollmentID: id)
+        case .rejected(let id): .rejected(enrollmentID: id)
+        case .cancelled(let id): .cancelled(enrollmentID: id)
+        case .failed(let id, let failure):
+            .failed(
+                enrollmentID: id,
+                failure: EnrollmentRemoteFailureV1(rawValue: failure.rawValue)!
+            )
+        }
+    }
+
+    init(core: EnrollmentMessageV1) {
+        switch core {
+        case .request(let request): self = .request(EnrollmentRequest(core: request))
+        case .installed(let id): self = .installed(enrollmentID: id)
+        case .recorded(let id): self = .recorded(enrollmentID: id)
+        case .completed(let id): self = .completed(enrollmentID: id)
+        case .rejected(let id): self = .rejected(enrollmentID: id)
+        case .cancelled(let id): self = .cancelled(enrollmentID: id)
+        case .failed(let id, let failure):
+            self = .failed(
+                enrollmentID: id,
+                failure: EnrollmentRemoteFailure(rawValue: failure.rawValue)!
+            )
+        }
+    }
 }
 
 extension EnrollmentMessage: Codable {
@@ -363,70 +416,24 @@ extension EnrollmentMessage: Codable {
     }
 
     init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        let version = try values.decode(Int.self, forKey: .version)
-        guard version == Self.currentVersion else {
-            throw CodingError.unsupportedVersion(version)
-        }
-        let kind = try values.decode(Kind.self, forKey: .kind)
-        let request = try values.decodeIfPresent(EnrollmentRequest.self, forKey: .request)
-        let failure = try values.decodeIfPresent(EnrollmentRemoteFailure.self, forKey: .failure)
-
-        switch kind {
-        case .request:
-            guard let request else { throw CodingError.missingRequest }
-            guard failure == nil else { throw CodingError.unexpectedFailure }
-            try request.validate()
-            self = .request(request)
-        case .installed, .recorded, .completed, .rejected, .cancelled:
-            guard request == nil else { throw CodingError.unexpectedRequest }
-            guard failure == nil else { throw CodingError.unexpectedFailure }
-            let id = try values.decode(UUID.self, forKey: .enrollmentID)
-            switch kind {
-            case .installed: self = .installed(enrollmentID: id)
-            case .recorded: self = .recorded(enrollmentID: id)
-            case .completed: self = .completed(enrollmentID: id)
-            case .rejected: self = .rejected(enrollmentID: id)
-            case .cancelled: self = .cancelled(enrollmentID: id)
-            default: fatalError("exhaustive kind switch")
-            }
-        case .failed:
-            guard request == nil else { throw CodingError.unexpectedRequest }
-            guard let failure else { throw CodingError.missingFailure }
-            self = .failed(
-                enrollmentID: try values.decode(UUID.self, forKey: .enrollmentID),
-                failure: failure
-            )
+        do {
+            self.init(core: try EnrollmentMessageV1(from: decoder))
+        } catch let error as EnrollmentMessageV1.CodingError {
+            throw CodingError(core: error)
+        } catch let error as DevicePublicKeyValidationError {
+            throw EnrollmentPublicKey.ValidationError(core: error)
+        } catch let error as EnrollmentRequestValidationError {
+            throw EnrollmentRequest.ValidationError(core: error)
         }
     }
 
     func encode(to encoder: Encoder) throws {
-        var values = encoder.container(keyedBy: CodingKeys.self)
-        try values.encode(Self.currentVersion, forKey: .version)
-        switch self {
-        case .request(let request):
-            try request.validate()
-            try values.encode(Kind.request, forKey: .kind)
-            try values.encode(request, forKey: .request)
-        case .installed(let id):
-            try values.encode(Kind.installed, forKey: .kind)
-            try values.encode(id, forKey: .enrollmentID)
-        case .recorded(let id):
-            try values.encode(Kind.recorded, forKey: .kind)
-            try values.encode(id, forKey: .enrollmentID)
-        case .completed(let id):
-            try values.encode(Kind.completed, forKey: .kind)
-            try values.encode(id, forKey: .enrollmentID)
-        case .rejected(let id):
-            try values.encode(Kind.rejected, forKey: .kind)
-            try values.encode(id, forKey: .enrollmentID)
-        case .cancelled(let id):
-            try values.encode(Kind.cancelled, forKey: .kind)
-            try values.encode(id, forKey: .enrollmentID)
-        case .failed(let id, let failure):
-            try values.encode(Kind.failed, forKey: .kind)
-            try values.encode(id, forKey: .enrollmentID)
-            try values.encode(failure, forKey: .failure)
+        do {
+            try core.encode(to: encoder)
+        } catch let error as DevicePublicKeyValidationError {
+            throw EnrollmentPublicKey.ValidationError(core: error)
+        } catch let error as EnrollmentRequestValidationError {
+            throw EnrollmentRequest.ValidationError(core: error)
         }
     }
 }
@@ -453,57 +460,83 @@ enum EnrollmentFrameCodec {
     }
 
     static func encode(_ message: EnrollmentMessage) throws -> Data {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let payload = try encoder.encode(message)
-        guard !payload.isEmpty else { throw FrameError.emptyPayload }
-        guard payload.count <= maximumPayloadBytes else {
-            throw FrameError.payloadTooLarge(payload.count)
+        do {
+            return try EnrollmentFrameCodecV1.encode(message.core)
+        } catch let error as EnrollmentFrameError {
+            throw FrameError(core: error)
+        } catch let error as DevicePublicKeyValidationError {
+            throw EnrollmentPublicKey.ValidationError(core: error)
+        } catch let error as EnrollmentRequestValidationError {
+            throw EnrollmentRequest.ValidationError(core: error)
         }
-        var length = UInt32(payload.count).bigEndian
-        var frame = Data(bytes: &length, count: headerBytes)
-        frame.append(payload)
-        return frame
     }
 }
 
 /// Incremental decoder for continuation streams, where reads may split a
 /// length prefix or coalesce multiple enrollment frames.
 struct EnrollmentFrameDecoder: Sendable {
-    private var buffer = Data()
+    private var core = EnrollmentFrameDecoderV1()
 
     mutating func append(_ bytes: Data) throws -> [EnrollmentMessage] {
-        buffer.append(bytes)
-        var messages: [EnrollmentMessage] = []
-
-        while buffer.count >= EnrollmentFrameCodec.headerBytes {
-            let length = buffer.prefix(EnrollmentFrameCodec.headerBytes).reduce(0) {
-                ($0 << 8) | Int($1)
-            }
-            guard length > 0 else { throw EnrollmentFrameCodec.FrameError.emptyPayload }
-            guard length <= EnrollmentFrameCodec.maximumPayloadBytes else {
-                throw EnrollmentFrameCodec.FrameError.payloadTooLarge(length)
-            }
-            let frameBytes = EnrollmentFrameCodec.headerBytes + length
-            guard buffer.count >= frameBytes else { break }
-
-            let payload = buffer.subdata(
-                in: EnrollmentFrameCodec.headerBytes..<frameBytes
-            )
-            do {
-                messages.append(try JSONDecoder().decode(EnrollmentMessage.self, from: payload))
-            } catch let error as EnrollmentMessage.CodingError {
-                throw error
-            } catch let error as EnrollmentPublicKey.ValidationError {
-                throw error
-            } catch let error as EnrollmentRequest.ValidationError {
-                throw error
-            } catch {
-                throw EnrollmentFrameCodec.FrameError.invalidPayload
-            }
-            buffer.removeSubrange(0..<frameBytes)
+        do {
+            return try core.append(bytes).map(EnrollmentMessage.init(core:))
+        } catch let error as EnrollmentFrameError {
+            throw EnrollmentFrameCodec.FrameError(core: error)
+        } catch let error as EnrollmentMessageV1.CodingError {
+            throw EnrollmentMessage.CodingError(core: error)
+        } catch let error as DevicePublicKeyValidationError {
+            throw EnrollmentPublicKey.ValidationError(core: error)
+        } catch let error as EnrollmentRequestValidationError {
+            throw EnrollmentRequest.ValidationError(core: error)
         }
+    }
+}
 
-        return messages
+private extension EnrollmentPublicKey.ValidationError {
+    init(core: DevicePublicKeyValidationError) {
+        self = switch core {
+        case .emptyDisplayName: .emptyDisplayName
+        case .displayNameTooLong: .displayNameTooLong
+        case .unsafeDisplayName: .unsafeDisplayName
+        case .invalidBlob: .invalidBlob
+        case .blobTooLarge: .blobTooLarge
+        case .algorithmMismatch: .algorithmMismatch
+        case .protectionMismatch: .protectionMismatch
+        case .invalidFingerprint: .invalidFingerprint
+        case .fingerprintMismatch: .fingerprintMismatch
+        }
+    }
+}
+
+private extension EnrollmentRequest.ValidationError {
+    init(core: EnrollmentRequestValidationError) {
+        self = switch core {
+        case .emptyHostName: .emptyHostName
+        case .emptyDeviceName: .emptyDeviceName
+        case .displayNameTooLong: .displayNameTooLong
+        case .unsafeDisplayMetadata: .unsafeDisplayMetadata
+        }
+    }
+}
+
+private extension EnrollmentMessage.CodingError {
+    init(core: EnrollmentMessageV1.CodingError) {
+        self = switch core {
+        case .unsupportedVersion(let version): .unsupportedVersion(version)
+        case .missingRequest: .missingRequest
+        case .unexpectedRequest: .unexpectedRequest
+        case .missingFailure: .missingFailure
+        case .unexpectedFailure: .unexpectedFailure
+        }
+    }
+}
+
+private extension EnrollmentFrameCodec.FrameError {
+    init(core: EnrollmentFrameError) {
+        self = switch core {
+        case .emptyPayload: .emptyPayload
+        case .payloadTooLarge(let count): .payloadTooLarge(count)
+        case .invalidPayload: .invalidPayload
+        }
     }
 }

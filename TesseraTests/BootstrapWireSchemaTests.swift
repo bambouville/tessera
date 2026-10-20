@@ -7,9 +7,21 @@ import XCTest
 /// `docs/schemas/nearby-bootstrap/v2/`. A failure here means the wire shape
 /// changed at v2 — either revert the change or bump
 /// `NearbyBootstrapProtocol.version` and add a new schema folder (see the
-/// archive README for the freeze rule).
+/// archive README for the freeze rule and authenticated extension exception).
 @MainActor
 final class BootstrapWireSchemaTests: XCTestCase {
+    func test_recipientKeyFrozenSchemaAllowsAuthenticatedDeclaration() throws {
+        let schema = try loadSchema("recipient-public-key.schema.json")
+        XCTAssertEqual(schema["additionalProperties"] as? Bool, true)
+        let key = BootstrapCoordinatorTests.fixturePublicKey()
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: canonicallyEncoded(key)) as? [String: Any])
+        object["manifestExtensions"] = ["settings.agentCenterEnabled"]
+        let bytes = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        let released = try JSONDecoder().decode(EnrollmentPublicKey.self, from: bytes)
+        try released.validate()
+        XCTAssertEqual(released, key)
+    }
+
     func test_wireShapesMatchFrozenV2Schemas() throws {
         XCTAssertEqual(
             NearbyBootstrapProtocol.version, 2,
@@ -21,7 +33,6 @@ final class BootstrapWireSchemaTests: XCTestCase {
         XCTAssertEqual(BootstrapManifest.currentVersion, NearbyBootstrapProtocol.version)
 
         try assertManifestMatchesSchema()
-        try assertManifestAllowlistsMatchSchema()
         try assertHelloMatchesSchema()
         try assertCommitmentMatchesSchema()
         try assertEnvelopeKindsMatchSchema()
@@ -63,39 +74,6 @@ final class BootstrapWireSchemaTests: XCTestCase {
             "manifest wire shape drifted from docs/schemas/nearby-bootstrap/v2/manifest.schema.json"
         )
         XCTAssertEqual(schemaVersionConst(schema), NearbyBootstrapProtocol.version)
-    }
-
-    /// Pins the DECODER side too: every strict-allowlist set in
-    /// BootstrapManifestSchema must equal the frozen schema's property keys,
-    /// so widening an allowlist without a schema-folder bump fails CI even if
-    /// the encoder fixture never emits the new field.
-    private func assertManifestAllowlistsMatchSchema() throws {
-        let schema = try loadSchema("manifest.schema.json")
-        func keys(_ pointer: [String]) throws -> Set<String> {
-            var node = schema
-            for step in pointer {
-                if step == "items" {
-                    node = try XCTUnwrap(node["items"] as? [String: Any])
-                } else {
-                    let properties = try XCTUnwrap(node["properties"] as? [String: Any])
-                    node = try XCTUnwrap(properties[step] as? [String: Any])
-                }
-            }
-            let properties = try XCTUnwrap(node["properties"] as? [String: Any])
-            return Set(properties.keys)
-        }
-
-        XCTAssertEqual(BootstrapManifestSchema.root, try keys([]))
-        XCTAssertEqual(BootstrapManifestSchema.identity, try keys(["identities", "items"]))
-        XCTAssertEqual(BootstrapManifestSchema.host, try keys(["hosts", "items"]))
-        XCTAssertEqual(
-            BootstrapManifestSchema.forward,
-            try keys(["hosts", "items", "portForwards", "items"])
-        )
-        XCTAssertEqual(BootstrapManifestSchema.jumpLink, try keys(["jumpChains", "items"]))
-        XCTAssertEqual(BootstrapManifestSchema.knownHost, try keys(["knownHosts", "items"]))
-        XCTAssertEqual(BootstrapManifestSchema.appearance, try keys(["appearance"]))
-        XCTAssertEqual(BootstrapManifestSchema.settings, try keys(["settings"]))
     }
 
     private func assertHelloMatchesSchema() throws {

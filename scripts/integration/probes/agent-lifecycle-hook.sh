@@ -101,7 +101,7 @@ if command -v ps >/dev/null 2>&1; then
 fi
 
 payload="$(jq -cn \
-    --argjson version 8 \
+    --argjson version 9 \
     --arg provider "$provider" \
     --arg event "$event" \
     --arg state "$state" \

@@ -87,6 +87,19 @@ Since iPadOS 15 the focus system also reserves bare arrows, Tab, Space and Retur
 keyboard navigation when nothing is focused — which is why `wantsPriorityOverSystemBehavior`
 exists at all. Tessera already sets it on the chords that need it.
 
+- **⇧ + arrow** — measured 2026-09-10 while fixing the dropped hardware Shift. The chord
+  was registered as a `UIKeyCommand` with `wantsPriorityOverSystemBehavior = true` **twice**:
+  on `TesseraTerminalContainer` (an ancestor) and on the `TerminalView` subclass itself
+  (the first responder). Neither fired. The `TESSERA_HARDWARE_KEY_HARNESS` log shows the
+  press instead arriving at gate 4 and leaving as a bare `ESC [ A`, so the chord was
+  delivered to the app and claimed by `pressesBegan` — gate 3 never got a look at it.
+
+  The generalisation worth keeping: **for a `UITextInput` first responder, a modified arrow
+  cannot be taken at gate 3 at all** — not from an ancestor, not from the first responder's
+  own `keyCommands`, and `wantsPriorityOverSystemBehavior` does not change it. Anything that
+  needs to reshape an arrow chord has to do it at gate 4, which for Tessera means the
+  SwiftTerm fork. `ModifiedSpecialKey` in the fork is where that now lives.
+
 ---
 
 ## 4. The ⌥ character-remapping trap (not interception)

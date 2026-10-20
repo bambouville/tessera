@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mosh_server_lost">此工作階段的 mosh-server 已不再執行 —— 主機可能已重新啟動。</string>
+    <string name="mosh_outage_last_contact">距上次聯絡 %1$d 秒</string>
+    <string name="mosh_outage_last_reply">距上次回覆 %1$d 秒</string>
+    <string name="mosh_outage_announcement">Mosh 連線中斷。正在重新連線。</string>
+</resources>

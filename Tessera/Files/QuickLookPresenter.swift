@@ -3,6 +3,8 @@
 // Contracts: Tessera/Files/FilesContracts.swift
 
 import Foundation
+import ImageIO
+import TesseraCore
 import QuickLook
 import SwiftUI
 import UIKit
@@ -110,7 +112,7 @@ private struct QuickLookPreviewPresentation: ViewModifier {
         // the safe area — a reported repaint artifact after closing a preview
         // has to be read against those two facts, which need this marker to
         // line up with the `size-changed` and `terminal-output-burst` lines.
-        let presenter = QuickLookPresenter(fileURL: request.localURL, displayTitle: request.title)
+        let presenter = QuickLookPresenter(fileURL: request.localURL, displayTitle: request.title, prepareImages: request.prepareImages)
             .onAppear {
                 let surface: FilesUIDiagnostics.Surface = MarkdownPreviewSupport.isMarkdown(
                     fileURL: request.localURL, displayTitle: request.title
@@ -145,16 +147,18 @@ struct QuickLookPresenter: View {
     let fileURL: URL
     let displayTitle: String?
     let onDismiss: (() -> Void)?
+    let prepareImages: (@MainActor () async throws -> Void)?
 
     @AppStorage(QuickLookPresentationMode.storageKey)
     private var mode: QuickLookPresentationMode = QuickLookPresentationMode.fallback
 
     @Environment(\.dismiss) private var dismiss
 
-    init(fileURL: URL, displayTitle: String? = nil, onDismiss: (() -> Void)? = nil) {
+    init(fileURL: URL, displayTitle: String? = nil, prepareImages: (@MainActor () async throws -> Void)? = nil, onDismiss: (() -> Void)? = nil) {
         self.fileURL = fileURL
         self.displayTitle = displayTitle
         self.onDismiss = onDismiss
+        self.prepareImages = prepareImages
     }
 
     private var presentsMarkdown: Bool {
@@ -165,6 +169,7 @@ struct QuickLookPresenter: View {
     var body: some View {
         if presentsMarkdown {
             MarkdownPreview(
+                prepareImages: prepareImages,
                 fileURL: fileURL,
                 displayTitle: displayTitle,
                 mode: mode,
@@ -216,7 +221,8 @@ enum MarkdownPreviewSupport {
         let source = try String(contentsOf: fileURL, encoding: .utf8)
         return try MarkdownDocument(
             source: source,
-            baseURL: fileURL.deletingLastPathComponent()
+            baseURL: fileURL.deletingLastPathComponent(),
+            images: MarkdownImageStaging.images(for: fileURL)
         )
     }
 }
@@ -242,6 +248,240 @@ private enum MarkdownDocumentCache {
 
     private static func modificationDate(of fileURL: URL) -> Date? {
         try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+    }
+}
+
+/// Private sidecar entries contain generated filenames only. Remote paths
+/// never become local destinations, including absolute paths and ../ links.
+enum MarkdownImageStaging {
+    static let maxImageBytes: Int64 = 8 * 1024 * 1024
+    static let maxTotalBytes: Int64 = 32 * 1024 * 1024
+    static let maxImages = 32
+
+    static func manifestURL(for document: URL) -> URL {
+        document.appendingPathExtension("images.json")
+    }
+
+    static func destinations(source: String) throws -> [String] {
+        var seen = Set<String>()
+        return MarkdownImagePlaceholders(source).references.compactMap { reference in
+            guard let destination = URL(string: reference.destination)?.relativeString,
+                  MarkdownLocalImage.path(destination) != nil,
+                  seen.insert(destination).inserted else { return nil }
+            return destination
+        }
+    }
+
+    static func images(for document: URL) -> [String: URL] {
+        guard let data = try? Data(contentsOf: manifestURL(for: document)),
+              let names = try? JSONDecoder().decode([String: String].self, from: data) else { return [:] }
+        return names.compactMapValues { name in
+            guard name == (name as NSString).lastPathComponent, name.hasPrefix("image-"),
+                  name.hasSuffix(".png") else { return nil }
+            return document.deletingLastPathComponent().appendingPathComponent(name)
+        }
+    }
+
+    @MainActor
+    static func stage(document: URL, remotePath: String, bridge: any FileBridging) async throws {
+        if FileManager.default.fileExists(atPath: manifestURL(for: document).path) { return }
+        let destinations = try await Task.detached(priority: .userInitiated) {
+            try Self.destinations(source: String(contentsOf: document, encoding: .utf8))
+        }.value
+        var names: [String: String] = [:]
+        var paths: [String: String] = [:]
+        var remaining = maxTotalBytes
+        var remainingPixels = 16 * 1024 * 1024
+        var created: [URL] = []
+        var completed = false
+        defer {
+            if !completed { for url in created { try? FileManager.default.removeItem(at: url) } }
+        }
+        for destination in destinations.prefix(maxImages) {
+            try Task.checkCancellation()
+            guard remaining > 0, remainingPixels > 0,
+                  let path = MarkdownLocalImage.remotePath(destination, documentPath: remotePath) else { continue }
+            if let name = paths[path] { names[destination] = name; continue }
+            let download = document.deletingLastPathComponent().appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: download) }
+            let limit = min(maxImageBytes, remaining)
+            // Cancellation bounds downloads even when the remote file grows
+            // after stat or does not report a size. This child owns its cancel.
+            let task = Task {
+                try await bridge.download(remotePath: path, to: download) { count, total in
+                    if count > limit || (total ?? 0) > limit {
+                        withUnsafeCurrentTask { $0?.cancel() }
+                    }
+                }
+                try Task.checkCancellation()
+            }
+            do {
+                try await withTaskCancellationHandler {
+                    try await task.value
+                } onCancel: { task.cancel() }
+                let name = "image-\(UUID().uuidString).png"
+                let target = document.deletingLastPathComponent().appendingPathComponent(name)
+                created.append(target)
+                let pixelLimit = remainingPixels
+                let pixels = await Task.detached(priority: .userInitiated) {
+                    thumbnail(from: download, to: target, pixelLimit: pixelLimit)
+                }.value
+                if pixels > 0 {
+                    remainingPixels -= pixels
+                    names[destination] = name
+                    paths[path] = name
+                } else { try? FileManager.default.removeItem(at: target) }
+            } catch {
+                try Task.checkCancellation()
+                // An unavailable image must not prevent reading the document.
+            }
+            let bytes = (try? download.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            remaining -= Int64(bytes)
+        }
+        try Task.checkCancellation()
+        try JSONEncoder().encode(names).write(to: manifestURL(for: document), options: .atomic)
+        completed = true
+    }
+
+    /// Decode off the UI thread and bound decoded pixels as well as wire bytes.
+    static func thumbnail(from source: URL, to target: URL, pixelLimit: Int) -> Int {
+        guard let imageSource = CGImageSourceCreateWithURL(source as CFURL, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: min(2048, Int(Double(pixelLimit).squareRoot())),
+              ] as CFDictionary),
+              let output = CGImageDestinationCreateWithURL(target as CFURL, "public.png" as CFString, 1, nil)
+        else { return 0 }
+        CGImageDestinationAddImage(output, image, nil)
+        return CGImageDestinationFinalize(output) ? image.width * image.height : 0
+    }
+}
+
+private enum MarkdownImageIdentity: AttributedStringKey {
+    typealias Value = String
+    static let name = "tessera.markdownImageIdentity"
+}
+
+private extension MarkdownImagePlaceholders {
+    func restoringImages(in content: AttributedString, referencesByToken: [String: Reference]) -> AttributedString {
+        guard !referencesByToken.isEmpty else { return content }
+        var result = AttributedString()
+        for run in content.runs {
+            let text = String(content[run.range].characters)
+            var cursor = text.startIndex
+            while let start = text.range(of: prefix, range: cursor..<text.endIndex),
+                  let end = text.range(of: "END:", range: start.upperBound..<text.endIndex),
+                  let reference = referencesByToken[String(text[start.lowerBound..<end.upperBound])] {
+                result.append(AttributedString(String(text[cursor..<start.lowerBound]), attributes: run.attributes))
+                var image = AttributedString(reference.alt.isEmpty ? "\u{fffc}" : reference.alt, attributes: run.attributes)
+                image.imageURL = URL(string: reference.destination)
+                image[MarkdownImageIdentity.self] = reference.token
+                result.append(image)
+                cursor = end.upperBound
+            }
+            result.append(AttributedString(String(text[cursor...]), attributes: run.attributes))
+        }
+        return result
+    }
+}
+
+struct MarkdownInlinePart: Identifiable {
+    let id: Int
+    var content: AttributedString
+    let image: String?
+
+    static func split(_ content: AttributedString) -> [Self] {
+        var parts: [Self] = []
+        var previousImageIdentity: String?
+        for run in content.runs {
+            let image = run.imageURL?.relativeString
+            let text = AttributedString(content[run.range])
+            let identity = run[MarkdownImageIdentity.self]
+            if parts.last?.image == image, previousImageIdentity == identity, !parts.isEmpty {
+                parts[parts.count - 1].content.append(text)
+            } else {
+                parts.append(Self(id: parts.count, content: text, image: image))
+            }
+            previousImageIdentity = identity
+        }
+        return parts
+    }
+}
+
+private struct MarkdownInlineView: View {
+    let content: AttributedString
+    let images: [String: URL]
+
+    var body: some View {
+        if !content.runs.contains(where: { $0.imageURL != nil }) {
+            Text(content)
+        } else {
+            imageContent
+        }
+    }
+
+    private var imageContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(MarkdownInlinePart.split(content)) { part in
+                if let destination = part.image {
+                    if let link = part.content.runs.first?.link {
+                        Link(destination: link) {
+                            MarkdownStagedImage(url: images[destination], alt: String(part.content.characters))
+                        }
+                    } else {
+                        MarkdownStagedImage(url: images[destination], alt: String(part.content.characters))
+                    }
+                } else {
+                    Text(part.content)
+                }
+            }
+        }
+    }
+}
+
+private enum MarkdownDecodedImages {
+    private static let cache: NSCache<NSURL, UIImage> = {
+        let cache = NSCache<NSURL, UIImage>()
+        cache.totalCostLimit = 64 * 1024 * 1024
+        return cache
+    }()
+    private static let lock = NSLock()
+
+    static func load(_ url: URL) -> UIImage? {
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached = cache.object(forKey: url as NSURL) { return cached }
+        guard let image = UIImage(contentsOfFile: url.path) else { return nil }
+        cache.setObject(image, forKey: url as NSURL, cost: Int(image.size.width * image.size.height * 4))
+        return image
+    }
+}
+
+private struct MarkdownStagedImage: View {
+    let url: URL?
+    let alt: String
+    @State private var image: UIImage?
+
+    private var label: String { alt.replacingOccurrences(of: "\u{fffc}", with: "") }
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .renderingMode(.original)
+                    .resizable()
+                    .scaledToFit()
+                    .accessibilityLabel(Text(verbatim: label))
+            } else {
+                Label { Text(verbatim: label) } icon: { Image(systemName: "photo") }
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .task(id: url) {
+            guard let url else { return }
+            image = await Task.detached(priority: .userInitiated) { MarkdownDecodedImages.load(url) }.value
+        }
     }
 }
 
@@ -286,10 +526,14 @@ struct MarkdownDocument: Sendable {
     }
 
     let blocks: [Block]
+    var images: [String: URL] = [:]
 
-    init(source: String, baseURL: URL?) throws {
+    init(source: String, baseURL: URL?, images: [String: URL] = [:]) throws {
+        self.images = images
+        let placeholders = MarkdownImagePlaceholders(source)
+        let imageReferences = Dictionary(uniqueKeysWithValues: placeholders.references.map { ($0.token, $0) })
         let parsed = try AttributedString(
-            markdown: source,
+            markdown: placeholders.source,
             options: .init(interpretedSyntax: .full),
             baseURL: baseURL
         )
@@ -299,7 +543,7 @@ struct MarkdownDocument: Sendable {
 
         for run in parsed.runs {
             let intent = run.presentationIntent
-            var content = AttributedString(parsed[run.range])
+            var content = placeholders.restoringImages(in: AttributedString(parsed[run.range]), referencesByToken: imageReferences)
             content.presentationIntent = nil
 
             // Table cells carry only table/tableRow/tableCell components —
@@ -542,6 +786,7 @@ private struct MarkdownPreview: View {
         case failed(String)
     }
 
+    let prepareImages: (@MainActor () async throws -> Void)?
     let fileURL: URL
     let displayTitle: String?
     let mode: QuickLookPresentationMode
@@ -589,18 +834,27 @@ private struct MarkdownPreview: View {
     }
 
     private func load() async {
-        if let cached = MarkdownDocumentCache.document(for: fileURL) {
-            loadState = .loaded(cached)
-            return
-        }
-        loadState = .loading
         do {
-            let document = try await Task.detached(priority: .userInitiated) {
-                try MarkdownPreviewSupport.loadDocument(from: fileURL)
-            }.value
+            var document: MarkdownDocument
+            if let cached = MarkdownDocumentCache.document(for: fileURL) {
+                document = cached
+            } else {
+                document = try await Task.detached(priority: .userInitiated) {
+                    try MarkdownPreviewSupport.loadDocument(from: fileURL)
+                }.value
+            }
             try Task.checkCancellation()
-            MarkdownDocumentCache.store(document, for: fileURL)
             loadState = .loaded(document)
+            MarkdownDocumentCache.store(document, for: fileURL)
+            // Text is already readable. SwiftUI cancels this task when the
+            // preview closes; a size toggle reuses the completed private cache.
+            if let prepareImages {
+                try? await prepareImages()
+                try Task.checkCancellation()
+                document.images = MarkdownImageStaging.images(for: fileURL)
+                loadState = .loaded(document)
+                MarkdownDocumentCache.store(document, for: fileURL)
+            }
         } catch is CancellationError {
             return
         } catch {
@@ -634,7 +888,7 @@ private struct MarkdownPreview: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
                 ForEach(document.blocks) { block in
-                    MarkdownBlockView(block: block)
+                    MarkdownBlockView(block: block, images: document.images)
                 }
             }
             .modifier(MarkdownScrollProbeAttachment())
@@ -651,7 +905,7 @@ private struct MarkdownPreview: View {
     /// re-lays out that block instead of every block already on screen.
     private func listBody(_ document: MarkdownDocument) -> some View {
         List(document.blocks) { block in
-            MarkdownBlockView(block: block)
+            MarkdownBlockView(block: block, images: document.images)
                 .frame(maxWidth: 760, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.horizontal, 20)
@@ -699,6 +953,7 @@ private struct MarkdownTextSelection: ViewModifier {
 
 private struct MarkdownBlockView: View {
     let block: MarkdownDocument.Block
+    let images: [String: URL]
 
     /// The frame sampler charges a slow frame to the shapes it realized, so
     /// the block has to say which shape it is.
@@ -790,7 +1045,8 @@ private struct MarkdownBlockView: View {
                 ForEach(block.rows) { row in
                     GridRow {
                         ForEach(Array(row.cells.enumerated()), id: \.offset) { _, cell in
-                            Text(cell)
+                            MarkdownInlineView(content: cell, images: images)
+                                .frame(maxWidth: cell.runs.contains(where: { $0.imageURL != nil }) ? 320 : nil, alignment: .leading)
                                 .font(row.isHeader ? .body.weight(.semibold) : .body)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -824,9 +1080,9 @@ private struct MarkdownBlockView: View {
     @ViewBuilder
     private func wrappingText(_ content: AttributedString) -> some View {
         if MarkdownRenderSeams.fixedSizeDisabled {
-            Text(content)
+            MarkdownInlineView(content: content, images: images)
         } else {
-            Text(content)
+            MarkdownInlineView(content: content, images: images)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -1045,3 +1301,56 @@ private final class PreviewItem: NSObject, QLPreviewItem {
         title
     }
 }
+
+#if DEBUG
+/// Host-free fixture that exercises the same download/staging/renderer path.
+@MainActor
+enum MarkdownImagePreviewFixture {
+    static let source = """
+    # Local images
+
+    Relative path:
+
+    ![Relative image][plot]
+
+    Absolute path:
+
+    [![Absolute image](/opt/red.png)](https://example.com/details)
+
+    | In a table |
+    | --- |
+    | ![Table image](<images/my plot.png>) |
+
+    ![Missing image](missing.png)
+
+    [plot]: ../images/blue%20plot.png
+    """
+
+    static func image(color: UIColor, label: String) -> Data {
+        UIGraphicsImageRenderer(size: CGSize(width: 300, height: 48)).pngData { context in
+            color.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 300, height: 48))
+            (label as NSString).draw(at: CGPoint(x: 14, y: 12), withAttributes: [
+                .font: UIFont.boldSystemFont(ofSize: 20), .foregroundColor: UIColor.white,
+            ])
+        }
+    }
+
+    static func stage() async throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let document = directory.appendingPathComponent("images.md")
+        try source.write(to: document, atomically: true, encoding: .utf8)
+        let bridge = MockFileBridge()
+        bridge.downloadContents = [
+            "/docs/../images/blue plot.png": image(color: .systemBlue, label: "RELATIVE IMAGE"),
+            "/opt/red.png": image(color: .systemRed, label: "ABSOLUTE IMAGE"),
+            "/docs/images/my plot.png": image(color: .systemGreen, label: "TABLE IMAGE"),
+        ]
+        try await bridge.connect()
+        try await MarkdownImageStaging.stage(document: document, remotePath: "/docs/readme.md", bridge: bridge)
+        precondition(MarkdownImageStaging.images(for: document).count == 3)
+        return document
+    }
+}
+#endif

@@ -25,6 +25,9 @@ RUN_TOKEN="$(basename "$RUN_DIR" | tr -cd 'A-Za-z0-9_-')"
 SESSION="tessera_foreground_${RUN_TOKEN}"
 TRIGGER="/tmp/${SESSION}.trigger"
 SCENARIO="/usr/local/bin/tessera-fixture-probe scroll-scenario --label FOREGROUND --trigger $TRIGGER --count 1000 --delay 0.001 --htop-seconds 45 --vim-seconds 45"
+# Cleanup ends the scenario by these names alone, so they must be run-unique.
+run_owned_name_is_specific "$TRIGGER.vim.txt" \
+  || die "run directory name must be a short run token with digits: $RUN_DIR"
 mkdir -p "$CASE_DIR"
 
 record_pid=''
@@ -44,17 +47,28 @@ cleanup() {
     >/dev/null 2>&1 || true
   xcrun simctl spawn "$UDID" launchctl unsetenv TESSERA_LIVE_SCROLL_CONFIG_B64 \
     >/dev/null 2>&1 || true
-  fixture_ssh "$TESSERA_FIXTURE_STABLE_HOST" tmux kill-session -t "$SESSION" \
+  # The scenario's processes first, while the scenario is still its
+  # helpers' ancestor: those naming the trigger and their descendants, and
+  # the Vim stage the probe execs into, which names only its file. Never
+  # `pgrep -f TRIGGER | kill`: when this case's new-session started the
+  # user's tmux server, the server's command line keeps the scenario, and
+  # every concurrent lane's sessions live in it.
+  if ! end_run_processes "$TESSERA_FIXTURE_STABLE_HOST" "$TESSERA_FIXTURE_USER" @any \
+    "$TRIGGER" "$TRIGGER.vim.txt" >>"$CASE_DIR/fixture-reap.txt" 2>&1; then
+    printf 'run-owned processes survived cleanup; see %s\n' "$CASE_DIR/fixture-reap.txt" >&2
+    exit_status=1
+  fi
+  fixture_ssh "$TESSERA_FIXTURE_STABLE_HOST" "tmux kill-session -t '=$SESSION'" \
     >/dev/null 2>&1 || true
   control_ssh "$TESSERA_FIXTURE_STABLE_HOST" \
-    "pids=\$(pgrep -u '$TESSERA_FIXTURE_USER' -f '$TRIGGER' || true); [[ -z \"\$pids\" ]] || kill \$pids; rm -f '$TRIGGER' '$TRIGGER.htop' '$TRIGGER.htop.done' '$TRIGGER.vim' '$TRIGGER.vim.txt'" \
+    "rm -f '$TRIGGER' '$TRIGGER.htop' '$TRIGGER.htop.done' '$TRIGGER.vim' '$TRIGGER.vim.txt'" \
     >/dev/null 2>&1 || true
   return "$exit_status"
 }
-trap 'exit_status=$?; cleanup "$exit_status"; exit "$exit_status"' EXIT
+trap 'exit_status=$?; fail_closed_status "$exit_status" || exit_status=1; cleanup "$exit_status" || exit_status=1; exit "$exit_status"' EXIT
 
 fixture_ssh "$TESSERA_FIXTURE_STABLE_HOST" \
-  "tmux kill-session -t '$SESSION' >/dev/null 2>&1 || true; tmux new-session -d -s '$SESSION' -x 160 -y 50 '$SCENARIO'"
+  "tmux kill-session -t '=$SESSION' >/dev/null 2>&1 || true; tmux new-session -d -s '$SESSION' -x 160 -y 50 '$SCENARIO'"
 
 config_json="$(jq -cn \
   --arg address "$TESSERA_FIXTURE_STABLE_HOST" \
@@ -248,17 +262,19 @@ springboard_offset="$(jq -r '."springboard-start"' "$CASE_DIR/video-event-offset
 return_offset="$(jq -r '."tessera-returned"' "$CASE_DIR/video-event-offsets.json")"
 last_terminal_index="$(jq -r '."last-terminal-frame-index"' "$CASE_DIR/video-event-offsets.json")"
 
-# Normalize the simulator's fixed framebuffer to landscape. Four native-rate
+# Normalize displayed portrait frames to landscape. Four native-rate
 # one-second sheets surround the visually measured return; at 30 fps, the
 # attached log's 120 ms deep replay spans several full-size tiles instead of
 # disappearing between sparse samples.
+rotate="$("$HERE/landscape-video-filter.sh" "$VIDEO")"
+frame_filter="${rotate%,}"
 before_video_offset="$(python3 - "$springboard_offset" <<'PY'
 import sys
 print(max(0.0, float(sys.argv[1]) - 0.5))
 PY
 )"
 ffmpeg -hide_banner -loglevel error -ss "$before_video_offset" -i "$VIDEO" \
-  -vf 'transpose=cclock' -frames:v 1 -y "$CASE_DIR/before-background.png"
+  -vf "${frame_filter:-null}" -frames:v 1 -y "$CASE_DIR/before-background.png"
 sheet_start="$(python3 - "$return_offset" <<'PY'
 import sys
 print(max(0.0, float(sys.argv[1]) - 1.0))
@@ -271,13 +287,13 @@ print(float(sys.argv[1]) + int(sys.argv[2]))
 PY
 )"
   ffmpeg -hide_banner -loglevel error -ss "$offset" -t 1 -i "$VIDEO" \
-    -vf 'transpose=cclock,fps=30,scale=480:-1,tile=5x6:padding=2:margin=2' \
+    -vf "${rotate}fps=30,scale=480:-1,tile=5x6:padding=2:margin=2" \
     -frames:v 1 -y "$CASE_DIR/foreground-activation-$((sheet + 1)).png"
 done
 # Decode sequentially to the exact contentful terminal frame. Timestamp seeks
 # can land inside simctl's long omitted-frame gap and synthesize a black frame.
 ffmpeg -hide_banner -loglevel error -i "$VIDEO" \
-  -vf "select='eq(n,$last_terminal_index)',transpose=cclock" -fps_mode vfr \
+  -vf "select='eq(n,$last_terminal_index)'${rotate:+,${rotate%,}}" -fps_mode vfr \
   -frames:v 1 -y "$CASE_DIR/foreground-settled.png"
 test -s "$CASE_DIR/before-background.png"
 test -s "$CASE_DIR/foreground-activation-1.png"
@@ -298,9 +314,10 @@ cat >"$CASE_DIR/case.json" <<'JSON'
     "SpringBoard frames between the explicit Home press and app activation are expected and are not graded as Tessera output."
   ],
   "capture_notes": "foreground-refresh.mov is one uninterrupted simctl recording across the explicit Home press and Tessera reactivation. before-background.png and foreground-settled.png are terminal endpoint frames; the settled image uses the last video-measured terminal frame before UI-test teardown returns to SpringBoard. foreground-activation-1.png through -4.png cover four consecutive one-second windows at 30 fps, beginning one second before the video-measured SpringBoard-to-Tessera return in video-event-offsets.json. The first tiles may show SpringBoard; once Tessera appears, the numbered viewport must not race through history. Each tile is 480 pixels wide so row changes remain legible. event-offsets.json, xctest.log, and redraw-burst.log carry the lifecycle markers, probe result, and the 80-frame PTY redraw burst injected while Tessera is backgrounded. The remote fixture has 1000 primary-screen history rows before the redraw burst, matching the user-reported high-history Codex pane exposure.",
-  "deterministic_precheck": {"verdict": "pass", "detail": "XCUITest proved Home moved Tessera out of foreground, reactivation returned it to runningForeground within four seconds, a unique post-activation probe traversed inline tmux into the rendered terminal, at most four terminal-feed presentation steps carried at least 250000 bytes across the injected 80-frame background redraw burst, and the test plus recording covered the full 20-second recovery window. A large coalesced batch is expected because preserving scrollback requires retaining every background byte below the bounded safety cap."}
+  "deterministic_precheck": {"verdict": "pass", "detail": "XCUITest proved Home moved Tessera out of foreground, reactivation returned it to runningForeground within four seconds, a unique post-activation probe traversed inline tmux into the rendered terminal, and at most four bounded terminal-feed presentation steps completed across the injected 80-frame background redraw burst. The fixture log independently proves the full burst ran; retained output above the safety cap is intentionally discarded as a whole escape stream in favor of the authoritative viewport. The test and recording covered the full 20-second recovery window."}
 }
 JSON
 
 cleanup 0
 trap - EXIT
+script_completed=1

@@ -1,5 +1,6 @@
 import Foundation
 import PortForwarding
+import TesseraDomainCore
 
 /// A saved host target.
 ///
@@ -47,7 +48,7 @@ public struct Host: Identifiable, Equatable, Sendable {
     public var envVars: String
     /// Free-form shell snippet executed before the launch command.
     public var startupSnippet: String
-    public var portForwardRules: [PortForwardRule]
+    public var portForwardRules: [PortForwarding.PortForwardRule]
     /// Bastion hops resolved from `HostJumpLink`, outermost first (the
     /// first entry is the hop the device dials directly). Hop entries carry
     /// empty chains of their own — the flattening happened at resolution.
@@ -82,7 +83,7 @@ public struct Host: Identifiable, Equatable, Sendable {
         launchCommand: String? = nil,
         envVars: String = "",
         startupSnippet: String = "",
-        portForwardRules: [PortForwardRule] = [],
+        portForwardRules: [PortForwarding.PortForwardRule] = [],
         jumpChain: [Host] = [],
         jumpChainBrokenReason: String? = nil,
         continuationHostKeyFingerprints: [UUID: String] = [:],
@@ -115,6 +116,61 @@ public struct Host: Identifiable, Equatable, Sendable {
 }
 
 extension Host {
+    /// Secret-free shared-core projection used at every portable boundary.
+    /// Password text, key filenames/handles, commands, environment, snippets,
+    /// and continuation peer labels cannot be represented here.
+    func sharedProfile() throws -> HostProfile {
+        guard let sharedPort = UInt16(exactly: port), sharedPort > 0 else {
+            throw SharedHostAdapterError.invalidPort(port)
+        }
+        let launch: HostLaunchPolicy = switch launchMode {
+        case .autoTmux:
+            .autoTmux
+        case .pinnedTmux:
+            .pinnedTmux(sessionName: tmuxSessionName ?? "")
+        case .customCommand:
+            .customCommand
+        }
+        // `PortForwarding.PortForwardRule` and `TesseraDomainCore.PortForwardRule`
+        // are the same shared type now, so this projection is the identity.
+        let forwards = portForwardRules
+        return HostProfile(
+            id: id,
+            name: name,
+            endpoint: HostEndpoint(user: user, address: address, port: sharedPort),
+            transport: HostTransportKind(rawValue: transport.rawValue) ?? .ssh,
+            launch: launch,
+            jumpHostIDs: jumpChain.map(\.id),
+            portForwards: forwards
+        )
+    }
+
+    var sharedCredentialReference: LocalCredentialReference {
+        if let storedKeyID { return .key(keyID: storedKeyID) }
+        switch passwordCredentialRevision {
+        case .ephemeral(let identityID, _):
+            return identityID.map { .password(identityID: $0) } ?? .none
+        case .keychain(let identityID, _):
+            return .password(identityID: identityID)
+        case .none:
+            return .none
+        }
+    }
+
+    func sharedRouteSnapshot() throws -> HostRoute {
+        let hops = try jumpChain.map {
+            ResolvedRouteNode(
+                profile: try $0.sharedProfile(),
+                credentialReference: $0.sharedCredentialReference
+            )
+        }
+        let destination = ResolvedRouteNode(
+            profile: try sharedProfile(),
+            credentialReference: sharedCredentialReference
+        )
+        return try HostRoute(hops: hops, destination: destination)
+    }
+
     /// Stable identity for the complete SSH route represented by this DTO.
     /// Host IDs distinguish separately managed records that happen to use the
     /// same private address; endpoint + user fields make edits invalidate a
@@ -277,6 +333,10 @@ extension Host {
     }
 }
 
+enum SharedHostAdapterError: Error, Equatable {
+    case invalidPort(Int)
+}
+
 enum HostPasswordCredentialRevision: Hashable, Sendable {
     case ephemeral(identityID: UUID?, token: UUID)
     case keychain(identityID: UUID, revision: UInt64)
@@ -288,7 +348,7 @@ struct HostTransientPasswordCredential: Sendable {
 }
 
 extension PersistedHost {
-    func setPortForwardRules(_ rules: [PortForwardRule]) {
+    func setPortForwardRules(_ rules: [PortForwarding.PortForwardRule]) {
         portForwardRulesData = RuleCodec.encode(rules)
     }
 }

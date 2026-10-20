@@ -109,6 +109,20 @@ ensure_user() {
 ensure_user "$FIXTURE_USER" "$FIXTURE_SHELL"
 ensure_user "$NOTMUX_USER" "$NOTMUX_SHELL"
 
+# Provisioning is the destructive reset boundary for these disposable VPS
+# accounts.  A prior SSH, mosh, or interrupted integration run may have left
+# the app user's default tmux server alive even though no test process still
+# owns it.  Later gates deliberately refuse to borrow that server, so make the
+# provisioned baseline truthful by terminating only this fixture user's
+# server.  Use the role's exact tmux binary so the chaos fixture addresses the
+# same socket as its login shell.
+if [[ "$ROLE" == chaos ]]; then
+  FIXTURE_TMUX="$ROOT/tmux-3.6a/bin/tmux"
+else
+  FIXTURE_TMUX=/usr/bin/tmux
+fi
+runuser -u "$FIXTURE_USER" -- "$FIXTURE_TMUX" kill-server >/dev/null 2>&1 || true
+
 # Launch-hostile account: its own login dotfiles take over the terminal
 # with a plain tmux client before the auto-tmux one-liner can run. This
 # is the shape of host that used to leave the app waiting forever on a
@@ -139,13 +153,24 @@ done
 if [[ ! -f "$ROOT/ssh/ssh_host_ed25519_key" ]]; then
   ssh-keygen -q -t ed25519 -N '' -f "$ROOT/ssh/ssh_host_ed25519_key"
 fi
-chmod 0600 "$ROOT/ssh/ssh_host_ed25519_key"
+if [[ ! -f "$ROOT/ssh/ssh_host_ecdsa_key" ]]; then
+  ssh-keygen -q -t ecdsa -b 256 -N '' -f "$ROOT/ssh/ssh_host_ecdsa_key"
+fi
+if [[ ! -f "$ROOT/ssh/ssh_host_rsa_key" ]]; then
+  ssh-keygen -q -t rsa -b 3072 -N '' -f "$ROOT/ssh/ssh_host_rsa_key"
+fi
+chmod 0600 \
+  "$ROOT/ssh/ssh_host_ed25519_key" \
+  "$ROOT/ssh/ssh_host_ecdsa_key" \
+  "$ROOT/ssh/ssh_host_rsa_key"
 
 cat >"$ROOT/sshd_config" <<EOF
 Port $APP_PORT
 ListenAddress 0.0.0.0
 AddressFamily inet
 HostKey $ROOT/ssh/ssh_host_ed25519_key
+HostKey $ROOT/ssh/ssh_host_ecdsa_key
+HostKey $ROOT/ssh/ssh_host_rsa_key
 PidFile /run/tessera-fixture-sshd.pid
 AuthorizedKeysFile .ssh/authorized_keys
 PermitRootLogin no
@@ -159,6 +184,11 @@ GatewayPorts no
 X11Forwarding no
 PermitTunnel no
 PermitUserEnvironment no
+# Raw Agent Center action proof is a per-PTY random value sent with the SSH
+# environment request. It is accepted only by the disposable integration
+# fixture; production hosts remain free to reject it, which leaves raw action
+# capabilities unavailable as intended.
+AcceptEnv LC_TESSERA_ROUTE
 PrintMotd no
 UseDNS no
 MaxSessions 64
@@ -176,6 +206,7 @@ After=network.target
 
 [Service]
 Type=simple
+ExecStartPre=/usr/bin/install -d -m 0755 -o root -g root /run/sshd
 ExecStart=/usr/sbin/sshd -D -e -f $ROOT/sshd_config
 Restart=on-failure
 RestartSec=1
@@ -228,3 +259,5 @@ else
 fi
 printf 'mosh=%s\n' "$(mosh-server --help 2>&1 | sed -n '1p')"
 printf 'host_key='; ssh-keygen -lf "$ROOT/ssh/ssh_host_ed25519_key.pub"
+printf 'host_key_ecdsa='; ssh-keygen -lf "$ROOT/ssh/ssh_host_ecdsa_key.pub"
+printf 'host_key_rsa='; ssh-keygen -lf "$ROOT/ssh/ssh_host_rsa_key.pub"

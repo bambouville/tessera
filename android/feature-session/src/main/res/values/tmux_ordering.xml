@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tmux_move_left">Move left</string>
+    <string name="tmux_move_right">Move right</string>
+    <string name="tmux_move_up">Move up</string>
+    <string name="tmux_move_down">Move down</string>
+    <string name="tmux_move_start">Move to start</string>
+    <string name="tmux_move_end">Move to end</string>
+    <string name="tmux_tidy">Tidy window numbers</string>
+    <string name="tmux_order_failed">Could not update the tmux window order.</string>
+    <string name="tmux_order_changed">The window order changed. Try again.</string>
+    <string name="tmux_order_timeout">Window ordering timed out.</string>
+    <string name="tmux_order_unavailable">Window ordering is not available yet.</string>
+    <string name="tmux_window_label">Window %1$d, %2$s</string>
+    <string name="tmux_window_index_label">Window %1$d, %2$s, tmux index %3$d</string>
+    <string name="tmux_window_index_detail">tmux index %1$d · %2$s</string>
+    <string name="tmux_split_right">Split Right</string>
+    <string name="tmux_split_left">Split Left</string>
+    <string name="tmux_split_down">Split Down</string>
+    <string name="tmux_split_up">Split Up</string>
+</resources>

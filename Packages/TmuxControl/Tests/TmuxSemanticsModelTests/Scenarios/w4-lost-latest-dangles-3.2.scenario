@@ -1,0 +1,21 @@
+scenario w4-lost-latest-dangles-3.2
+# W4 on 3.2: there is no handoff, `latest` keeps the lost client, and with two
+# sizing clients left the window freezes at the lost client's size.
+versions 3.2
+session O 80x24 w0
+group O-tessera-view O
+session probes 80x24 p0
+control probe probes no-output
+control side O-tessera-view no-output
+send side refresh-client -C 90,28
+tty laptop O 200x50
+key laptop
+control device O
+send device select-window ; refresh-client -C 100,30
+expect-latest w0 device
+expect-size w0 100x30
+detach device
+expect-latest w0 dangling:device
+expect-size w0 100x30
+send probe display-message -p -t {w0} 'size=#{window_width}x#{window_height}'
+expect probe size=100x30

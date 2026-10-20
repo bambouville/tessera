@@ -8,6 +8,84 @@ import XCTest
 
 final class SwipePadPetalLayoutTests: XCTestCase {
 
+    func test_dictationSurfacesClampAtEveryCornerAndPreserveCentre() {
+        let bounds = CGRect(x: 0, y: 0, width: 440, height: 900)
+        for size in [CGSize(width: 280, height: 56), CGSize(width: 320, height: 110)] {
+            for center in [CGPoint(x: 42, y: 42), CGPoint(x: 398, y: 42),
+                           CGPoint(x: 42, y: 858), CGPoint(x: 398, y: 858)] {
+                let frame = SwipePadFloatingLayout.frame(center: center, size: size, bounds: bounds)
+                XCTAssertTrue(bounds.insetBy(dx: 12, dy: 12).contains(frame))
+                XCTAssertEqual(frame.size, size)
+            }
+            let center = CGPoint(x: 220, y: 450)
+            let frame = SwipePadFloatingLayout.frame(center: center, size: size, bounds: bounds)
+            XCTAssertEqual(frame.midX, center.x)
+            XCTAssertEqual(frame.midY, center.y)
+        }
+    }
+
+    func test_dictationSurfacesFitNarrowCanvasAndSafeAreasOnBothAxes() {
+        let bounds = CGRect(x: 20, y: 44, width: 200, height: 70)
+        let frame = SwipePadFloatingLayout.frame(
+            center: CGPoint(x: 398, y: 858), size: CGSize(width: 280, height: 110), bounds: bounds
+        )
+        XCTAssertEqual(frame, CGRect(x: 32, y: 56, width: 176, height: 46))
+        XCTAssertEqual(
+            SwipePadFloatingLayout.frame(center: .zero, size: CGSize(width: 280, height: 56), bounds: .zero),
+            .zero
+        )
+    }
+
+    @MainActor
+    func test_dictationCancelDuringSetupDoesNotPublishLateStart() async {
+        let controller = SpeechDictationController(appearance: AppearancePreferences())
+        let entered = expectation(description: "setup suspended")
+        var finish: CheckedContinuation<Date, Never>?
+        var cancellations = 0
+        let task = Task { @MainActor in
+            await controller.beginListening(cancel: { cancellations += 1 }) { _ in
+                XCTAssertEqual(controller.activeState, .listening)
+                XCTAssertNil(controller.startedAt)
+                return await withCheckedContinuation {
+                    finish = $0
+                    entered.fulfill()
+                }
+            }
+        }
+        await fulfillment(of: [entered], timeout: 2)
+        controller.stop(commit: false)
+        XCTAssertEqual(cancellations, 1)
+        finish?.resume(returning: Date(timeIntervalSince1970: 100))
+        await task.value
+        XCTAssertEqual(controller.activeState, .idle)
+        XCTAssertNil(controller.startedAt)
+        XCTAssertEqual(controller.transcript, "")
+    }
+
+    @MainActor
+    func test_dictationOldSetupCannotOverwriteRestartedSession() async {
+        let controller = SpeechDictationController(appearance: AppearancePreferences())
+        let entered = expectation(description: "old setup suspended")
+        var finish: CheckedContinuation<Date, Never>?
+        let old = Task { @MainActor in
+            await controller.beginListening(cancel: {}) { _ in
+                await withCheckedContinuation {
+                    finish = $0
+                    entered.fulfill()
+                }
+            }
+        }
+        await fulfillment(of: [entered], timeout: 2)
+        controller.stop(commit: false)
+        let newStart = Date(timeIntervalSince1970: 200)
+        await controller.beginListening(cancel: {}) { _ in newStart }
+        finish?.resume(returning: Date(timeIntervalSince1970: 100))
+        await old.value
+        XCTAssertEqual(controller.activeState, .listening)
+        XCTAssertEqual(controller.startedAt, newStart)
+        controller.stop(commit: false)
+    }
+
     @MainActor
     func test_plainMoshSidecarProbeBacksOffAndRecovers() async {
         var currentTime = Date(timeIntervalSince1970: 1_000)
@@ -96,9 +174,49 @@ final class SwipePadPetalLayoutTests: XCTestCase {
         ])
         XCTAssertEqual(
             petals.map(\.action),
-            [.macro("1↵"), .macro("2↵"), .macro("3↵")]
+            [.macro("1"), .macro("2"), .macro("3")]
         )
         XCTAssertEqual(petals.map(\.tint), [.affirmative, .caution, .negative])
+    }
+
+    /// The live Claude menu is 1=Yes / 2=always / 3=No and answers with the
+    /// digit alone. Its petals must keep the trained no-look gestures — deny
+    /// on left, always on up — for the factory profile and for a stored copy
+    /// of the 2026-08 factory set that still ends each digit with Enter.
+    /// Menu-order fill would put sticky consent on the deny gesture.
+    func test_liveClaudePetalsKeepTrainedDenyAcrossEnterSpellings() {
+        let viewport = """
+        Do you want to proceed?
+        ❯ 1. Yes
+          2. Yes, and always allow access to claude/ from this project
+          3. No
+
+        Esc to cancel · Tab to amend · ctrl+e to explain
+        """
+        guard let prompt = AgentPromptParser.parse(
+            visibleText: viewport,
+            profile: .builtInClaudeCode
+        ).prompt else { return XCTFail("expected a parsed prompt") }
+
+        var enterSpelled = SwipePadProfile.builtInClaudeCode
+        enterSpelled.bindings = [
+            .right: SwipePadBinding(macro: "1↵"),
+            .left: SwipePadBinding(macro: "3↵"),
+            .up: SwipePadBinding(macro: "2↵"),
+        ]
+        for profile in [SwipePadProfile.builtInClaudeCode, enterSpelled] {
+            let petals = SwipePadPetalLayout.petals(for: prompt, profile: profile)
+            let byDirection = Dictionary(uniqueKeysWithValues: petals.map { ($0.direction, $0) })
+            let spelling = profile.binding(for: .left).macro
+            XCTAssertEqual(byDirection[.right]?.label, "Yes", spelling)
+            XCTAssertEqual(byDirection[.left]?.label, "No", "deny gesture (\(spelling)) must answer No")
+            XCTAssertEqual(byDirection[.left]?.action, .macro("3"), "the petal sends the core's bytes")
+            XCTAssertEqual(
+                byDirection[.up]?.label,
+                "Yes, and always allow access to claude/ from this project",
+                spelling
+            )
+        }
     }
 
     func test_codexShortcutPromptKeepsShortcutMacros() {
@@ -861,9 +979,9 @@ final class SwipePadPetalLayoutTests: XCTestCase {
         XCTAssertEqual(byDirection[.left]?.tint, .negative)
         XCTAssertEqual(byDirection[.up]?.tint, .caution)
         // Claude's menu is 1=Yes / 2=always / 3=No — deny MUST send 3.
-        XCTAssertEqual(byDirection[.right]?.action, .macro("1↵"))
-        XCTAssertEqual(byDirection[.left]?.action, .macro("3↵"))
-        XCTAssertEqual(byDirection[.up]?.action, .macro("2↵"))
+        XCTAssertEqual(byDirection[.right]?.action, .macro("1"))
+        XCTAssertEqual(byDirection[.left]?.action, .macro("3"))
+        XCTAssertEqual(byDirection[.up]?.action, .macro("2"))
     }
 
     /// Drift guard: pins each built-in binding's label semantics to the
@@ -1225,10 +1343,50 @@ final class SwipePadProfileStoreLabelBackfillTests: XCTestCase {
             $0.id == SwipePadProfile.builtInClaudeCodeID
         }
 
-        XCTAssertEqual(claude?.binding(for: .left).macro, "3↵", "deny must send No")
+        XCTAssertEqual(claude?.binding(for: .left).macro, "3", "deny must send No")
         XCTAssertEqual(claude?.binding(for: .left).label, "deny")
-        XCTAssertEqual(claude?.binding(for: .up).macro, "2↵", "always must send sticky consent")
+        XCTAssertEqual(claude?.binding(for: .up).macro, "2", "always must send sticky consent")
         XCTAssertEqual(claude?.binding(for: .up).label, "always")
+    }
+
+    func test_untouchedEnterSpelledClaudeFactorySetAdoptsBareDigits() throws {
+        let previous = UserDefaults.standard.data(forKey: defaultsKey)
+        defer {
+            if let previous {
+                UserDefaults.standard.set(previous, forKey: defaultsKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: defaultsKey)
+            }
+        }
+
+        // The 2026-08 factory set ended each digit with Enter, which reaches
+        // the composer once Claude has acted on the digit. A user-added
+        // `.down` is a real customization and survives.
+        var stored = SwipePadProfile.builtInClaudeCode
+        stored.bindings = [
+            .right: SwipePadBinding(macro: "1↵"),
+            .left: SwipePadBinding(macro: "3↵"),
+            .up: SwipePadBinding(macro: "2↵"),
+            .down: SwipePadBinding(macro: "4↵"),
+        ]
+        UserDefaults.standard.set(
+            try JSONEncoder().encode([stored]),
+            forKey: defaultsKey
+        )
+
+        let store = SwipePadProfileStore()
+        let claude = store.profiles.first {
+            $0.id == SwipePadProfile.builtInClaudeCodeID
+        }
+
+        XCTAssertEqual(claude?.binding(for: .right).macro, "1")
+        XCTAssertEqual(claude?.binding(for: .right).label, "approve")
+        XCTAssertEqual(claude?.binding(for: .left).macro, "3")
+        XCTAssertEqual(claude?.binding(for: .left).label, "deny")
+        XCTAssertEqual(claude?.binding(for: .up).macro, "2")
+        XCTAssertEqual(claude?.binding(for: .up).label, "always")
+        XCTAssertEqual(claude?.binding(for: .down).macro, "4↵")
+        XCTAssertNil(claude?.binding(for: .down).label)
     }
 
     func test_partiallyCustomizedLegacyClaudeSetStillUpgradesUntouchedDirections() throws {
@@ -1262,8 +1420,8 @@ final class SwipePadProfileStoreLabelBackfillTests: XCTestCase {
             $0.id == SwipePadProfile.builtInClaudeCodeID
         }
 
-        XCTAssertEqual(claude?.binding(for: .left).macro, "3↵", "untouched legacy deny still upgrades")
-        XCTAssertEqual(claude?.binding(for: .up).macro, "2↵", "untouched legacy always still upgrades")
+        XCTAssertEqual(claude?.binding(for: .left).macro, "3", "untouched legacy deny still upgrades")
+        XCTAssertEqual(claude?.binding(for: .up).macro, "2", "untouched legacy always still upgrades")
         XCTAssertEqual(claude?.binding(for: .down).macro, "ls↵", "real customization survives")
         XCTAssertNil(claude?.binding(for: .down).label)
     }
@@ -1299,7 +1457,7 @@ final class SwipePadProfileStoreLabelBackfillTests: XCTestCase {
 
         XCTAssertEqual(claude?.binding(for: .left).macro, "echo hi↵")
         XCTAssertNil(claude?.binding(for: .left).label)
-        XCTAssertEqual(claude?.binding(for: .up).macro, "2↵")
+        XCTAssertEqual(claude?.binding(for: .up).macro, "2")
     }
 
     func test_duplicateCustomProfileIDsCollapseToFirst() throws {
@@ -1714,300 +1872,6 @@ final class SwipePadResolverGateTests: XCTestCase {
             ),
             "foreground-changed",
             "the freshly resolved foreground must still offer the exact binding"
-        )
-    }
-}
-
-// MARK: - Projection
-
-@MainActor
-final class SwipePadAgentContextTests: XCTestCase {
-    private func waitingAgent(
-        sessionID: UUID,
-        paneID: Int = 7,
-        status: AgentStatus = .waitingForInput
-    ) -> AgentInstance {
-        let now = Date.now
-        return AgentCenterHarnessFixtures.make(
-            sessionID: sessionID,
-            paneID: paneID,
-            profileID: SwipePadProfile.builtInClaudeCodeID,
-            name: "Claude Code",
-            host: "devbox",
-            transport: "ssh+tmux",
-            tmuxSession: "work",
-            windowID: 1,
-            windowName: "api",
-            status: status,
-            tail: "Do you want to proceed?",
-            prompt: status == .waitingForInput
-                ? AgentPrompt(
-                    signature: "proceed?",
-                    summary: "Do you want to proceed?",
-                    options: [
-                        AgentPromptOption(id: 1, label: "Yes", responseMacro: "1↵", isDefault: true),
-                        AgentPromptOption(id: 2, label: "No", responseMacro: "2↵", isDefault: false),
-                    ]
-                )
-                : nil,
-            detectedAt: now.addingTimeInterval(-60),
-            statusChangedAt: now.addingTimeInterval(-5),
-            lastOutputAt: now.addingTimeInterval(-5)
-        )
-    }
-
-    func test_activeHookProofPublishesSnapshotForFocusedPane() {
-        let sessionID = UUID()
-        let agent = waitingAgent(sessionID: sessionID)
-        let center = AgentCenter()
-        center.installHarnessAgents([agent])
-        center.installHarnessLifecycleIntegrationState(.active, for: agent.id)
-
-        let context = center.swipePadContext(sessionID: sessionID)
-        XCTAssertNil(context.snapshot, "no focus reported yet")
-
-        center.setSwipePadFocus(sessionID: sessionID, paneID: 7)
-
-        XCTAssertEqual(context.snapshot?.agentID, agent.id)
-        XCTAssertEqual(context.snapshot?.status, .waitingForInput)
-        XCTAssertEqual(context.snapshot?.prompt?.options.count, 2)
-        XCTAssertEqual(context.snapshot?.profileName, "Claude Code")
-    }
-
-    func test_lifecycleEventRotatesProviderSessionInFireGuard() {
-        let sessionID = UUID()
-        let agent = waitingAgent(sessionID: sessionID, status: .working)
-        let center = AgentCenter()
-        center.installHarnessAgents([agent])
-        center.installHarnessLifecycleIntegrationState(.active, for: agent.id)
-        center.setSwipePadFocus(sessionID: sessionID, paneID: 7)
-        let context = center.swipePadContext(sessionID: sessionID)
-
-        let before = context.snapshot
-        XCTAssertNotNil(before)
-
-        // Same pane, same process, same visible status — only the provider
-        // conversation changed (resume / new thread). Exercises the REAL
-        // acceptance path (applyLifecycleEvent → finishApplying → card →
-        // snapshot republish): the card must adopt the event's session so
-        // the fire-guard incarnation rotates before any discovery rebuild.
-        let event = AgentLifecycleEvent(
-            version: AgentLifecycleEvent.supportedVersion,
-            provider: "claude",
-            event: "PreToolUse",
-            state: .working,
-            reason: "",
-            timestampNanoseconds: UInt64(Date.now.timeIntervalSince1970 * 1_000_000_000),
-            providerSessionID: "conversation-after-resume",
-            turnID: "turn-2",
-            notificationType: "",
-            permissionMode: "",
-            agentPID: 4242
-        )
-        XCTAssertTrue(center.harnessApplyLifecycleEvent(event, to: agent.id))
-
-        let after = context.snapshot
-        XCTAssertEqual(after?.providerSessionID, "conversation-after-resume")
-        XCTAssertNotEqual(
-            before?.fireGuardKey,
-            after?.fireGuardKey,
-            "a same-status conversation swap must never leave the guard key unchanged"
-        )
-    }
-
-    func test_statusNeutralProviderSessionSurvivesObservationRebuild() {
-        let sessionID = UUID()
-        let agent = waitingAgent(sessionID: sessionID, status: .working)
-        let center = AgentCenter()
-        center.installHarnessAgents([agent])
-        center.installHarnessLifecycleIntegrationState(.active, for: agent.id)
-        center.setSwipePadFocus(sessionID: sessionID, paneID: 7)
-        let context = center.swipePadContext(sessionID: sessionID)
-
-        let baseNanoseconds = UInt64(Date.now.timeIntervalSince1970 * 1_000_000_000)
-        let rootEvent = AgentLifecycleEvent(
-            version: AgentLifecycleEvent.supportedVersion,
-            provider: "claude",
-            event: "PreToolUse",
-            state: .working,
-            reason: "",
-            timestampNanoseconds: baseNanoseconds,
-            providerSessionID: "conversation-a",
-            turnID: "turn-1",
-            notificationType: "",
-            permissionMode: "",
-            agentPID: 4242
-        )
-        XCTAssertTrue(center.harnessApplyLifecycleEvent(rootEvent, to: agent.id))
-        XCTAssertEqual(context.snapshot?.providerSessionID, "conversation-a")
-
-        // R3-F1 step 1: the FIRST accepted proof of the new conversation is
-        // status-neutral. SubagentStop cannot answer whether the root turn
-        // stopped, so it never becomes the root-status event — but it does
-        // carry the new session, and the card adopts it directly.
-        let neutralEvent = AgentLifecycleEvent(
-            version: AgentLifecycleEvent.supportedVersion,
-            provider: "claude",
-            event: "SubagentStop",
-            state: .working,
-            reason: "",
-            timestampNanoseconds: baseNanoseconds + 1_000_000_000,
-            providerSessionID: "conversation-b",
-            turnID: "turn-2",
-            notificationType: "",
-            permissionMode: "",
-            agentPID: 4242
-        )
-        XCTAssertTrue(center.harnessApplyLifecycleEvent(neutralEvent, to: agent.id))
-        let adopted = context.snapshot
-        XCTAssertEqual(adopted?.providerSessionID, "conversation-b")
-
-        // R3-F1 step 2: the next terminal observation rebuilds the card.
-        // The candidate selector rightly prefers the older non-neutral
-        // root event for STATUS (retained neutral vs streamed non-neutral);
-        // it must not also revert the conversation to A — that would
-        // re-validate a press begun on A against conversation B (the
-        // A→B→A guard hole).
-        let location = AgentLocation(
-            sessionID: sessionID,
-            hostName: "devbox",
-            transportLabel: "ssh+tmux",
-            tmuxSessionName: "work",
-            windowID: 1,
-            windowName: "api",
-            paneID: 7
-        )
-        center.harnessReplaceAgents(
-            sessionID: sessionID,
-            probes: [
-                AgentProbeTarget(
-                    location: location,
-                    processNames: ["claude"],
-                    processIDs: [4242],
-                    visibleText: nil,
-                    lifecycleEvent: neutralEvent,
-                    bracketedPasteEnabled: false
-                )
-            ]
-        )
-
-        let rebuilt = context.snapshot
-        XCTAssertEqual(
-            rebuilt?.providerSessionID,
-            "conversation-b",
-            "a rebuild must keep the newest accepted conversation, not the root-status event's older one"
-        )
-        XCTAssertEqual(
-            rebuilt?.fireGuardKey,
-            adopted?.fireGuardKey,
-            "an unchanged world must not rotate the guard key back (A→B→A)"
-        )
-    }
-
-    func test_installationStatusAloneNeverEnablesHookMode() {
-        let sessionID = UUID()
-        let agent = waitingAgent(sessionID: sessionID)
-        let center = AgentCenter()
-        center.installHarnessAgents([agent])
-        let context = center.swipePadContext(sessionID: sessionID)
-        center.setSwipePadFocus(sessionID: sessionID, paneID: 7)
-
-        for state: AgentLifecycleIntegrationState in [
-            .checking, .notChecked, .checkUnavailable,
-            .notInstalled, .installedInactive, .outdated(version: 3),
-        ] {
-            center.installHarnessLifecycleIntegrationState(state, for: agent.id)
-            XCTAssertNil(context.snapshot, "state \(state) must stay fallback")
-        }
-
-        center.installHarnessLifecycleIntegrationState(.active, for: agent.id)
-        XCTAssertNotNil(context.snapshot)
-    }
-
-    func test_focusOnPaneWithoutAgentPublishesNil() {
-        let sessionID = UUID()
-        let agent = waitingAgent(sessionID: sessionID)
-        let center = AgentCenter()
-        center.installHarnessAgents([agent])
-        center.installHarnessLifecycleIntegrationState(.active, for: agent.id)
-        let context = center.swipePadContext(sessionID: sessionID)
-
-        center.setSwipePadFocus(sessionID: sessionID, paneID: 7)
-        XCTAssertNotNil(context.snapshot)
-
-        center.setSwipePadFocus(sessionID: sessionID, paneID: 99)
-        XCTAssertNil(context.snapshot, "vim pane / plain shell must fall back")
-    }
-
-    func test_disablingAgentCenterPublishesNil() {
-        let sessionID = UUID()
-        let agent = waitingAgent(sessionID: sessionID)
-        let center = AgentCenter()
-        center.installHarnessAgents([agent])
-        center.installHarnessLifecycleIntegrationState(.active, for: agent.id)
-        let context = center.swipePadContext(sessionID: sessionID)
-        center.setSwipePadFocus(sessionID: sessionID, paneID: 7)
-        XCTAssertNotNil(context.snapshot)
-
-        center.setEnabled(false)
-
-        XCTAssertNil(context.snapshot)
-    }
-
-    func test_identicalRepublishDoesNotInvalidateObservers() {
-        let sessionID = UUID()
-        let agent = waitingAgent(sessionID: sessionID)
-        let center = AgentCenter()
-        center.installHarnessAgents([agent])
-        center.installHarnessLifecycleIntegrationState(.active, for: agent.id)
-        let context = center.swipePadContext(sessionID: sessionID)
-        center.setSwipePadFocus(sessionID: sessionID, paneID: 7)
-
-        // Sendable box: withObservationTracking's onChange is @Sendable, so
-        // a captured var would be a Swift 6 error.
-        final class Flag: @unchecked Sendable { var value = false }
-        let invalidated = Flag()
-        withObservationTracking {
-            _ = context.snapshot
-        } onChange: {
-            invalidated.value = true
-        }
-
-        // Same content again — the choke point republishes, the equality
-        // gate must swallow it.
-        center.installHarnessAgents([agent])
-        XCTAssertFalse(invalidated.value, "identical snapshot must not invalidate")
-
-        var changed = agent
-        changed.status = .working
-        changed.prompt = nil
-        center.installHarnessAgents([changed])
-        XCTAssertTrue(invalidated.value, "real transition must invalidate")
-    }
-
-    func test_promptChangeAlonePublishesNewSnapshot() {
-        let sessionID = UUID()
-        let agent = waitingAgent(sessionID: sessionID)
-        let center = AgentCenter()
-        center.installHarnessAgents([agent])
-        center.installHarnessLifecycleIntegrationState(.active, for: agent.id)
-        let context = center.swipePadContext(sessionID: sessionID)
-        center.setSwipePadFocus(sessionID: sessionID, paneID: 7)
-        XCTAssertEqual(context.snapshot?.prompt?.signature, "proceed?")
-
-        var changed = agent
-        changed.prompt = AgentPrompt(
-            signature: "different menu",
-            summary: "Another question?",
-            options: [
-                AgentPromptOption(id: 1, label: "Yes", responseMacro: "1↵", isDefault: true)
-            ]
-        )
-        center.installHarnessAgents([changed])
-
-        XCTAssertEqual(
-            context.snapshot?.prompt?.signature, "different menu",
-            "a prompt swap with unchanged status must republish"
         )
     }
 }

@@ -7,6 +7,31 @@ import XCTest
 
 @MainActor
 final class BootstrapCoordinatorTests: XCTestCase {
+    func test_failedRecipientGrantSaveRestoresOnlyItsOwnedMutation() throws {
+        enum Failure: Error { case save }
+        let context = ModelContext(try TesseraModelContainer.make(inMemory: true))
+        let original = Identity(name: "Original", user: "test", credentialMode: .none)
+        let unrelated = Identity(name: "Unrelated", user: "other", credentialMode: .none)
+        let host = PersistedHost(name: "Fixture", address: "fixture.invalid", identity: original)
+        host.user = "test"
+        context.insert(original); context.insert(unrelated); context.insert(host)
+        try context.save()
+        let key = Self.fixturePublicKey()
+        let record = BootstrapRecipientGrantRecord(
+            hostID: host.id, hostName: host.name, endpoint: "test@fixture.invalid:22",
+            routeIdentity: "fixture-route", peerDeviceName: "Test peer",
+            recipientKey: try BootstrapRecipientKey(storedKeyID: key.id, publicKey: key)
+        )
+        XCTAssertThrowsError(try BootstrapCoordinator.liveRecordRecipientGrant(record, in: context, save: { _ in
+            XCTAssertNotEqual(host.identity?.id, original.id)
+            throw Failure.save
+        }))
+        XCTAssertEqual(host.identity?.id, original.id)
+        try context.save() // A later autosave must not accidentally authorize the key.
+        XCTAssertEqual(Set(try context.fetch(FetchDescriptor<Identity>()).map(\.id)), [original.id, unrelated.id])
+        XCTAssertEqual(host.identity?.credentialMode, .some(.none))
+    }
+
     func test_constructingAndFirstOpenPresentationNeverStartsNetworkingOrCreatesKey() {
         let networking = BootstrapCoordinatorFakeNetworking()
         let counters = BootstrapCoordinatorCounters()
@@ -40,7 +65,150 @@ final class BootstrapCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(counters.keyProviderCalls, 1)
         XCTAssertTrue(store.isComplete)
+        XCTAssertTrue(coordinator.hasCompletedFirstOpen)
         XCTAssertEqual(coordinator.phase, .inactive)
+        coordinator.beginIfFirstOpen(hasHosts: false)
+        XCTAssertEqual(coordinator.phase, .inactive)
+    }
+
+    func test_cancelDefersFirstOpenUntilNextLaunchWithoutCompletingIt() throws {
+        let suiteName = "BootstrapCoordinatorTests.cancel.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = BootstrapFirstOpenStore(defaults: defaults)
+        let networking = BootstrapCoordinatorFakeNetworking()
+        let coordinator = makeCoordinator(networking: networking, firstOpenStore: store)
+        coordinator.beginIfFirstOpen(hasHosts: false)
+        coordinator.startRecipientDiscovery()
+
+        let wasPresented = coordinator.isPresented
+        coordinator.cancel()
+
+        XCTAssertEqual(coordinator.phase, .inactive)
+        XCTAssertFalse(store.isComplete)
+        XCTAssertFalse(coordinator.hasCompletedFirstOpen)
+        let appearance = AppearancePreferences()
+        let hasSeenWelcome = appearance.hasSeenWelcome
+        defer { appearance.hasSeenWelcome = hasSeenWelcome }
+        appearance.hasSeenWelcome = false
+        let onboarding = OnboardingController(appearance: appearance)
+        let dismissalAction = OnboardingController.bootstrapPresentationAction(
+            wasPresented: wasPresented,
+            isPresented: coordinator.isPresented,
+            hasCompletedFirstOpen: coordinator.hasCompletedFirstOpen
+        )
+        XCTAssertEqual(dismissalAction, .resumeOnboarding)
+        if dismissalAction == .resumeOnboarding {
+            onboarding.beginIfFirstLaunch(hasHosts: false, hasSeen: appearance.hasSeenWelcome)
+        }
+        XCTAssertEqual(onboarding.phase, .welcome)
+        XCTAssertFalse(appearance.hasSeenWelcome)
+        // Completion alone consumes the welcome flow; showing or retaining the
+        // sheet only hides it, and an unchanged dismissed sheet does nothing.
+        for completed in [false, true] {
+            for wasPresented in [false, true] {
+                XCTAssertEqual(OnboardingController.bootstrapPresentationAction(
+                    wasPresented: wasPresented, isPresented: true,
+                    hasCompletedFirstOpen: completed
+                ), .hideOnboarding)
+            }
+            XCTAssertEqual(OnboardingController.bootstrapPresentationAction(
+                wasPresented: false, isPresented: false,
+                hasCompletedFirstOpen: completed
+            ), .none)
+        }
+        XCTAssertEqual(OnboardingController.bootstrapPresentationAction(
+            wasPresented: true, isPresented: false, hasCompletedFirstOpen: true
+        ), .completeWelcome)
+        coordinator.beginIfFirstOpen(hasHosts: false)
+        XCTAssertEqual(coordinator.phase, .inactive)
+        XCTAssertEqual(networking.startBrowsingCount, 1)
+        XCTAssertEqual(networking.connectCount, 0)
+
+        let nextLaunch = makeCoordinator(
+            networking: BootstrapCoordinatorFakeNetworking(), firstOpenStore: store
+        )
+        nextLaunch.beginIfFirstOpen(hasHosts: true)
+        XCTAssertEqual(nextLaunch.phase, .inactive)
+        nextLaunch.beginIfFirstOpen(hasHosts: false)
+        XCTAssertEqual(nextLaunch.phase, .welcome)
+    }
+
+    func test_finishWithoutReceivingSetupDoesNotCompleteFirstOpen() {
+        let coordinator = makeCoordinator(networking: BootstrapCoordinatorFakeNetworking())
+        coordinator.beginIfFirstOpen(hasHosts: false)
+
+        coordinator.finish()
+
+        XCTAssertEqual(coordinator.phase, .inactive)
+        XCTAssertFalse(coordinator.hasCompletedFirstOpen)
+    }
+
+    func test_nearbyNegotiatesAgentCenterBeforeExportAndImportsItEndToEnd() async throws {
+        let pendingKey = BootstrapNotificationPermissionDeferral.pendingKey
+        let previousPending = UserDefaults.standard.object(forKey: pendingKey)
+        defer { UserDefaults.standard.set(previousPending, forKey: pendingKey) }
+        UserDefaults.standard.removeObject(forKey: pendingKey)
+        for declaresSupport in [false, true] {
+            let sourceContext = ModelContext(try TesseraModelContainer.make(inMemory: true))
+            let appearance = AppearancePreferences()
+            let snapshot = BootstrapAppearanceSnapshot(appearance)
+            let wasEnabled = appearance.agentCenterEnabled
+            defer { snapshot.restore(to: appearance); appearance.agentCenterEnabled = wasEnabled }
+            appearance.agentCenterEnabled = true
+            let pair = makeCoordinatorPair(
+                manifest: Self.fixtureManifest(includeSecondKeyHost: false),
+                counters: BootstrapCoordinatorCounters(),
+                exporter: { supports in
+                    XCTAssertEqual(supports, declaresSupport)
+                    // Export the live source preference through the real gate.
+                    appearance.agentCenterEnabled = true
+                    let exported = try await BootstrapManifestAdapter.export(from: sourceContext,
+                        appearance: appearance, peerSupportsAgentCenterEnabled: supports)
+                    XCTAssertEqual(exported.settings.agentCenterEnabled, declaresSupport ? true : nil)
+                    appearance.agentCenterEnabled = false
+                    return try Self.fixtureManifest(includeSecondKeyHost: false,
+                        agentCenterEnabled: exported.settings.agentCenterEnabled).selectingOptionalTransfers([])
+                },
+                recipientDeclaresAgentCenterEnabled: declaresSupport)
+            let recipientContext = ModelContext(try TesseraModelContainer.make(inMemory: true))
+            let provenance = BootstrapStandardProvenanceSnapshot()
+            defer { provenance.restore() }
+            pair.recipient.configure(modelContext: recipientContext, appearance: appearance)
+            try await reachGrantSelection(pair)
+            XCTAssertFalse(appearance.agentCenterEnabled)
+            pair.origin.approveOriginTransfer()
+            try await waitForBothCompletions(pair)
+            XCTAssertEqual(appearance.agentCenterEnabled, declaresSupport)
+            guard case .completed(let receipt) = pair.recipient.phase,
+                  case .received(let imported) = receipt.direction else { return XCTFail("Expected receipt") }
+            XCTAssertEqual(imported.enabledAgentCenter, declaresSupport)
+            XCTAssertEqual(UserDefaults.standard.bool(forKey: pendingKey), declaresSupport,
+                           "Nearby import must durably record its deferred permission request")
+        }
+    }
+
+    func test_receivedSetupCompletesFirstOpenAndDoneStartsNoNewNearbyNetworking() async throws {
+        let pair = makeCoordinatorPair(
+            manifest: Self.fixtureManifest(includeSecondKeyHost: false),
+            counters: BootstrapCoordinatorCounters()
+        )
+        try await reachGrantSelection(pair)
+        pair.origin.approveOriginTransfer()
+        try await waitForBothCompletions(pair)
+        XCTAssertTrue(pair.recipient.hasCompletedFirstOpen)
+        XCTAssertFalse(pair.origin.hasCompletedFirstOpen)
+        let connections = pair.recipientNetworking.connectCount
+        let browsing = pair.recipientNetworking.startBrowsingCount
+
+        pair.recipient.finish()
+
+        XCTAssertEqual(pair.recipient.phase, .inactive)
+        XCTAssertTrue(pair.recipient.hasCompletedFirstOpen)
+        pair.recipient.beginIfFirstOpen(hasHosts: false)
+        XCTAssertEqual(pair.recipient.phase, .inactive)
+        XCTAssertEqual(pair.recipientNetworking.connectCount, connections)
+        XCTAssertEqual(pair.recipientNetworking.startBrowsingCount, browsing)
     }
 
     func test_setUpAsNewKeyFailureIsTruthfulAndDoesNotCompleteFirstOpen() async throws {
@@ -899,6 +1067,8 @@ final class BootstrapCoordinatorTests: XCTestCase {
     private func makeCoordinatorPair(
         manifest: BootstrapManifest,
         counters: BootstrapCoordinatorCounters,
+        exporter: BootstrapCoordinator.ManifestExporter? = nil,
+        recipientDeclaresAgentCenterEnabled: Bool = true,
         originLabel: String = "iPad",
         recipientLabel: String = "iPhone",
         recipientAcceptedHostIDs: Set<UUID>? = nil,
@@ -913,7 +1083,7 @@ final class BootstrapCoordinatorTests: XCTestCase {
             origin: makeCoordinator(
                 networking: originNetworking,
                 counters: counters,
-                exporter: {
+                exporter: exporter ?? { _ in
                     counters.exportCalls += 1
                     return manifest
                 },
@@ -923,6 +1093,7 @@ final class BootstrapCoordinatorTests: XCTestCase {
             recipient: makeCoordinator(
                 networking: recipientNetworking,
                 counters: counters,
+                recipientDeclaresAgentCenterEnabled: recipientDeclaresAgentCenterEnabled,
                 importer: { imported, _ in
                     counters.importCalls += 1
                     counters.importedManifests.append(imported)
@@ -1002,7 +1173,8 @@ final class BootstrapCoordinatorTests: XCTestCase {
         interruptedImportProvider: @escaping BootstrapCoordinator.InterruptedImportProvider = {
             false
         },
-        exporter: @escaping BootstrapCoordinator.ManifestExporter = {
+        recipientDeclaresAgentCenterEnabled: Bool = true,
+        exporter: @escaping BootstrapCoordinator.ManifestExporter = { _ in
             BootstrapCoordinatorTests.fixtureManifest(includeSecondKeyHost: false)
         },
         importer: @escaping BootstrapCoordinator.ManifestImporter = { manifest, _ in
@@ -1042,6 +1214,7 @@ final class BootstrapCoordinatorTests: XCTestCase {
                 counters.onBiometricAuthorization?()
                 return counters.biometricDecision
             },
+            recipientDeclaresAgentCenterEnabled: recipientDeclaresAgentCenterEnabled,
             manifestExporter: exporter,
             manifestImporter: importer,
             recipientKeyProvider: {
@@ -1130,7 +1303,7 @@ final class BootstrapCoordinatorTests: XCTestCase {
         blob.append(value)
     }
 
-    static func fixtureManifest(includeSecondKeyHost: Bool) -> BootstrapManifest {
+    static func fixtureManifest(includeSecondKeyHost: Bool, agentCenterEnabled: Bool? = nil) -> BootstrapManifest {
         var hosts = [
             BootstrapHostDescriptor(
                 id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
@@ -1195,7 +1368,8 @@ final class BootstrapCoordinatorTests: XCTestCase {
                 bellNotificationEnabled: false,
                 accessoryBarKeys: [],
                 filesReaperDays: 7,
-                filesDefaultDestination: "temp"
+                filesDefaultDestination: "temp",
+                agentCenterEnabled: agentCenterEnabled
             )
         )
     }
@@ -1358,7 +1532,7 @@ private struct BootstrapAppearanceSnapshot {
     let mode: AppearanceModeOption
     let accent: AccentName
     let customAccentRGB: Int
-    let monoFontName: String
+    let terminalFontID: String
     let fontSize: Double
     let chromeMaterial: ChromeMaterial
     let cursorStyle: CursorStyleOption
@@ -1377,7 +1551,7 @@ private struct BootstrapAppearanceSnapshot {
         mode = appearance.mode
         accent = appearance.accent
         customAccentRGB = appearance.customAccentRGB
-        monoFontName = appearance.monoFontName
+        terminalFontID = appearance.terminalFontID
         fontSize = appearance.fontSize
         chromeMaterial = appearance.chromeMaterial
         cursorStyle = appearance.cursorStyle
@@ -1397,7 +1571,7 @@ private struct BootstrapAppearanceSnapshot {
         appearance.mode = mode
         appearance.accent = accent
         appearance.customAccentRGB = customAccentRGB
-        appearance.monoFontName = monoFontName
+        appearance.terminalFontID = terminalFontID
         appearance.fontSize = fontSize
         appearance.chromeMaterial = chromeMaterial
         appearance.cursorStyle = cursorStyle

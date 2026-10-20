@@ -33,6 +33,13 @@ final class ShortcutValidationTests: XCTestCase {
         }
     }
 
+    func testCommandRejectionExplainsTerminalKeyOwnership() {
+        XCTAssertEqual(
+            BindingRejection.needsCommand.detail,
+            String(localized: "without ⌘, the terminal and the programs in it keep this key.")
+        )
+    }
+
     func testOrdinaryCommandChordsAreAccepted() {
         XCTAssertEqual(KeyBinding.cmd("y").validate(), .ok)
         XCTAssertEqual(KeyBinding.cmdShift("y").validate(), .ok)

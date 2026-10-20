@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mosh_server_lost">このセッションの mosh-server は実行されていません。ホストが再起動した可能性があります。</string>
+    <string name="mosh_outage_last_contact">最後の受信から %1$d 秒</string>
+    <string name="mosh_outage_last_reply">最後の応答から %1$d 秒</string>
+    <string name="mosh_outage_announcement">Mosh の接続が中断されました。再接続しています。</string>
+</resources>

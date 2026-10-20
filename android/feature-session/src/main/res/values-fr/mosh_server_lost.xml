@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mosh_server_lost">Le mosh-server de cette session ne tourne plus — l\'hôte a peut-être redémarré.</string>
+    <string name="mosh_outage_last_contact">dernier contact il y a %1$d s</string>
+    <string name="mosh_outage_last_reply">dernière réponse il y a %1$d s</string>
+    <string name="mosh_outage_announcement">Connexion Mosh interrompue. Reconnexion en cours.</string>
+</resources>

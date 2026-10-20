@@ -1,0 +1,26 @@
+{
+  "hide content in app switcher": {
+    "de": "Inhalte im App-Umschalter ausblenden",
+    "es": "ocultar el contenido en el selector de apps",
+    "fr": "masquer le contenu dans le sélecteur d'apps",
+    "ja": "App スイッチャーで内容を非表示",
+    "zh-Hans": "在应用切换器中隐藏内容",
+    "zh-Hant": "在 App 切換器中隱藏內容"
+  },
+  "show a blank screen in the app switcher instead of Tessera's content": {
+    "de": "zeigt im App-Umschalter einen leeren Bildschirm statt der Inhalte von Tessera",
+    "es": "muestra una pantalla en blanco en el selector de apps en lugar del contenido de Tessera",
+    "fr": "affiche un écran vide dans le sélecteur d'apps au lieu du contenu de Tessera",
+    "ja": "App スイッチャーには Tessera の内容の代わりに空白の画面を表示します",
+    "zh-Hans": "在应用切换器中显示空白画面，而不是 Tessera 的内容",
+    "zh-Hant": "在 App 切換器中顯示空白畫面，而不是 Tessera 的內容"
+  },
+  "always on while device owner authentication is required": {
+    "de": "immer an, solange die Authentifizierung des Gerätebesitzers verlangt wird",
+    "es": "siempre activo mientras se exija la autenticación del propietario del dispositivo",
+    "fr": "toujours actif tant que l'authentification du propriétaire de l'appareil est exigée",
+    "ja": "デバイス所有者の認証を要求している間は常にオン",
+    "zh-Hans": "要求设备所有者认证期间始终开启",
+    "zh-Hant": "要求裝置擁有者驗證期間始終開啟"
+  }
+}

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Tessera</string>
+    <string name="shared_core_checking">Checking shared core…</string>
+    <string name="shared_core_ready">Shared core ready</string>
+    <string name="shared_core_failed">Shared core unavailable</string>
+    <string name="app_lock_title">Tessera is locked</string>
+    <string name="app_lock_body">Use your device credential to access hosts, keys, files, and sessions.</string>
+    <string name="app_lock_unlock">Unlock</string>
+    <string name="system_picker_session_channel">Active connection</string>
+    <string name="system_picker_session_title">Tessera connection active</string>
+    <string name="system_picker_session_body">Keeping the SSH connection available while choosing a file</string>
+    <plurals name="shared_core_contract">
+        <item quantity="one">ABI %1$d · max payload %2$d byte</item>
+        <item quantity="other">ABI %1$d · max payload %2$d bytes</item>
+    </plurals>
+</resources>

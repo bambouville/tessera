@@ -1,0 +1,9 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Serves named local files, so a Files upload keeps its display name. -->
+        <provider android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.recovery" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/files_recovery_test_paths" />
+        </provider>
+    </application>
+</manifest>

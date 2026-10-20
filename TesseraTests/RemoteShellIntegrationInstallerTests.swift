@@ -1,4 +1,5 @@
 import XCTest
+import TesseraCore
 @testable import Tessera
 
 final class RemoteShellIntegrationInstallerTests: XCTestCase {
@@ -93,24 +94,33 @@ final class RemoteShellIntegrationInstallerTests: XCTestCase {
     func test_agentLifecycleHookUsesImmediateOSCAndRetainedTmuxOptionWithoutJQ() {
         let script = RemoteAgentLifecycleIntegrationInstaller.hookScript
 
+        // The hook stamps events with the lifecycle schema, not the
+        // installation version, so script-only updates stay readable.
         XCTAssertEqual(
-            RemoteAgentLifecycleIntegrationInstaller.integrationVersion,
+            RemoteAgentLifecycleIntegrationInstaller.lifecycleEventVersion,
             AgentLifecycleEvent.supportedVersion
         )
-        XCTAssertTrue(script.contains("TESSERA_AGENT_INTEGRATION_VERSION=8"))
+        XCTAssertTrue(script.contains("TESSERA_AGENT_INTEGRATION_VERSION=\(RemoteAgentLifecycleIntegrationInstaller.integrationVersion)"))
+        XCTAssertTrue(script.contains("TESSERA_AGENT_EVENT_VERSION=\(AgentLifecycleEvent.supportedVersion)"))
         XCTAssertTrue(script.contains("\"agentPid\":"))
+        XCTAssertTrue(script.contains("\"transcriptRef\":"))
+        XCTAssertTrue(script.contains("\"agentId\":"))
+        XCTAssertTrue(script.contains("\"agentType\":"))
+        XCTAssertTrue(script.contains("\"rootAgentId\":"))
         XCTAssertTrue(script.contains("@tessera_agent_state"))
+        XCTAssertTrue(script.contains("tessera_agent_foreground_status()"))
+        XCTAssertTrue(script.contains("defer_pane=foreground(pid) is False and holder != pid and foreground(holder) is True"))
         XCTAssertTrue(script.contains("]1337;TesseraAgentState="))
         XCTAssertTrue(script.contains("tmux display-message -p -t"))
         XCTAssertTrue(script.contains("ps -o tty="))
-        XCTAssertTrue(script.contains(#"metadata="$(python3 -c"#))
+        XCTAssertTrue(script.contains(#"metadata="$(TESSERA_AGENT_PROVIDER="$provider" python3 -c"#))
         XCTAssertTrue(script.contains("dd bs=4096 count=16"))
         XCTAssertFalse(script.contains(#"input="$(cat"#))
         XCTAssertTrue(script.contains("json.load(sys.stdin)"))
         XCTAssertTrue(script.contains(#"data.get("session_id", "")"#))
         XCTAssertTrue(script.contains(#"data.get("turn_id", "")"#))
         XCTAssertTrue(script.contains(#"data.get("permission_mode", "")"#))
-        XCTAssertTrue(script.contains(#"data.get("agent_id", "")"#))
+        XCTAssertTrue(script.contains(#"data.get("agent_id", data.get("agent_name", ""))"#))
         XCTAssertTrue(script.contains(#"sed -n 's/.*"agent_id""#))
         XCTAssertTrue(script.contains(#"SessionStart|SessionEnd|WrapperExit)"#))
         XCTAssertFalse(script.contains("TESSERA_AGENT_LAUNCH_PID"))
@@ -171,7 +181,8 @@ final class RemoteShellIntegrationInstallerTests: XCTestCase {
     }
 
     func test_agentLifecycleCodexHookMergePreservesUserGroupsAndReplacesOnlyTesseraHandlers() throws {
-        let existing = #"{"customTopLevel":{"enabled":true},"hooks":{"SessionStart":[{"matcher":"user","hooks":[{"type":"command","command":"user-session-hook"},{"type":"command","command":"\"$HOME/.config/tessera/agent-lifecycle-hook.sh\" codex SessionStart idle obsolete"}]}],"CustomEvent":[{"hooks":[{"type":"command","command":"user-custom-hook"}]}]}}"#
+        let userWrapper = #"audit-before && "$HOME/.config/tessera/agent-lifecycle-hook.sh" codex SessionStart idle session-start"#
+        let existing = #"{"customTopLevel":{"enabled":true},"hooks":{"SessionStart":[{"matcher":"user","hooks":[{"type":"command","command":"user-session-hook"},{"type":"command","command":"audit-before && \"$HOME/.config/tessera/agent-lifecycle-hook.sh\" codex SessionStart idle session-start"},{"type":"command","command":"\"$HOME/.config/tessera/agent-lifecycle-hook.sh\" codex SessionStart idle obsolete"}]}],"CustomEvent":[{"hooks":[{"type":"command","command":"user-custom-hook"}]}]}}"#
         let merged = try RemoteAgentLifecycleIntegrationInstaller.mergeCodexHooks(existing: existing)
         let mergedData = try XCTUnwrap(merged.data(using: .utf8))
         let root = try XCTUnwrap(
@@ -189,8 +200,13 @@ final class RemoteShellIntegrationInstallerTests: XCTestCase {
             (group["hooks"] as? [[String: Any]] ?? []).compactMap { $0["command"] as? String }
         }
         XCTAssertTrue(commands.contains("user-session-hook"))
-        XCTAssertEqual(commands.filter { $0.contains("agent-lifecycle-hook.sh") }.count, 1)
-        XCTAssertTrue(commands.contains { $0.contains("SessionStart idle session-start") })
+        XCTAssertTrue(commands.contains(userWrapper))
+        XCTAssertEqual(
+            commands.filter {
+                $0 == #""$HOME/.config/tessera/agent-lifecycle-hook.sh" codex SessionStart idle session-start"#
+            }.count,
+            1
+        )
         XCTAssertFalse(commands.contains { $0.contains("obsolete") })
     }
 
@@ -220,6 +236,44 @@ final class RemoteShellIntegrationInstallerTests: XCTestCase {
         XCTAssertFalse(commands.contains { $0.contains("obsolete") })
     }
 
+    func test_agentLifecycleKimiConfigMergePreservesUnrelatedTomlAndReplacesOnlyOwnedBlock() throws {
+        let old = """
+        theme = "dark"
+
+        # TESSERA-AGENT-CENTER-KIMI-HOOKS-BEGIN
+        [[hooks]]
+        event = "Stop"
+        command = "obsolete"
+        # TESSERA-AGENT-CENTER-KIMI-HOOKS-END
+
+        [custom]
+        enabled = true
+        """
+        let merged = try RemoteAgentLifecycleIntegrationInstaller.mergeKimiConfig(existing: old)
+        XCTAssertTrue(merged.contains("theme = \"dark\""))
+        XCTAssertTrue(merged.contains("[custom]\nenabled = true"))
+        XCTAssertFalse(merged.contains("obsolete"))
+        XCTAssertTrue(merged.contains("event = \"PermissionRequest\""))
+        XCTAssertTrue(merged.contains("kimi PermissionRequest waitingForInput permission"))
+        XCTAssertFalse(merged.contains("permission_prompt|elicitation_dialog"))
+        XCTAssertEqual(occurrences(of: RemoteAgentLifecycleIntegrationInstaller.kimiHooksStartMarker, in: merged), 1)
+        XCTAssertEqual(occurrences(of: RemoteAgentLifecycleIntegrationInstaller.kimiHooksEndMarker, in: merged), 1)
+        XCTAssertEqual(
+            try RemoteAgentLifecycleIntegrationInstaller.mergeKimiConfig(existing: merged),
+            merged
+        )
+        XCTAssertThrowsError(
+            try RemoteAgentLifecycleIntegrationInstaller.mergeKimiConfig(
+                existing: old + "\n" + RemoteAgentLifecycleIntegrationInstaller.kimiHooksBlock
+            )
+        )
+        XCTAssertThrowsError(
+            try RemoteAgentLifecycleIntegrationInstaller.mergeKimiConfig(
+                existing: "prefix\n\(RemoteAgentLifecycleIntegrationInstaller.kimiHooksStartMarker)\n"
+            )
+        )
+    }
+
     func test_agentLifecycleCodexHookSnapshotRoundTripsUTF8AndRejectsErrors() {
         let contents = #"{"hooks":{"SessionStart":[]},"label":"héllo"}"#
         let encoded = Data(contents.utf8).base64EncodedString()
@@ -246,6 +300,22 @@ final class RemoteShellIntegrationInstallerTests: XCTestCase {
             ),
             .present(contents)
         )
+        XCTAssertEqual(
+            RemoteAgentLifecycleIntegrationInstaller.parseKimiConfigSnapshot(
+                "TESSERA_AGENT_KIMI_CONFIG present:\(encoded)\n"
+            ),
+            .present(contents)
+        )
+        for command in [
+            RemoteAgentLifecycleIntegrationInstaller.makeCodexHooksReadCommand(),
+            RemoteAgentLifecycleIntegrationInstaller.makeClaudeSettingsReadCommand(),
+            RemoteAgentLifecycleIntegrationInstaller.makeKimiConfigReadCommand(),
+        ] {
+            XCTAssertTrue(command.contains("wc -c"))
+            XCTAssertTrue(command.contains("-gt 1048576"))
+            XCTAssertTrue(command.contains("error:too-large"))
+            XCTAssertLessThan(command.range(of: "wc -c")!.lowerBound, command.range(of: "base64 <")!.lowerBound)
+        }
     }
 
     func test_agentLifecycleInstallCommandAtomicallyMergesBothOfficialUserConfigs() {
@@ -255,6 +325,8 @@ final class RemoteShellIntegrationInstallerTests: XCTestCase {
         XCTAssertTrue(command.contains(RemoteAgentLifecycleIntegrationInstaller.rcMarkerLine))
         XCTAssertTrue(command.contains("agent-lifecycle-hook.sh"))
         XCTAssertTrue(command.contains("agent-launch.sh"))
+        XCTAssertTrue(command.contains("tessera-agent-project"))
+        XCTAssertTrue(command.contains("tessera-agent-launch"))
         XCTAssertTrue(command.contains("agent-codex-readiness.sh"))
         XCTAssertTrue(command.contains("$HOME/.config/tessera/bin/claude"))
         XCTAssertTrue(command.contains("$HOME/.config/tessera/bin/codex"))
@@ -262,8 +334,11 @@ final class RemoteShellIntegrationInstallerTests: XCTestCase {
         XCTAssertTrue(command.contains("settings.json"))
         XCTAssertTrue(command.contains(#"${CODEX_HOME:-$HOME/.codex}"#))
         XCTAssertTrue(command.contains("hooks.json"))
+        XCTAssertTrue(command.contains(#"${KIMI_CODE_HOME:-$HOME/.kimi-code}"#))
+        XCTAssertTrue(command.contains("config.toml"))
         XCTAssertTrue(command.contains(RemoteAgentLifecycleIntegrationInstaller.codexHooksRaceMarker))
         XCTAssertTrue(command.contains(RemoteAgentLifecycleIntegrationInstaller.claudeSettingsRaceMarker))
+        XCTAssertTrue(command.contains(RemoteAgentLifecycleIntegrationInstaller.kimiConfigRaceMarker))
         XCTAssertTrue(command.contains("realpath"))
         XCTAssertTrue(command.contains("readlink -f"))
         XCTAssertTrue(command.contains(RemoteAgentLifecycleIntegrationInstaller.verificationMarker))
@@ -309,28 +384,123 @@ final class RemoteShellIntegrationInstallerTests: XCTestCase {
         XCTAssertTrue(command.contains("agent-codex-readiness.sh"))
         XCTAssertTrue(command.contains("codex_hooks_target="))
         XCTAssertTrue(command.contains("claude_settings_target="))
+        XCTAssertTrue(command.contains("kimi_config_target="))
         XCTAssertTrue(command.contains("agent-lifecycle.sh"))
         XCTAssertTrue(command.contains("grep -qFx"))
         XCTAssertTrue(command.contains("cksum"))
         XCTAssertTrue(command.contains("agent-lifecycle-hook.sh\\\" codex SessionStart idle session-start"))
         XCTAssertTrue(command.contains("agent-lifecycle-hook.sh\\\" claude SessionStart idle session-start"))
+        XCTAssertTrue(command.contains("agent-lifecycle-hook.sh\\\" kimi SessionStart"))
         XCTAssertFalse(command.contains(#"$HOME/.config/tessera/agent-lifecycle-hook.sh\" codex SessionStart"#))
         XCTAssertFalse(command.contains("$(cat \"$hook\")"))
         XCTAssertFalse(command.contains("cmp -s"))
         XCTAssertFalse(command.contains(RemoteAgentLifecycleIntegrationInstaller.hookScript))
-        XCTAssertLessThan(command.utf8.count, 16_000)
+        // Backstop against the probe turning into a payload. The real guards are
+        // the no-inlining assertions above; this only bounds unchecked growth.
+        // Raised from 16_000 (set 2026-07-15) because the probe legitimately
+        // gained the opencode, pi and kimi adapters (01754b69 2026-08-30 →
+        // c429f2a9 2026-09-07). Currently ~18.4 KB; keep the headroom modest so
+        // a real regression still trips it.
+        XCTAssertLessThan(command.utf8.count, 24_000)
         XCTAssertFalse(command.contains(#"mkdir -p "$HOME/.config/tessera" &&"#))
         XCTAssertFalse(command.contains(#"chmod 700 "$HOME/.config/tessera/agent-lifecycle-hook.sh""#))
         XCTAssertTrue(command.contains(#"[ ! -x "$hook" ]"#))
         XCTAssertTrue(command.contains(#"[ ! -x "$launcher" ]"#))
+        XCTAssertTrue(command.contains(#"[ ! -x "$projector" ]"#))
+        XCTAssertTrue(command.contains(#"[ ! -x "$semantic_launcher" ]"#))
         XCTAssertTrue(command.contains(#"[ ! -x "$codex_readiness" ]"#))
         XCTAssertTrue(command.contains(#"[ ! -x "$claude_shim" ]"#))
         XCTAssertTrue(command.contains(#"[ ! -x "$codex_shim" ]"#))
         XCTAssertTrue(command.contains(#"[ ! -r "$claude_legacy" ]"#))
         XCTAssertTrue(command.contains(#"tessera_primary_rc="$tessera_zshrc""#))
-        XCTAssertTrue(command.contains(#"-perm -020 -o -perm -002"#))
+        // Mode bits never gate the installation: the owner decides them.
+        XCTAssertFalse(command.contains("-perm"))
+        XCTAssertFalse(command.contains("permissions="))
         XCTAssertTrue(command.contains("codex-readiness-diagnostics.log"))
         XCTAssertTrue(command.contains("agent-lifecycle-diagnostics.log"))
+    }
+
+    /// macOS resolves a non-interactive `python3` to 3.9, which has no
+    /// `tomllib`. Treating that as a parse failure reported every correct Kimi
+    /// config as corrupt, so the probe answered `outdated` forever and the
+    /// installer never published the merged config: Install and Update could
+    /// never converge on such a host.
+    func test_agentLifecycleTomlValidationSurvivesAnInterpreterWithoutTomllib() {
+        let status = RemoteAgentLifecycleIntegrationInstaller.makeStatusCommand()
+        let install = RemoteAgentLifecycleIntegrationInstaller.makeInstallCommand()
+
+        for command in [status, install] {
+            XCTAssertTrue(command.contains("for tessera_toml_candidate in python3 "))
+            XCTAssertTrue(command.contains(#"u.find_spec("tomllib") or u.find_spec("tomli")"#))
+            // A host with no TOML parser at all is `unavailable`, never a
+            // mismatch: the validator succeeds when nothing can check.
+            XCTAssertTrue(
+                command.contains(#"tessera_toml_valid() { [ -n "$tessera_toml_python" ] || return 0;"#)
+            )
+            XCTAssertFalse(command.contains("command -v python3 >/dev/null 2>&1 && python3 -c 'import sys,tomllib"))
+        }
+
+        XCTAssertTrue(status.contains(#"tessera_toml_valid "$kimi_config_target" || tessera_kimi_hooks=mismatch"#))
+        XCTAssertTrue(status.contains("kimiToml=%s"))
+
+        // A merge that really is invalid TOML must leave the remote config and
+        // the working directory exactly as they were.
+        XCTAssertTrue(install.contains(#"tessera_toml_valid "$tessera_kimi_config_temp""#))
+        XCTAssertTrue(install.contains(#"rm -f "$tessera_kimi_config_temp""#))
+        XCTAssertTrue(install.contains("merge-not-valid-toml"))
+
+        let projector = RemoteAgentLifecycleIntegrationInstaller.projectorScript
+        XCTAssertTrue(projector.contains(#"exec "$tessera_python" -c"#))
+        XCTAssertTrue(projector.contains("import tomli as tomllib"))
+        XCTAssertFalse(projector.contains("exec python3 -c"))
+    }
+
+    /// The retry policy is shared, so it is stated once and tested once.
+    /// Android used to decide this locally and reported every failure as a
+    /// settings race, which pointed away from the real cause.
+    func test_agentInstallClassificationRetriesOnlyOnAConfigurationRace() {
+        let installer = RemoteAgentLifecycleIntegrationInstaller.self
+        let verified = """
+        \(installer.verificationMarker)
+        \(installer.statusMarker) current
+        """
+
+        XCTAssertEqual(installer.classifyInstallOutput(verified), .completed)
+
+        for marker in [
+            installer.codexHooksRaceMarker,
+            installer.claudeSettingsRaceMarker,
+            installer.kimiConfigRaceMarker,
+        ] {
+            // A race wins even alongside an otherwise complete-looking run:
+            // the settings file moved, so the merge it was based on is stale.
+            XCTAssertEqual(installer.classifyInstallOutput(marker), .configurationRace)
+            XCTAssertEqual(
+                installer.classifyInstallOutput("\(verified)\n\(marker)"),
+                .configurationRace
+            )
+        }
+
+        // Never verified, and verified-but-not-current, are distinct terminal
+        // failures — neither is a race, and neither may be retried.
+        XCTAssertEqual(
+            installer.classifyInstallOutput("\(installer.statusMarker) outdated:8"),
+            .failed(reason: .notVerified, detail: "\(installer.statusMarker) outdated:8")
+        )
+        let notCurrent = "\(installer.verificationMarker)\n\(installer.statusMarker) outdated:8"
+        XCTAssertEqual(
+            installer.classifyInstallOutput(notCurrent),
+            .failed(reason: .notCurrent, detail: notCurrent)
+        )
+        XCTAssertEqual(
+            installer.classifyInstallOutput("/bin/sh: line 2435: [: : integer expression expected"),
+            .failed(
+                reason: .notVerified,
+                detail: "/bin/sh: line 2435: [: : integer expression expected"
+            )
+        )
+
+        XCTAssertEqual(installer.maximumInstallAttempts, 3)
     }
 
     func test_agentLifecycleStatusChecksumMatchesPOSIXCksum() {
@@ -381,6 +551,8 @@ final class RemoteShellIntegrationInstallerTests: XCTestCase {
         XCTAssertTrue(source.contains(RemoteAgentLifecycleIntegrationInstaller.codexShimScript))
         XCTAssertTrue(source.contains("${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json"))
         XCTAssertTrue(source.contains(RemoteAgentLifecycleIntegrationInstaller.claudeSettings))
+        XCTAssertTrue(source.contains("${KIMI_CODE_HOME:-~/.kimi-code}/config.toml"))
+        XCTAssertTrue(source.contains(RemoteAgentLifecycleIntegrationInstaller.kimiHooksBlock))
         XCTAssertTrue(source.contains("~/.config/tessera/agent-lifecycle.sh"))
         XCTAssertTrue(source.contains(RemoteAgentLifecycleIntegrationInstaller.shellIntegration))
         XCTAssertTrue(source.contains(RemoteAgentLifecycleIntegrationInstaller.rcMarkerLine))
@@ -389,7 +561,7 @@ final class RemoteShellIntegrationInstallerTests: XCTestCase {
     func test_agentShellActivationIsVersionedAndBoundToExactShellProcess() {
         let integration = RemoteAgentLifecycleIntegrationInstaller.shellIntegration
 
-        XCTAssertTrue(integration.contains("TESSERA_AGENT_INTEGRATION_VERSION=8"))
+        XCTAssertTrue(integration.contains("TESSERA_AGENT_INTEGRATION_VERSION=\(RemoteAgentLifecycleIntegrationInstaller.integrationVersion)"))
         XCTAssertTrue(integration.contains("active-shells"))
         XCTAssertTrue(integration.contains(#"/proc/$$/stat"#))
         XCTAssertTrue(integration.contains("ps -o lstart= -p $$"))
@@ -422,14 +594,17 @@ final class RemoteShellIntegrationInstallerTests: XCTestCase {
         XCTAssertTrue(command.contains("for tessera_pid in 7 42"))
         XCTAssertTrue(command.contains("active-shells/$tessera_pid"))
         XCTAssertTrue(command.contains(#"/proc/$tessera_pid/environ"#))
-        XCTAssertTrue(command.contains("grep -qFx 'TESSERA_AGENT_INTEGRATION_VERSION=8'"))
-        XCTAssertTrue(command.contains("grep -qFx 'TESSERA_AGENT_SHIM_VERSION=8'"))
+        // A shell that loaded any release since the shell floor counts; the
+        // exact transitions run against a real shell in AgentIntegrationVersioningTests.
+        XCTAssertTrue(command.contains("tessera_env_version TESSERA_AGENT_INTEGRATION_VERSION"))
+        XCTAssertTrue(command.contains("tessera_env_version TESSERA_AGENT_SHIM_VERSION"))
+        XCTAssertTrue(command.contains(#"[ "$1" -ge \#(RemoteAgentLifecycleIntegrationInstaller.shellIntegrationCompatibleFrom) ]"#))
         XCTAssertFalse(command.contains("TESSERA_AGENT_CLAUDE_WRAPPER_VERSION"))
         XCTAssertFalse(command.contains("TESSERA_AGENT_CODEX_WRAPPER_VERSION"))
         XCTAssertFalse(command.contains("command -v claude"))
         XCTAssertFalse(command.contains("command -v codex"))
         XCTAssertFalse(command.contains("tessera_process_path"))
-        XCTAssertTrue(command.contains(#"$start|8"#))
+        XCTAssertTrue(command.contains(#""$tessera_marker_version|$start|$tessera_marker_version""#))
         XCTAssertFalse(command.contains("kill -WINCH"))
         XCTAssertFalse(command.contains(".challenge."))
         XCTAssertTrue(command.contains("tessera_proof=process-identity"))
@@ -482,7 +657,12 @@ final class RemoteShellIntegrationInstallerTests: XCTestCase {
 
     func test_agentHostDiagnosticParserAcceptsOnlyBoundedContentFreeFields() {
         let marker = RemoteAgentLifecycleIntegrationInstaller.hostDiagnosticMarker
-        let detail = "readiness=trusted lifecycleProvider=codex lifecycleEvent=SessionStart lifecycleState=idle lifecycleReason=verified-trusted-empty-composer lifecyclePhase=resolved agentPid=present pane=present terminal=present tmuxState=written terminalEmission=written"
+        let detail = "readiness=trusted lifecycleProvider=kimi lifecycleEvent=SessionStart lifecycleState=idle lifecycleReason=session-start lifecyclePhase=resolved agentPid=present pane=present terminal=present tmuxState=written terminalEmission=written"
+        let deferred = detail.replacingOccurrences(of: "=written", with: "=deferred")
+        XCTAssertEqual(
+            RemoteAgentLifecycleIntegrationInstaller.parseHostDiagnostic("\(marker) \(deferred)\n"),
+            deferred
+        )
         XCTAssertEqual(
             RemoteAgentLifecycleIntegrationInstaller.parseHostDiagnostic(
                 "banner\n\(marker) \(detail)\n"
@@ -503,7 +683,11 @@ final class RemoteShellIntegrationInstallerTests: XCTestCase {
 
     func test_agentInstallationDiagnosticParserAcceptsOnlyBoundedComponentStates() {
         let marker = RemoteAgentLifecycleIntegrationInstaller.installationDiagnosticMarker
-        let detail = "files=present configs=present rc=current permissions=secure cksum=available hook=match launcher=match codexReadiness=match claudeShim=match codexShim=match integration=match claudeLegacy=match codexHooks=match codexResume=match claudeHooks=match"
+        let detail = "files=present configs=present rc=current cksum=available uninstaller=match hook=match launcher=match projector=match codexRecovery=match semanticLauncher=match processProof=match codexReadiness=match claudeShim=match codexShim=match integration=match claudeLegacy=match codexHooks=match codexResume=match claudeHooks=match kimiHooks=match kimiToml=available"
+        let emitted = RemoteAgentLifecycleIntegrationInstaller.makeStatusCommand()
+        for field in ["projector=%s", "semanticLauncher=%s", "processProof=%s", "kimiHooks=%s", "kimiToml=%s"] {
+            XCTAssertTrue(emitted.contains(field), "missing emitted diagnostic field \(field)")
+        }
         XCTAssertEqual(
             RemoteAgentLifecycleIntegrationInstaller.parseInstallationDiagnostic(
                 "banner\n\(marker) \(detail)\n"
@@ -517,7 +701,7 @@ final class RemoteShellIntegrationInstallerTests: XCTestCase {
         )
         XCTAssertNil(
             RemoteAgentLifecycleIntegrationInstaller.parseInstallationDiagnostic(
-                "\(marker) files=present configs=present rc=current permissions=world-writable\n"
+                "\(marker) files=present configs=present rc=current cksum=world-writable\n"
             )
         )
     }
@@ -532,7 +716,7 @@ final class RemoteShellIntegrationInstallerTests: XCTestCase {
         XCTAssertTrue(integration.contains(#"_tessera_agent_remaining_path="${PATH:-}""#))
         XCTAssertTrue(integration.contains(#"PATH="$_tessera_agent_bin_dir:$_tessera_agent_clean_path""#))
         XCTAssertTrue(integration.contains(#"[ "$_tessera_agent_clean_path_started" -eq 1 ]"#))
-        XCTAssertTrue(integration.contains("TESSERA_AGENT_SHIM_VERSION=8"))
+        XCTAssertTrue(integration.contains("TESSERA_AGENT_SHIM_VERSION=\(RemoteAgentLifecycleIntegrationInstaller.integrationVersion)"))
         XCTAssertTrue(integration.contains(#"if [ "$_tessera_agent_path_entry" != "$_tessera_agent_bin_dir" ]"#))
         XCTAssertTrue(integration.contains("TESSERA_AGENT_SHIM_DIR"))
         XCTAssertFalse(integration.contains("unalias claude"))
@@ -580,7 +764,16 @@ final class RemoteShellIntegrationInstallerTests: XCTestCase {
         XCTAssertFalse(codexShim.contains("plugin marketplace add"))
         XCTAssertFalse(codexShim.contains("plugin add"))
         XCTAssertFalse(codexShim.contains("hooks.PermissionRequest="))
-        XCTAssertFalse(codexShim.contains("--profile"))
+        // `--profile` must only ever be PARSED, never injected. The wrapper has
+        // to recognise the flag to know it consumes a following value, and it
+        // re-appends the user's own argument unchanged. The blanket substring
+        // ban here predated that support (57eb2fca 2026-08-31, refined 46a46172
+        // 2026-09-07) and had been forbidding correct behaviour ever since.
+        // In codexShimScript the sole occurrence is the option-arity table: the
+        // shim must know `--profile` consumes a following value so it skips it
+        // while scanning for a subcommand. Pin that, and ban injection.
+        XCTAssertTrue(codexShim.contains("-c|--config|-m|--model|-p|--profile|"))
+        XCTAssertFalse(codexShim.contains(#"set -- "$@" "--profile""#))
         XCTAssertFalse(codexShim.contains("$HOME/.codex/hooks.json"))
         XCTAssertTrue(codexShim.contains(#""$@""#))
         XCTAssertFalse(claudeShim.contains("dangerously-bypass-hook-trust"))
@@ -604,6 +797,15 @@ final class RemoteShellIntegrationInstallerTests: XCTestCase {
         XCTAssertTrue(codexReadiness.contains("--profile"))
         XCTAssertTrue(codexReadiness.contains("--cd"))
         XCTAssertTrue(codexReadiness.contains("-p?*"))
+        // A resumed or forked thread starts at an empty composer and, like a
+        // fresh start, gets no native SessionStart before its first turn. It
+        // takes the pre-exec bootstrap; a prompt argument stays deferred.
+        XCTAssertTrue(codexReadiness.contains("resume|fork) launch_mode=\"$argument\" ;;"))
+        XCTAssertTrue(codexReadiness.contains("--last|--all|--include-non-interactive)"))
+        XCTAssertTrue(codexReadiness.contains("resume:*|fork:--last|fork:--all) ;;"))
+        XCTAssertTrue(codexReadiness.contains(#"[ "$argument" != --last ] || selects_last_thread=1"#))
+        XCTAssertTrue(codexReadiness.contains(#"[ "$launch_mode" != composer ] && [ "$selects_last_thread" -eq 1 ] && [ "$subcommand_positionals" -gt 0 ]"#))
+        XCTAssertTrue(codexReadiness.contains("cwdOverride=%s launch=%s"))
         XCTAssertTrue(codexReadiness.contains("-C?*"))
         XCTAssertTrue(codexReadiness.contains("-c?*"))
         XCTAssertTrue(codexReadiness.contains("--strict-config"))
@@ -614,7 +816,7 @@ final class RemoteShellIntegrationInstallerTests: XCTestCase {
     func test_agentProviderLauncherRequiresExactCodexReadinessProofAndExecsExactlyOnce() {
         let launcher = RemoteAgentLifecycleIntegrationInstaller.launcherScript
 
-        XCTAssertTrue(launcher.contains("TESSERA_AGENT_INTEGRATION_VERSION=8"))
+        XCTAssertTrue(launcher.contains("TESSERA_AGENT_INTEGRATION_VERSION=\(RemoteAgentLifecycleIntegrationInstaller.integrationVersion)"))
         XCTAssertTrue(launcher.contains(#"case "$provider" in claude|codex)"#))
         XCTAssertEqual(occurrences(of: #"exec "$@""#, in: launcher), 1)
         XCTAssertTrue(launcher.contains("TESSERA_AGENT_CODEX_BOOTSTRAP_PROOF"))
@@ -627,6 +829,100 @@ final class RemoteShellIntegrationInstallerTests: XCTestCase {
         XCTAssertFalse(launcher.contains("WrapperStart"))
         XCTAssertFalse(launcher.contains("TESSERA_AGENT_LAUNCH_PID"))
         XCTAssertFalse(launcher.contains("dangerously-bypass-hook-trust"))
+    }
+
+    func test_agentProjectorIsBoundedReadOnlyAndFailsClosed() {
+        let projector = RemoteAgentLifecycleIntegrationInstaller.projectorScript
+
+        XCTAssertTrue(projector.contains("MAX_FRAME = 65536"))
+        XCTAssertTrue(projector.contains("MAX_PAGE = 262144"))
+        XCTAssertTrue(projector.contains("MAX_RECORDS = 100"))
+        XCTAssertTrue(projector.contains("MAX_RESULT = 16384"))
+        XCTAssertTrue(projector.contains("MAX_PREFIX = 49152"))
+        XCTAssertTrue(projector.contains("MAX_INVENTORY_DIRECTORIES = 256"))
+        XCTAssertTrue(projector.contains("MAX_INVENTORY_FILES = 2048"))
+        XCTAssertTrue(projector.contains("MAX_INVENTORY_BYTES = 8 * 1024 * 1024"))
+        XCTAssertTrue(projector.contains("MAX_INVENTORY_SECONDS = 3.0"))
+        XCTAssertTrue(projector.contains("OPENCODE_REQUIRED"))
+        XCTAssertTrue(projector.contains("def open_opencode_database():"))
+        XCTAssertTrue(projector.contains("fields.append(field + \":missing\")"))
+        XCTAssertTrue(projector.contains("verified_sources"))
+        XCTAssertTrue(projector.contains("mode=ro"))
+        XCTAssertTrue(projector.contains("PRAGMA query_only=ON"))
+        XCTAssertTrue(projector.contains("def validate_schema(database, schema):"))
+        XCTAssertTrue(projector.contains("validate_schema(database, required)"))
+        XCTAssertTrue(projector.contains("def opencode_project(request):"))
+        XCTAssertTrue(projector.contains("def opencode_inventory(request):"))
+        XCTAssertTrue(projector.contains("def opencode_search(request):"))
+        XCTAssertTrue(projector.contains("decode_opencode_session_ref"))
+        XCTAssertTrue(projector.contains("length(CAST(p.data AS BLOB))"))
+        XCTAssertTrue(projector.contains("substr(CAST(data AS BLOB),1,?)"))
+        XCTAssertTrue(projector.contains("MAX_PI_SESSION_BYTES = 8 * 1024 * 1024"))
+        XCTAssertTrue(projector.contains("def pi_inventory(request):"))
+        XCTAssertTrue(projector.contains("def pi_project(request):"))
+        XCTAssertTrue(projector.contains("def pi_search(request):"))
+        XCTAssertTrue(projector.contains("def pi_rpc(snapshot, commands, deadline):"))
+        XCTAssertTrue(projector.contains("subprocess.Popen(pi_argv(binary, snapshot)"))
+        XCTAssertTrue(projector.contains("{\"id\":state_id, \"type\":\"get_state\"}"))
+        XCTAssertTrue(projector.contains("{\"id\":messages_id, \"type\":\"get_messages\"}"))
+        XCTAssertTrue(projector.contains("def pi_snapshot_session(descriptor, identity):"))
+        XCTAssertTrue(projector.contains("tempfile.mkstemp(prefix=\"tessera-pi-\", suffix=\".jsonl\")"))
+        XCTAssertTrue(projector.contains("def pi_secure_session_path(relative):"))
+        XCTAssertTrue(projector.contains("PI_SESSION_ID.fullmatch(session_id)"))
+        XCTAssertTrue(projector.contains("if provider == \"pi\": return pi_inventory(request)"))
+        XCTAssertTrue(projector.contains("if provider == \"pi\": return pi_project(request)"))
+        XCTAssertTrue(projector.contains("if provider == \"pi\": return pi_search(request)"))
+        XCTAssertTrue(projector.contains("def load_kimi_index(root):"))
+        XCTAssertTrue(projector.contains("def validate_kimi_hook_configuration(root):"))
+        XCTAssertTrue(projector.contains("hooks[-len(expected):] != expected"))
+        XCTAssertFalse(projector.contains("session_path in encoded"))
+        XCTAssertTrue(projector.contains("O_NOFOLLOW"))
+        XCTAssertTrue(projector.contains("sourceChanged"))
+        XCTAssertTrue(projector.contains("permissionDenied"))
+        XCTAssertTrue(projector.contains("pythonUnavailable"))
+        XCTAssertTrue(projector.contains("os.read(descriptor, 8192)"))
+        XCTAssertFalse(projector.contains("readline()"))
+        XCTAssertTrue(projector.contains("executable.readline(128)"))
+        XCTAssertFalse(projector.contains("eval("))
+        XCTAssertFalse(projector.contains("shell=True"))
+        XCTAssertFalse(projector.contains("subprocess.run([\"sh\""))
+        XCTAssertFalse(projector.contains("shell=True"))
+    }
+
+    func test_agentSemanticLauncherUsesArgumentVectorsAndValidatesMutationInputs() {
+        let launcher = RemoteAgentLifecycleIntegrationInstaller.semanticLaunchScript
+
+        XCTAssertTrue(launcher.contains("SAFE_BRANCH"))
+        XCTAssertTrue(launcher.contains("MAX_REQUEST = 65536"))
+        XCTAssertTrue(launcher.contains("subprocess.run([\"git\""))
+        XCTAssertTrue(launcher.contains("os.execvp(arguments[0], arguments)"))
+        XCTAssertTrue(launcher.contains("worktreeFailed"))
+        XCTAssertTrue(launcher.contains("launchReceipt"))
+        XCTAssertTrue(launcher.contains("encoded.rstrip(b\"\\r\\n\")"))
+        XCTAssertFalse(launcher.contains("eval("))
+        XCTAssertFalse(launcher.contains("shell=True"))
+    }
+
+    func test_piProjectorUsesSnapshotBoundNonceRPCAndNeverAProviderShell() {
+        let projector = RemoteAgentLifecycleIntegrationInstaller.projectorScript
+
+        XCTAssertTrue(projector.contains("def pi_secure_session_path(relative):"))
+        XCTAssertTrue(projector.contains("def pi_snapshot_session(descriptor, identity):"))
+        XCTAssertTrue(projector.contains("def pi_rpc(snapshot, commands, deadline):"))
+        XCTAssertTrue(projector.contains("secrets.token_hex(16)"))
+        XCTAssertTrue(projector.contains("arguments = [\"--mode\", \"rpc\", \"--session\", snapshot,"))
+        XCTAssertTrue(projector.contains("subprocess.Popen(pi_argv(binary, snapshot)"))
+        XCTAssertTrue(projector.contains("\"--no-extensions\", \"--no-skills\", \"--no-prompt-templates\", \"--no-context-files\""))
+        XCTAssertTrue(projector.contains("command.get(\"type\") not in {\"get_state\", \"get_messages\"}"))
+        XCTAssertTrue(projector.contains("frame.get(\"command\") != command[\"type\"]"))
+        XCTAssertTrue(projector.contains("os.path.realpath(session_file) != os.path.realpath(snapshot)"))
+        XCTAssertTrue(projector.contains("len(data[\"messages\"]) != state[\"messageCount\"]"))
+        XCTAssertTrue(projector.contains("if provider == \"pi\": return pi_inventory(request)"))
+        XCTAssertTrue(projector.contains("if provider == \"pi\": return pi_project(request)"))
+        XCTAssertTrue(projector.contains("if provider == \"pi\": return pi_search(request)"))
+        XCTAssertFalse(projector.contains("os.system("))
+        XCTAssertFalse(projector.contains("shell=True"))
+        XCTAssertFalse(projector.contains("eval("))
     }
 
     func test_agentPersistentActivationTargetsTheActualInteractiveShell() {

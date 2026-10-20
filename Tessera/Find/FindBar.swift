@@ -114,8 +114,7 @@ struct FindBar: View {
                 .accessibilityIdentifier("find-query-field")
                 .font(Typography.tesseraMono(size: 12 * scale))
                 .foregroundStyle(T.fg)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
+                .literalTextInput()
                 .focused($inputFocused)
                 // Submission handled via `.onKeyPress(.return)` below
                 // so Enter advances to the next match without dropping

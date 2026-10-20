@@ -191,7 +191,7 @@ enum BindingRejection: Equatable {
     var detail: String {
         switch self {
         case .needsCommand:
-            return String(localized: "without it the terminal loses this key — ^E is end-of-line in every shell.")
+            return String(localized: "without ⌘, the terminal and the programs in it keep this key.")
         case .optionRemapsTheKey:
             return String(localized: "holding ⌥ makes this key produce a different character, so the shortcut would never match. try it without ⌥, or pick a letter.")
         case .reservedBySystem(let why), .notCapturable(let why):

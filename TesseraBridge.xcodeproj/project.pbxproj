@@ -1,0 +1,322 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* TesseraBridgeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11000000000000000000001 /* TesseraBridgeApp.swift */; };
+		A10000000000000000000002 /* BridgeModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11000000000000000000002 /* BridgeModel.swift */; };
+		A10000000000000000000003 /* BridgeSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11000000000000000000003 /* BridgeSetupView.swift */; };
+		A10000000000000000000004 /* BridgeMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11000000000000000000004 /* BridgeMenu.swift */; };
+		A10000000000000000000005 /* TesseraAppleContinuity in Frameworks */ = {isa = PBXBuildFile; productRef = A19000000000000000000001 /* TesseraAppleContinuity */; };
+		A10000000000000000000006 /* TesseraBridgeCore in Frameworks */ = {isa = PBXBuildFile; productRef = A19000000000000000000002 /* TesseraBridgeCore */; };
+		A10000000000000000000007 /* LocalContinuationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11000000000000000000008 /* LocalContinuationService.swift */; };
+		A10000000000000000000008 /* tessera_iterm_attach.py in Resources */ = {isa = PBXBuildFile; fileRef = A11000000000000000000009 /* tessera_iterm_attach.py */; };
+		A10000000000000000000009 /* BridgeIdentityStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1100000000000000000000B /* BridgeIdentityStore.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A11000000000000000000001 /* TesseraBridgeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TesseraBridgeApp.swift; sourceTree = "<group>"; };
+		A11000000000000000000002 /* BridgeModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeModel.swift; sourceTree = "<group>"; };
+		A11000000000000000000003 /* BridgeSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeSetupView.swift; sourceTree = "<group>"; };
+		A11000000000000000000004 /* BridgeMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeMenu.swift; sourceTree = "<group>"; };
+		A11000000000000000000005 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A11000000000000000000007 /* Tessera Bridge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Tessera Bridge.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A11000000000000000000008 /* LocalContinuationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalContinuationService.swift; sourceTree = "<group>"; };
+		A11000000000000000000009 /* tessera_iterm_attach.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = tessera_iterm_attach.py; sourceTree = "<group>"; };
+		A1100000000000000000000A /* TesseraBridge.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TesseraBridge.entitlements; sourceTree = "<group>"; };
+		A1100000000000000000000B /* BridgeIdentityStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeIdentityStore.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A12000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000005 /* TesseraAppleContinuity in Frameworks */,
+				A10000000000000000000006 /* TesseraBridgeCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A13000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				A13000000000000000000002 /* TesseraBridge */,
+				A13000000000000000000004 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A13000000000000000000002 /* TesseraBridge */ = {
+			isa = PBXGroup;
+			children = (
+				A13000000000000000000003 /* App */,
+				A13000000000000000000005 /* Resources */,
+				A11000000000000000000005 /* Info.plist */,
+				A1100000000000000000000A /* TesseraBridge.entitlements */,
+			);
+			path = TesseraBridge;
+			sourceTree = "<group>";
+		};
+		A13000000000000000000003 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				A11000000000000000000001 /* TesseraBridgeApp.swift */,
+				A11000000000000000000002 /* BridgeModel.swift */,
+				A11000000000000000000003 /* BridgeSetupView.swift */,
+				A11000000000000000000004 /* BridgeMenu.swift */,
+				A11000000000000000000008 /* LocalContinuationService.swift */,
+				A1100000000000000000000B /* BridgeIdentityStore.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		A13000000000000000000005 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				A11000000000000000000009 /* tessera_iterm_attach.py */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		A13000000000000000000004 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A11000000000000000000007 /* Tessera Bridge.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A14000000000000000000001 /* TesseraBridge */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A18000000000000000000002 /* Build configuration list for PBXNativeTarget "TesseraBridge" */;
+			buildPhases = (
+				A15000000000000000000001 /* Sources */,
+				A12000000000000000000001 /* Frameworks */,
+				A16000000000000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TesseraBridge;
+			packageProductDependencies = (
+				A19000000000000000000001 /* TesseraAppleContinuity */,
+				A19000000000000000000002 /* TesseraBridgeCore */,
+			);
+			productName = TesseraBridge;
+			productReference = A11000000000000000000007 /* Tessera Bridge.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A17000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					A14000000000000000000001 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+				};
+			};
+			buildConfigurationList = A18000000000000000000001 /* Build configuration list for PBXProject "TesseraBridge" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A13000000000000000000001;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A1A000000000000000000001 /* XCLocalSwiftPackageReference "TesseraCore" */,
+				A1A000000000000000000002 /* XCLocalSwiftPackageReference "TesseraBridgeCore" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = A13000000000000000000004 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A14000000000000000000001 /* TesseraBridge */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A16000000000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000008 /* tessera_iterm_attach.py in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A15000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000001 /* TesseraBridgeApp.swift in Sources */,
+				A10000000000000000000002 /* BridgeModel.swift in Sources */,
+				A10000000000000000000003 /* BridgeSetupView.swift in Sources */,
+				A10000000000000000000004 /* BridgeMenu.swift in Sources */,
+				A10000000000000000000007 /* LocalContinuationService.swift in Sources */,
+				A10000000000000000000009 /* BridgeIdentityStore.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A1B000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A1B000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		A1B000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = TesseraBridge/TesseraBridge.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TesseraBridge/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Tessera Bridge";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraBridge;
+				PRODUCT_NAME = "Tessera Bridge";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A1B000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = TesseraBridge/TesseraBridge.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9ZW4K2PQ8X;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TesseraBridge/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Tessera Bridge";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bambouville.TesseraBridge;
+				PRODUCT_NAME = "Tessera Bridge";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A18000000000000000000001 /* Build configuration list for PBXProject "TesseraBridge" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1B000000000000000000001 /* Debug */,
+				A1B000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A18000000000000000000002 /* Build configuration list for PBXNativeTarget "TesseraBridge" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1B000000000000000000003 /* Debug */,
+				A1B000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A1A000000000000000000001 /* XCLocalSwiftPackageReference "TesseraCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/TesseraCore;
+		};
+		A1A000000000000000000002 /* XCLocalSwiftPackageReference "TesseraBridgeCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/TesseraBridgeCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A19000000000000000000001 /* TesseraAppleContinuity */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1A000000000000000000001 /* XCLocalSwiftPackageReference "TesseraCore" */;
+			productName = TesseraAppleContinuity;
+		};
+		A19000000000000000000002 /* TesseraBridgeCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1A000000000000000000002 /* XCLocalSwiftPackageReference "TesseraBridgeCore" */;
+			productName = TesseraBridgeCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A17000000000000000000001 /* Project object */;
+}

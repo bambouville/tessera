@@ -1,0 +1,54 @@
+{
+  "activeWindowID" : {
+    "rawValue" : 1
+  },
+  "authority" : {
+    "peer" : {
+      "deviceID" : "ipad",
+      "displayName" : "iPad",
+      "generation" : 7
+    }
+  },
+  "sessionID" : {
+    "rawValue" : 0
+  },
+  "sessionName" : "work",
+  "windows" : [
+    {
+      "activePaneID" : {
+        "rawValue" : 1
+      },
+      "id" : {
+        "rawValue" : 0
+      },
+      "isZoomed" : false,
+      "name" : "editor",
+      "panes" : [
+        {
+          "id" : {
+            "rawValue" : 1
+          },
+          "isActive" : true
+        }
+      ]
+    },
+    {
+      "activePaneID" : {
+        "rawValue" : 2
+      },
+      "id" : {
+        "rawValue" : 1
+      },
+      "isZoomed" : false,
+      "name" : "logs",
+      "panes" : [
+        {
+          "id" : {
+            "rawValue" : 2
+          },
+          "isActive" : true
+        }
+      ]
+    }
+  ]
+}

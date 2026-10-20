@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A forwarded port is reached at http://127.0.0.1:<port>, and the in-app tunnel
+  browser is a WebView, so targetSdk's cleartext ban applies to it. The
+  exemption is deliberately two loopback names and nothing else: the base
+  config is untouched, so a tunnel to a public host still gets the platform
+  default. The encryption for that hop is the SSH channel underneath, which no
+  WebView setting can see.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>

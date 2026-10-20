@@ -325,8 +325,7 @@ struct CustomShortcutEditorView: View {
                 .font(Typography.tesseraMono(size: 12.5))
                 .textFieldStyle(.plain)
                 .lineLimit(1...4)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
+                .literalTextInput()
                 .padding(.vertical, 9)
                 .padding(.horizontal, 12)
                 .background(T.inputBg)
@@ -334,6 +333,7 @@ struct CustomShortcutEditorView: View {
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(T.border, lineWidth: 1))
                 .accessibilityIdentifier("custom-shortcut-body")
 
+            typographicPunctuationNote(for: $bodyText)
             caption("typed literally, spaces included.")
 
             Toggle(isOn: $trailingReturn) {
@@ -399,13 +399,13 @@ struct CustomShortcutEditorView: View {
                     TextField(processSample, text: $processMatch)
                         .font(Typography.tesseraMono(size: 12.5))
                         .textFieldStyle(.plain)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
+                        .literalTextInput()
                         .padding(.vertical, 9)
                         .padding(.horizontal, 12)
                         .background(T.inputBg)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(T.border, lineWidth: 1))
+                    typographicPunctuationNote(for: $processMatch)
                     caption("literal process name, or a `regex:` prefix — the same matcher swipe-pad profiles use, so an \"approve\" shortcut exists only while an agent is in the foreground.")
                 }
             }
@@ -519,6 +519,22 @@ struct CustomShortcutEditorView: View {
 
     // MARK: bits
 
+    @ViewBuilder
+    private func typographicPunctuationNote(for text: Binding<String>) -> some View {
+        if containsTypographicShortcutPunctuation(text.wrappedValue) {
+            VStack(alignment: .leading, spacing: 4) {
+                caption("Contains typographic quotes or dashes.")
+                Button("Use straight quotes") {
+                    text.wrappedValue = straightenedShortcutLiteral(text.wrappedValue)
+                }
+                .font(Typography.tesseraMono(size: 10.5))
+                .foregroundStyle(T.fg)
+                .buttonStyle(.borderless)
+                .accessibilityIdentifier("custom-shortcut-straighten")
+            }
+        }
+    }
+
     private func fieldLabel(_ text: LocalizedStringKey) -> some View {
         Text(text)
             .font(Typography.tesseraMono(size: 11))
@@ -540,5 +556,21 @@ struct CustomShortcutEditorView: View {
         text
             .font(Typography.tesseraMono(size: 10.5))
             .foregroundStyle(T.fgDim)
+    }
+}
+
+func containsTypographicShortcutPunctuation(_ text: String) -> Bool {
+    text.contains { "‘’‚‛“”„‟—–".contains($0) }
+}
+
+/// Explicit editor action only: saving preserves the field's literal text.
+func straightenedShortcutLiteral(_ text: String) -> String {
+    text.reduce(into: "") { result, character in
+        switch character {
+        case "‘", "’", "‚", "‛": result.append("'")
+        case "“", "”", "„", "‟": result.append("\"")
+        case "—", "–": result.append("--")
+        default: result.append(character)
+        }
     }
 }

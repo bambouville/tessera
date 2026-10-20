@@ -1,0 +1,9 @@
+%session-changed $0 work
+%window-add @0
+%window-renamed @0 editor
+%window-pane-changed @0 %1
+%window-add @1
+%window-renamed @1 logs
+%window-pane-changed @1 %2
+%session-window-changed $0 @1
+%subscription-changed tessera-authority $0 @1 1 %2 : v1 ipad 7 iPad

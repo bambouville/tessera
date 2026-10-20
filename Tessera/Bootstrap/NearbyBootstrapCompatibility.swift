@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import TesseraProtocolCore
 
 /// Cross-version compatibility contract for nearby bootstrap.
 ///
@@ -33,9 +34,10 @@ import Network
 ///    either input then desynchronizes the SAS. The frozen v2 transcript
 ///    ships without this only because v2 accepts exactly v2, so there is
 ///    no version choice for an attacker to influence.
-/// 4. The v2 commitment digest projection is exactly
+/// 4. The v2 recipient-hello digest projection is exactly
 ///    `{version, role, ephemeralPublicKey}`. Any new v2 hello field stays out
-///    of it; a future version defines its own projection under a new label.
+///    of it. The commitment carries that digest as `helloDigest`; a future
+///    version defines its own projection under a new label.
 /// 5. `appVersion` and `supportedVersions` are unauthenticated advisory
 ///    hints: sanitize before display and never use them as trust,
 ///    negotiation-integrity, or key-derivation inputs. (Folding their raw
@@ -53,94 +55,20 @@ import Network
 ///    `docs/schemas/nearby-bootstrap/vN/`. A wire change requires bumping
 ///    `NearbyBootstrapProtocol.version`, adding `v(N+1)/`, and leaving `vN/`
 ///    untouched as the record a future downgrade path is written against.
+///    Exception: receiver-declared optional extensions documented in
+///    `docs/schemas/nearby-bootstrap/v2-extensions.md` may use an authenticated,
+///    lenient payload sent BEFORE the strict message. A sender must omit each
+///    extension unless that receiver declared it; released receivers never
+///    see extended manifests. No cleartext hint may enable an extension.
 /// 10. Size envelopes are part of the contract because they are enforced
 ///    before the version probe runs: a future commitment/hello must fit
 ///    `maximumHandshakeMessageSize` (4096 bytes) on shipped builds, encrypted
 ///    frames are read with a 65536-byte cap, and the manifest with
 ///    `BootstrapManifest.maximumEncodedByteCount` plus framing headroom.
-public enum NearbyBootstrapProtocol {
-    /// End-to-end version of the whole nearby-bootstrap flow: handshake
-    /// messages, encrypted-channel framing, and manifest schema bump together.
-    public static let version = 2
-
-    /// Ascending versions this build can complete a transfer with. v2 code
-    /// accepts exactly v2; a future build widens this only after it implements
-    /// an explicit compatibility path for each listed version.
-    public static let supportedVersions: [Int] = [2]
-
-    /// Receive cap applied to the length prefix of the cleartext handshake
-    /// messages (commitment and hello) BEFORE the version probe can run. A
-    /// future version's first messages must fit this envelope on already
-    /// shipped builds or the clean version error is unreachable.
-    public static let maximumHandshakeMessageSize = 4_096
-}
-
-/// Sanitized, advisory-only description of a peer's version claims. The raw
-/// values arrive in cleartext from an unauthenticated peer, so free-text is
-/// cleaned at construction and list sizes are capped before anything can
-/// reach UI or logs.
-public struct NearbyPeerVersionInfo: Equatable, Sendable {
-    public let version: Int
-    public let appVersion: String?
-    public let supportedVersions: [Int]?
-
-    public init(version: Int, appVersion: String?, supportedVersions: [Int]?) {
-        self.version = version
-        let cleaned = appVersion.map(Self.sanitizedAppVersion)
-        self.appVersion = (cleaned?.isEmpty ?? true) ? nil : cleaned
-        self.supportedVersions = supportedVersions.map { Array($0.prefix(8)) }
-    }
-
-    private static let allowedAppVersionScalars = CharacterSet(
-        charactersIn: "0123456789abcdefghijklmnopqrstuvwxyz"
-            + "ABCDEFGHIJKLMNOPQRSTUVWXYZ.+-"
-    )
-
-    /// Marketing versions are `[0-9A-Za-z.+-]` by construction, so restrict
-    /// to that class and cap by scalar count. `String.prefix` would count
-    /// grapheme clusters, which are unbounded in bytes — a hostile peer could
-    /// pack the whole handshake message budget into a few clusters of
-    /// combining marks, and bidi scalars could reorder the failure sentence
-    /// this value gets interpolated into.
-    private static func sanitizedAppVersion(_ rawValue: String) -> String {
-        var scalars = String.UnicodeScalarView()
-        for scalar in rawValue.unicodeScalars
-        where allowedAppVersionScalars.contains(scalar) {
-            scalars.append(scalar)
-            if scalars.count == 32 { break }
-        }
-        return String(scalars)
-    }
-}
-
-/// Which wire message carried an incompatible version, for distinct error
-/// wording between the commitment (first message) and hello legs.
-public enum NearbyVersionedMessageKind: String, Equatable, Sendable {
-    case commitment
-    case hello
-}
-
-/// Lenient version-first probe run before every strict or full decode of a
-/// versioned wire message. It never throws: `nil` means the payload is not a
-/// JSON object carrying an integer `version`, in which case callers fall
-/// through to their existing structural errors. Contract: the `version` key
-/// name and integer type never change in any future protocol revision.
-enum NearbyVersionProbe {
-    static func probe(_ data: Data) -> NearbyPeerVersionInfo? {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let versionNumber = object["version"] as? NSNumber,
-              CFGetTypeID(versionNumber) != CFBooleanGetTypeID(),
-              let version = versionNumber as? Int
-        else { return nil }
-        let appVersion = object["appVersion"] as? String
-        let supported = (object["supportedVersions"] as? [Any])?.compactMap { $0 as? Int }
-        return NearbyPeerVersionInfo(
-            version: version,
-            appVersion: appVersion,
-            supportedVersions: supported
-        )
-    }
-}
+public typealias NearbyBootstrapProtocol = LegacyNearbyBootstrapV2
+public typealias NearbyPeerVersionInfo = LegacyNearbyPeerVersionInfoV2
+public typealias NearbyVersionedMessageKind = LegacyNearbyVersionedMessageKindV2
+typealias NearbyVersionProbe = LegacyNearbyVersionProbeV2
 
 /// Pre-connect compatibility verdict for a browsed peer, derived from its
 /// Bonjour TXT record. Strictly advisory badge data: the TXT record is

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tmux_move_left">Nach links verschieben</string>
+    <string name="tmux_move_right">Nach rechts verschieben</string>
+    <string name="tmux_move_up">Nach oben verschieben</string>
+    <string name="tmux_move_down">Nach unten verschieben</string>
+    <string name="tmux_move_start">An den Anfang verschieben</string>
+    <string name="tmux_move_end">Ans Ende verschieben</string>
+    <string name="tmux_tidy">Fensternummern neu ordnen</string>
+    <string name="tmux_order_failed">Die tmux-Fensterreihenfolge konnte nicht aktualisiert werden.</string>
+    <string name="tmux_order_changed">Die Fensterreihenfolge hat sich geändert. Bitte erneut versuchen.</string>
+    <string name="tmux_order_timeout">Zeitüberschreitung beim Ordnen der Fenster.</string>
+    <string name="tmux_order_unavailable">Fenster können noch nicht geordnet werden.</string>
+    <string name="tmux_window_label">Fenster %1$d, %2$s</string>
+    <string name="tmux_window_index_label">Fenster %1$d, %2$s, tmux-Index %3$d</string>
+    <string name="tmux_window_index_detail">tmux-Index %1$d · %2$s</string>
+    <string name="tmux_split_right">Rechts teilen</string>
+    <string name="tmux_split_left">Links teilen</string>
+    <string name="tmux_split_down">Nach unten teilen</string>
+    <string name="tmux_split_up">Nach oben teilen</string>
+</resources>

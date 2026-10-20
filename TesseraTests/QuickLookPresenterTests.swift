@@ -1,8 +1,81 @@
 import Foundation
 import Testing
+import UIKit
 @testable import Tessera
 
 struct QuickLookPresenterTests {
+    @Test func imageParsingPreservesProseAndFindsReferencesInNestedBlocks() throws {
+        let source = """
+        Before ![a **bold** caption][picture] after.
+
+        - ![list](/opt/list.png)
+
+        | Preview |
+        | --- |
+        | ![table](../table.png) |
+
+        `![code](ignored.png)`
+
+        [picture]: ../images/a%20b.png
+        """
+        #expect(try MarkdownImageStaging.destinations(source: source) == ["../images/a%20b.png", "/opt/list.png", "../table.png"])
+        let document = try MarkdownDocument(source: source, baseURL: URL(fileURLWithPath: "/staging/"))
+        let parts = MarkdownInlinePart.split(try #require(document.blocks.first).content)
+        #expect(parts.map(\.image) == [nil, "../images/a%20b.png", nil])
+        #expect(String(parts[0].content.characters) == "Before ")
+        #expect(String(parts[1].content.characters) == "a bold caption")
+        #expect(String(parts[2].content.characters) == " after.")
+    }
+
+    @Test @MainActor func stagesRemoteImagesWithoutReadingDevicePathsAndSurvivesFailures() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let document = directory.appendingPathComponent("readme.md")
+        try "![one](../image%20one.png) ![two](/opt/two.png) ![again](../image%20one.png) ![missing](missing.png) ![invalid](bad.png) ![large](large.png)".write(to: document, atomically: true, encoding: .utf8)
+        let png = UIGraphicsImageRenderer(size: CGSize(width: 80, height: 40)).pngData { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 80, height: 40))
+        }
+        let bridge = MockFileBridge()
+        bridge.downloadContents = [
+            "/docs/../image one.png": png, "/opt/two.png": png,
+            "/docs/bad.png": Data("not an image".utf8),
+            "/docs/large.png": Data(repeating: 0, count: Int(MarkdownImageStaging.maxImageBytes + 1)),
+        ]
+        try await bridge.connect()
+        try await MarkdownImageStaging.stage(document: document, remotePath: "/docs/readme.md", bridge: bridge)
+        let images = MarkdownImageStaging.images(for: document)
+        #expect(Set(images.keys) == Set(["../image%20one.png", "/opt/two.png"]))
+        #expect(bridge.downloadedPaths == ["/docs/../image one.png", "/opt/two.png", "/docs/missing.png", "/docs/bad.png", "/docs/large.png"])
+        for image in images.values {
+            #expect(image.deletingLastPathComponent().path == directory.path)
+            #expect(UIImage(contentsOfFile: image.path) != nil)
+        }
+        #expect(try MarkdownPreviewSupport.loadDocument(from: document).images == images)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).count == 4)
+    }
+
+    @Test func linkedAndAdjacentImagesKeepDestinationsAndLinks() throws {
+        let source = "[![linked](/opt/a.png)](https://example.com/details) ![one](same.png)![two](same.png)"
+        let document = try MarkdownDocument(source: source, baseURL: nil)
+        let parts = MarkdownInlinePart.split(try #require(document.blocks.first).content)
+        let images = parts.filter { $0.image != nil }
+        #expect(images.map(\.image) == ["/opt/a.png", "same.png", "same.png"])
+        #expect(images.first?.content.runs.first?.link == URL(string: "https://example.com/details"))
+        #expect(try MarkdownImageStaging.destinations(source: source) == ["/opt/a.png", "same.png"])
+    }
+
+    @Test func imagePlaceholdersPreserveAdjacentEmphasisAndCRLines() throws {
+        let source = "_before_![one](one.png)_after_\r\r![two](two.png)"
+        let document = try MarkdownDocument(source: source, baseURL: nil)
+        #expect(try MarkdownImageStaging.destinations(source: source) == ["one.png", "two.png"])
+        let first = try #require(document.blocks.first).content
+        #expect(String(first.characters) == "beforeoneafter")
+        #expect(first.runs.first?.inlinePresentationIntent?.contains(.emphasized) == true)
+        #expect(first.runs.last?.inlinePresentationIntent?.contains(.emphasized) == true)
+    }
+
     @Test func presentationModeTogglesBetweenPopupAndFullScreen() {
         #expect(QuickLookPresentationMode.fallback == .popup)
         #expect(QuickLookPresentationMode.popup.toggled == .fullScreen)

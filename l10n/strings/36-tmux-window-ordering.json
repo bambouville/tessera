@@ -1,0 +1,274 @@
+{
+  "Move Left": {
+    "de": "Nach links verschieben",
+    "es": "Mover a la izquierda",
+    "fr": "Déplacer à gauche",
+    "ja": "左に移動",
+    "zh-Hans": "向左移动",
+    "zh-Hant": "向左移動"
+  },
+  "Move Right": {
+    "de": "Nach rechts verschieben",
+    "es": "Mover a la derecha",
+    "fr": "Déplacer à droite",
+    "ja": "右に移動",
+    "zh-Hans": "向右移动",
+    "zh-Hant": "向右移動"
+  },
+  "Move Up": {
+    "de": "Nach oben verschieben",
+    "es": "Mover arriba",
+    "fr": "Déplacer vers le haut",
+    "ja": "上に移動",
+    "zh-Hans": "向上移动",
+    "zh-Hant": "向上移動"
+  },
+  "Move Down": {
+    "de": "Nach unten verschieben",
+    "es": "Mover abajo",
+    "fr": "Déplacer vers le bas",
+    "ja": "下に移動",
+    "zh-Hans": "向下移动",
+    "zh-Hant": "向下移動"
+  },
+  "Move to Start": {
+    "de": "An den Anfang verschieben",
+    "es": "Mover al principio",
+    "fr": "Déplacer au début",
+    "ja": "先頭に移動",
+    "zh-Hans": "移至开头",
+    "zh-Hant": "移至開頭"
+  },
+  "Move to End": {
+    "de": "Ans Ende verschieben",
+    "es": "Mover al final",
+    "fr": "Déplacer à la fin",
+    "ja": "末尾に移動",
+    "zh-Hans": "移至末尾",
+    "zh-Hant": "移至結尾"
+  },
+  "Close Window": {
+    "de": "Fenster schließen",
+    "es": "Cerrar ventana",
+    "fr": "Fermer la fenêtre",
+    "ja": "ウインドウを閉じる",
+    "zh-Hans": "关闭窗口",
+    "zh-Hant": "關閉視窗"
+  },
+  "Tidy window numbers": {
+    "de": "Fensternummern neu ordnen",
+    "es": "Reordenar números de ventana",
+    "fr": "Réorganiser les numéros des fenêtres",
+    "ja": "ウインドウ番号を整理",
+    "zh-Hans": "整理窗口编号",
+    "zh-Hant": "整理視窗編號"
+  },
+  "Updating tmux window order": {
+    "de": "tmux-Fensterreihenfolge wird aktualisiert",
+    "es": "Actualizando el orden de ventanas de tmux",
+    "fr": "Mise à jour de l’ordre des fenêtres tmux",
+    "ja": "tmux ウインドウの順序を更新中",
+    "zh-Hans": "正在更新 tmux 窗口顺序",
+    "zh-Hant": "正在更新 tmux 視窗順序"
+  },
+  "Active tmux window": {
+    "de": "Aktives tmux-Fenster",
+    "es": "Ventana de tmux activa",
+    "fr": "Fenêtre tmux active",
+    "ja": "現在の tmux ウインドウ",
+    "zh-Hans": "当前 tmux 窗口",
+    "zh-Hant": "目前的 tmux 視窗"
+  },
+  "Tmux window order": {
+    "de": "tmux-Fensterreihenfolge",
+    "es": "Orden de ventanas de tmux",
+    "fr": "Ordre des fenêtres tmux",
+    "ja": "tmux ウインドウの順序",
+    "zh-Hans": "tmux 窗口顺序",
+    "zh-Hant": "tmux 視窗順序"
+  },
+  "Tmux window indexes": {
+    "de": "tmux-Fensterindizes",
+    "es": "Índices de ventanas de tmux",
+    "fr": "Indices des fenêtres tmux",
+    "ja": "tmux ウインドウのインデックス",
+    "zh-Hans": "tmux 窗口索引",
+    "zh-Hant": "tmux 視窗索引"
+  },
+  "Window order failed: %@": {
+    "de": "Fensterreihenfolge fehlgeschlagen: %@",
+    "es": "Error al ordenar ventanas: %@",
+    "fr": "Échec du déplacement des fenêtres : %@",
+    "ja": "ウインドウの並べ替えに失敗: %@",
+    "zh-Hans": "窗口排序失败：%@",
+    "zh-Hant": "視窗排序失敗：%@"
+  },
+  ", tmux index %lld": {
+    "de": ", tmux-Index %lld",
+    "es": ", índice de tmux %lld",
+    "fr": ", indice tmux %lld",
+    "ja": "、tmux インデックス %lld",
+    "zh-Hans": "，tmux 索引 %lld",
+    "zh-Hant": "，tmux 索引 %lld"
+  },
+  "jump to window 1–8 / last": {
+    "de": "Zu Fenster 1–8 / letztem wechseln",
+    "es": "ir a ventana 1–8 / última",
+    "fr": "aller à la fenêtre 1–8 / dernière",
+    "ja": "ウインドウ 1～8 / 最後に移動",
+    "zh-Hans": "跳转到窗口 1–8 / 最后一个",
+    "zh-Hant": "跳至視窗 1–8 / 最後一個"
+  },
+  "Reorder tmux window": {
+    "de": "tmux-Fenster verschieben",
+    "es": "Reordenar ventana de tmux",
+    "fr": "Déplacer la fenêtre tmux",
+    "ja": "tmux ウインドウを並べ替え",
+    "zh-Hans": "重新排列 tmux 窗口",
+    "zh-Hant": "重新排列 tmux 視窗"
+  },
+  "Could not update the tmux window order.": {
+    "de": "Die tmux-Fensterreihenfolge konnte nicht aktualisiert werden.",
+    "es": "No se pudo actualizar el orden de ventanas de tmux.",
+    "fr": "Impossible de mettre à jour l’ordre des fenêtres tmux.",
+    "ja": "tmux ウインドウの順序を更新できませんでした。",
+    "zh-Hans": "无法更新 tmux 窗口顺序。",
+    "zh-Hant": "無法更新 tmux 視窗順序。"
+  },
+  "The window order changed. Try again.": {
+    "de": "Die Fensterreihenfolge hat sich geändert. Bitte erneut versuchen.",
+    "es": "El orden de ventanas ha cambiado. Inténtalo de nuevo.",
+    "fr": "L’ordre des fenêtres a changé. Réessayez.",
+    "ja": "ウインドウの順序が変更されました。もう一度お試しください。",
+    "zh-Hans": "窗口顺序已改变。请重试。",
+    "zh-Hant": "視窗順序已變更。請重試。"
+  },
+  "Window ordering timed out.": {
+    "de": "Zeitüberschreitung beim Ordnen der Fenster.",
+    "es": "Se agotó el tiempo para ordenar ventanas.",
+    "fr": "Le déplacement des fenêtres a expiré.",
+    "ja": "ウインドウの並べ替えがタイムアウトしました。",
+    "zh-Hans": "窗口排序超时。",
+    "zh-Hant": "視窗排序逾時。"
+  },
+  "Window ordering is not available yet.": {
+    "de": "Fenster können noch nicht geordnet werden.",
+    "es": "Aún no se pueden ordenar las ventanas.",
+    "fr": "Le déplacement des fenêtres n’est pas encore disponible.",
+    "ja": "ウインドウはまだ並べ替えできません。",
+    "zh-Hans": "暂时无法排列窗口。",
+    "zh-Hant": "暫時無法排列視窗。"
+  },
+  "move window left": {
+    "de": "Nach links verschieben",
+    "es": "Mover a la izquierda",
+    "fr": "Déplacer à gauche",
+    "ja": "左に移動",
+    "zh-Hans": "向左移动",
+    "zh-Hant": "向左移動"
+  },
+  "move window right": {
+    "de": "Nach rechts verschieben",
+    "es": "Mover a la derecha",
+    "fr": "Déplacer à droite",
+    "ja": "右に移動",
+    "zh-Hans": "向右移动",
+    "zh-Hant": "向右移動"
+  },
+  "%@, window %lld%@": {
+    "de": "%@, Fenster %lld%@",
+    "es": "%@, ventana %lld%@",
+    "fr": "%@, fenêtre %lld%@",
+    "ja": "%1$@、ウインドウ %2$lld%3$@",
+    "zh-Hans": "%1$@，窗口 %2$lld%3$@",
+    "zh-Hant": "%1$@，視窗 %2$lld%3$@"
+  },
+  "%@, window %lld%@, agent active": {
+    "de": "%@, Fenster %lld%@, Agent aktiv",
+    "es": "%@, ventana %lld%@, agente activo",
+    "fr": "%@, fenêtre %lld%@, agent actif",
+    "ja": "%1$@、ウインドウ %2$lld%3$@、エージェント稼働中",
+    "zh-Hans": "%1$@，窗口 %2$lld%3$@，智能体运行中",
+    "zh-Hant": "%1$@，視窗 %2$lld%3$@，智慧體執行中"
+  },
+  "%@, window %lld, tmux index %lld": {
+    "de": "%1$@, Fenster %2$lld, tmux-Index %3$lld",
+    "es": "%1$@, ventana %2$lld, índice de tmux %3$lld",
+    "fr": "%1$@, fenêtre %2$lld, indice tmux %3$lld",
+    "ja": "%1$@、ウインドウ %2$lld、tmux インデックス %3$lld",
+    "zh-Hans": "%1$@，窗口 %2$lld，tmux 索引 %3$lld",
+    "zh-Hant": "%1$@，視窗 %2$lld，tmux 索引 %3$lld"
+  },
+  "Could not verify the tmux session group.": {
+    "de": "Die tmux-Sitzungsgruppe konnte nicht überprüft werden.",
+    "es": "No se pudo verificar el grupo de sesiones tmux.",
+    "fr": "Impossible de vérifier le groupe de sessions tmux.",
+    "ja": "tmux セッショングループを確認できませんでした。",
+    "zh-Hans": "无法验证 tmux 会话组。",
+    "zh-Hant": "無法驗證 tmux 工作階段群組。"
+  },
+  "Could not discover the tmux session group.": {
+    "de": "Die tmux-Sitzungsgruppe konnte nicht ermittelt werden.",
+    "es": "No se pudo identificar el grupo de sesiones tmux.",
+    "fr": "Impossible d’identifier le groupe de sessions tmux.",
+    "ja": "tmux セッショングループを取得できませんでした。",
+    "zh-Hans": "无法获取 tmux 会话组。",
+    "zh-Hant": "無法取得 tmux 工作階段群組。"
+  },
+  "Could not build a safe tmux tidy operation.": {
+    "de": "Die tmux-Fensternummern konnten nicht sicher neu geordnet werden.",
+    "es": "No se pudo preparar una reordenación segura de tmux.",
+    "fr": "Impossible de préparer une réorganisation sûre de tmux.",
+    "ja": "tmux の安全な番号整理を準備できませんでした。",
+    "zh-Hans": "无法准备安全的 tmux 编号整理操作。",
+    "zh-Hant": "無法準備安全的 tmux 編號整理操作。"
+  },
+  "The tmux session changed before the window could move.": {
+    "de": "Die tmux-Sitzung hat sich vor dem Verschieben geändert.",
+    "es": "La sesión tmux cambió antes de mover la ventana.",
+    "fr": "La session tmux a changé avant le déplacement.",
+    "ja": "ウインドウを移動する前に tmux セッションが変更されました。",
+    "zh-Hans": "移动窗口前 tmux 会话已改变。",
+    "zh-Hant": "移動視窗前 tmux 工作階段已變更。"
+  },
+  "The tmux window order change was cancelled.": {
+    "de": "Die Änderung der tmux-Fensterreihenfolge wurde abgebrochen.",
+    "es": "Se canceló el cambio de orden de ventanas tmux.",
+    "fr": "Le changement d’ordre des fenêtres tmux a été annulé.",
+    "ja": "tmux ウインドウの並べ替えがキャンセルされました。",
+    "zh-Hans": "tmux 窗口排序已取消。",
+    "zh-Hant": "tmux 視窗排序已取消。"
+  },
+  "The tmux window order did not update in time.": {
+    "de": "Zeitüberschreitung beim Ordnen der Fenster.",
+    "es": "Se agotó el tiempo para ordenar ventanas.",
+    "fr": "Le déplacement des fenêtres a expiré.",
+    "ja": "ウインドウの並べ替えがタイムアウトしました。",
+    "zh-Hans": "窗口排序超时。",
+    "zh-Hant": "視窗排序逾時。"
+  },
+  "The tmux window order command timed out.": {
+    "de": "Zeitüberschreitung beim Ordnen der Fenster.",
+    "es": "Se agotó el tiempo para ordenar ventanas.",
+    "fr": "Le déplacement des fenêtres a expiré.",
+    "ja": "ウインドウの並べ替えがタイムアウトしました。",
+    "zh-Hans": "窗口排序超时。",
+    "zh-Hant": "視窗排序逾時。"
+  },
+  "The tmux control connection is unavailable.": {
+    "de": "Fenster können noch nicht geordnet werden.",
+    "es": "Aún no se pueden ordenar las ventanas.",
+    "fr": "Le déplacement des fenêtres n’est pas encore disponible.",
+    "ja": "ウインドウはまだ並べ替えできません。",
+    "zh-Hans": "暂时无法排列窗口。",
+    "zh-Hant": "暫時無法排列視窗。"
+  },
+  "tmux rejected the window order change.": {
+    "de": "Die tmux-Fensterreihenfolge konnte nicht aktualisiert werden.",
+    "es": "No se pudo actualizar el orden de ventanas de tmux.",
+    "fr": "Impossible de mettre à jour l’ordre des fenêtres tmux.",
+    "ja": "tmux ウインドウの順序を更新できませんでした。",
+    "zh-Hans": "无法更新 tmux 窗口顺序。",
+    "zh-Hant": "無法更新 tmux 視窗順序。"
+  }
+}

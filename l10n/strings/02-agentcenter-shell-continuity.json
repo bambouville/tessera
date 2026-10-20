@@ -1,28 +1,4 @@
 {
-  "A terminal exposes process presence and pixels, but not whether an agent is computing, idle, or blocked. Claude and Codex keep prompt-looking rows visible while they work, so inferring state from terminal text produces false results. Their lifecycle hook APIs are the authoritative signal.": {
-    "de": "Ein Terminal gibt Prozesse und Pixel preis, aber nicht, ob ein Agent rechnet, untätig ist oder blockiert. Claude und Codex lassen prompt-ähnliche Zeilen sichtbar, während sie arbeiten — den Zustand aus dem Terminaltext abzuleiten liefert deshalb falsche Ergebnisse. Ihre Lifecycle-Hook-APIs sind das verbindliche Signal.",
-    "es": "un terminal expone los procesos y los píxeles, pero no si un agente está calculando, inactivo o bloqueado. Claude y Codex mantienen visibles filas que parecen un prompt mientras trabajan, así que deducir el estado del texto del terminal da resultados falsos. Sus API de hooks de ciclo de vida son la señal autorizada.",
-    "fr": "un terminal expose les processus et les pixels, mais pas si un agent calcule, est inactif ou bloqué. Claude et Codex laissent visibles des lignes qui ressemblent à une invite pendant qu'ils travaillent : déduire l'état du texte du terminal donne donc de faux résultats. Leurs API de hooks de cycle de vie sont le signal faisant foi.",
-    "ja": "ターミナルからはプロセスの有無とピクセルは分かりますが、エージェントが計算中なのか、待機中なのか、ブロックされているのかは分かりません。Claude と Codex は作業中もプロンプトに見える行を表示したままにするため、ターミナルのテキストから状態を推測すると誤った結果になります。各社のライフサイクルフック API が信頼できる唯一の情報源です。",
-    "zh-Hans": "终端只能暴露进程和像素，无法说明智能体正在计算、空闲还是被阻塞。Claude 和 Codex 在工作时仍会显示形似提示符的行，因此从终端文本推断状态会得出错误结论。它们的生命周期钩子 API 才是权威信号。",
-    "zh-Hant": "終端機只能暴露行程與像素，無法說明智慧體正在運算、閒置還是被阻擋。Claude 和 Codex 在工作時仍會顯示形似提示字元的列，因此從終端機文字推斷狀態會得出錯誤結論。它們的生命週期掛鉤 API 才是權威訊號。"
-  },
-  "Agent Center watches Claude Code, Codex, and matching custom profiles across active sessions.": {
-    "de": "Das Agent Center beobachtet Claude Code, Codex und passende eigene Profile über alle aktiven Sitzungen hinweg.",
-    "es": "el centro de agentes vigila Claude Code, Codex y los perfiles personalizados que coincidan en todas las sesiones activas.",
-    "fr": "le centre d'agents surveille Claude Code, Codex et les profils personnalisés correspondants dans toutes les sessions actives.",
-    "ja": "エージェントセンターは、アクティブなセッション全体で Claude Code、Codex、および一致するカスタムプロファイルを監視します。",
-    "zh-Hans": "智能体中心会在所有活动会话中监视 Claude Code、Codex 以及匹配的自定义配置。",
-    "zh-Hant": "智慧體中心會在所有進行中的工作階段中監視 Claude Code、Codex 以及符合的自訂設定檔。"
-  },
-  "Answer %lld": {
-    "de": "Antwort %lld",
-    "es": "Respuesta %lld",
-    "fr": "Réponse %lld",
-    "ja": "回答 %lld",
-    "zh-Hans": "回答 %lld",
-    "zh-Hant": "回答 %lld"
-  },
   "Cancel": {
     "de": "Abbrechen",
     "es": "Cancelar",
@@ -47,14 +23,6 @@
     "zh-Hans": "帮助",
     "zh-Hant": "輔助說明"
   },
-  "Next agent": {
-    "de": "Nächster Agent",
-    "es": "Agente siguiente",
-    "fr": "Agent suivant",
-    "ja": "次のエージェント",
-    "zh-Hans": "下一个智能体",
-    "zh-Hant": "下一個智慧體"
-  },
   "Open %@ on %@": {
     "de": "%@ auf %@ öffnen",
     "es": "Abrir %@ en %@",
@@ -62,30 +30,6 @@
     "ja": "%2$@ の %1$@ を開く",
     "zh-Hans": "在 %2$@ 上打开 %1$@",
     "zh-Hant": "在 %2$@ 上打開 %1$@"
-  },
-  "Open focused agent": {
-    "de": "Fokussierten Agenten öffnen",
-    "es": "Abrir el agente enfocado",
-    "fr": "Ouvrir l'agent ciblé",
-    "ja": "フォーカス中のエージェントを開く",
-    "zh-Hans": "打开聚焦的智能体",
-    "zh-Hant": "打開聚焦的智慧體"
-  },
-  "agent center · %lld": {
-    "de": "Agent Center · %lld",
-    "es": "centro de agentes · %lld",
-    "fr": "centre d'agents · %lld",
-    "ja": "エージェントセンター・%lld",
-    "zh-Hans": "智能体中心 · %lld",
-    "zh-Hant": "智慧體中心 · %lld"
-  },
-  "agent status hook": {
-    "de": "Agent-Status-Hook",
-    "es": "hook de estado del agente",
-    "fr": "hook d'état de l'agent",
-    "ja": "エージェントステータスフック",
-    "zh-Hans": "智能体状态钩子",
-    "zh-Hant": "智慧體狀態掛鉤"
   },
   "agents": {
     "de": "Agenten",
@@ -95,14 +39,6 @@
     "zh-Hans": "智能体",
     "zh-Hant": "智慧體"
   },
-  "agents need attention": {
-    "de": "Agenten brauchen Aufmerksamkeit",
-    "es": "hay agentes que necesitan atención",
-    "fr": "des agents demandent votre attention",
-    "ja": "対応が必要なエージェントがあります",
-    "zh-Hans": "有智能体需要处理",
-    "zh-Hant": "有智慧體需要處理"
-  },
   "all caught up": {
     "de": "Alles erledigt",
     "es": "todo al día",
@@ -110,30 +46,6 @@
     "ja": "すべて対応済み",
     "zh-Hans": "全部已处理",
     "zh-Hant": "全部已處理"
-  },
-  "answers re-check the live prompt · sends verify submission": {
-    "de": "Antworten prüfen die aktive Eingabeaufforderung erneut · Senden bestätigt die Übermittlung",
-    "es": "las respuestas vuelven a comprobar el prompt en vivo · el envío verifica la entrega",
-    "fr": "les réponses revérifient l'invite en cours · l'envoi vérifie la soumission",
-    "ja": "回答時にライブプロンプトを再確認・送信時に内容を検証します",
-    "zh-Hans": "回答会重新检查实时提示符 · 发送会校验提交内容",
-    "zh-Hant": "回答會重新檢查即時提示字元 · 傳送會校驗提交內容"
-  },
-  "check status hook": {
-    "de": "Status-Hook prüfen",
-    "es": "comprobar el hook de estado",
-    "fr": "vérifier le hook d'état",
-    "ja": "ステータスフックを確認",
-    "zh-Hans": "检查状态钩子",
-    "zh-Hant": "檢查狀態掛鉤"
-  },
-  "checking agent status integration": {
-    "de": "Agent-Status-Integration wird geprüft",
-    "es": "comprobando la integración de estado del agente",
-    "fr": "vérification de l'intégration d'état de l'agent",
-    "ja": "エージェントステータス連携を確認中",
-    "zh-Hans": "正在检查智能体状态集成",
-    "zh-Hant": "正在檢查智慧體狀態整合"
   },
   "finished": {
     "de": "fertig",
@@ -159,14 +71,6 @@
     "zh-Hans": "中断",
     "zh-Hant": "中斷"
   },
-  "just finished": {
-    "de": "Gerade fertig",
-    "es": "recién terminado",
-    "fr": "vient de terminer",
-    "ja": "完了直後",
-    "zh-Hans": "刚刚完成",
-    "zh-Hant": "剛剛完成"
-  },
   "needs input": {
     "de": "Braucht Eingabe",
     "es": "necesita entrada",
@@ -174,46 +78,6 @@
     "ja": "入力待ち",
     "zh-Hans": "等待输入",
     "zh-Hant": "等待輸入"
-  },
-  "no agents detected": {
-    "de": "Keine Agenten erkannt",
-    "es": "no se detectaron agentes",
-    "fr": "aucun agent détecté",
-    "ja": "エージェントが検出されません",
-    "zh-Hans": "未检测到智能体",
-    "zh-Hant": "未偵測到智慧體"
-  },
-  "open %@": {
-    "de": "%@ öffnen",
-    "es": "abrir %@",
-    "fr": "ouvrir %@",
-    "ja": "%@ を開く",
-    "zh-Hans": "打开 %@",
-    "zh-Hant": "打開 %@"
-  },
-  "open ↩": {
-    "de": "Öffnen ↩",
-    "es": "abrir ↩",
-    "fr": "ouvrir ↩",
-    "ja": "開く ↩",
-    "zh-Hans": "打开 ↩",
-    "zh-Hant": "打開 ↩"
-  },
-  "provider session %@": {
-    "de": "Anbieter-Sitzung %@",
-    "es": "sesión del proveedor %@",
-    "fr": "session du fournisseur %@",
-    "ja": "プロバイダセッション %@",
-    "zh-Hans": "提供方会话 %@",
-    "zh-Hant": "提供者工作階段 %@"
-  },
-  "retry check": {
-    "de": "Prüfung wiederholen",
-    "es": "reintentar la comprobación",
-    "fr": "réessayer la vérification",
-    "ja": "再確認",
-    "zh-Hans": "重新检查",
-    "zh-Hant": "重新檢查"
   },
   "session %@": {
     "de": "Sitzung %@",
@@ -223,22 +87,6 @@
     "zh-Hans": "会话 %@",
     "zh-Hant": "工作階段 %@"
   },
-  "show less": {
-    "de": "Weniger anzeigen",
-    "es": "mostrar menos",
-    "fr": "afficher moins",
-    "ja": "折りたたむ",
-    "zh-Hans": "收起",
-    "zh-Hant": "收合"
-  },
-  "show more": {
-    "de": "Mehr anzeigen",
-    "es": "mostrar más",
-    "fr": "afficher plus",
-    "ja": "もっと見る",
-    "zh-Hans": "展开",
-    "zh-Hant": "展開"
-  },
   "status unavailable": {
     "de": "Status nicht verfügbar",
     "es": "estado no disponible",
@@ -246,14 +94,6 @@
     "ja": "ステータスを取得できません",
     "zh-Hans": "状态不可用",
     "zh-Hant": "狀態無法使用"
-  },
-  "tap an agent to jump into its session; answer or send directly from its card.": {
-    "de": "Tippe auf einen Agenten, um zu seiner Sitzung zu springen; antworte oder sende direkt von seiner Karte aus.",
-    "es": "toca un agente para ir a su sesión; responde o envía directamente desde su tarjeta.",
-    "fr": "touchez un agent pour ouvrir sa session ; répondez ou envoyez directement depuis sa carte.",
-    "ja": "エージェントをタップするとそのセッションに移動します。カードから直接回答・送信もできます。",
-    "zh-Hans": "轻点智能体即可进入其会话；也可直接在卡片上回答或发送。",
-    "zh-Hant": "輕點智慧體即可進入其工作階段；也可直接在卡片上回答或傳送。"
   },
   "task": {
     "de": "Aufgabe",
@@ -263,38 +103,6 @@
     "zh-Hans": "任务",
     "zh-Hant": "工作"
   },
-  "view and answer every agent across your sessions — tmux windows, panes, and raw connections": {
-    "de": "Alle Agenten über deine Sitzungen hinweg ansehen und beantworten — tmux-Fenster, Bereiche und direkte Verbindungen",
-    "es": "consulta y responde a todos los agentes de tus sesiones: ventanas de tmux, paneles y conexiones directas",
-    "fr": "consultez et répondez à tous les agents de vos sessions — fenêtres tmux, volets et connexions directes",
-    "ja": "すべてのセッション（tmux ウィンドウ、ペイン、直接接続）のエージェントを一覧して回答できます",
-    "zh-Hans": "查看并回复所有会话中的智能体 —— tmux 窗口、窗格和直接连接",
-    "zh-Hant": "查看並回覆所有工作階段中的智慧體 —— tmux 視窗、窗格和直接連線"
-  },
-  "visiting the agent's pane marks it checked": {
-    "de": "Der Bereich des Agenten gilt als geprüft, sobald du ihn aufrufst",
-    "es": "visitar el panel del agente lo marca como revisado",
-    "fr": "ouvrir le volet de l'agent le marque comme vu",
-    "ja": "エージェントのペインを開くと確認済みになります",
-    "zh-Hans": "访问智能体的窗格即标记为已查看",
-    "zh-Hant": "造訪智慧體的窗格即標記為已查看"
-  },
-  "what installation changes": {
-    "de": "Was die Installation ändert",
-    "es": "qué cambia la instalación",
-    "fr": "ce que l'installation modifie",
-    "ja": "インストールによる変更点",
-    "zh-Hans": "安装会更改什么",
-    "zh-Hant": "安裝會更改什麼"
-  },
-  "why this is necessary": {
-    "de": "Warum das nötig ist",
-    "es": "por qué es necesario",
-    "fr": "pourquoi c'est nécessaire",
-    "ja": "これが必要な理由",
-    "zh-Hans": "为什么需要它",
-    "zh-Hant": "為什麼需要它"
-  },
   "working": {
     "de": "Arbeitet",
     "es": "trabajando",
@@ -302,14 +110,6 @@
     "ja": "実行中",
     "zh-Hans": "工作中",
     "zh-Hant": "工作中"
-  },
-  "⎋ interrupt": {
-    "de": "⎋ Unterbrechen",
-    "es": "⎋ interrumpir",
-    "fr": "⎋ interrompre",
-    "ja": "⎋ 中断",
-    "zh-Hans": "⎋ 中断",
-    "zh-Hant": "⎋ 中斷"
   },
   "Disconnect": {
     "de": "Trennen",
@@ -511,14 +311,6 @@
     "zh-Hans": "上传失败",
     "zh-Hant": "上傳失敗"
   },
-  "%@ left — control returned here": {
-    "de": "%@ hat die Sitzung verlassen — die Steuerung ist wieder hier",
-    "es": "%@ salió; el control ha vuelto aquí",
-    "fr": "%@ a quitté la session — le contrôle est revenu ici",
-    "ja": "%@ が離脱しました — 操作権はこのデバイスに戻りました",
-    "zh-Hans": "%@ 已离开 —— 控制权已回到此设备",
-    "zh-Hant": "%@ 已離開 —— 控制權已回到此裝置"
-  },
   "Session continued on %@. Double-tap to take back control.": {
     "de": "Sitzung wird auf %@ fortgesetzt. Doppeltippe, um die Steuerung zurückzuholen.",
     "es": "la sesión continúa en %@. Toca dos veces para recuperar el control.",
@@ -566,14 +358,6 @@
     "ja": "他のデバイスから継続しています",
     "zh-Hans": "正在从你的另一台设备继续",
     "zh-Hant": "正在從你的另一台裝置繼續"
-  },
-  "control returned here": {
-    "de": "Steuerung ist wieder hier",
-    "es": "el control ha vuelto aquí",
-    "fr": "le contrôle est revenu ici",
-    "ja": "操作権がこのデバイスに戻りました",
-    "zh-Hans": "控制权已回到此设备",
-    "zh-Hant": "控制權已回到此裝置"
   },
   "could not continue": {
     "de": "Fortsetzen nicht möglich",

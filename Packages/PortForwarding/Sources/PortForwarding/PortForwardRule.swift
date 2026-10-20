@@ -1,29 +1,28 @@
 import Foundation
+import TesseraDomainCore
 
-public struct PortForwardRule: Codable, Equatable, Identifiable, Sendable {
-    public var id: UUID
-    public var enabled: Bool
-    public var autoStart: Bool
-    public var localPort: UInt16
-    public var remoteHost: String
-    public var remotePort: UInt16
-    public var label: String
+// This package is a shim. The forwarding model itself lives in
+// `Packages/TesseraCore/Sources/TesseraDomainCore/PortForwarding.swift`,
+// shared with Android; everything below is the iOS-side surface over it:
+// re-exports so existing call sites keep compiling, the storage codec that
+// migrates the legacy iOS blob, and the iOS sandbox validation overlay.
 
-    public init(
-        id: UUID = UUID(),
-        enabled: Bool = true,
-        autoStart: Bool = true,
-        localPort: UInt16,
-        remoteHost: String = "localhost",
-        remotePort: UInt16,
-        label: String = ""
-    ) {
-        self.id = id
-        self.enabled = enabled
-        self.autoStart = autoStart
-        self.localPort = localPort
-        self.remoteHost = remoteHost
-        self.remotePort = remotePort
-        self.label = label
+public typealias PortForwardDirection = TesseraDomainCore.PortForwardDirection
+public typealias PortForwardEndpoint = TesseraDomainCore.PortForwardEndpoint
+public typealias PortForwardRule = TesseraDomainCore.PortForwardRule
+public typealias PortForwardRuleError = TesseraDomainCore.PortForwardRuleError
+public typealias PortForwardRuleValidator = TesseraDomainCore.PortForwardRuleValidator
+public typealias ForwardingTransport = TesseraDomainCore.ForwardingTransport
+public typealias ForwardingCapabilities = TesseraDomainCore.ForwardingCapabilities
+public typealias ForwardingUnavailableReason = TesseraDomainCore.ForwardingUnavailableReason
+public typealias ForwardedWebTarget = TesseraDomainCore.ForwardedWebTarget
+public typealias ForwardedWebPolicy = TesseraDomainCore.ForwardedWebPolicy
+
+extension PortForwardRule {
+    /// `host:port` for display. A dynamic rule has no target and renders
+    /// empty; the iOS editor is local-only this round, so it never shows one.
+    public var targetDisplayText: String {
+        guard let target else { return "" }
+        return "\(target.host):\(target.port)"
     }
 }
