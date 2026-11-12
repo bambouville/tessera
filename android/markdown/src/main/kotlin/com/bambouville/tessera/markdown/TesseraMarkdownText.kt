@@ -341,7 +341,9 @@ private fun AnnotatedString.Builder.appendAgentMarkdownInline(
                 withStyle(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)) { appendChildren() }
             }
         }
-        "softBreak", "lineBreak" -> append('\n')
+        // A soft break is the source's own line wrap, so it reads as a space, as on iOS.
+        "softBreak" -> append(' ')
+        "lineBreak" -> append('\n')
         // Agent transcripts remain alt-only. Files explicitly supplies an
         // image slot backed by privately staged copies from the document host.
         "image" -> {
