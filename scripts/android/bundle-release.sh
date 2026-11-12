@@ -104,7 +104,9 @@ dexdump="$ANDROID_SDK_ROOT/build-tools/36.0.0/dexdump"
 for dex in "$work"/x/base/dex/*.dex; do
   "$dexdump" "$dex" >> "$work/dexdump" 2> /dev/null || fail "cannot read $dex"
 done
-awk '
+# dexdump prints string constants as raw bytes, so its output need not be UTF-8; BSD awk aborts on
+# an invalid sequence under a UTF-8 locale.
+LC_ALL=C awk '
   /^Class #/ { section = "" }
   $1 == "Class" && $2 == "descriptor" { cls = $4; gsub(/\047/, "", cls); classes[cls] = 1 }
   $1 == "Superclass" { s = $3; gsub(/\047/, "", s); parent[cls] = s }
@@ -126,7 +128,7 @@ awk '
     }
   }
 ' "$work/dexdump" > "$work/stripped" || fail "cannot inspect the bundle's crypto classes"
-grep -c '^Class #' "$work/dexdump" > /dev/null || fail "dexdump listed no classes"
+LC_ALL=C grep -c '^Class #' "$work/dexdump" > /dev/null || fail "dexdump listed no classes"
 [[ ! -s "$work/stripped" ]] \
   || fail "crypto SPI classes without a constructor (stripped by R8): $(sort "$work/stripped" | tr '\n' ' ')"
 
@@ -138,7 +140,7 @@ Lcom/bambouville/tessera/core/bridge/NativeEventSink; onEvent (Ljava/nio/ByteBuf
 Lcom/bambouville/tessera/core/bridge/NativeAgentEventSink; onEvent (Ljava/nio/ByteBuffer;)V
 Lcom/bambouville/tessera/networking/mosh/JniMoshNativeClient; onNativeOutput ([B)V
 CALLBACKS
-awk '
+LC_ALL=C awk '
   NR == FNR { wanted[$0] = 1; next }
   $1 == "Class" && $2 == "descriptor" { cls = $4; gsub(/\047/, "", cls) }
   $1 == "name" { name = $3; gsub(/\047/, "", name) }
