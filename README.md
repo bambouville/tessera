@@ -5,7 +5,11 @@ fast, keyboard-first, and private by design. It connects directly to servers
 you own or control; there is no Tessera backend, no account, and no data
 collection.
 
-- [Tessera on the App Store](https://apps.apple.com/us/app/tessera-ssh-terminal/id6779869388)
+<p>
+  <a href="https://apps.apple.com/app/id6779869388"><img src="https://toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/black/en-us" alt="Download Tessera on the App Store" height="40" align="middle"></a>
+  <a href="https://play.google.com/store/apps/details?id=com.bambouville.tessera"><img src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png" alt="Get Tessera on Google Play" height="60" align="middle"></a>
+</p>
+
 - [User guide](https://bambouville.com/docs/)
 - [Support & bug reports](https://github.com/bambouville/tessera/issues)
 
@@ -20,21 +24,28 @@ collection.
   loses your work. Drag tabs to reorder windows, long-press a tab to split it,
   jump between windows and panes with ⌘K on iPad, and scroll a pane's full
   history with your finger. Copying in tmux reaches the iOS clipboard.
+- **Artifacts.** A tabbed browser for everything your sessions produce: docs,
+  forwarded web pages, an agent's changes, and remote files from every session
+  open as tabs that stay with their host, even after the session ends. Back and
+  forward, an address bar, and ⌘T, ⌘L, ⌘[ and ⌘]. Choose Open in Artifacts
+  from Files, a terminal selection, or an agent's conversation. Tabs never
+  open a connection on their own; offline, they show their last copy.
 - **Agent Center (experimental).** Follow the Claude Code and Codex sessions
-  running on your servers in one list. Read and search full conversations,
-  reply with text, photos, files, or dictation, answer an agent's questions
-  without opening the terminal, and start a new agent in a tmux window or
-  split. With your approval, it installs a small helper on each host.
+  running on your servers in one list. Read and search full conversations
+  (long ones open in about a second, and search runs on your host), reply with
+  text, photos, files, or dictation, answer an agent's questions without
+  opening the terminal, and start a new agent in a tmux window or split. With
+  your approval, it installs a small helper on each host.
 - **Program status.** Scripts and tools can report "needs input",
   "finished", or "failed" (OSC 7501), shown on tabs, the session list, and the
   switcher.
 - **Files beside your shell.** A remote file panel that follows your shell's
-  directory over SSH and Mosh alike, with SFTP transfers, Quick Look and
-  Markdown previews, and a Share extension for uploading photos, videos, and
-  files.
-- **Port forwarding.** Local tunnels to services behind your server, a
-  built-in browser for forwarded web pages, and a live indicator that shows
-  when the far end answers.
+  directory over SSH and Mosh alike, with SFTP transfers, Markdown and file
+  previews in Artifacts, and a Share extension for uploading photos, videos,
+  and files.
+- **Port forwarding.** Local tunnels to services behind your server, forwarded
+  web pages that open in Artifacts, and a live indicator that shows when the
+  far end answers.
 - **Pair by QR code.** Copy your setup to another device, even one on a
   different Apple Account, or continue a session there. You choose which hosts
   to copy; passwords and private keys never leave the device.
@@ -47,6 +58,11 @@ collection.
   accessory bar on iPhone, a configurable swipe pad, Stage Manager / Split
   View, session restore, find-in-terminal, ten terminal fonts, themes, and
   optional on-device dictation.
+- **Made for iPhone Duo.** Closed, open, half-folded like a book, or as a
+  laptop, Tessera fits the way you hold it. Open, Artifacts docks beside your
+  session; as a laptop, your terminal or agent sits above the fold with the
+  keyboard bar and Artifacts below. Folding never interrupts a session: it
+  resizes once, when the hinge settles.
 - **Seven languages.** English, French, German, Spanish, Japanese, Simplified
   Chinese, and Traditional Chinese.
 
@@ -122,7 +138,8 @@ additional permissions in [`COPYING.iOS`](COPYING.iOS) (mosh's iOS exception,
 extended with Tessera's own App Store distribution exception, granted by
 Bambouville Inc.). See [`COPYRIGHT`](COPYRIGHT) for the full notice.
 "Tessera" and the Tessera icon are trademarks of Bambouville Inc. (not
-licensed under the GPL).
+licensed under the GPL). Apple and the Apple logo are trademarks of Apple Inc.
+Google Play and the Google Play logo are trademarks of Google LLC.
 
 Tessera builds on [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) (MIT),
 [Citadel](https://github.com/orlandos-nl/Citadel) (MIT),
