@@ -184,6 +184,8 @@ private extension AgentMarkdownDocument {
         private let keepsLinks: Bool
         private var nodeCount = 0
         private var outputBytes = 0
+        /// Text inside a link or an image's alt is already a label, never a link of its own.
+        private var labelDepth = 0
 
         init(initiallyTruncated: Bool, keepsLinks: Bool = false) {
             truncated = initiallyTruncated
@@ -254,6 +256,8 @@ private extension AgentMarkdownDocument {
                 return AgentMarkdownNode(kind: .inlineCode, text: limited(code.code))
             }
             if let link = markup as? Markdown.Link {
+                labelDepth += 1
+                defer { labelDepth -= 1 }
                 return AgentMarkdownNode(kind: .link, children: children(of: link, depth: depth + 1), destination: safeDestination(link.destination))
             }
             if markup is Markdown.SoftBreak {
@@ -263,6 +267,8 @@ private extension AgentMarkdownDocument {
                 return AgentMarkdownNode(kind: .lineBreak)
             }
             if let image = markup as? Markdown.Image {
+                labelDepth += 1
+                defer { labelDepth -= 1 }
                 // Local destinations are inert metadata. Only Files Quick Look
                 // supplies staged image content; agent transcripts stay alt-only.
                 return AgentMarkdownNode(
@@ -285,7 +291,68 @@ private extension AgentMarkdownDocument {
         }
 
         private mutating func children(of markup: any Markdown.Markup, depth: Int) -> [AgentMarkdownNode] {
-            markup.children.compactMap { node(from: $0, depth: depth) }
+            let children = Array(markup.children)
+            var nodes: [AgentMarkdownNode] = []
+            var index = 0
+            while index < children.count {
+                // swift-markdown leaves GFM's autolink extension off, which
+                // Apple's own parser (iOS documents) has on. cmark splits text
+                // where emphasis might have opened, so a URL can span several
+                // text siblings: each run is scanned whole.
+                guard labelDepth == 0, children[index] is Markdown.Text else {
+                    if let node = node(from: children[index], depth: depth) { nodes.append(node) }
+                    index += 1
+                    continue
+                }
+                var end = index + 1
+                while end < children.count, children[end] is Markdown.Text { end += 1 }
+                let run = children[index..<end].compactMap { ($0 as? Markdown.Text)?.string }.joined()
+                let next = end < children.count ? children[end] : nil
+                let continues = next is Markdown.Strong || next is Markdown.Emphasis || next is Markdown.Strikethrough
+                if let linked = autolinked(run, depth: depth, continuesIntoNext: continues) {
+                    nodes += linked
+                } else {
+                    nodes += children[index..<end].compactMap { node(from: $0, depth: depth) }
+                }
+                index = end
+            }
+            return nodes
+        }
+
+        /// The run as text and link nodes, or nil when it holds no autolink.
+        /// cmark reads delimiters inside an address before any autolinking
+        /// (`…/pkg/__init__.py` holds strong text), where GFM claims the whole
+        /// address first. An address running into such a node stays text:
+        /// linking its first part would open the wrong page.
+        private mutating func autolinked(_ text: String, depth: Int, continuesIntoNext: Bool) -> [AgentMarkdownNode]? {
+            let scalars = Array(text.unicodeScalars)
+            let matches = AgentMarkdownAutolink.matches(in: scalars).filter { !(continuesIntoNext && $0.reachesEnd) }
+            guard !matches.isEmpty, depth < AgentMarkdownDocument.maximumDepth else { return nil }
+            func string(_ range: Range<Int>) -> String {
+                var view = String.UnicodeScalarView()
+                view.append(contentsOf: scalars[range])
+                return String(view)
+            }
+            var nodes: [AgentMarkdownNode] = []
+            var cursor = 0
+            for match in matches {
+                if cursor < match.range.lowerBound {
+                    guard reserveNode() else { return nodes }
+                    nodes.append(AgentMarkdownNode(kind: .text, text: limited(string(cursor..<match.range.lowerBound))))
+                }
+                guard reserveNode() else { return nodes }
+                let label = string(match.range)
+                if let destination = safeDestination(match.destination), reserveNode() {
+                    nodes.append(AgentMarkdownNode(kind: .link, children: [AgentMarkdownNode(kind: .text, text: limited(label))], destination: destination))
+                } else {
+                    nodes.append(AgentMarkdownNode(kind: .text, text: limited(label)))
+                }
+                cursor = match.range.upperBound
+            }
+            if cursor < scalars.count, reserveNode() {
+                nodes.append(AgentMarkdownNode(kind: .text, text: limited(string(cursor..<scalars.count))))
+            }
+            return nodes
         }
 
         private mutating func tableRows(from table: Markdown.Table, depth: Int) -> [AgentMarkdownNode] {
@@ -385,6 +452,186 @@ private extension AgentMarkdownDocument {
             return limited(destination, destination: true)
         }
     }
+}
+
+/// GFM's extended autolinks for web addresses: `http://` and `https://` URLs
+/// and `www.` domains, with cmark-gfm's rules for where one starts and which
+/// trailing characters it leaves to the sentence. Email autolinks stay text:
+/// in a terminal app's prose `git@github.com` is an SSH address, not mail.
+enum AgentMarkdownAutolink {
+    struct Match: Equatable {
+        /// Unicode scalar offsets into the scanned text.
+        let range: Range<Int>
+        let destination: String
+        /// The address ran to the end of the text before trimming, so it may
+        /// carry on into whatever node follows.
+        let reachesEnd: Bool
+    }
+
+    static func matches(in scalars: [Unicode.Scalar]) -> [Match] {
+        var matches: [Match] = []
+        var domain: Domain?
+        var index = 0
+        while index < scalars.count {
+            if let match = match(in: scalars, at: index, domain: &domain) {
+                matches.append(match)
+                index = match.range.upperBound
+            } else {
+                index += 1
+            }
+        }
+        return matches
+    }
+
+    private static func match(in scalars: [Unicode.Scalar], at start: Int, domain cached: inout Domain?) -> Match? {
+        let first = scalars[start]
+        guard first == "h" || first == "H" || first == "w" else { return nil }
+        let previous = start > 0 ? scalars[start - 1] : nil
+        let domainStart: Int
+        let www: Bool
+        if let length = schemeLength(scalars, at: start) {
+            // cmark-gfm reads the scheme back from the colon over ASCII
+            // letters, so an address straight after CJK prose still links.
+            if let previous, isASCIILetter(previous) { return nil }
+            domainStart = start + length
+            www = false
+        } else if hasPrefix(scalars, at: start, wwwPrefix) {
+            if let previous, !isSpace(previous), !"*_~(".unicodeScalars.contains(previous) { return nil }
+            domainStart = start
+            www = true
+        } else {
+            return nil
+        }
+        guard domainStart < scalars.count, isLetterOrDigit(scalars[domainStart]) else { return nil }
+        if cached.map({ !$0.contains(domainStart) }) ?? true { cached = Domain(scalars, from: domainStart) }
+        guard let domainEnd = cached?.validEnd(from: domainStart, allowsShort: !www) else { return nil }
+        var pathEnd = domainEnd
+        while pathEnd < scalars.count, !isSpace(scalars[pathEnd]), scalars[pathEnd] != "<" { pathEnd += 1 }
+        let end = trimmedEnd(scalars, start: start, end: pathEnd)
+        guard end > domainStart else { return nil }
+        var label = String.UnicodeScalarView()
+        label.append(contentsOf: scalars[start..<end])
+        return Match(range: start..<end, destination: (www ? "http://" : "") + String(label), reachesEnd: pathEnd == scalars.count)
+    }
+
+    private static func schemeLength(_ scalars: [Unicode.Scalar], at start: Int) -> Int? {
+        if hasPrefix(scalars, at: start, httpsPrefix, caseInsensitive: true) { return httpsPrefix.count }
+        if hasPrefix(scalars, at: start, httpPrefix, caseInsensitive: true) { return httpPrefix.count }
+        return nil
+    }
+
+    /// One scan of a run of domain characters, shared by every candidate that
+    /// starts inside it. Rescanning from each start made `_www._www.…`
+    /// quadratic.
+    private struct Domain {
+        let start: Int
+        let end: Int
+        let lastPeriod: Int?
+        /// The last `_` after the last period, and the last one in the segment before it.
+        let lastUnderscore: Int?
+        let previousUnderscore: Int?
+
+        init(_ scalars: [Unicode.Scalar], from start: Int) {
+            var index = start
+            var lastPeriod: Int?
+            var lastUnderscore: Int?
+            var previousUnderscore: Int?
+            while index < scalars.count {
+                let scalar = scalars[index]
+                if scalar == "." {
+                    // A period the domain ends on belongs to the sentence.
+                    guard index + 1 < scalars.count, isDomainCharacter(scalars[index + 1]) else { break }
+                    previousUnderscore = lastUnderscore
+                    lastUnderscore = nil
+                    lastPeriod = index
+                } else if scalar == "_" {
+                    lastUnderscore = index
+                } else if !isDomainCharacter(scalar) {
+                    break
+                }
+                index += 1
+            }
+            self.start = start
+            end = index
+            self.lastPeriod = lastPeriod
+            self.lastUnderscore = lastUnderscore
+            self.previousUnderscore = previousUnderscore
+        }
+
+        func contains(_ index: Int) -> Bool { index >= start && index < end }
+
+        /// The domain read from `from` if valid: segments of letters, digits,
+        /// `_` and `-` split by periods, no `_` in the last two, and a period
+        /// unless short is allowed (`http://localhost:3000` links; a bare
+        /// `www.` needs a real domain).
+        func validEnd(from: Int, allowsShort: Bool) -> Int? {
+            let hasPeriod = lastPeriod.map { $0 >= from } ?? false
+            let underscoreInLast = lastUnderscore.map { $0 >= from } ?? false
+            let underscoreInPrevious = hasPeriod && (previousUnderscore.map { $0 >= from } ?? false)
+            guard end > from, !underscoreInLast, !underscoreInPrevious, allowsShort || hasPeriod else { return nil }
+            return end
+        }
+    }
+
+    /// Leaves trailing punctuation, an unmatched `)` and a trailing entity
+    /// reference to the surrounding sentence.
+    private static func trimmedEnd(_ scalars: [Unicode.Scalar], start: Int, end: Int) -> Int {
+        var end = end
+        // Counted once: a run of closing parentheses trims in linear time.
+        var opening = 0
+        var closing = 0
+        for scalar in scalars[start..<end] {
+            if scalar == "(" { opening += 1 } else if scalar == ")" { closing += 1 }
+        }
+        while end > start {
+            let last = scalars[end - 1]
+            if "?!.,:*_~'\"".unicodeScalars.contains(last) {
+                end -= 1
+            } else if last == ")" {
+                guard closing > opening else { break }
+                closing -= 1
+                end -= 1
+            } else if last == ";" {
+                var entityStart = end - 2
+                while entityStart > start, isASCIILetter(scalars[entityStart]) { entityStart -= 1 }
+                end = entityStart >= start && entityStart < end - 2 && scalars[entityStart] == "&" ? entityStart : end - 1
+            } else {
+                break
+            }
+        }
+        return end
+    }
+
+    private static let httpsPrefix = Array("https://".unicodeScalars)
+    private static let httpPrefix = Array("http://".unicodeScalars)
+    private static let wwwPrefix = Array("www.".unicodeScalars)
+
+    private static func hasPrefix(_ scalars: [Unicode.Scalar], at start: Int, _ expected: [Unicode.Scalar], caseInsensitive: Bool = false) -> Bool {
+        guard start + expected.count <= scalars.count else { return false }
+        for (offset, scalar) in expected.enumerated() {
+            let actual = scalars[start + offset]
+            guard actual == scalar || caseInsensitive && asciiLowercased(actual) == scalar else { return false }
+        }
+        return true
+    }
+
+    private static func asciiLowercased(_ scalar: Unicode.Scalar) -> Unicode.Scalar {
+        ("A"..."Z").contains(scalar) ? Unicode.Scalar(UInt8(scalar.value + 32)) : scalar
+    }
+
+    private static func isDomainCharacter(_ scalar: Unicode.Scalar) -> Bool {
+        scalar == "-" || scalar == "_" || isLetterOrDigit(scalar)
+    }
+
+    private static func isLetterOrDigit(_ scalar: Unicode.Scalar) -> Bool {
+        scalar.properties.isAlphabetic || scalar.properties.numericType != nil
+    }
+
+    private static func isASCIILetter(_ scalar: Unicode.Scalar) -> Bool {
+        ("a"..."z").contains(scalar) || ("A"..."Z").contains(scalar)
+    }
+
+    private static func isSpace(_ scalar: Unicode.Scalar) -> Bool { scalar.properties.isWhitespace }
 }
 
 /// A Markdown image path refers to the document's remote host, never the

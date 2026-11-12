@@ -96,6 +96,60 @@ final class AgentMarkdownTests: XCTestCase {
         XCTAssertEqual(AgentMarkdownDocument.parseDocument(fresh).blocks.first?.children.first?.destination, "notes.md")
     }
 
+    func testBareWebAddressesLinkAsGitHubDoes() {
+        func links(_ source: String) -> [String?] {
+            func collect(_ nodes: [AgentMarkdownNode]) -> [String?] {
+                nodes.flatMap { $0.kind == .link ? [$0.destination] : collect($0.children) }
+            }
+            return collect(AgentMarkdownDocument.parseDocument(source).blocks)
+        }
+        XCTAssertEqual(links("See https://example.com/docs."), ["https://example.com/docs"])
+        XCTAssertEqual(links("Run it at http://localhost:3000, then www.example.org/a?b=1!"),
+                       ["http://localhost:3000", "http://www.example.org/a?b=1"])
+        // cmark splits text where emphasis might open; the address stays whole.
+        XCTAssertEqual(links("https://example.com/a_b_c and *bold*"), ["https://example.com/a_b_c"])
+        XCTAssertEqual(links("(see https://en.wikipedia.org/wiki/Mosh_(software))"),
+                       ["https://en.wikipedia.org/wiki/Mosh_(software)"])
+        XCTAssertEqual(links("www.google.com/search?q=commonmark&hl;"), ["http://www.google.com/search?q=commonmark"])
+        // Not addresses, or already a label, a destination or code.
+        XCTAssertEqual(links("git@github.com:org/repo.git xhttps://a.com www. awww.example.com"), [])
+        XCTAssertEqual(links("https://bad_domain.example_x/ and www.a_b.c"), [])
+        XCTAssertEqual(links("[https://label.example](https://dest.example) `https://code.example`"), ["https://dest.example"])
+        XCTAssertEqual(links("![https://alt.example](i.png)"), [])
+        XCTAssertEqual(links("https://-foo.example"), [])
+        // A www. inside a rejected domain is judged on its own segments.
+        XCTAssertEqual(links("www.x_www.y"), ["http://www.y"])
+        // The scheme check reads ASCII letters only, so CJK prose may run into it.
+        XCTAssertEqual(links("请访问https://example.com/文档"), ["https://example.com/文档"])
+        // cmark has already made `__init__` strong text: half an address would open the wrong page.
+        XCTAssertEqual(links("https://github.com/a/b/blob/main/pkg/__init__.py"), [])
+        XCTAssertEqual(links("https://docs.python.org/3/reference/datamodel.html#object.__init__"), [])
+        XCTAssertEqual(links("see https://example.com **now**"), ["https://example.com"])
+
+        let document = AgentMarkdownDocument.parseDocument("Docs: https://example.com/docs.")
+        XCTAssertEqual(allText(in: document.blocks).joined(), "Docs: https://example.com/docs.")
+        // Agent output links the same addresses through its own allowlist.
+        let agent = AgentMarkdownDocument.parse("open https://example.com now").blocks.first?.children
+        XCTAssertEqual(agent?.map(\.kind), [.text, .link, .text])
+        XCTAssertEqual(agent?[1].destination, "https://example.com")
+    }
+
+    func testAutolinkScanStaysLinearOnHostileRuns() {
+        let parens = "https://a.example/" + String(repeating: ")", count: 100_000)
+        var started = Date()
+        let document = AgentMarkdownDocument.parse(parens)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 2)
+        XCTAssertEqual(document.blocks.first?.children.first?.destination, "https://a.example/")
+
+        // Every `www.` here starts inside one domain, and only the last
+        // has no `_` in its last two segments.
+        let underscores = String(repeating: "_www.", count: 26_000) + "x"
+        started = Date()
+        let rejected = AgentMarkdownDocument.parse(underscores)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 2)
+        XCTAssertEqual(rejected.blocks.first?.children.filter { $0.kind == .link }.map(\.destination), ["http://www.x"])
+    }
+
     func testRawHTMLIsLiteralText() {
         let document = AgentMarkdownDocument.parse("<script>alert('x')</script>\n\nhello <b>world</b>")
         let rendered = allText(in: document.blocks).joined()

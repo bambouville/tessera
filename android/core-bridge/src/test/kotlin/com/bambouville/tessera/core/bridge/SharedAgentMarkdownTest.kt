@@ -6,9 +6,20 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 class SharedAgentMarkdownTest {
+    @Test
+    fun aBareWebAddressArrivesAsALinkFromTheSharedParser() {
+        val state = CoreBridge.inspect()
+        assumeTrue("host-built shared core unavailable: $state", state is CoreBridgeState.Ready)
+        val paragraph = checkNotNull(SharedAgentMarkdown.parseDocument("See https://example.com/docs.")).blocks.single()
+        assertEquals(listOf("text", "link", "text"), paragraph.children.map { it.kind })
+        assertEquals("https://example.com/docs", paragraph.children[1].destination)
+        assertEquals(".", paragraph.children[2].text)
+    }
+
     @Test
     fun decodesTheSharedMarkdownJSONWithoutImplementingMarkdownLocally() {
         val json = JSONObject()
