@@ -12,7 +12,7 @@ android {
         targetSdk {
             version = release(37)
         }
-        versionCode = 5
+        versionCode = 7
         versionName = "0.4.1"
         // The shared core and Mosh are built for arm64 only. Without this,
         // dependency .so files for other ABIs make Play serve the app to
