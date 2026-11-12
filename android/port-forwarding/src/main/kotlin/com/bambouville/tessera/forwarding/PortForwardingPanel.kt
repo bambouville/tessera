@@ -39,10 +39,24 @@ import com.bambouville.tessera.design.TesseraTextField
 import com.bambouville.tessera.design.TesseraToggleRow
 import com.bambouville.tessera.design.TesseraType
 import com.bambouville.tessera.design.text
+import kotlinx.coroutines.flow.StateFlow
+
+/**
+ * A connected session's tunnels, for a page outside that session that lists
+ * the same host's rules: what each is doing now, and the controls that act on
+ * it. The page shows idle rules without one, and offers no start.
+ */
+class LiveForwarding(
+    val states: StateFlow<Map<java.util.UUID, PortForwardingState>>,
+    val start: (java.util.UUID) -> Unit,
+    val stop: (java.util.UUID) -> Unit,
+    val probeServices: () -> Unit,
+)
 
 /**
  * Compact-safe host editor panel. Persistence and the live manager remain
  * caller-owned so the same view works before a connection and in-session.
+ * A null [onStartRule] means nothing can start a rule from here.
  */
 @Composable
 fun PortForwardingPanel(
@@ -50,7 +64,7 @@ fun PortForwardingPanel(
     states: Map<java.util.UUID, PortForwardingState>,
     onRulesChanged: (List<PortForwardRule>) -> Unit,
     modifier: Modifier = Modifier,
-    onStartRule: (java.util.UUID) -> Unit = {},
+    onStartRule: ((java.util.UUID) -> Unit)? = {},
     onStopRule: (java.util.UUID) -> Unit = {},
     /**
      * Asks for every probeable rule to be checked now. Called once when the
@@ -104,7 +118,7 @@ fun PortForwardingPanel(
                         },
                         onEdit = { editing = rule },
                         onDelete = { onRulesChanged(rules.filterNot { it.id == rule.id }) },
-                        onStart = { onStartRule(rule.id) },
+                        onStart = onStartRule?.let { start -> { start(rule.id) } },
                         onStop = { onStopRule(rule.id) },
                         onOpenInBrowser = { target ->
                             val page = forwardingArtifactPage(rule, hostId, target.scheme, sessionHint)
@@ -184,7 +198,7 @@ private fun ForwardRuleRow(
     onEnabledChanged: (Boolean) -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
-    onStart: () -> Unit,
+    onStart: (() -> Unit)?,
     onStop: () -> Unit,
     onOpenInBrowser: (SharedForwardedWebTarget) -> Unit,
 ) {
@@ -252,7 +266,7 @@ private fun ForwardRuleRow(
                     status is PortForwardingStatus.Starting
                 ) {
                     TesseraButton(text = stringResource(R.string.forwarding_stop), onClick = onStop, compact = true)
-                } else if (rule.enabled) {
+                } else if (rule.enabled && onStart != null) {
                     TesseraButton(
                         text = stringResource(R.string.forwarding_start),
                         onClick = onStart,

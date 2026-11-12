@@ -9,6 +9,7 @@ import com.bambouville.tessera.core.bridge.SharedTmuxAuthorityCarriedShow
 import com.bambouville.tessera.core.bridge.SharedTmuxShowEdge
 import com.bambouville.tessera.core.bridge.SharedTmuxShowEdges
 import com.bambouville.tessera.data.SavedHost
+import com.bambouville.tessera.forwarding.LiveForwarding
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -324,6 +325,16 @@ class LiveSessionStore private constructor() {
     fun isLive(hostId: String): Boolean = controllers.containsKey(hostId)
 
     val liveHostIds: Set<String> get() = controllers.keys.toSet()
+
+    /** The live session's tunnels, for the host list's page of the same rules. */
+    fun forwarding(hostId: String): LiveForwarding? = controllers[hostId]?.controller?.let { controller ->
+        LiveForwarding(
+            states = controller.forwardingStates,
+            start = controller::startForwardingRule,
+            stop = controller::stopForwardingRule,
+            probeServices = controller::probeForwardedServicesNow,
+        )
+    }
 
     /**
      * End one session for good and forget its tab.

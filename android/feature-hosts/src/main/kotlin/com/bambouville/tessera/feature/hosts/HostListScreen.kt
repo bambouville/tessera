@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Base64
 import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -25,6 +26,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -82,8 +84,10 @@ import com.bambouville.tessera.design.TesseraToggleRow
 import com.bambouville.tessera.design.TesseraType
 import com.bambouville.tessera.design.TesseraSubPageHeader
 import com.bambouville.tessera.forwarding.AndroidPortForwardRuleStore
+import com.bambouville.tessera.forwarding.LiveForwarding
 import com.bambouville.tessera.forwarding.PortForwardRuleStore
 import com.bambouville.tessera.forwarding.PortForwardingPanel
+import com.bambouville.tessera.forwarding.PortForwardingState
 import com.bambouville.tessera.data.HostDraft
 import com.bambouville.tessera.data.HostRepository
 import com.bambouville.tessera.data.CredentialKinds
@@ -99,6 +103,7 @@ import com.bambouville.tessera.security.confirmDeviceOwner
 import java.util.UUID
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
@@ -110,6 +115,8 @@ fun HostListScreen(
     modifier: Modifier = Modifier,
     connectedHostIds: Set<String> = emptySet(),
     addHostButtonModifier: Modifier = Modifier,
+    /** A connected host's session tunnels; the forwarding page shows them live. */
+    liveForwarding: (hostId: String) -> LiveForwarding? = { null },
     onOpenHost: (SavedHost) -> Unit,
 ) {
     val context = LocalContext.current
@@ -158,7 +165,20 @@ fun HostListScreen(
         }
     }
 
-    Column(modifier.background(tokens.bg)) {
+    val listState = rememberLazyListState()
+    // The forwarding page takes the list's place rather than covering it: as
+    // a sibling it ignored the screen's insets (its header went under the
+    // status bar) and taps on its empty space reached the rows beneath.
+    val forwarding = forwardingHost
+    if (forwarding != null) {
+        HostForwardingEditor(
+            host = forwarding,
+            store = forwardingStore,
+            live = if (forwarding.id in connectedHostIds) liveForwarding(forwarding.id) else null,
+            onDismiss = { forwardingHost = null },
+            modifier = modifier,
+        )
+    } else Column(modifier.background(tokens.bg)) {
         TesseraPageHeader(title = stringResource(R.string.hosts_title), hero = true) {
             TesseraIconButton(
                 icon = TesseraIcons.Download,
@@ -193,7 +213,7 @@ fun HostListScreen(
                 onAdd = { creating = true },
             )
         } else {
-            LazyColumn(modifier = Modifier.fillMaxSize().weight(1f)) {
+            LazyColumn(modifier = Modifier.fillMaxSize().weight(1f), state = listState) {
                 items(visibleHosts, key = SavedHost::id) { host ->
                     CompactHostRow(
                         host = host,
@@ -240,13 +260,6 @@ fun HostListScreen(
             onDismiss = { editing = null },
         )
     }
-    forwardingHost?.let { host ->
-        HostForwardingEditor(
-            host = host,
-            store = forwardingStore,
-            onDismiss = { forwardingHost = null },
-        )
-    }
     deleting?.let { host ->
         val deleteScope = rememberCoroutineScope()
         val usedAsJump = hosts.any { it.jumpHostId == host.id }
@@ -290,12 +303,18 @@ fun HostListScreen(
 private fun HostForwardingEditor(
     host: SavedHost,
     store: PortForwardRuleStore,
+    live: LiveForwarding?,
     onDismiss: () -> Unit,
+    modifier: Modifier,
 ) {
     val rules by store.observe(host.id).collectAsState(initial = emptyList())
+    // Without a connected session every rule is idle, which is what it says.
+    val idle = remember { MutableStateFlow(emptyMap<UUID, PortForwardingState>()) }
+    val states by (live?.states ?: idle).collectAsState()
     val scope = rememberCoroutineScope()
     val tokens = LocalTesseraTokens.current
-    Column(Modifier.fillMaxSize().background(tokens.bg)) {
+    BackHandler(onBack = onDismiss)
+    Column(modifier.background(tokens.bg)) {
         TesseraSubPageHeader(
             title = stringResource(R.string.hosts_forwarding_title, host.displayName),
             onBack = onDismiss,
@@ -304,9 +323,12 @@ private fun HostForwardingEditor(
         TesseraHairline()
         PortForwardingPanel(
             rules = rules,
-            states = emptyMap(),
+            states = states,
             onRulesChanged = { updated -> scope.launch { store.replace(host.id, updated) } },
             modifier = Modifier.fillMaxSize().weight(1f),
+            onStartRule = live?.start,
+            onStopRule = live?.stop ?: {},
+            onProbeServices = live?.probeServices ?: {},
             hostId = host.id,
         )
     }

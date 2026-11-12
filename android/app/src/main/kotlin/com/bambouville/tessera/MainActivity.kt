@@ -1851,6 +1851,7 @@ private fun FoundationScreen(
                         repository = hostRepository,
                         identities = identityRepository,
                         connectedHostIds = connectedHostIds,
+                        liveForwarding = sessionStore::forwarding,
                         addHostButtonModifier = Modifier.onboardingAnchor(OnboardingTarget.AddHost),
                                 onOpenHost = { host ->
                                     openHost(host, connectOnPresent = true, explicitOpen = true)

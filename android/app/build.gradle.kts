@@ -139,6 +139,8 @@ dependencies {
     // MainActivity owns shared-URI ingress in production, while the visual
     // harness also renders the real Remote Files screen against a mock presenter.
     implementation(project(":files"))
+    // MainActivity hands a live session's tunnels to the host list's forwarding page.
+    implementation(project(":port-forwarding"))
 
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.core.ktx)
