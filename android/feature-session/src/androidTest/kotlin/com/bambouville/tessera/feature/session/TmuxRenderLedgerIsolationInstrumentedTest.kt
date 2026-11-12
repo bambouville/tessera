@@ -3471,7 +3471,7 @@ class TmuxRenderLedgerIsolationInstrumentedTest {
             live.onMain {
                 live.surface.sendInput(
                     ("/usr/local/bin/tessera-fixture-probe tmux-isolation-stream" +
-                        " --owner W1 --token ${fixture.renderLedgerToken} --count 300" +
+                        " --owner W1 --token=${fixture.renderLedgerToken} --count 300" +
                         " --hold-seconds 20 --heartbeat-seconds 0.5\n").encodeToByteArray(),
                 )
             }
@@ -4042,7 +4042,7 @@ class TmuxRenderLedgerIsolationInstrumentedTest {
         val output = remote(
             fixture,
             "/usr/local/bin/tessera-fixture-probe tmux-isolation-session" +
-                " --session '$target' --token '${fixture.renderLedgerToken}' --count 300" +
+                " --session '$target' --token='${fixture.renderLedgerToken}' --count 300" +
                 " --hold-seconds 360 --heartbeat-seconds 0.5 --columns 100 --rows 30",
         )
         check(output.contains("TESSERA_TMUX_ISOLATION_FIXTURE_V1")) {

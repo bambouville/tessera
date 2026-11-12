@@ -399,14 +399,6 @@
     "zh-Hans": "目录 → 浏览该处",
     "zh-Hant": "目錄 → 瀏覽該處"
   },
-  "⏎ file → Quick Look": {
-    "de": "⏎ Datei → Übersicht",
-    "es": "⏎ archivo → Vista rápida",
-    "fr": "⏎ fichier → Coup d'œil",
-    "ja": "⏎ ファイル → クイックルック",
-    "zh-Hans": "⏎ 文件 → 快速查看",
-    "zh-Hant": "⏎ 檔案 → 快速查看"
-  },
   "Quick Look": {
     "de": "Übersicht",
     "es": "Vista rápida",

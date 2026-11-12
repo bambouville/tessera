@@ -22,12 +22,12 @@ internal fun AgentThreadRow.compactContextTokens(): String? {
 
 /** Context wins over line changes even for finished/idle threads. Cost stays
  * supplementary, as before. tokenText is localized by the Compose caller. */
-internal fun AgentThreadRow.summaryMeter(tokenText: String?): String? {
-    val context = contextPercent?.let { "${it.wholePercent()}% context" } ?: tokenText
+internal fun AgentThreadRow.summaryMeter(tokenText: String?, words: AgentRowWords): String? {
+    val context = contextPercent?.let { words.contextPercent(it.wholePercent()) } ?: tokenText
     val changes = listOfNotNull(linesAdded?.let { "+$it" }, linesRemoved?.let { "−$it" })
         .joinToString(" ").takeIf(String::isNotBlank)
     return listOfNotNull(
-        context ?: changes?.let { "$it changes" },
+        context ?: changes?.let(words.lineChanges),
         totalCost?.let { "$$it" },
     ).joinToString(" · ").takeIf(String::isNotBlank)
 }

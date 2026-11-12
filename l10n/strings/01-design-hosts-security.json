@@ -278,5 +278,13 @@
     "ja": "ホストまたは user@host を検索",
     "zh-Hans": "搜索主机或 user@host",
     "zh-Hant": "搜尋主機或 user@host"
+  },
+  "view your keys": {
+    "de": "Keys ansehen",
+    "es": "ver tus claves",
+    "fr": "voir vos clés",
+    "ja": "キーを表示",
+    "zh-Hans": "查看密钥",
+    "zh-Hant": "檢視金鑰"
   }
 }

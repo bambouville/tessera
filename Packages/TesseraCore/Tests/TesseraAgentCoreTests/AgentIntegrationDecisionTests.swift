@@ -62,6 +62,61 @@ final class AgentIntegrationDecisionTests: XCTestCase {
         XCTAssertNil(resolve(.current, .other).effectiveAction(for: .installAndApply))
     }
 
+    func testPlainMoshAgentIsShownByItsProcessWithoutAnUnconfirmedLifecycle() {
+        func decide(_ installation: AgentIntegrationInstallationKind, deliverable: Bool?) -> AgentIntegrationDecision {
+            AgentIntegrationDecisionReducer.resolve(.init(
+                installation: installation,
+                foreground: .agent,
+                shellIntegrationActive: false,
+                agentIntegrationActive: false,
+                agentRequiresLifecycleHook: true,
+                agentLifecycleDeliverable: deliverable
+            ))
+        }
+        XCTAssertEqual(decide(.current, deliverable: false).kind, .ready)
+        XCTAssertFalse(decide(.current, deliverable: false).showsWarning)
+        // Missing or old helpers are still offered, files only.
+        XCTAssertEqual(decide(.missing, deliverable: false), .init(kind: .notInstalled, primaryAction: .installOnly))
+        XCTAssertEqual(decide(.outdated, deliverable: false), .init(kind: .outdated, primaryAction: .installOnly))
+        XCTAssertEqual(decide(.requiresAppUpdate, deliverable: false).kind, .appUpdateRequired)
+        // Where lifecycle can arrive, a silent agent still warns.
+        XCTAssertEqual(decide(.current, deliverable: true).kind, .insideAgent)
+        XCTAssertEqual(decide(.current, deliverable: nil).kind, .insideAgent)
+    }
+
+    func testPlainMoshShellIsNeverAskedToEnableWhatCannotReport() {
+        func decide(_ installation: AgentIntegrationInstallationKind, _ foreground: AgentIntegrationForegroundKind,
+                    deliverable: Bool?) -> AgentIntegrationDecision {
+            AgentIntegrationDecisionReducer.resolve(.init(
+                installation: installation,
+                foreground: foreground,
+                shellIntegrationActive: false,
+                agentIntegrationActive: false,
+                agentLifecycleDeliverable: deliverable
+            ))
+        }
+        for foreground in [AgentIntegrationForegroundKind.shell, .unsupportedShell, .other] {
+            XCTAssertEqual(decide(.current, foreground, deliverable: false).kind, .ready, "\(foreground)")
+        }
+        // Files only: applying them here could never report.
+        XCTAssertEqual(decide(.missing, .shell, deliverable: false), .init(kind: .notInstalled, primaryAction: .installOnly))
+        XCTAssertEqual(decide(.outdated, .shell, deliverable: false), .init(kind: .outdated, primaryAction: .installOnly))
+        XCTAssertEqual(decide(.requiresAppUpdate, .shell, deliverable: false).kind, .appUpdateRequired)
+        // Every other transport keeps its shell prompts.
+        for deliverable in [true, nil] as [Bool?] {
+            XCTAssertEqual(decide(.current, .shell, deliverable: deliverable).kind, .inactiveShell)
+            XCTAssertEqual(decide(.missing, .shell, deliverable: deliverable).primaryAction, .installAndApply)
+            XCTAssertEqual(decide(.current, .unsupportedShell, deliverable: deliverable).kind, .unsupportedShell)
+        }
+    }
+
+    func testObservationFromAnOlderCallerDecodesAsDeliverable() throws {
+        let json = #"{"installation":"current","foreground":"agent","shellIntegrationActive":false,"agentIntegrationActive":false,"agentRequiresLifecycleHook":true}"#
+        let observation = try JSONDecoder().decode(AgentIntegrationObservation.self, from: Data(json.utf8))
+        XCTAssertNil(observation.agentLifecycleDeliverable)
+        XCTAssertEqual(AgentIntegrationDecisionReducer.resolve(observation).kind, .insideAgent)
+    }
+
     func testTierCForegroundAgentNeverRequestsLifecycleHookRepair() {
         let decision = AgentIntegrationDecisionReducer.resolve(.init(
             installation: .current,

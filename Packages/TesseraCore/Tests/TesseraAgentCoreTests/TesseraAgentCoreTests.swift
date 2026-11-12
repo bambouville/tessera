@@ -1644,6 +1644,47 @@ final class TesseraAgentCoreTests: XCTestCase {
         XCTAssertEqual(snapshot.results.count, 200)
     }
 
+    func test_searchSnapshotReportsPartialResultHostAsNotFullySearched() throws {
+        let quietHost = UUID(uuidString: "BBBBBBBB-CCCC-DDDD-EEEE-FFFFFFFFFFFF")!
+        let partial = AgentSearchResult(threadID: thread(), recordID: "a", excerpt: "needle")
+        let snapshot = AgentSearchSnapshot(results: [partial], unavailableHostIDs: [hostID, quietHost, hostID])
+        XCTAssertEqual(snapshot.results, [partial], "a host that stopped early keeps what it found")
+        XCTAssertEqual(snapshot.unavailableHostIDs, [hostID, quietHost], "and is still reported, once")
+
+        let decoded = try JSONDecoder().decode(AgentSearchSnapshot.self, from: JSONEncoder().encode(snapshot))
+        XCTAssertEqual(decoded, snapshot)
+    }
+
+    func test_searchSnapshotCountsHostCapOnResultAndUnavailableUnion() throws {
+        let hosts = (0..<6).map { UUID(uuidString: "BBBBBBBB-CCCC-DDDD-EEEE-00000000000\($0)")! }
+        let results = hosts.prefix(3).map {
+            AgentSearchResult(threadID: AgentThreadID(hostID: $0, providerID: .claude, providerSessionID: "s")!, recordID: "r", excerpt: "needle")
+        }
+        // Partial result hosts take no new slot; only one resultless host
+        // fits beside the three result hosts.
+        let snapshot = AgentSearchSnapshot(results: results, unavailableHostIDs: [hosts[3], hosts[0], hosts[4], hosts[2], hosts[5]])
+        XCTAssertEqual(snapshot.results.count, 3)
+        XCTAssertEqual(snapshot.unavailableHostIDs, [hosts[3], hosts[0], hosts[2]])
+        XCTAssertEqual(
+            Set(snapshot.results.map(\.threadID.hostID)).union(snapshot.unavailableHostIDs).count,
+            AgentSearchSnapshot.maximumHosts
+        )
+        let encoded = try JSONEncoder().encode(snapshot)
+        XCTAssertEqual(try JSONDecoder().decode(AgentSearchSnapshot.self, from: encoded), snapshot)
+
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object["unavailableHostIDs"] = [hosts[3], hosts[0], hosts[2], hosts[4]].map(\.uuidString)
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(AgentSearchSnapshot.self, from: JSONSerialization.data(withJSONObject: object)),
+            "five hosts in the union exceed the bound"
+        )
+        object["unavailableHostIDs"] = [hosts[0], hosts[0]].map(\.uuidString)
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(AgentSearchSnapshot.self, from: JSONSerialization.data(withJSONObject: object)),
+            "a duplicated host is malformed"
+        )
+    }
+
     func test_launchReceiptRequiresCorrelatedPlanAndWorktreeProof() {
         let intent = AgentLaunchIntent(
             kind: .spawn(name: nil),

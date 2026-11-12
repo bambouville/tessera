@@ -36,4 +36,5 @@ include(
     ":protocol-conformance",
     ":agent-platform",
     ":feature-agent-center",
+    ":feature-artifacts",
 )

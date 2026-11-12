@@ -102,12 +102,43 @@ public enum SensitiveDataRedaction {
     /// diagnostic lines — `target=@3`, an escaped `…\t@3\t…` metadata row —
     /// and hid exactly the window identity a tmux report is read for. An
     /// endpoint's local part is a word-ish token that sits on a boundary, so
-    /// requiring that (and refusing one that begins right after an escape
-    /// backslash) keeps `alice@prod.internal` redacted while leaving a window
-    /// id legible.
-    private static let endpointIdentifierExpression = try! NSRegularExpression(
-        pattern: #"(?<![\w.\-\\])[\w.\-]+@[\w.\-]+"#
-    )
+    /// requiring that keeps `alice@prod.internal` redacted while leaving a
+    /// window id legible.
+    ///
+    /// Escaped evidence (`TmuxWireEvidence.snippet`) glues a word to its
+    /// separator: `\t@3` is a window, but a pane title in `\talice@devbox` is
+    /// an endpoint. A local part may therefore start right after a backslash
+    /// unless it would be a lone escape (`t`, `n`, `r`, `e`, `xHH`), and a
+    /// `DOMAIN\user` account keeps its domain inside the match, even a user
+    /// that begins like an escape (`CORP\tom`).
+    ///
+    /// Beyond that the local part may carry a `+` tag, a `$` (machine
+    /// accounts), an inner apostrophe and a `:password`, even an empty one;
+    /// the host may be an IPv6 literal, bracketed (even if cut short), bare
+    /// with a `%zone`, cut at a snippet's `…`, or a UPN's `domain@host`; and
+    /// either side may be a key the mosh stage already replaced. A few colour
+    /// codes may paint either side, as a zsh `%F{…}%n%f@%F{…}%m` prompt does,
+    /// and a match may begin at one. A name of digits alone is never a host,
+    /// so `%5@3` and `policy:@3` stay window ids. Starts inside an apostrophe
+    /// or placeholder chain or a colour code, and passwords past the next
+    /// `:`, are refused so no input makes the scan quadratic.
+    private static let endpointIdentifierExpression: NSRegularExpression = {
+        let run = #"(?:<redacted-key>|[\w.+\-$])+"#
+        let escape = #"(?:[tnre]|x[0-9A-Fa-f]{2})"#
+        let introducer = #"(?:\\e|\\x1[bB]|\x1b)\["#
+        let paint = "(?:" + introducer + #"[0-9;]{0,16}m){0,3}"#
+        let boundary = #"(?<![\w.+\-$\\])(?<![\w.+\-$]')(?<!<redacted-key>)(?<!<redacted-key>')"#
+            + #"(?<!\\e\[)(?<!\\x1[bB]\[)(?<!\x1b\[)"#
+        let start = "(?:" + boundary + "(?:" + run + #"\\{1,2}(?!"# + escape + "@))?"
+            + #"|(?<=\\)(?!"# + escape + "@)"
+            + "|(?=" + introducer + "))"
+        let local = paint + run + "(?:'" + run + ")*" + paint + #"(?::(?:[^\s@:/][^\s@:]{0,63})?)?"#
+        let name = paint + #"(?!\d+(?![\w.\-…]))(?:<redacted-key>|[\w.\-…])+"# + paint
+        let host = #"(?:\[[^\]\s]{0,64}\]?"#
+            + #"|(?:[0-9A-Fa-f]{0,4}:){2,}[0-9A-Fa-f.]*(?:%[\w.\-]+)?"#
+            + "|" + name + "(?:@" + name + ")*)"
+        return try! NSRegularExpression(pattern: start + local + "@" + host)
+    }()
 
     private static func apply(_ pattern: Pattern, to text: String) -> String {
         switch pattern {

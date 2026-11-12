@@ -37,7 +37,7 @@ def main():
     output = args.output.resolve()
     if any((parent / '.git').exists() for parent in [output, *output.parents]): parser.error('measurement output must be outside Git')
     if not 1 <= args.seconds <= 600 or output.exists(): parser.error('invalid duration or existing output')
-    start = time.monotonic(); peak = 0; samples = 0; cpu = {}; first_seen = None; last_seen = None
+    start = time.monotonic(); peak = 0; samples = 0; skipped = 0; cpu = {}; first_seen = None; last_seen = None
     stopped = False
     def stop(_signal, _frame):
         nonlocal stopped
@@ -45,7 +45,12 @@ def main():
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     while not stopped and time.monotonic() - start < args.seconds:
-        raw = subprocess.check_output(['/bin/ps', '-axo', 'pid=,rss=,time=,command='], text=True, timeout=5)
+        try:
+            raw = subprocess.check_output(['/bin/ps', '-axo', 'pid=,rss=,time=,command='], text=True, timeout=5)
+        except subprocess.TimeoutExpired:
+            # A loaded host (a build beside the lane) can stall one ps; that
+            # sample is missed, not the census.
+            skipped += 1; time.sleep(.25); continue
         current = census(raw, args.device)
         if current:
             now = time.monotonic() - start
@@ -54,7 +59,7 @@ def main():
             peak = max(peak, sum(value[0] for value in current.values()))
             for pid, (_, usage) in current.items(): cpu[pid] = max(cpu.get(pid, 0), usage)
         time.sleep(.25)
-    report = dict(stage='simulator_app_resource_census_not_device_footprint', samples=samples,
+    report = dict(stage='simulator_app_resource_census_not_device_footprint', samples=samples, skipped_samples=skipped,
                   observed_app_processes=len(cpu), peak_sampled_rss_bytes=peak,
                   cumulative_observed_process_cpu_seconds=sum(cpu.values()),
                   first_seen_seconds=first_seen, last_seen_seconds=last_seen,

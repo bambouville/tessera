@@ -445,6 +445,8 @@ data class SharedAgentLifecycleHookEvent(
     val agentID: String?,
     val agentType: String?,
     val rootAgentID: String?,
+    /** The tool call a question tool's PreToolUse/PostToolUse names. */
+    val toolUseID: String? = null,
 )
 
 /** Shared timing policy; native task owners keep clocks and cancellation. */
@@ -539,6 +541,7 @@ object SharedAgentIntegrationParsing {
             agentID = optional("agentID"),
             agentType = optional("agentType"),
             rootAgentID = optional("rootAgentID"),
+            toolUseID = optional("toolUseID"),
         )
     }
 
@@ -667,6 +670,8 @@ data class SharedAgentIntegrationObservation(
     val shellIntegrationActive: Boolean?,
     val agentIntegrationActive: Boolean,
     val agentRequiresLifecycleHook: Boolean? = null,
+    /** False on plain mosh, where no lifecycle event can reach the app; null means it can. */
+    val agentLifecycleDeliverable: Boolean? = null,
 )
 
 data class SharedAgentIntegrationDecision(
@@ -732,7 +737,8 @@ internal object SharedAgentIntegrationWireCodec {
                 .put("foreground", observation.foreground.wireValue)
                 .put("shellIntegrationActive", observation.shellIntegrationActive ?: org.json.JSONObject.NULL)
                 .put("agentIntegrationActive", observation.agentIntegrationActive)
-                .put("agentRequiresLifecycleHook", observation.agentRequiresLifecycleHook ?: org.json.JSONObject.NULL),
+                .put("agentRequiresLifecycleHook", observation.agentRequiresLifecycleHook ?: org.json.JSONObject.NULL)
+                .put("agentLifecycleDeliverable", observation.agentLifecycleDeliverable ?: org.json.JSONObject.NULL),
         )
         .put("requestedAction", requestedAction?.wireValue ?: org.json.JSONObject.NULL)
         .toString()
@@ -2357,7 +2363,9 @@ internal object NativeCoreBindings {
     external fun agentProjectorDiagnostics(input: ByteBuffer, inputCount: Int): String
 
     external fun agentMarkdownParse(input: ByteBuffer?, inputCount: Int): String?
+    external fun agentMarkdownParseDocument(input: ByteBuffer?, inputCount: Int): String?
     external fun agentPageSearch(input: ByteBuffer, inputCount: Int): String
+    external fun agentHostSearch(input: ByteBuffer, inputCount: Int): String
 
     external fun agentIntegrationParseConfigs(input: ByteBuffer, inputCount: Int): String
 
@@ -2624,6 +2632,22 @@ internal object NativeCoreBindings {
     external fun forwardingPortableLocalSubset(rules: ByteBuffer, rulesCount: Int): String
 
     external fun forwardingWebTarget(rule: ByteBuffer, ruleCount: Int): String
+
+    external fun artifactsReduce(request: ByteBuffer, requestCount: Int): String
+    external fun artifactsOverview(request: ByteBuffer, requestCount: Int): String
+    external fun artifactsQuickOpenParse(request: ByteBuffer, requestCount: Int): String
+    external fun artifactsQuickOpenSuggestions(request: ByteBuffer, requestCount: Int): String
+    external fun artifactsClassifyLink(request: ByteBuffer, requestCount: Int): String
+    external fun artifactsDocumentLink(request: ByteBuffer, requestCount: Int): String
+    external fun artifactsListeningPortsCommand(): String
+    external fun artifactsListeningPortsParse(request: ByteBuffer, requestCount: Int): String
+    external fun artifactsForwardPlan(request: ByteBuffer, requestCount: Int): String
+    external fun artifactsKeepAsRule(request: ByteBuffer, requestCount: Int): String
+    external fun artifactsCacheKey(request: ByteBuffer, requestCount: Int): String
+    external fun artifactsCacheEvictions(request: ByteBuffer, requestCount: Int): String
+    external fun artifactsCachePresentation(request: ByteBuffer, requestCount: Int): String
+    external fun artifactsDecodeState(request: ByteBuffer, requestCount: Int): String
+    external fun artifactsKind(request: ByteBuffer, requestCount: Int): String
 
     external fun tmuxSessionNameValidate(name: ByteBuffer?, nameCount: Int): Int
 

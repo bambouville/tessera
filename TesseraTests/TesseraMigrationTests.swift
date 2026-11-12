@@ -329,6 +329,32 @@ final class TesseraMigrationTests: XCTestCase {
         }
     }
 
+    func test_aFreshInstallHasItsStoreDirectoryBeforeTheStoreOpens() throws {
+        // A fresh install's app group container has no Application Support
+        // directory; Core Data would log a failed open and a recovery first.
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tessera-fresh-store-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storeURL = root.appendingPathComponent("Library/Application Support/default.store")
+        let configuration = ModelConfiguration(schema: TesseraModelContainer.currentSchema, url: storeURL)
+
+        TesseraModelContainer.prepareStoreDirectory(for: configuration)
+
+        var isDirectory: ObjCBool = false
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: storeURL.deletingLastPathComponent().path, isDirectory: &isDirectory))
+        XCTAssertTrue(isDirectory.boolValue)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: storeURL.path))
+        // Preparing an existing directory again is harmless.
+        TesseraModelContainer.prepareStoreDirectory(for: configuration)
+        let container = try ModelContainer(
+            for: TesseraModelContainer.currentSchema,
+            migrationPlan: TesseraMigrationPlan.self,
+            configurations: configuration
+        )
+        XCTAssertEqual(try ModelContext(container).fetchCount(FetchDescriptor<PersistedHost>()), 0)
+    }
+
     private func makeDiskContainer(at url: URL) throws -> ModelContainer {
         let configuration = ModelConfiguration(
             "TesseraMigrationDiskTest",

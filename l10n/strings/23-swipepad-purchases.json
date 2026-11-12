@@ -181,7 +181,7 @@
     "fr": "profil fourre-tout · utilisé lorsqu'aucun profil ci-dessus ne correspond au processus au premier plan. toutes les directions sont non assignées par défaut — assignez-en une pour utiliser le palet hors d'une invite d'agent.",
     "ja": "汎用プロファイル · 上のどのプロファイルもフォアグラウンドのプロセスに一致しないときに使われます。既定ではどの方向も未割り当てです — いずれかを割り当てると、エージェントのプロンプト以外でもパックを使えます。",
     "zh-Hans": "兜底配置 · 当上面所有配置都不匹配前台进程时使用。默认所有方向均未绑定 —— 绑定任意方向即可在智能体提示之外使用圆钮。",
-    "zh-Hant": "兜底設定檔 · 當上面所有設定檔都不符合前景行程時使用。預設所有方向均未綁定 —— 綁定任一方向即可在智能體提示之外使用圓鈕。"
+    "zh-Hant": "兜底設定檔 · 當上面所有設定檔都不符合前景行程時使用。預設所有方向均未綁定 —— 綁定任一方向即可在智慧體提示之外使用圓鈕。"
   },
   "literal process name, or a `regex:` prefix — the same matcher swipe-pad profiles use, so an \"approve\" shortcut exists only while an agent is in the foreground.": {
     "de": "wörtlicher Prozessname oder ein `regex:`-Präfix — derselbe Abgleich wie bei Swipe-Pad-Profilen, sodass ein „Zustimmen“-Kurzbefehl nur existiert, solange ein Agent im Vordergrund ist.",
@@ -189,7 +189,7 @@
     "fr": "nom de processus littéral, ou un préfixe `regex:` — le même comparateur que celui des profils du pavé tactile, si bien qu'un raccourci « approuver » n'existe que lorsqu'un agent est au premier plan.",
     "ja": "プロセス名そのもの、または `regex:` プレフィックス — スワイプパッドのプロファイルと同じ照合方法なので、「承認」ショートカットはエージェントがフォアグラウンドにある間だけ存在します。",
     "zh-Hans": "进程名原文，或加 `regex:` 前缀 —— 与滑动板配置使用同一套匹配规则，因此「批准」快捷键只在智能体处于前台时才存在。",
-    "zh-Hant": "行程名原文，或加 `regex:` 前綴 —— 與滑動板設定檔使用同一套比對規則，因此「批准」快捷鍵只在智能體處於前景時才存在。"
+    "zh-Hant": "行程名原文，或加 `regex:` 前綴 —— 與滑動板設定檔使用同一套比對規則，因此「批准」快捷鍵只在智慧體處於前景時才存在。"
   },
   "trigger": {
     "de": "Auslöser",
@@ -317,7 +317,7 @@
     "fr": "Tessera ne peut pas vous prévenir lorsqu'un agent hors écran termine ou attend une saisie pendant que l'app est en arrière-plan. Activez les notifications dans Réglages, puis revenez.",
     "ja": "アプリがバックグラウンドにある間、画面外のエージェントが完了したり入力を求めたりしても、Tessera はお知らせできません。「設定」で通知をオンにしてから戻ってきてください。",
     "zh-Hans": "当应用在后台时，Tessera 无法在屏幕外的智能体完成或需要输入时通知你。请在“设置”中开启通知后再回来。",
-    "zh-Hant": "當 App 在背景時，Tessera 無法在畫面外的智能體完成或需要輸入時通知你。請在「設定」中開啟通知後再回來。"
+    "zh-Hant": "當 App 在背景時，Tessera 無法在畫面外的智慧體完成或需要輸入時通知你。請在「設定」中開啟通知後再回來。"
   },
   "Tessera can't send terminal-bell banners while iOS notifications are off. Turn notifications on in Settings, then come back.": {
     "de": "Tessera kann keine Banner für den Terminal-Signalton senden, solange iOS-Mitteilungen aus sind. Aktiviere Mitteilungen in den Einstellungen und komm dann zurück.",
@@ -333,7 +333,7 @@
     "fr": "Activer les alertes d'agent précises désactive une fois les notifications d'arrière-plan de la cloche du terminal. Vous pourrez le rétablir plus tard sous Terminal. Sans serveur de notifications, les fins de tâche survenues après la suspension de Tessera par iPadOS sont récupérées à votre retour.",
     "ja": "精密なエージェント通知を有効にすると、ターミナルのベルによるバックグラウンド通知が一度だけオフになります。後で「ターミナル」から変更できます。通知サーバーがない場合、iPadOS が Tessera を停止させた後に完了した処理は、戻ってきたときにまとめて反映されます。",
     "zh-Hans": "启用精确的智能体提醒会一次性关闭终端响铃的后台通知。你之后可以在“终端”中改回来。若没有通知服务器，在 iPadOS 挂起 Tessera 之后完成的任务会在你返回时补上。",
-    "zh-Hant": "啟用精確的智能體提醒會一次性關閉終端機響鈴的背景通知。你之後可以在「終端機」中改回來。若沒有通知伺服器，在 iPadOS 暫停 Tessera 之後完成的任務會在你返回時補上。"
+    "zh-Hant": "啟用精確的智慧體提醒會一次性關閉終端機響鈴的背景通知。你之後可以在「終端機」中改回來。若沒有通知伺服器，在 iPadOS 暫停 Tessera 之後完成的任務會在你返回時補上。"
   },
   "Terminal-bell background notifications are also enabled by your override. They can duplicate alerts and are less precise because any program can ring BEL. Without a notification server, completions after iPadOS suspends Tessera are recovered when you return.": {
     "de": "Durch deine Übersteuerung sind auch Hintergrundmitteilungen für den Terminal-Signalton aktiv. Sie können Hinweise doppeln und sind ungenauer, weil jedes Programm BEL auslösen kann. Ohne Benachrichtigungsserver werden Abschlüsse, die nach dem Anhalten von Tessera durch iPadOS eintreten, bei deiner Rückkehr nachgeholt.",

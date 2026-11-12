@@ -37,7 +37,7 @@ struct WindowSegment {
     std::vector<PositionedRecord> records;
     std::vector<WindowRecordAnchors> anchors;
     static size_t recordBytes(const PositionedRecord& record) {
-        return record.value.json.size() + record.value.providerID.size() + record.value.parentID.size() + 256;
+        return record.value.json.size() + record.value.providerID.size() + record.value.parentID.size() + record.value.turnID.size() + 256;
     }
     static size_t anchorBytes(const WindowRecordAnchors& item) {
         size_t count = 0;
@@ -56,7 +56,9 @@ struct WindowSegment {
 
 class PageWindow {
 public:
-    enum class Kind { Bootstrap, Before, After, Head, Revisions };
+    // Seek: a page away from the viewport (a search match). It replaces the
+    // viewport and leaves the head apart, where paging newer meets it.
+    enum class Kind { Bootstrap, Before, After, Head, Revisions, Seek };
     using Segment = std::shared_ptr<const WindowSegment>;
     using Clock = std::chrono::steady_clock;
     static constexpr size_t pageLimit = 262144;
@@ -122,11 +124,17 @@ public:
         if (retainedBytes() > retainedLimit) throw std::runtime_error("windowCapacity");
         serviceBytes = std::max(serviceBytes, footprint());
         const bool refresh = kind == Kind::Head || kind == Kind::Revisions;
-        // A bootstrap ACK replaces all of this window's committed pages: its
-        // result must fit the growth limit, while staging overlaps the old pages.
-        const bool replacing = reset && !retained_.empty();
+        // A bootstrap ACK replaces all of this window's committed pages, and a
+        // seek ACK all but the head: the result must fit the growth limit,
+        // while staging overlaps the old pages.
+        const bool replacing = (reset || kind == Kind::Seek) && !retained_.empty();
+        size_t released = 0;
+        if (replacing) {
+            const auto kept = reset ? retained_.end() : retained_.find(head_);
+            released = retainedBytes_ - (kept == retained_.end() ? 0 : kept->second->bytes());
+        }
         if (!(refresh ? fits(serviceBytes, serviceRefreshLimit) : replacing ?
-                fits(serviceBytes - retainedBytes_, serviceGrowthLimit) && fits(serviceBytes, serviceRefreshLimit) :
+                fits(serviceBytes - released, serviceGrowthLimit) && fits(serviceBytes, serviceRefreshLimit) :
                 fits(serviceBytes, serviceGrowthLimit)))
             throw std::runtime_error("windowCapacity");
         transaction_ = transaction; resetting_ = reset; kind_ = kind; deadline_ = Clock::now() + std::chrono::seconds(30);
@@ -283,6 +291,10 @@ public:
             else candidate.push_back(staged_->id);
             if (std::find(viewport.begin(), viewport.end(), staged_->id) == viewport.end()) throw std::runtime_error("windowAckDroppedIncoming");
             candidates.push_back(std::move(candidate));
+        } else if (kind_ == Kind::Seek) {
+            if (head != head_) throw std::runtime_error("windowAckHead");
+            candidates.push_back({staged_->id});
+            if (std::find(viewport.begin(), viewport.end(), staged_->id) == viewport.end()) throw std::runtime_error("windowAckDroppedIncoming");
         } else if (kind_ == Kind::Head) {
             if (head != staged_->id) throw std::runtime_error("windowAckHead");
             candidates.push_back(viewport_); candidates.push_back({staged_->id});

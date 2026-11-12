@@ -2,11 +2,24 @@
 #include "ReadWorker.h"
 #include "Json.h"
 #include <cassert>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <new>
 #include <unistd.h>
+#include <vector>
 #include <poll.h>
+
+// Once armed, the allocation after this many more on this thread fails.
+static thread_local long allocationsBeforeFailure = -1;
+void* operator new(std::size_t size) {
+    if (allocationsBeforeFailure >= 0 && allocationsBeforeFailure-- == 0) throw std::bad_alloc();
+    if (void* value = std::malloc(size ? size : 1)) return value;
+    throw std::bad_alloc();
+}
+void operator delete(void* value) noexcept { std::free(value); }
+void operator delete(void* value, std::size_t) noexcept { std::free(value); }
 
 using namespace tessera;
 static void giant(const std::string& path, bool newline = true, bool malformedTail = false) {
@@ -43,6 +56,70 @@ int main() {
         auto nextRevision = revised; nextRevision.observedRevision = 8;
         assert(context.result(nextRevision, 10, 20) == nullptr);
         assert(context.result(revised, 10, 20) == nullptr);
+    }
+    // Results with the same bounds keep apart by kind and path, and a
+    // validated observation never retires an unvalidated one's result.
+    {
+        JsonlContinuation context;
+        JsonlContinuation::Source source{path, "jsonl:1:2", "stamp", "claude", 1000, 0};
+        auto other = source; other.path = path + ".other";
+        auto validated = source; validated.observedRevision = 3;
+        NormalizedRecord value;
+        value.json = "default"; context.remember(source, 10, 20, value);
+        value.json = "metadata"; context.remember(source, 10, 20, value, "chainMetadata:claude");
+        value.json = "other"; context.remember(other, 10, 20, value);
+        value.json = "validated"; context.remember(validated, 10, 20, value);
+        assert(context.result(source, 10, 20)->json == "default");
+        assert(context.result(source, 10, 20, "chainMetadata:claude")->json == "metadata");
+        assert(context.result(source, 10, 20, "chainMetadata:pi") == nullptr);
+        assert(context.result(other, 10, 20)->json == "other");
+        assert(context.result(validated, 10, 20)->json == "validated");
+        assert(context.result(source, 10, 20)->json == "default");
+        auto changed = source; changed.stamp = "stamp:b";
+        assert(context.result(changed, 10, 20) == nullptr);
+        assert(context.result(source, 10, 20) == nullptr);
+        assert(context.result(source, 10, 20, "chainMetadata:claude") == nullptr);
+        assert(context.result(other, 10, 20)->json == "other");
+        assert(context.result(validated, 10, 20)->json == "validated");
+    }
+    // A source change drops every result it retired, not just those at the
+    // bounds looked up: stale results would outlive live ones under pressure.
+    {
+        JsonlContinuation context;
+        JsonlContinuation::Source source{path, "jsonl:1:2", "stamp", "claude", 1000, 0};
+        auto other = source; other.path = path + ".other";
+        NormalizedRecord value; value.json = "small";
+        context.remember(source, 10, 20, value);
+        context.remember(source, 30, 40, value);
+        context.remember(other, 30, 40, value);
+        assert(context.result(source, 30, 40));
+        auto changed = source; changed.stamp = "stamp:b";
+        assert(context.result(changed, 10, 20) == nullptr);
+        assert(context.result(source, 30, 40) == nullptr);
+        assert(context.result(other, 30, 40));
+    }
+    // A remember that fails part way leaves no trace. An unindexed result
+    // would be forgotten uncounted, wrapping the byte total so that every
+    // later remember flushed the whole cache.
+    for (long failAt = 0;; ++failAt) {
+        assert(failAt < 1000);
+        JsonlContinuation context;
+        JsonlContinuation::Source source{path, "jsonl:1:2", "stamp", "claude", 1000, 0};
+        NormalizedRecord value; value.json = "small";
+        context.remember(source, 1, 2, value);
+        // Larger than the results after it, so its uncounted bytes cannot
+        // cancel out against theirs.
+        NormalizedRecord large; large.json.assign(100 * 1024, 'x');
+        bool failed = false;
+        allocationsBeforeFailure = failAt;
+        try { context.remember(source, 3, 4, large); } catch (const std::bad_alloc&) { failed = true; }
+        allocationsBeforeFailure = -1;
+        if (!failed) { assert(context.result(source, 3, 4)); break; }
+        assert(context.result(source, 3, 4) == nullptr);
+        auto changed = source; changed.stamp = "stamp:b";
+        assert(context.result(changed, 1, 2) == nullptr);
+        for (uint64_t index = 10; index < 20; ++index) context.remember(changed, index, index + 1, value);
+        for (uint64_t index = 10; index < 20; ++index) assert(context.result(changed, index, index + 1));
     }
     // A hit moves to the newest LRU position before count pressure evicts.
     {
@@ -279,6 +356,38 @@ int main() {
         assert(json::text(proof, "actionID") == "action");
         assert(json::text(proof, "sourceIdentity").rfind("jsonl:", 0) == 0);
         worker.shutdown();
+    }
+    // A reader reuses one line buffer for the records it decodes itself. A
+    // record retained across slices must not carry that buffer's capacity,
+    // which the continuation's budget counts: alternating near-limit and
+    // oversized records (an Edit result with a long patch) tripped it.
+    {
+        const std::string alternating = std::string(directory) + "/alternating.jsonl";
+        std::vector<std::pair<uint64_t, uint64_t>> bounds;
+        {
+            std::ofstream file(alternating, std::ios::binary | std::ios::trunc);
+            uint64_t offset = 0;
+            for (int pair = 0; pair < 6; ++pair) for (const bool oversized : {false, true}) {
+                const std::string head = "{\"type\":\"user\",\"uuid\":\"" + std::string(oversized ? "o" : "n") +
+                    std::to_string(pair) + "\",\"parentUuid\":null,\"message\":{\"role\":\"user\",\"content\":\"";
+                std::string tail = "\"}}\n";
+                if (oversized) {
+                    tail = "\"},\"toolUseResult\":{\"structuredPatch\":[{\"lines\":[";
+                    for (int line = 0; line < 10000; ++line)
+                        tail += std::string(line ? "," : "") + "\"+    line " + std::to_string(line) + " of the edited file body\"";
+                    tail += "]}]}}\n";
+                }
+                const size_t size = oversized ? 1300000 : 1040000;
+                const auto record = head + std::string(size - head.size() - tail.size(), 'x') + tail;
+                file << record; bounds.push_back({offset, offset + record.size()}); offset += record.size();
+            }
+        }
+        JsonlContinuation context; JsonlContinuation::Scope scope(context);
+        JsonlReader reader(alternating, "claude");
+        for (const auto& [start, end] : bounds) {
+            context.beginSlice();
+            assert(reader.readRecord(start, end).value.disposition != "malformed");
+        }
     }
     std::filesystem::remove_all(directory);
     std::cout << "oversized forward/backward, cancellation, tail validation, rewrite and partial-line continuation passed\n";

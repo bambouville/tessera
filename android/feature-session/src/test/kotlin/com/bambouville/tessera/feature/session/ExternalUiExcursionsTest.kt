@@ -45,19 +45,19 @@ class ExternalUiExcursionsTest {
     @Test
     fun aScreenDisposedMidExcursionReleasesItsSlotOnce() {
         val excursions = ExternalUiExcursions()
-        val keys = excursions.slot()
-        val picker = excursions.slot()
+        val files = excursions.slot()
+        val settings = excursions.slot()
 
-        picker(true)
-        keys(true)
-        // Keys leaves composition while its credential prompt is up: the
+        settings(true)
+        files(true)
+        // A session leaves composition while its Files picker is up: the
         // screen's onDispose releases the slot it will never hear back from.
-        keys(false)
+        files(false)
         assertEquals(1, excursions.count)
-        // The prompt's late result (or a second dispose) is then a no-op.
-        keys(false)
+        // The picker's late result (or a second dispose) is then a no-op.
+        files(false)
         assertEquals(1, excursions.count)
-        picker(false)
+        settings(false)
         assertFalse("nothing leaked: the next stop can hide again", excursions.active)
         assertEquals(0, excursions.count)
     }

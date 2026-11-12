@@ -195,35 +195,18 @@ struct SessionSidebar: View {
                     ) {
                         selectedItem = .agents
                     }
+                    .onboardingAnchor(.agentsNav)
                 }
 
                 BottomNavigationRow(
-                    item: .keys,
-                    systemName: "key.fill",
-                    label: "keys",
-                    isSelected: selectedItem == .keys
+                    item: .artifacts,
+                    systemName: "square.stack.3d.up",
+                    label: "artifacts",
+                    isSelected: selectedItem == .artifacts
                 ) {
-                    selectedItem = .keys
+                    selectedItem = .artifacts
                 }
-                .onboardingAnchor(.keysNav)
-
-                BottomNavigationRow(
-                    item: .knownHosts,
-                    systemName: "lock.shield.fill",
-                    label: "known hosts",
-                    isSelected: selectedItem == .knownHosts
-                ) {
-                    selectedItem = .knownHosts
-                }
-
-                BottomNavigationRow(
-                    item: .tunnels,
-                    systemName: "arrow.left.arrow.right",
-                    label: "tunnels",
-                    isSelected: selectedItem == .tunnels
-                ) {
-                    selectedItem = .tunnels
-                }
+                .onboardingAnchor(.artifactsNav)
 
                 BottomNavigationRow(
                     item: .settings,
@@ -233,6 +216,7 @@ struct SessionSidebar: View {
                 ) {
                     selectedItem = .settings
                 }
+                .onboardingAnchor(.settingsNav)
             }
             .padding(.top, 8)
             .padding(.bottom, 14)
@@ -688,6 +672,7 @@ struct BottomNavigationRow: View {
             }
             .padding(.vertical, 8)
             .padding(.horizontal, 12)
+            .frame(minHeight: 44)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(isSelected ? T.inputBgSoft : Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -730,7 +715,7 @@ struct BottomNavigationRow: View {
             .resizable()
             .scaledToFit()
             .frame(width: 15, height: 15)
-            .foregroundStyle(isSelected ? T.accent : T.fgMuted)
+            .foregroundStyle(T.fgMuted)
     }
 }
 
@@ -789,6 +774,7 @@ enum SidebarItem: Hashable, Equatable {
     case session(UUID)
     case host(UUID)
     case agents
+    case artifacts
     case keys
     case knownHosts
     case tunnels
@@ -801,6 +787,7 @@ enum SidebarItem: Hashable, Equatable {
         case .session(let id):  return "session-\(id)"
         case .host(let id):     return "host-\(id)"
         case .agents:           return "agents"
+        case .artifacts:        return "artifacts"
         case .keys:             return "keys"
         case .knownHosts:       return "known-hosts"
         case .tunnels:          return "tunnels"

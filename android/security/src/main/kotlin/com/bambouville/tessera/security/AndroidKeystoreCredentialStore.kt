@@ -1,6 +1,5 @@
 package com.bambouville.tessera.security
 
-import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
@@ -103,16 +102,10 @@ class AndroidKeystoreCredentialStore {
             .setDigests(KeyProperties.DIGEST_SHA256)
             .setUserAuthenticationRequired(ownerAuthenticationRequired)
         if (ownerAuthenticationRequired) {
-            val validity = ownerAuthenticationValiditySeconds ?: 0
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                builder.setUserAuthenticationParameters(
-                    validity,
-                    KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL,
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                builder.setUserAuthenticationValidityDurationSeconds(validity)
-            }
+            builder.setUserAuthenticationParameters(
+                ownerAuthenticationValiditySeconds ?: 0,
+                KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL,
+            )
         }
         builder.setIsStrongBoxBacked(useStrongBox)
         KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, PROVIDER).apply {
@@ -122,18 +115,12 @@ class AndroidKeystoreCredentialStore {
     }
 
     private fun KeyInfo.toSecurityLevel(): KeySecurityLevel =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            when (securityLevel) {
-                KeyProperties.SECURITY_LEVEL_SOFTWARE -> KeySecurityLevel.SOFTWARE
-                KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT -> KeySecurityLevel.TRUSTED_ENVIRONMENT
-                KeyProperties.SECURITY_LEVEL_STRONGBOX -> KeySecurityLevel.STRONGBOX
-                KeyProperties.SECURITY_LEVEL_UNKNOWN_SECURE -> KeySecurityLevel.UNKNOWN_SECURE
-                else -> KeySecurityLevel.UNKNOWN
-            }
-        } else {
-            @Suppress("DEPRECATION")
-            if (isInsideSecureHardware) KeySecurityLevel.UNKNOWN_SECURE
-            else KeySecurityLevel.SOFTWARE
+        when (securityLevel) {
+            KeyProperties.SECURITY_LEVEL_SOFTWARE -> KeySecurityLevel.SOFTWARE
+            KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT -> KeySecurityLevel.TRUSTED_ENVIRONMENT
+            KeyProperties.SECURITY_LEVEL_STRONGBOX -> KeySecurityLevel.STRONGBOX
+            KeyProperties.SECURITY_LEVEL_UNKNOWN_SECURE -> KeySecurityLevel.UNKNOWN_SECURE
+            else -> KeySecurityLevel.UNKNOWN
         }
 
     companion object {

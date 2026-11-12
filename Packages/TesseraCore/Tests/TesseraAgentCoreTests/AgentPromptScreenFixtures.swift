@@ -453,6 +453,110 @@ Ready to submit your answers?
 
   enter submit   ctrl+] skip   ⌥+↓ main prompt   shift+← next question
 """#)
+    // Codex 0.166: the hints read "⌃] skip" and "⇧→ main prompt"; at phone
+    // width they wrap onto a second row.
+    static let codexAsync166OpenQ1 = Fixture(cursorRow: nil, cursorVisible: false, text: #"""
+› SCRIPT:async2
+
+
+? Which database should the service use?
+
+  • Postgres
+  • SQLite
+
+? Describe the rollout window you prefer.
+
+◦ Working (3s • esc to interrupt)
+
+• Queued follow-up inputs
+
+
+  1 of 2
+  Which database should the service use?
+
+  › 1. Postgres
+    2. SQLite
+    3. Other
+
+  enter submit   ⌃] skip   ⇧→ main prompt   ⇧← next question
+"""#)
+    static let codexAsync166OpenQ1Phone = Fixture(cursorRow: nil, cursorVisible: false, text: #"""
+› SCRIPT:async2
+
+
+? Which database should the service use?
+
+  • Postgres
+  • SQLite
+
+? Describe the rollout window you prefer.
+
+• Working (1m 02s • esc to interrupt)
+
+• Queued follow-up inputs
+
+
+  1 of 2
+  Which database should the service use?
+
+  › 1. Postgres
+    2. SQLite
+    3. Other
+
+  enter submit   ⌃] skip   ⇧→ main prompt
+  ⇧← next question
+"""#)
+    // Codex 0.166, twins of two paragraphs that differ in the first: the
+    // counter sits alone a blank row above it, and the twin left once the
+    // first is answered has none.
+    static let codexAsyncParagraphsQ1 = Fixture(cursorRow: nil, cursorVisible: false, text: #"""
+? Staging takes the first rollout.
+
+  Describe the rollout window you prefer.
+
+? Production takes the second rollout.
+
+  Describe the rollout window you prefer.
+
+◦ Working (3s • esc to interrupt)
+
+• Queued follow-up inputs
+
+
+  1 of 2
+
+  Staging takes the first rollout.
+
+  Describe the rollout window you prefer.
+
+  Type your answer
+
+  enter submit   ⌃] skip   ⇧→ main prompt   ⇧← next question
+"""#)
+    static let codexAsyncParagraphsQ2 = Fixture(cursorRow: nil, cursorVisible: false, text: #"""
+? Production takes the second rollout.
+
+  Describe the rollout window you prefer.
+
+
+↪ Re: Staging takes the first rollout.  Describe the rollout window you prefer.
+
+  Staging mornings
+
+
+• Working (8s • esc to interrupt)
+
+• Queued follow-up inputs
+
+
+  Production takes the second rollout.
+
+  Describe the rollout window you prefer.
+
+  Type your answer
+
+  enter submit   ⌃] skip   ⇧→ main prompt
+"""#)
     static let codexAsync2AfterQ1 = Fixture(cursorRow: 23, cursorVisible: true, text: #"""
   • Postgres
   • SQLite
@@ -1193,6 +1297,100 @@ report the issue.
   \#u{1B}[1mesc\#u{1B}[0m to interrupt                                      
                             
 """#)
+    /// Codex 0.166's notes field open at 49 columns: its key hints wrap.
+    static let codexRuiNotesOpenPhone = Fixture(cursorRow: nil, cursorVisible: true, text: #"""
+  Question 1/1 (1 unanswered)
+  Which database should we use?
+
+    1. Postgres (Recommended)  Transactional
+                               and deployed.
+    2. SQLite                  Embedded, zero
+                               operations.
+  › 3. None of the above       Optionally, add
+                               details in notes
+                               (tab)
+
+  › Add notes
+
+  tab or esc to clear notes
+  enter to submit answer
+"""#)
+    /// Codex 0.166, the TUI lane's capture: a note wider than the field wraps
+    /// onto rows indented past its marker, at 110 columns and at 49.
+    static let codexRuiNotesWrapped = Fixture(cursorRow: nil, cursorVisible: true, text: #"""
+  Question 1/1 (1 unanswered)
+  Which database should we use?
+
+    1. Postgres (Recommended)  Transactional and deployed.
+    2. SQLite                  Embedded, zero operations.
+  › 3. None of the above       Optionally, add details in notes (tab)
+
+  › CockroachDB with a replica in the east region and a standby in the west region, both on NVMe disks with
+    nightly backups
+
+  tab or esc to clear notes | enter to submit answer
+"""#)
+    /// Codex 0.166, a probe's capture: a path wider than the row breaks after
+    /// a slash, and at 49 columns a note taller than the field's six rows
+    /// scrolls, its marker on the first row shown.
+    static let codexRuiNotesBroken = Fixture(cursorRow: nil, cursorVisible: true, text: #"""
+  Question 1/1 (1 unanswered)
+  Which database should we use?
+
+    1. Postgres (Recommended)  Transactional and deployed.
+    2. SQLite                  Embedded, zero operations.
+  › 3. None of the above       Optionally, add details in notes (tab)
+
+  › CockroachDB with a replica in the east region and a standby in the west region, schema at /srv/ledger/
+    migrations/2026-11-06/0042_split_the_ledger_tables_into_hot_and_cold_partitions_by_quarter.sql which
+    the platform team reviews every quarter. Keep nightly backups for thirty days and weekly ones for a
+    year, restore drills every month, and page the on-call engineer when replication lag passes ten seconds
+    for more than five minutes during business hours or thirty seconds at any other time, with dashboards
+    for both regions kept next to the release calendar so the change freeze is visible to everyone.
+
+  tab or esc to clear notes | enter to submit answer
+"""#)
+    static let codexRuiNotesScrolledPhone = Fixture(cursorRow: nil, cursorVisible: true, text: #"""
+  Question 1/1 (1 unanswered)
+  Which database should we use?
+
+    1. Postgres (Recommended)  Transactional
+                               and deployed.
+    2. SQLite                  Embedded, zero
+                               operations.
+  › 3. None of the above       Optionally, add
+                               details in notes
+                               (tab)
+
+  › when replication lag passes ten seconds
+    for more than five minutes during business
+    hours or thirty seconds at any other time,
+    with dashboards for both regions kept next
+    to the release calendar so the change
+    freeze is visible to everyone.
+
+  tab or esc to clear notes
+  enter to submit answer
+"""#)
+    static let codexRuiNotesWrappedPhone = Fixture(cursorRow: nil, cursorVisible: true, text: #"""
+  Question 1/1 (1 unanswered)
+  Which database should we use?
+
+    1. Postgres (Recommended)  Transactional
+                               and deployed.
+    2. SQLite                  Embedded, zero
+                               operations.
+  › 3. None of the above       Optionally, add
+                               details in notes
+                               (tab)
+
+  › CockroachDB with a replica in the east
+    region and a standby in the west region,
+    both on NVMe disks with nightly backups
+
+  tab or esc to clear notes
+  enter to submit answer
+"""#)
     static let kimiAskPhone = Fixture(cursorRow: 18, cursorVisible: false, text: #"""
  \#u{1B}[1m\#u{1B}[38;5;222m✨ SCRIPT:ask1\#u{1B}[0m                                         
  \#u{1B}[38;5;111m──────────────────────────────────────────────────────\#u{1B}[39m 
@@ -1481,6 +1679,11 @@ report the issue.
         ("claudeAskWideNarrow", claudeAskWideNarrow),
         ("claudeAskWideShortPane", claudeAskWideShortPane),
         ("codexRuiPhone", codexRuiPhone),
+        ("codexRuiNotesOpenPhone", codexRuiNotesOpenPhone),
+        ("codexRuiNotesWrapped", codexRuiNotesWrapped),
+        ("codexRuiNotesWrappedPhone", codexRuiNotesWrappedPhone),
+        ("codexRuiNotesBroken", codexRuiNotesBroken),
+        ("codexRuiNotesScrolledPhone", codexRuiNotesScrolledPhone),
         ("kimiAskPhone", kimiAskPhone),
         ("kimiReviewElidedPhone", kimiReviewElidedPhone),
         ("claudeReviewTallPhone", claudeReviewTallPhone),
@@ -1504,6 +1707,10 @@ report the issue.
         ("codexAsync2Collapsed", codexAsync2Collapsed),
         ("codexAsyncCountdown", codexAsyncCountdown),
         ("codexAsync2OpenQ1", codexAsync2OpenQ1),
+        ("codexAsync166OpenQ1", codexAsync166OpenQ1),
+        ("codexAsync166OpenQ1Phone", codexAsync166OpenQ1Phone),
+        ("codexAsyncParagraphsQ1", codexAsyncParagraphsQ1),
+        ("codexAsyncParagraphsQ2", codexAsyncParagraphsQ2),
         ("codexAsync2AfterQ1", codexAsync2AfterQ1),
         ("codexAsync2Q2Typed", codexAsync2Q2Typed),
         ("codexAsync2Done", codexAsync2Done),

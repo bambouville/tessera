@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="agent_platform_integration_check_failed">Falló la comprobación de la integración del host.</string>
+    <string name="agent_platform_integration_shared_unavailable">La integración de agentes compartida no está disponible.</string>
+    <string name="agent_platform_integration_probe_failed">Falló el sondeo de la integración del host.</string>
+    <string name="agent_platform_integration_process_state_unverified">No se pudo verificar el estado de los procesos del terminal.</string>
+    <string name="agent_platform_integration_provider_settings_unreadable">No se pudieron leer de forma segura los ajustes del proveedor.</string>
+    <string name="agent_platform_integration_provider_settings_too_large">Los ajustes del proveedor superan el límite seguro de instalación.</string>
+    <string name="agent_platform_integration_install_unconfirmed">No se pudo verificar la integración de Agent Center.</string>
+    <string name="agent_platform_integration_install_unconfirmed_code">No se pudo verificar la integración de Agent Center: %1$s</string>
+    <string name="agent_platform_integration_installed_shell_changed">La integración se instaló, pero el shell en primer plano cambió antes de la activación.</string>
+    <string name="agent_platform_integration_installed_not_enabled">La integración se instaló, pero no se pudo activar aquí: %1$s</string>
+    <string name="agent_platform_integration_provider_settings_changing">Los ajustes del proveedor cambiaron durante la instalación. Vuelve a intentarlo cuando dejen de cambiar.</string>
+    <string name="agent_platform_integration_shell_unverified">No se pudo verificar el shell actual.</string>
+    <string name="agent_platform_integration_shell_changed">El shell en primer plano cambió antes de la activación.</string>
+    <string name="agent_platform_integration_install_not_verified">El host no confirmó que la integración de agentes se instalara.</string>
+    <string name="agent_platform_integration_install_not_current">La integración de agentes se escribió, pero el host sigue indicando que está desactualizada.</string>
+    <string name="agent_platform_integration_newer_installed">Este host tiene una integración de Agent Center más nueva de una versión más reciente de Tessera. Actualiza esta app en su lugar.</string>
+    <string name="agent_platform_endpoint_agent_runtime_unavailable">Entorno de ejecución de agentes no disponible</string>
+    <string name="agent_platform_endpoint_terminal_uploads_unavailable">Las subidas de archivos no están disponibles para este terminal</string>
+    <string name="agent_platform_endpoint_uploads_unavailable">Las subidas de archivos no están disponibles</string>
+    <string name="agent_platform_endpoint_process_occupancy_unavailable">La ocupación de procesos no está disponible para este terminal</string>
+    <string name="agent_platform_endpoint_process_root_unavailable">El proceso raíz no está disponible</string>
+    <string name="agent_platform_endpoint_mosh_process_root_unavailable">el proceso raíz de mosh no está disponible</string>
+    <string name="agent_platform_endpoint_foreground_shell_proof_unavailable">la prueba del shell en primer plano no está disponible</string>
+    <string name="agent_platform_endpoint_fresh_terminal_evidence_unavailable">no hay datos recientes del terminal</string>
+    <string name="agent_platform_endpoint_terminal_capture_unavailable">la captura del terminal no está disponible</string>
+    <string name="agent_platform_endpoint_launch_directory_unproven">el inicio requiere un directorio de panel SSH+tmux verificado</string>
+    <string name="agent_platform_endpoint_raw_transport_one_focus">sin tmux solo hay un terminal enfocado</string>
+    <string name="agent_platform_endpoint_raw_prompt_capture_unavailable">sin tmux, aún no se puede capturar el prompt de forma fiable</string>
+    <string name="agent_platform_endpoint_raw_terminal_route_unavailable">ruta directa del terminal no disponible</string>
+    <string name="agent_platform_endpoint_route_proof_rejected">el servidor remoto no aceptó el marcador de prueba de ruta</string>
+    <string name="agent_platform_endpoint_spawn_requires_tmux">iniciar y bifurcar requieren tmux</string>
+    <string name="agent_platform_endpoint_tmux_control_unavailable">el control de tmux no está disponible</string>
+    <string name="agent_platform_endpoint_tmux_control_route_unavailable">ruta de control de tmux no disponible</string>
+    <string name="agent_platform_endpoint_remote_data_unavailable">datos remotos no disponibles</string>
+    <string name="agent_platform_endpoint_session_closed">sesión cerrada</string>
+</resources>

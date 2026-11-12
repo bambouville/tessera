@@ -37,6 +37,14 @@ enum AgentCenterV2Fixture {
         /// Threads appear and move between list sections in quick
         /// succession, as a tmux rebuild publishes them.
         case sectionMoves
+        /// A transcript of paths and a localhost link for the selection
+        /// menu's "Open in Artifacts" / "Reveal in Files", with a mock
+        /// connected session and Files bridge.
+        case selection
+        /// Two agents waiting, one working, one finished, one recent: the
+        /// laptop pose and the answers on rows. `LaptopState` picks the
+        /// thread that is open.
+        case laptop
 
         static var requested: Self {
             Self(rawValue: ProcessInfo.processInfo.environment[
@@ -81,6 +89,35 @@ enum AgentCenterV2Fixture {
             case .accessibility3: .accessibility3
             }
         }
+    }
+
+    /// What the laptop scene opens (`TESSERA_AGENT_CENTER_V2_HARNESS_LAPTOP_STATE`).
+    enum LaptopState: String {
+        /// The working agent is open; both waiting rows show their answers.
+        case reading
+        /// A waiting agent is open above; its row folds and points there.
+        case needs
+        /// As `needs`, with the composer focused and the keyboard taken as up.
+        case typing
+        /// The agent whose prompt takes a typed answer is open, with the
+        /// keyboard taken as up: opening that answer puts the card on the hinge.
+        case answering
+        /// As `reading`, with the list's search open on the hinge, a query
+        /// with matches, and the keyboard taken as up.
+        case searching
+        /// No threads at all.
+        case empty
+
+        static var requested: Self {
+            Self(rawValue: ProcessInfo.processInfo.environment["TESSERA_AGENT_CENTER_V2_HARNESS_LAPTOP_STATE"] ?? "") ?? .reading
+        }
+    }
+
+    /// Lays the root out as a laptop-folded Duo's inner display, 669 × 951 pt
+    /// with the fold at 455.5–495.5, on any simulator: none can pose a hinge
+    /// from a script (`TESSERA_AGENT_CENTER_V2_HARNESS_LAPTOP=1`).
+    static var laptopFoldRequested: Bool {
+        ProcessInfo.processInfo.environment["TESSERA_AGENT_CENTER_V2_HARNESS_LAPTOP"] == "1"
     }
 
     /// Live prompt cards as Core publishes them from real terminal screens.
@@ -211,6 +248,10 @@ enum AgentCenterV2Fixture {
             Task { await playSectionMoves(into: model) }
             return model
         }
+        if scene == .laptop, LaptopState.requested == .empty {
+            model.apply(list: .init(threads: []))
+            return model
+        }
         let host = UUID(uuidString: "A11CE000-0000-4000-8000-000000000001")!
         let claude = AgentThreadID(hostID: host, providerID: .claude, providerSessionID: "claude-thread-visual")!
         let codex = AgentThreadID(hostID: host, providerID: .codex, providerSessionID: "codex-thread-visual")!
@@ -314,6 +355,76 @@ enum AgentCenterV2Fixture {
         if scene == .prompt {
             model.select(claude)
             model.pendingNarrowThreadNavigation = claude
+        }
+        if scene == .laptop {
+            let photosID = AgentThreadID(hostID: host, providerID: .claude, providerSessionID: "photos-thread-visual")!
+            let photos = AgentThreadSummary(
+                id: photosID, title: "dedupe the thumbnail cache", providerName: "claude", model: "sonnet", projectBasename: "photos", branch: "main", hostDisplayLabel: "nas", permissionMode: .defaultMode, status: .waitingForInput, attention: .needsYou, lastActivitySequence: 41, lastActivity: .now.addingTimeInterval(-240), preview: "Bash command: fdupes -rdN cache/thumbs/2024", cost: .init(totalCost: 0.32, durationSeconds: 96), context: .init(percentUsed: 21), availability: availability
+            )
+            model.apply(list: .init(threads: [waiting, photos, working, finished, recent]))
+            model.apply(thread: .init(summary: photos, messages: [
+                .init(recordID: "p1", role: .user, displayTime: .now.addingTimeInterval(-600), blocks: [.text("The thumbnail cache is 40 GB. Find the duplicates and clean them up.")]),
+                .init(recordID: "p2", role: .assistant, displayTime: .now.addingTimeInterval(-240), blocks: [
+                    .toolCall(name: "Bash", preview: "fdupes -r cache/thumbs · 214 duplicates in 2024/"),
+                    .text("214 thumbnails under `cache/thumbs/2024` are byte-identical copies. Removing them frees 3.1 GB; the first of each set stays."),
+                    .actionPrompt(AgentActionPrompt(
+                        title: "Bash command",
+                        detail: "fdupes -rdN cache/thumbs/2024\nDelete duplicate thumbnails, keeping the first of each set",
+                        options: [
+                            .init(id: "1", label: "Yes", isDefault: true),
+                            .init(id: "2", label: "Yes, and don't ask again for fdupes in ~/photos"),
+                            .init(id: "3", label: "No, and tell Claude what to do differently", acceptsText: true),
+                        ],
+                        token: AgentActionToken("fixture-photos-prompt")!,
+                        question: "Do you want to proceed?"
+                    )),
+                ]),
+            ], cursor: nil, hasMore: false, binding: binding))
+            model.apply(thread: .init(summary: working, messages: [
+                .init(recordID: "w0", role: .user, displayTime: .now.addingTimeInterval(-300), blocks: [.text("Review the scroll transport and run the focused integration tests.")]),
+                .init(recordID: "w1", role: .assistant, displayTime: .now.addingTimeInterval(-120), blocks: [
+                    .text("The transport keeps one offset per pane; the dispatcher already coalesces flings, so the review is mostly about release momentum."),
+                    .toolCall(name: "Read", preview: "Packages/ScrollDispatcher/Sources/ScrollDispatcher/Dispatcher.swift"),
+                    .edit(path: "Packages/ScrollDispatcher/Sources/ScrollDispatcher/Dispatcher.swift", diff: "+ clamp momentum at the history edge\n- let momentum = velocity"),
+                    .text("Running the focused integration tests now."),
+                ]),
+                .init(recordID: "w2", role: .assistant, displayTime: .now, blocks: [.thinking("Running the four transport verification lanes.")]),
+            ], cursor: nil, hasMore: false, binding: binding))
+            switch LaptopState.requested {
+            case .needs, .typing: model.select(claude)
+            case .answering: model.select(photosID)
+            case .reading, .empty: model.select(codex)
+            case .searching:
+                model.select(codex)
+                model.searchQuery = "momentum"
+                model.searchSnapshot = .init(results: [
+                    .init(threadID: codex, recordID: "w1",
+                          excerpt: "the dispatcher already coalesces flings, so the review is mostly about release momentum."),
+                    .init(threadID: claude, recordID: "c2",
+                          excerpt: "Scroll momentum resets when the files panel reloads its rows."),
+                ])
+            }
+        }
+        if scene == .selection {
+            var selectionSummary = waiting
+            selectionSummary.title = "selection actions"
+            selectionSummary.status = .idle
+            selectionSummary.attention = .none
+            model.apply(thread: .init(summary: selectionSummary, messages: [
+                .init(recordID: "selection-u1", role: .user, displayTime: .now.addingTimeInterval(-120),
+                      blocks: [.text("Where did the notes and the preview end up?")]),
+                .init(recordID: "selection-a1", role: .assistant, displayTime: .now, blocks: [
+                    .text("The notes are in README.md beside the preview."),
+                    .text("Preview http://localhost:8001/laptop.html"),
+                    .text("Notes ~/atlas/README.md"),
+                    .text("```\n/home/mock/atlas/README.md\n```"),
+                    .toolCall(name: "Read", preview: "/home/mock/atlas"),
+                    .text("Nothing else changed in this pass."),
+                ]),
+            ], cursor: nil, hasMore: false, binding: binding))
+            model.select(claude)
+            model.pendingNarrowThreadNavigation = claude
+            model.setDraft("~/atlas/README.md", for: claude)
         }
         if scene == .transcript,
            let encoded = ProcessInfo.processInfo.environment["TESSERA_AGENT_TRANSCRIPT_FIXTURE_B64"],
@@ -484,6 +595,8 @@ private final class AgentIngestionWindowFixture {
     private let initiallyDetached: Bool
     private var preparingDetached: Bool
     private var grewTail = false
+    /// The record a search landing reads around.
+    private var landingIndex: Int?
 
     init(model: AgentCenterV2PresentationModel, chatFollow: Bool = false, initiallyDetached: Bool = false) {
         self.model = model; self.chatFollow = chatFollow; self.initiallyDetached = initiallyDetached
@@ -524,6 +637,12 @@ private final class AgentIngestionWindowFixture {
             preparingDetached = false
             if let snapshot = await runtime.snapshot(for: thread) { model?.apply(thread: snapshot) }
             model?.apply(list: await runtime.listSnapshot())
+        }
+        // Opened from a search, the detail (on a phone, once its row is
+        // tapped) starts with the page read around the match.
+        if let index = Self.landing {
+            landingIndex = index
+            await land()
         }
         // After the reader is selected: a sibling's first publish would
         // otherwise take an empty selection.
@@ -651,6 +770,17 @@ private final class AgentIngestionWindowFixture {
         }
     }
 
+    /// A search result for `landingIndex` opens the thread at it, read from
+    /// the record as the host's seek reads it: a page starting a quarter of
+    /// a page above the match, applied while the landing waits.
+    private func land() async {
+        guard let model, let index = landingIndex, model.beginSearchLanding(.init(threadID: thread,
+            recordID: "fixture-record-\(index)", excerpt: "History record \(index)", sequence: UInt64(index))) else { return }
+        model.loadingTranscriptThreads.insert(thread)
+        while busy { try? await Task.sleep(for: .milliseconds(50)) }
+        await load(.seek)
+    }
+
     private func load(_ lane: AgentIngestionWindowTransaction.Lane) async {
         guard let model else { return }
         if busy {
@@ -671,18 +801,20 @@ private final class AgentIngestionWindowFixture {
             let current = await runtime.ingestionWindowSnapshot(for: thread)
             let before = current?.before.flatMap { Int($0.dropFirst(7)) } ?? count
             let after = current?.after.flatMap { Int($0.dropFirst(7)) } ?? count
-            let end = lane == .before ? before : lane == .after ? min(count, after + limit) : count
-            let start = lane == .after ? after : max(0, end - limit)
+            let seekStart = max(0, (landingIndex ?? 0) - limit / 4)
+            let end = lane == .before ? before : lane == .after ? min(count, after + limit) : lane == .seek ? min(count, seekStart + limit) : count
+            let start = lane == .after ? after : lane == .seek ? seekStart : max(0, end - limit)
             guard start < end else { return }
             let records: [AgentProjectionRecord] = (start..<end).map { index in
                 if let transcript = Self.transcript { return transcript.records[index] }
                 let tail = chatFollow && index == count - 1
                 // Whitespace-only prose projects to no message at all.
                 let hidden = Self.sparse > 0 && index % Self.sparse != 0
-                let tool = index % 8 >= 3 && !tail && Self.sparse == 0
+                let tool = index % 8 >= 3 && !tail && Self.sparse == 0 && Self.tallCharacters == 0
                 let text = hidden ? " " : tail ? "Chat tail \(index)\n" + (AgentCenterV2Fixture.chatFollowStage == 0 ? "Initial reply." :
                     (1...(AgentCenterV2Fixture.chatFollowStage == 1 ? 80 : 120)).map { "Streaming line \($0) in the same record." }.joined(separator: "\n")) + "\nEnd of latest reply."
                     : Self.richContent ? Self.richText(index)
+                    : Self.tallCharacters > 0 ? Self.tallText(index)
                     : "History record \(index)\nScroll through older and newer ranges while the live head advances independently."
                 let block: AgentJSONValue = tool
                     ? .object(["type": .string("tool_result"), "preview": .string(Self.richContent ? Self.richToolPreview(index)
@@ -700,11 +832,12 @@ private final class AgentIngestionWindowFixture {
             let version: UInt64 = lane == .bootstrap ? 1 : (current?.version ?? 0) + 1
             let transaction = try AgentIngestionWindowTransaction(lane: lane, version: version, segmentID: UUID().uuidString,
                 before: "offset_\(start)", after: "offset_\(end)", hasOlder: start > 0, hasNewer: end < count)
-            let history = lane == .before || lane == .after
+            let history = lane == .before || lane == .after || lane == .seek
             let range = AgentIngestionRange(epoch: "fixture", requestID: UUID().uuidString,
                 operation: lane == .bootstrap ? .bootstrap : history ? .history : .updates,
                 liveCursor: history ? nil : "live_\(count)", sourceEnd: history ? nil : UInt64(count), window: transaction)!
-            let from = lane == .before ? current?.before : lane == .after ? current?.after : lane == .head ? current?.liveCursor : nil
+            let from = lane == .before ? current?.before : lane == .after ? current?.after
+                : lane == .head || lane == .seek ? current?.liveCursor : nil
             // Real transcript records can exceed the page byte bound at 100
             // records; the host cuts such pages short, and so does replay.
             guard let page = AgentProjectionPage(sourceIdentity: "fixture-source", from: from, records: records,
@@ -743,6 +876,11 @@ private final class AgentIngestionWindowFixture {
     /// Only every Nth record is visible, so a page adds a row or two and the
     /// transcript is shorter than the viewport.
     private static let sparse = Int(ProcessInfo.processInfo.environment["TESSERA_AGENT_WINDOW_FIXTURE_SPARSE"] ?? "") ?? 0
+    /// Records about this many characters long: device transcripts' long
+    /// replies, taller than a phone's or a narrow Duo pane's viewport.
+    private static let tallCharacters = Int(ProcessInfo.processInfo.environment["TESSERA_AGENT_WINDOW_FIXTURE_TALL"] ?? "") ?? 0
+    /// A search result opens the thread at this record.
+    private static let landing = Int(ProcessInfo.processInfo.environment["TESSERA_AGENT_WINDOW_FIXTURE_LAND"] ?? "")
     /// Once the rolled head is kept beside history, a revision splits it so
     /// that its last part no longer holds the viewport's newest record.
     private static let splitsHead = ProcessInfo.processInfo.environment["TESSERA_AGENT_WINDOW_FIXTURE_SPLIT_HEAD"] == "1"
@@ -782,6 +920,11 @@ private final class AgentIngestionWindowFixture {
                     .joined(separator: "\n"))
         }
         return parts.joined(separator: "\n\n")
+    }
+
+    private static func tallText(_ index: Int) -> String {
+        let sentence = "Record \(index) continues past the bottom of the viewport, so its first line shows only where the reader starts at its top. "
+        return "History record \(index)\n" + String(repeating: sentence, count: max(1, tallCharacters / sentence.count))
     }
 
     private static func richToolPreview(_ index: Int) -> String {
@@ -876,9 +1019,13 @@ struct AgentCenterV2FixtureView: View {
     private var model: AgentCenterV2PresentationModel { fixture.model }
     @State private var keyboardFrame = CGRect.zero
     @State private var attachments: AgentComposerAttachments?
+    @State private var keyboardShown = false
+    /// The typing states take the keyboard as up until it first goes down.
+    @State private var keyboardTakenAsUp = [.typing, .answering, .searching].contains(AgentCenterV2Fixture.LaptopState.requested)
     @Environment(\.designTokens) private var T
 
     private var isCompact: Bool { AgentCenterV2Fixture.Scene.requested == .compact }
+    private var isLaptop: Bool { AgentCenterV2Fixture.laptopFoldRequested }
 
     private var fixtureState: String {
         let focus: String
@@ -913,6 +1060,40 @@ struct AgentCenterV2FixtureView: View {
         }
     }
 
+    /// The selection scene's stand-ins: a logging artifacts opener and a
+    /// connected mock session whose Files bridge holds the fixture's paths.
+    private static let selectionBridge: MockFileBridge = {
+        let notes = RemoteFileEntry(name: "README.md", path: "/home/mock/atlas/README.md", kind: .file,
+                                    size: 120, modified: nil, permissions: nil)
+        let atlas = RemoteFileEntry(name: "atlas", path: "/home/mock/atlas", kind: .directory,
+                                    size: nil, modified: nil, permissions: nil)
+        let tessera = RemoteFileEntry(name: "README.md", path: "/home/mock/tessera/README.md", kind: .file,
+                                      size: 80, modified: nil, permissions: nil)
+        let project = RemoteFileEntry(name: "tessera", path: "/home/mock/tessera", kind: .directory,
+                                      size: nil, modified: nil, permissions: nil)
+        return MockFileBridge(tree: [
+            "/": [], "/home": [], "/home/mock": [atlas, project],
+            "/home/mock/atlas": [notes], "/home/mock/tessera": [tessera],
+        ])
+    }()
+
+    private var selectionFixture: AgentTranscriptSelectionFixture? {
+        guard AgentCenterV2Fixture.Scene.requested == .selection else { return nil }
+        return AgentTranscriptSelectionFixture(
+            sessionConnected: ProcessInfo.processInfo.environment["TESSERA_AGENT_SELECTION_DISCONNECTED"] != "1",
+            directory: "/home/mock/tessera", bridge: Self.selectionBridge)
+    }
+
+    private var selectionOpener: OpenArtifactAction? {
+        guard AgentCenterV2Fixture.Scene.requested == .selection else { return nil }
+        let model = model
+        return OpenArtifactAction { request in
+            NSLog("TESSERA_AGENT_SELECTION open target=%@ origin=%@ session=%@", String(describing: request.target),
+                  request.origin.rawValue, request.sessionID?.uuidString ?? "none")
+            model.reportUnavailable("fixture: open \(request.target) in Artifacts")
+        }
+    }
+
     var body: some View {
         AgentCenterV2RootView(model: model) {
             VStack(alignment: .leading, spacing: 12) {
@@ -927,13 +1108,43 @@ struct AgentCenterV2FixtureView: View {
             .padding(16)
             .background(T.sidebarBg)
         }
+        .modifier(AgentLaptopHarnessDisplay(
+            isEnabled: isLaptop,
+            keyboardUp: keyboardShown || keyboardTakenAsUp
+        ))
         .frame(width: isCompact ? 390 : nil, alignment: .leading)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: isLaptop ? .topLeading : .leading)
+        .ignoresSafeArea(.keyboard, edges: isLaptop ? .bottom : [])
         .preferredColorScheme(AgentCenterV2Fixture.Appearance.requested.colorScheme)
         .dynamicTypeSize(AgentCenterV2Fixture.FixtureDynamicType.requested.size)
+        .environment(\.agentTranscriptSelectionFixture, selectionFixture)
+        .environment(\.openArtifact, selectionOpener)
         .task { await exerciseDiscovery() }
-        .onAppear {
-            guard attachments == nil else { return }
+        .task {
+            // The laptop harness's typing states: the composer or the search
+            // on the hinge.
+            guard isLaptop else { return }
+            switch AgentCenterV2Fixture.LaptopState.requested {
+            case .typing:
+                try? await Task.sleep(for: .seconds(1.5))
+                if let id = model.selectedThreadID { model.requestComposerFocus(for: id) }
+            case .searching:
+                try? await Task.sleep(for: .seconds(1.5))
+                model.requestSearchFocus()
+            default:
+                break
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
+            let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+            keyboardShown = (frame?.height ?? 0) > 100
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            keyboardShown = false
+            keyboardTakenAsUp = false
+        }
+        .onAppear { [weak model] in
+            guard attachments == nil, let model else { return }
             let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             try? "Tessera native attachment fixture\n".write(to: docs.appendingPathComponent("tessera-attachment-fixture.txt"), atomically: true, encoding: .utf8)
             let registration = UUID()
@@ -984,6 +1195,47 @@ struct AgentCenterV2FixtureView: View {
                 identifier: "agent-center-v2-fixture",
                 value: fixtureState
             )
+        }
+    }
+}
+
+/// The laptop harness's display: the Duo's inner screen, standing tall at
+/// 669 × 951 pt in the simulator's top-leading corner, with the fold drawn
+/// where the hinge would be and reported to Agent Center in its place. A
+/// software keyboard on this simulator never reaches the fold, so any
+/// keyboard counts as covering the desk, as it does on the Duo.
+private struct AgentLaptopHarnessDisplay: ViewModifier {
+    static let size = CGSize(width: 669, height: 951)
+    static let fold = CGRect(x: 0, y: 455.5, width: 669, height: 40)
+
+    let isEnabled: Bool
+    let keyboardUp: Bool
+    @State private var display: CGRect = .zero
+
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content
+                .environment(\.agentCenterLaptopFoldOverride, display == .zero ? nil
+                    : Self.fold.offsetBy(dx: display.minX, dy: display.minY))
+                .environment(\.duoOpenSwitcher, DuoSwitcherAction { NSLog("TESSERA_AGENT_LAPTOP switcher") })
+                .environment(\.horizontalSizeClass, .compact)
+                .environment(\.softwareKeyboardUp, keyboardUp)
+                .frame(width: Self.size.width, height: Self.size.height)
+                // A Duo reports its keyboard from the fold; this display's
+                // keyboard is the host's, which must not push it around.
+                .ignoresSafeArea(.keyboard)
+                .overlay(alignment: .topLeading) {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.22))
+                        .frame(width: Self.fold.width, height: Self.fold.height)
+                        .offset(y: Self.fold.minY)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+                .overlay { Rectangle().stroke(Color.gray.opacity(0.6), lineWidth: 1).allowsHitTesting(false) }
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { display = $0 }
+        } else {
+            content
         }
     }
 }

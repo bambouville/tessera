@@ -26,12 +26,16 @@ class AuthenticatedForwardingRuntimeFactory internal constructor(
  * object first closes its listeners, then the SSH jump-chain resources.
  */
 class AuthenticatedForwardingSideChannel internal constructor(
-    client: SSHClient,
+    private val client: SSHClient,
     private val resources: List<Closeable>,
 ) : Closeable {
     private val closed = AtomicBoolean(false)
     private val factory = AuthenticatedForwardingRuntimeFactory(client)
     private var runtime: PortForwardingRuntime? = null
+
+    /** State only: artifact page leases close when the carrier they rode dies. */
+    val isConnected: Boolean
+        get() = !closed.get() && client.isConnected && client.isAuthenticated
 
     @Synchronized
     fun runtime(): PortForwardingRuntime {

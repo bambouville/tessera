@@ -109,8 +109,8 @@ actor KnownHostsStore {
         ).first!
         try? FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
         self.fileURL = appSupport.appendingPathComponent("known_hosts.json")
-        self.nowProvider = Date.init
-        loadFromDisk()
+        self.nowProvider = { Date() }
+        self.records = Self.loadRecords(from: fileURL)
     }
 
     /// Test-only initializer: lets tests inject a temporary file URL
@@ -118,7 +118,7 @@ actor KnownHostsStore {
     init(fileURL: URL, now: @Sendable @escaping () -> Date) {
         self.fileURL = fileURL
         self.nowProvider = now
-        loadFromDisk()
+        self.records = Self.loadRecords(from: fileURL)
     }
 
     /// Check whether a host key is trusted.
@@ -518,13 +518,13 @@ actor KnownHostsStore {
 
     // MARK: - Persistence
 
-    private func loadFromDisk() {
-        guard let data = try? Data(contentsOf: fileURL) else { return }
+    /// Static so the synchronous initializers can read it before the actor
+    /// is isolated.
+    private static func loadRecords(from fileURL: URL) -> [String: HostRecord] {
+        guard let data = try? Data(contentsOf: fileURL) else { return [:] }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        guard let decoded = try? decoder.decode([String: HostRecord].self, from: data)
-        else { return }
-        records = decoded
+        return (try? decoder.decode([String: HostRecord].self, from: data)) ?? [:]
     }
 
     private func saveToDisk() {

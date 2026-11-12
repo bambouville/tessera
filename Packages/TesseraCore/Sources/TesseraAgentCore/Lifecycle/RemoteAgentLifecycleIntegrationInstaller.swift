@@ -11,17 +11,18 @@ public enum AgentLifecycleIntegrationInstallError: LocalizedError {
         case .verificationFailed:
             // Remote output is untrusted and can contain terminal/transcript
             // content. Diagnostics deliberately expose only a local code.
-            #if os(Android)
+            #if os(Android) || os(Linux)
             return "Could not verify Agent Center integration."
             #else
-            return String(localized: "Could not verify Agent Center integration.", comment: "Agent Center hook verification failed")
+            return String(localized: "Could not verify Agent Center integration.", bundle: .main, comment: "Agent Center hook verification failed")
             #endif
         case .newerInstalled:
-            #if os(Android)
+            #if os(Android) || os(Linux)
             return "A newer Tessera manages this host's Agent Center integration."
             #else
             return String(
                 localized: "A newer Tessera manages this host's Agent Center integration.",
+                bundle: .main,
                 comment: "Agent Center install refused because a newer app version installed the host integration"
             )
             #endif
@@ -91,7 +92,7 @@ public enum RemoteAgentLifecycleIntegrationInstaller {
     /// `integrationCompatibleFrom` admits it and otherwise asks for an app
     /// update, so an older and a newer device cannot flip the host back and
     /// forth.
-    public static let integrationVersion = 25
+    public static let integrationVersion = 31
     /// Oldest app `integrationVersion` that can operate against an installation
     /// of this version (its shell markers, shims, hook payloads, and native
     /// host). Raise it only for a deliberate break; older apps then show an
@@ -130,6 +131,12 @@ public enum RemoteAgentLifecycleIntegrationInstaller {
         23: .init(fingerprint: "0fb591ba7e7541bbe2b6f8fa782d2409d647c54e3fcdfce331aa59be0bbcb234", eventVersion: 9, nativeRevision: "048d13911700bae2ba595af7283bb1e6a7fa1d47bc05c014c6e4ed9ae3cfe302"),
         24: .init(fingerprint: "f0e44b42be0a3a474af8a6990ebe55e3ca81f53b345295305fa0c53c35e162d3", eventVersion: 9, nativeRevision: "048d13911700bae2ba595af7283bb1e6a7fa1d47bc05c014c6e4ed9ae3cfe302"),
         25: .init(fingerprint: "25fc92be0bfa76135e5299d4a9f2684ffaa1f89efda9557ca8358bb1e56eb31e", eventVersion: 9, nativeRevision: "41665a520740272537ce0c30023728e781cd90207ddfb938897f5dd0ab2e094a"),
+        26: .init(fingerprint: "0708bcf53250c54de9875700ce2781e97616a5c7db2394bbb45356844fec01b9", eventVersion: 9, nativeRevision: "41665a520740272537ce0c30023728e781cd90207ddfb938897f5dd0ab2e094a"),
+        27: .init(fingerprint: "86e6f58d082af15c5c179cf7a39bd6b563fe35f1b8f63257cb84a7bbd3fe3a62", eventVersion: 9, nativeRevision: "9d9990db699200096bcffb63ecc6624ce1c48cb447ed820af9e6b7b7b2a3847c"),
+        28: .init(fingerprint: "a0aee96d8d3f434158088f25b3bcad5910322cddd4b3f847b5858925c4fd4cab", eventVersion: 9, nativeRevision: "9d9990db699200096bcffb63ecc6624ce1c48cb447ed820af9e6b7b7b2a3847c"),
+        29: .init(fingerprint: "293f715cef8fdbe4f4c1ab6aba17d5272d4ce11d54e2cfcc8801e7c49d2efb2b", eventVersion: 9, nativeRevision: "63fdf6e5d2391513d76c5fd153bd20809fbf69e18dc045378a2469ecd03d61a4"),
+        30: .init(fingerprint: "b69a5b6906a65df22943fcd1056e07eba353f9f1c1496b3ad1ba368949e09ca7", eventVersion: 9, nativeRevision: "0691f5cf3e908fb45dc22d905d608cd1e987fd4c3a674c70b1032ae251af4f80"),
+        31: .init(fingerprint: "fc604ed294b6ee954818f6d073754f579dfb5406b155c2a6e7e35059a0ccda7f", eventVersion: 9, nativeRevision: "8f3b2935ebcafe3c58b76c63da71578bc4702692da8c0a2b9c9f7703c28842d6"),
     ]
 
     struct IntegrationRelease: Equatable {
@@ -194,6 +201,99 @@ case "$state" in waitingForInput|working|idle|unavailable) ;; *) exit 0 ;; esac
 reason="$(printf '%s' "$reason" | tr -cd 'A-Za-z0-9._:-')"
 reason="$(printf '%.64s' "$reason")"
 
+# An observer an earlier install started keeps polling the client of a shared
+# server, which holds no rollout; that client's own observer follows its
+# title. Turn the old one away before any work.
+if [ "${TESSERA_AGENT_OBSERVER:-}" = 1 ] && [ "${TESSERA_AGENT_OBSERVED_SHARED:-}" != 1 ]; then
+    case "${TESSERA_AGENT_OBSERVED_PROVIDER_PID:-}" in
+        ''|*[!0-9]*) ;;
+        *)
+            observed_mark="$HOME/.config/tessera/agent-runtime-state/$TESSERA_AGENT_OBSERVED_PROVIDER_PID.shared-server"
+            if [ -f "$observed_mark" ] && [ ! -L "$observed_mark" ] \
+                && IFS= read -r observed_token < "$observed_mark" 2>/dev/null \
+                && [ "$observed_token" = "${TESSERA_AGENT_OBSERVED_PROCESS_START:-}" ]; then
+                exit 0
+            fi
+            ;;
+    esac
+fi
+
+# Every shell that loads agent-lifecycle.sh leaves active-shells/<pid>, and no
+# shell removes its own on exit, so a host kept one per shell it ever ran (a
+# bash login profile ran one per remote command). A starting agent session
+# clears those a day old whose process is gone, at most hourly, at low
+# priority and off the hook's path. Only a hook that lists every process able
+# to share this home prunes: on Linux one in the initial PID namespace (a
+# container or a sandbox such as flatpak lists only its own), on macOS any,
+# and neither once the listing lacks PID 1 (hidepid) or itself. A home on a
+# network or VM-shared disk holds markers of shells alive on other machines,
+# so only a local disk is pruned. A Linux marker whose recorded start is a
+# live process's is a container shell's under another PID number: it stays.
+# Each file's age is checked again as it goes, so a shell that took a listed
+# PID since keeps its new marker.
+if [ "$event" = SessionStart ]; then
+    shells_dir="$HOME/.config/tessera/active-shells"
+    shells_pruned="$HOME/.config/tessera/active-shells.pruned"
+    if [ -d "$shells_dir" ] && [ ! -L "$shells_dir" ] && [ ! -L "$shells_pruned" ] \
+        && { [ ! -e "$shells_pruned" ] || [ -n "$(find "$shells_pruned" -mmin +60 2>/dev/null)" ]; }; then
+        shells_system=''
+        case "$(uname -s 2>/dev/null)" in
+            Linux)
+                if [ "$(readlink /proc/self/ns/pid 2>/dev/null)" = 'pid:[4026531836]' ]; then
+                    case "$(stat -f -c %T "$shells_dir" 2>/dev/null)" in
+                        ''|nfs*|cifs|smb*|fuse*|9p|v9fs|virtiofs|ceph|lustre|gpfs|afs|glusterfs|beegfs|UNKNOWN*) ;;
+                        *) shells_system=linux ;;
+                    esac
+                fi
+                ;;
+            Darwin)
+                [ -n "$(df -l "$shells_dir" 2>/dev/null | awk 'NR > 1')" ] && shells_system=darwin
+                ;;
+        esac
+        if [ -n "$shells_system" ]; then
+            (umask 077; : > "$shells_pruned") 2>/dev/null
+            nice -n 19 sh -s "$shells_dir" "$shells_system" <<'TESSERA_PRUNE' >/dev/null 2>&1 &
+cd "$1" 2>/dev/null || exit 0
+find . -maxdepth 1 -type f -name '[0-9]*' -mtime +0 </dev/null 2>/dev/null \
+    | awk -v kind="$2" -v self="$$" '
+        BEGIN {
+            listing = kind == "linux" ? "cat /proc/[0-9]*/stat 2>/dev/null" : "ps -axo pid= 2>/dev/null"
+            while ((listing | getline line) > 0) {
+                pid = line
+                sub(/^[ \t]+/, "", pid)
+                sub(/[ \t].*$/, "", pid)
+                live[pid] = 1
+                if (kind == "linux") {
+                    sub(/^.*\) /, "", line)
+                    split(line, field, " ")
+                    started[field[20]] = 1
+                }
+            }
+            close(listing)
+            if (!(1 in live) || !(self in live)) exit
+            ready = 1
+        }
+        ready {
+            pid = $0
+            sub(/^\.\//, "", pid)
+            if (pid !~ /^[0-9]+$/ || (pid in live)) next
+            if (kind == "linux") {
+                marker = ""
+                if ((getline marker < $0) > 0 && match(marker, /[|]proc:[0-9]+[|]/) \
+                    && (substr(marker, RSTART + 6, RLENGTH - 7) in started)) {
+                    close($0)
+                    next
+                }
+                close($0)
+            }
+            print
+        }' \
+    | xargs sh -c 'find "$@" -maxdepth 0 -type f -mtime +0 -exec rm -f {} +' sh
+TESSERA_PRUNE
+        fi
+    fi
+fi
+
 # Content-free, bounded host-side breadcrumbs make real-device failures
 # diagnosable without recording prompts, commands, hook payloads, paths, or
 # terminal output. They are useful when a provider reports a configured hook
@@ -230,6 +330,7 @@ agent_type=""
 root_agent_id=""
 transcript_ref=""
 question_marker=""
+tool_use_id=""
 if command -v python3 >/dev/null 2>&1; then
     # Let Python consume the hook pipe directly. Provider payloads can contain
     # large prompts/tool inputs; copying those bytes through a shell variable
@@ -237,7 +338,7 @@ if command -v python3 >/dev/null 2>&1; then
     # session can live in another project: when its transcript path is absent
     # or gone, recover only one exact, user-owned transcript within the
     # configured projects root, in this same process.
-    metadata="$(TESSERA_AGENT_PROVIDER="$provider" python3 -c 'import json,os,sys,time
+    metadata="$(TESSERA_AGENT_PROVIDER="$provider" python3 -I -c 'import json,os,sys,time
 try: data=json.load(sys.stdin)
 except Exception: data={}
 print(time.time_ns())
@@ -269,7 +370,8 @@ tool=data.get("tool_name")
 tool_input=data.get("tool_input") if isinstance(data.get("tool_input"),dict) else {}
 if tool=="request_user_input_async" or tool=="AskUserQuestion" and tool_input.get("background") is True: print("deferred-question")
 elif tool in ("AskUserQuestion","request_user_input"): print("question")
-else: print("")' 2>/dev/null || true)"
+else: print("")
+print(str(data.get("tool_use_id", "")).replace("\n", ""))' 2>/dev/null || true)"
     timestamp_ns="$(printf '%s\n' "$metadata" | sed -n '1p')"
     session_id="$(printf '%s\n' "$metadata" | sed -n '2p')"
     turn_id="$(printf '%s\n' "$metadata" | sed -n '3p')"
@@ -280,6 +382,7 @@ else: print("")' 2>/dev/null || true)"
     root_agent_id="$(printf '%s\n' "$metadata" | sed -n '8p')"
     transcript_ref="$(printf '%s\n' "$metadata" | sed -n '9p')"
     question_marker="$(printf '%s\n' "$metadata" | sed -n '10p')"
+    tool_use_id="$(printf '%s\n' "$metadata" | sed -n '11p')"
 else
     # Minimal hosts get a bounded, conservative fallback. Missing metadata is
     # safer than retaining an arbitrarily large or partial provider payload.
@@ -304,6 +407,7 @@ fi
 [ -n "$agent_id" ] || agent_id="$(printf '%s' "$input" | sed -n 's/.*"agent_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
 [ -n "$agent_type" ] || agent_type="$(printf '%s' "$input" | sed -n 's/.*"agent_type"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
 [ -n "$root_agent_id" ] || root_agent_id="$(printf '%s' "$input" | sed -n 's/.*"root_agent_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+[ -n "$tool_use_id" ] || tool_use_id="$(printf '%s' "$input" | sed -n 's/.*"tool_use_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
 if [ -z "$question_marker" ] && [ -n "$input" ]; then
     case "$(printf '%s' "$input" | sed -n 's/.*"tool_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)" in
         request_user_input_async) question_marker=deferred-question ;;
@@ -333,6 +437,9 @@ permission_mode="$(printf '%s' "$permission_mode" | tr -cd 'A-Za-z0-9._:-')"
 agent_id="$(printf '%s' "$agent_id" | tr -cd 'A-Za-z0-9._:-')"
 agent_type="$(printf '%s' "$agent_type" | tr -cd 'A-Za-z0-9._:-')"
 root_agent_id="$(printf '%s' "$root_agent_id" | tr -cd 'A-Za-z0-9._:-')"
+# A call's ID is kept whole or not at all: a filtered or cut one could name
+# another call.
+case "$tool_use_id" in *[!A-Za-z0-9._:-]*) tool_use_id="" ;; esac
 transcript_ref="$(printf '%s' "$transcript_ref" | tr -cd 'A-Za-z0-9_-')"
 session_id="$(printf '%.256s' "$session_id")"
 turn_id="$(printf '%.256s' "$turn_id")"
@@ -341,13 +448,14 @@ permission_mode="$(printf '%.64s' "$permission_mode")"
 agent_id="$(printf '%.256s' "$agent_id")"
 agent_type="$(printf '%.64s' "$agent_type")"
 root_agent_id="$(printf '%.256s' "$root_agent_id")"
+[ "${#tool_use_id}" -le 255 ] || tool_use_id=""
 transcript_ref="$(printf '%.4096s' "$transcript_ref")"
 [ -n "$timestamp_ns" ] || timestamp_ns="$(date +%s)000000000"
 
 # Kimi hooks identify the session but do not publish a transcript path. Resolve
 # the exact main-agent wire only through Kimi Code's bounded session index.
 if [ "$provider" = kimi ] && [ -n "$session_id" ] && [ -z "$transcript_ref" ] && command -v python3 >/dev/null 2>&1; then
-    transcript_ref="$(TESSERA_KIMI_SESSION_ID="$session_id" TESSERA_KIMI_EVENT="$event" python3 -c 'import base64,json,os,re,stat,time
+    transcript_ref="$(TESSERA_KIMI_SESSION_ID="$session_id" TESSERA_KIMI_EVENT="$event" python3 -I -c 'import base64,json,os,re,stat,time
 root=os.path.realpath(os.environ.get("KIMI_CODE_HOME") or os.path.expanduser("~/.kimi-code"))
 index=os.path.join(root,"session_index.jsonl")
 session_id=os.environ.get("TESSERA_KIMI_SESSION_ID","")
@@ -384,13 +492,34 @@ fi
 case "$timestamp_ns" in ''|*[!0-9]*) timestamp_ns="$(date +%s)$(printf '%09d' "$$")" ;; esac
 
 agent_pid=""
+shared_client=0
+shared_observe=0
 # A process-owned observer is reparented after its launching native hook ends.
 # Independently revalidate its exact provider lifetime and open root before
 # accepting its PID; the delivery path also compares the native claim epoch.
 if [ "${TESSERA_AGENT_OBSERVER:-}" = 1 ]; then
     agent_pid="$("${0%/*}/agent-codex-recover.sh" --verify-observation "${TESSERA_AGENT_OBSERVED_PROVIDER_PID:-}" "${TESSERA_AGENT_OBSERVED_PROCESS_START:-}" "$session_id" 2>/dev/null || true)"
     case "$agent_pid" in ''|*[!0-9]*) exit 0 ;; esac
-    [ "$provider:$event" = codex:SessionStart ] || exit 0
+    # Only a replay publishes another event, at the time it first ran, so
+    # that any later event wins over it: from a shared client's binder, the
+    # one its server ran before any pane showed the thread; from the child
+    # of a native hook, the one whose provider's open files could not be
+    # read in time, once they read.
+    case "$provider:$event:${TESSERA_AGENT_OBSERVED_SHARED:-}:${TESSERA_AGENT_OBSERVED_REPLAY:-}" in
+        codex:*:1:1)
+            case "${TESSERA_AGENT_OBSERVED_EVENT_NS:-}" in ''|0*|*[!0-9]*) exit 0 ;; esac
+            [ "${#TESSERA_AGENT_OBSERVED_EVENT_NS}" -le 19 ] || exit 0
+            timestamp_ns="$TESSERA_AGENT_OBSERVED_EVENT_NS"
+            ;;
+        codex:*::1)
+            [ -z "${TESSERA_AGENT_OBSERVED_SHARED:-}" ] || exit 0
+            case "${TESSERA_AGENT_OBSERVED_EVENT_NS:-}" in ''|0*|*[!0-9]*) exit 0 ;; esac
+            [ "${#TESSERA_AGENT_OBSERVED_EVENT_NS}" -le 19 ] || exit 0
+            timestamp_ns="$TESSERA_AGENT_OBSERVED_EVENT_NS"
+            ;;
+        codex:SessionStart:*:) ;;
+        *) exit 0 ;;
+    esac
 fi
 # This override is private to the verified Codex empty-composer launch path.
 # It is accepted only from this hook's direct parent, which immediately execs
@@ -455,6 +584,106 @@ if [ "$event" = WrapperExit ]; then
     fi
     agent_pid="$wrapper_pid"
 fi
+# Current Codex hosts TUI threads in a shared background app-server. It runs
+# the hooks of every thread it hosts with the environment of the client that
+# started it, so TMUX_PANE and the terminal name that client's pane whichever
+# pane the thread belongs to, and the provider process is the server. Such an
+# event is published only to the one pane whose own Codex client shows the
+# thread in its title, under that client's PID; otherwise it is ignored.
+#
+# Reads one argument per line, the executable first. Only the command itself
+# counts: past the root options and their values it must be app-server, and a
+# TUI's prompt or an option value can mention the same words. A stdio
+# app-server serves only the client that spawned it.
+tessera_codex_shared_server() {
+    awk '
+        NR == 1 { next }
+        skip { skip = 0; next }
+        !server {
+            if ($0 == "--") exit
+            if ($0 ~ /^(-c|--config|--enable|--disable|-m|--model|-p|--profile|-C|--cd|-s|--sandbox|-a|--ask-for-approval|--add-dir|--local-provider|--remote|--remote-auth-token-env)$/) { skip = 1; images = 0; next }
+            if ($0 == "-i" || $0 == "--image") { images = 1; next }
+            if ($0 ~ /^-/) { images = 0; next }
+            if (images) next
+            if ($0 != "app-server") exit
+            server = 1
+            next
+        }
+        listen {
+            listen = 0
+            if ($0 ~ /^(unix|ws):/) { shared = 1; exit }
+            next
+        }
+        $0 == "--managed-daemon" || $0 ~ /^--listen=(unix|ws):/ { shared = 1; exit }
+        $0 == "--listen" { listen = 1; next }
+        $0 == "-c" || $0 == "--config" { skip = 1 }
+        END { exit !shared }
+    '
+}
+if [ "$provider" = codex ] && [ -n "$agent_pid" ]; then
+    # Linux keeps each argument whole. Elsewhere ps joins them with spaces:
+    # drop the executable, which macOS ps names in full, and split the rest,
+    # so there a prompt or a value spelled like a listener can still match.
+    agent_arguments=''
+    if [ -r "/proc/$agent_pid/cmdline" ]; then
+        agent_arguments="$(tr '\n\000' ' \n' <"/proc/$agent_pid/cmdline" 2>/dev/null || true)"
+    elif command -v ps >/dev/null 2>&1; then
+        agent_arguments="$(ps -o args= -p "$agent_pid" 2>/dev/null || true)"
+        case "$agent_arguments" in
+            *app-server*)
+                agent_executable="$(ps -o comm= -p "$agent_pid" 2>/dev/null || true)"
+                agent_arguments="${agent_arguments#"${agent_arguments%%[! ]*}"}"
+                case "$agent_arguments" in
+                    "$agent_executable "*) agent_arguments="${agent_arguments#"$agent_executable "}" ;;
+                    *) agent_arguments="${agent_arguments#* }" ;;
+                esac
+                agent_arguments="$(printf 'codex %s\n' "$agent_arguments" | tr -s ' ' '\n')"
+                ;;
+        esac
+    fi
+    case "$agent_arguments" in
+        *app-server*)
+            if printf '%s\n' "$agent_arguments" | tessera_codex_shared_server; then
+                # A child callback that the filter below drops needs no pane.
+                if [ -n "$agent_id" ]; then
+                    case "$event:$state" in
+                        SessionStart:*|SessionEnd:*|SubagentStart:*|SubagentStop:*|PermissionRequest:*|Notification:waitingForInput) ;;
+                        *) exit 0 ;;
+                    esac
+                fi
+                shared_binding=''
+                if [ -n "$session_id" ] && [ -n "$agent_id" ]; then
+                    shared_binding="$("${0%/*}/agent-codex-recover.sh" --bind-shared "$agent_pid" "$session_id" 2>/dev/null || true)"
+                elif [ -n "$session_id" ]; then
+                    # A turn can end before Codex names its thread and the
+                    # title shows it; the binder then publishes this event
+                    # once a pane does.
+                    shared_binding="$("${0%/*}/agent-codex-recover.sh" --bind-shared "$agent_pid" "$session_id" "$event" "$state" "$reason" "$timestamp_ns" 2>/dev/null || true)"
+                fi
+                shared_pane="${shared_binding%% *}"
+                shared_rest="${shared_binding#* }"
+                shared_pid="${shared_rest%% *}"
+                shared_rest="${shared_rest#* }"
+                shared_ref="${shared_rest%% *}"
+                shared_observe="${shared_rest#* }"
+                case "$shared_binding" in %*' '*' '*' '*) ;; *) shared_pane='' ;; esac
+                case "${shared_pane#%}" in ''|*[!0-9]*) shared_pane='' ;; esac
+                case "$shared_pid" in ''|*[!0-9]*) shared_pane='' ;; esac
+                case "$shared_ref" in ''|*[!A-Za-z0-9_-]*) shared_pane='' ;; esac
+                case "$shared_observe" in 0|1) ;; *) shared_pane='' ;; esac
+                if [ -z "$shared_pane" ] || [ "$shared_pid" -le 1 ] 2>/dev/null; then
+                    tessera_agent_diagnostic ignored source=shared-server
+                    exit 0
+                fi
+                TMUX_PANE="$shared_pane"
+                export TMUX_PANE
+                agent_pid="$shared_pid"
+                [ -n "$transcript_ref" ] || transcript_ref="$(printf '%.4096s' "$shared_ref")"
+                shared_client=1
+            fi
+            ;;
+    esac
+fi
 agent_pid_json="${agent_pid:-null}"
 
 # /resume and /clear can omit transcript_path. Accept only the exact durable
@@ -462,7 +691,9 @@ agent_pid_json="${agent_pid:-null}"
 # Internal helper IDs intentionally fail this same shared proof.
 if [ "$provider" = codex ] && [ -z "$transcript_ref" ] && [ -n "$session_id" ]; then
     if [ -n "$agent_pid" ]; then
-        transcript_ref="$("${0%/*}/agent-codex-recover.sh" --resolve-root "$agent_pid" "$session_id" 2>/dev/null || true)"
+        # With the event, which a detached child publishes once the open
+        # files read, when they could not be read in time.
+        transcript_ref="$("${0%/*}/agent-codex-recover.sh" --resolve-root "$agent_pid" "$session_id" "$event" "$state" "$reason" "$timestamp_ns" 2>/dev/null || true)"
         transcript_ref="$(printf '%.4096s' "$transcript_ref" | tr -cd 'A-Za-z0-9_-')"
     fi
     if [ -z "$transcript_ref" ]; then
@@ -526,7 +757,7 @@ case "$event" in
         ;;
 esac
 
-payload="$(printf '{"version":%s,"provider":"%s","event":"%s","state":"%s","reason":"%s","timestampNs":"%s","sessionId":"%s","turnId":"%s","notificationType":"%s","permissionMode":"%s","agentPid":%s,"transcriptRef":"%s","agentId":"%s","agentType":"%s","rootAgentId":"%s"}' "$TESSERA_AGENT_EVENT_VERSION" "$provider" "$event" "$state" "$reason" "$timestamp_ns" "$session_id" "$turn_id" "$notification_type" "$permission_mode" "$agent_pid_json" "$transcript_ref" "$agent_id" "$agent_type" "$root_agent_id")"
+payload="$(printf '{"version":%s,"provider":"%s","event":"%s","state":"%s","reason":"%s","timestampNs":"%s","sessionId":"%s","turnId":"%s","notificationType":"%s","permissionMode":"%s","agentPid":%s,"transcriptRef":"%s","agentId":"%s","agentType":"%s","rootAgentId":"%s","toolUseId":"%s"}' "$TESSERA_AGENT_EVENT_VERSION" "$provider" "$event" "$state" "$reason" "$timestamp_ns" "$session_id" "$turn_id" "$notification_type" "$permission_mode" "$agent_pid_json" "$transcript_ref" "$agent_id" "$agent_type" "$root_agent_id" "$tool_use_id")"
 
 # A nested background provider shares its parent's pane. Preserve a different
 # live foreground holder, but publish as usual when either proof is unknown.
@@ -567,7 +798,7 @@ pane="${TMUX_PANE:-}"
 # replaced the exact claim it inspected. Pane writers always take the pane
 # lock before the Codex PID lock, through both retained and OSC publication.
 if { [ -n "$pane" ] || { [ "$provider" = codex ] && [ -n "$agent_pid" ]; }; } && command -v python3 >/dev/null 2>&1; then
-    delivery_status="$(TESSERA_AGENT_DELIVERY_PARENT="$PPID" TESSERA_AGENT_DELIVERY_PAYLOAD="$payload" python3 -c 'import base64,fcntl,hashlib,json,os,stat,subprocess,sys,time
+    delivery_status="$(TESSERA_AGENT_DELIVERY_PARENT="$PPID" TESSERA_AGENT_DELIVERY_PAYLOAD="$payload" python3 -I -c 'import base64,fcntl,hashlib,json,os,stat,subprocess,sys,time
 def command(arguments):
  try:
   result=subprocess.run(arguments,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=1)
@@ -587,10 +818,38 @@ def exclusive(path):
  fd=safe_open(path,True)
  deadline=time.monotonic()+2
  while True:
-  try: fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB); return fd
+  try:
+   fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+   # A pruner unlinks only a lock it holds: one opened before then is no
+   # longer the path, so the lock is taken again on the file there now.
+   held=os.fstat(fd)
+   try: now=os.lstat(path)
+   except FileNotFoundError: now=None
+   if now is not None and (now.st_dev,now.st_ino) == (held.st_dev,held.st_ino):
+    try: os.utime(fd)
+    except Exception: pass
+    return fd
+   os.close(fd)
+   if time.monotonic() >= deadline: return None
+   time.sleep(0.01)
+   fd=safe_open(path,True)
   except BlockingIOError:
    if time.monotonic() >= deadline: os.close(fd); return None
    time.sleep(0.01)
+def stale_lock(path):
+ # A pane lock unused for a day, as each holder touches it; unlinked only
+ # while held, so no writer can hold the file it replaced.
+ try: fd=safe_open(path)
+ except Exception: return False
+ try:
+  held=os.fstat(fd)
+  if time.time()-held.st_mtime < 86400: return False
+  fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+  now=os.lstat(path)
+  if (now.st_dev,now.st_ino) != (held.st_dev,held.st_ino): return False
+  os.unlink(path); return True
+ except Exception: return False
+ finally: os.close(fd)
 def foreground(pid):
  if not isinstance(pid,int) or isinstance(pid,bool) or pid <= 1: return None
  path=os.path.join(os.environ.get("TESSERA_AGENT_PROC_ROOT","/proc"),str(pid),"stat")
@@ -706,8 +965,12 @@ try:
  locks=[]
  pruned=0
  for name in os.listdir(directory):
+  if pruned>=64: break
+  if name.startswith("pane-") and name.endswith(".delivery.lock"):
+   if stale_lock(os.path.join(directory,name)): pruned+=1
+   continue
   head=name.split(".",1)[0]
-  if pruned>=64 or not head.isdigit() or int(head)==pid: continue
+  if not head.isdigit() or int(head)==pid: continue
   try: os.kill(int(head),0)
   except ProcessLookupError:
    try:
@@ -723,9 +986,15 @@ finally:
     agent_pid_presence=absent
     [ -z "$agent_pid" ] || agent_pid_presence=present
     tessera_agent_diagnostic resolved "agentPid=$agent_pid_presence pane=$3 terminal=$4 tmuxState=$1 terminalEmission=$2"
-    case "$provider:$agent_pid:$event:${TESSERA_AGENT_OBSERVER:-}" in
-        codex:?*:SessionStart:|codex:?*:UserPromptSubmit:)
+    # A shared server's client holds no transcript, so its observer follows
+    # the pane title instead. Its first bound event can come in any phase of
+    # a turn; the binder says when it has no observer yet.
+    case "$provider:$agent_pid:$event:${TESSERA_AGENT_OBSERVER:-}:$shared_client:$shared_observe" in
+        codex:?*:SessionStart::0:0|codex:?*:UserPromptSubmit::0:0)
             "${0%/*}/agent-codex-recover.sh" --watch-root "$agent_pid" </dev/null >/dev/null 2>&1 || true
+            ;;
+        codex:?*:*::1:1)
+            "${0%/*}/agent-codex-recover.sh" --watch-shared "$agent_pid" </dev/null >/dev/null 2>&1 || true
             ;;
     esac
     exit 0
@@ -785,7 +1054,7 @@ elif [ -n "$terminal_path" ]; then
         elif command -v openssl >/dev/null 2>&1; then
             encoded_payload="$(printf '%s' "$payload" | openssl base64 2>/dev/null | tr -d '\n')"
         elif command -v python3 >/dev/null 2>&1; then
-            encoded_payload="$(printf '%s' "$payload" | python3 -c 'import base64,sys; sys.stdout.write(base64.b64encode(sys.stdin.buffer.read()).decode())' 2>/dev/null || true)"
+            encoded_payload="$(printf '%s' "$payload" | python3 -I -c 'import base64,sys; sys.stdout.write(base64.b64encode(sys.stdin.buffer.read()).decode())' 2>/dev/null || true)"
         fi
         if [ -z "$encoded_payload" ]; then
             terminal_emission=encoding-missing
@@ -871,7 +1140,7 @@ tessera_python=''
 for tessera_candidate in python3 python3.13 python3.12 python3.11 /opt/homebrew/bin/python3 /usr/local/bin/python3; do
     command -v "$tessera_candidate" >/dev/null 2>&1 || continue
     [ -n "$tessera_python" ] || tessera_python="$tessera_candidate"
-    if "$tessera_candidate" -c 'import sys,importlib.util as u; sys.exit(0 if (u.find_spec("tomllib") or u.find_spec("tomli")) else 1)' >/dev/null 2>&1; then
+    if "$tessera_candidate" -I -c 'import sys,importlib.util as u; sys.exit(0 if (u.find_spec("tomllib") or u.find_spec("tomli")) else 1)' >/dev/null 2>&1; then
         tessera_python="$tessera_candidate"
         break
     fi
@@ -882,7 +1151,7 @@ if [ -z "$tessera_python" ]; then
     exit 69
 fi
 
-exec "$tessera_python" -c '
+exec "$tessera_python" -I -c '
 import base64, codecs, hashlib, json, os, re, secrets, select, shutil, sqlite3, stat, subprocess, sys, tempfile, time, urllib.parse
 from collections import deque
 
@@ -1964,6 +2233,12 @@ def preview(value, limit=MAX_RESULT):
     if isinstance(value, (dict, list)): value = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     return bounded_string(value, limit)
 
+def call_identity(item, *fields):
+    # An ID names its call whole or not at all: one clipped could name
+    # another call. Field order and bound follow the native reader.
+    value = next((value for value in map(item.get, fields) if isinstance(value, str) and value), "")
+    return value if len(value.encode("utf-8", "surrogatepass")) <= 255 else ""
+
 def content_text(value):
     # Provider content arrays contain prose plus attachments. Project only
     # their documented text fields, never JSON-serialize the container into
@@ -2063,9 +2338,13 @@ def normalized_blocks(content, claude=False, evicted=None):
             if value and (not narration or item["thinking"].strip(CLAUDE_TRIM_SPACE)):
                 result.append({"type":"text" if narration else "thinking","text":value,"truncated":cut})
         elif kind in {"tool_use", "function_call", "custom_tool_call"}:
-            value, cut = preview(item.get("input") or item.get("arguments") or ""); result.append({"type":"tool_call","name":str(item.get("name") or "Tool")[:256],"preview":value,"truncated":cut})
+            value, cut = preview(next((value for value in map(item.get, ("input", "arguments", "action")) if value is not None), "")); result.append({"type":"tool_call","name":str(item.get("name") or "Tool")[:256],"preview":value,"truncated":cut})
+            call_id = call_identity(item, "call_id", "id")
+            if call_id: result[-1]["toolCallID"] = call_id
         elif kind in {"tool_result", "function_call_output", "custom_tool_call_output"}:
             value, cut = preview(content_text(item.get("content") or item.get("output") or "")); result.append({"type":"tool_result","preview":value,"truncated":cut})
+            call_id = call_identity(item, "tool_use_id", "call_id")
+            if call_id: result[-1]["toolCallID"] = call_id
         elif kind == "attachment":
             result.append({"type":"attachment","name":str(item.get("name") or "attachment")[:512],"mediaType":str(item.get("media_type") or item.get("mime_type") or "")[:128]})
         elif kind == "image":
@@ -2888,7 +3167,7 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 69
 fi
 
-exec python3 -c '
+exec python3 -I -c '
 import base64, json, os, re, subprocess, sys
 
 MAX_REQUEST = 65536
@@ -2980,7 +3259,7 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 69
 fi
 
-exec python3 -c '
+exec python3 -I -c '
 import json, os, re, subprocess, sys
 
 MAX_REQUEST = 4096
@@ -3092,11 +3371,30 @@ def foreground(pid):
             return None
     return pgid == tpgid if pgid > 0 and tpgid > 0 else None
 
+def launcher_script(pid, argv):
+    # A global npm install runs a package launcher through a bin symlink,
+    # such as ~/.local/bin/codex, and node keeps the path it was given: only
+    # the target names the package.
+    script = next((argument for argument in argv[1:] if not argument.startswith("-")), "")
+    if not script:
+        return ""
+    if not script.startswith("/"):
+        try:
+            script = os.path.join(os.readlink("/proc/%d/cwd" % pid), script)
+        except Exception:
+            return ""
+    try:
+        return os.path.realpath(script)
+    except Exception:
+        return ""
+
 def exact_provider_process(pid, provider):
     comm, argv = process_identity(pid)
     command = os.path.basename(comm).lower()
     executable = os.path.basename(argv[0]).lower() if argv else ""
     arguments = "\0".join(argv[1:]).lower()
+    if command in {"node", "nodejs"}:
+        arguments += "\0" + launcher_script(pid, argv).lower()
     # The official Claude self-updater executes a semver-named binary at this
     # exact private installation location. A bare `1.2.3` comm is never enough:
     # require the unnormalised absolute argv[0] shape as well, so a forged
@@ -3253,6 +3551,8 @@ for argument in "$@"; do
             set -- "$@" "$argument"
             ;;
         --strict-config|--full-auto) set -- "$@" "$argument" ;;
+        # Where the TUI hosts its threads, not an app-server option.
+        --no-daemon) ;;
         --dangerously-bypass-hook-trust)
             trust_bypassed=1
             set -- "$@" "$argument"
@@ -3647,17 +3947,33 @@ for argument in "$@"; do
     esac
 done
 
+# The first command decides, never a later word: `codex resume review`
+# resumes a session named review, and everything after `--` is a prompt. An
+# image option takes every value up to the next option.
+command_seen=0
 skip_option_value=0
+image_values=0
 for argument in "$@"; do
     if [ "$skip_option_value" -eq 1 ]; then skip_option_value=0; continue; fi
     case "$argument" in
-        -c|--config|-m|--model|-p|--profile|-C|--cd|-s|--sandbox|-a|--ask-for-approval|--enable|--disable|--add-dir|--local-provider|-i|--image)
+        --) break ;;
+        -h|--help|-V|--version) exec "$provider_path" "$@" ;;
+        -c|--config|-m|--model|-p|--profile|-C|--cd|-s|--sandbox|-a|--ask-for-approval|--enable|--disable|--add-dir|--local-provider|--remote|--remote-auth-token-env)
             skip_option_value=1
             ;;
-        -h|--help|-V|--version|exec|e|app-server|mcp|mcp-server|login|logout|completion|debug|review)
-            exec "$provider_path" "$@"
+        -i|--image) image_values=1; continue ;;
+        -*) ;;
+        *)
+            if [ "$image_values" -eq 1 ] || [ "$command_seen" -eq 1 ]; then continue; fi
+            command_seen=1
+            case "$argument" in
+                exec|e|app-server|mcp|mcp-server|login|logout|completion|debug|review)
+                    exec "$provider_path" "$@"
+                    ;;
+            esac
             ;;
     esac
+    image_values=0
 done
 
 readiness_status=0
@@ -4300,11 +4616,12 @@ unset _tessera_agent_support_dir
         throw AgentLifecycleIntegrationInstallError.verificationFailed(
             lastOutput.isEmpty
                 ? {
-                    #if os(Android)
+                    #if os(Android) || os(Linux)
                     return "Provider hook settings kept changing during installation."
                     #else
                     return String(
                     localized: "Provider hook settings kept changing during installation.",
+                    bundle: .main,
                     comment: "Agent Center install gave up because the remote settings file kept moving"
                     )
                     #endif
@@ -4465,7 +4782,7 @@ unset _tessera_agent_support_dir
     /// `tessera_toml_valid` succeeds when nothing can check the file, and
     /// verifies it whenever something can. `tessera_toml` records which of the
     /// two happened for the installation diagnostic.
-    private static let tomlValidatorSetup = #"tessera_toml_python=''; for tessera_toml_candidate in python3 python3.13 python3.12 python3.11 /opt/homebrew/bin/python3 /usr/local/bin/python3; do command -v "$tessera_toml_candidate" >/dev/null 2>&1 || continue; "$tessera_toml_candidate" -c 'import sys,importlib.util as u; sys.exit(0 if (u.find_spec("tomllib") or u.find_spec("tomli")) else 1)' >/dev/null 2>&1 || continue; tessera_toml_python="$tessera_toml_candidate"; break; done; if [ -n "$tessera_toml_python" ]; then tessera_toml=available; else tessera_toml=unavailable; fi; tessera_toml_valid() { [ -n "$tessera_toml_python" ] || return 0; "$tessera_toml_python" -c 'import sys,importlib.util as u; __import__("tomllib" if u.find_spec("tomllib") else "tomli").load(open(sys.argv[1],"rb"))' "$1" >/dev/null 2>&1; }"#
+    private static let tomlValidatorSetup = #"tessera_toml_python=''; for tessera_toml_candidate in python3 python3.13 python3.12 python3.11 /opt/homebrew/bin/python3 /usr/local/bin/python3; do command -v "$tessera_toml_candidate" >/dev/null 2>&1 || continue; "$tessera_toml_candidate" -I -c 'import sys,importlib.util as u; sys.exit(0 if (u.find_spec("tomllib") or u.find_spec("tomli")) else 1)' >/dev/null 2>&1 || continue; tessera_toml_python="$tessera_toml_candidate"; break; done; if [ -n "$tessera_toml_python" ]; then tessera_toml=available; else tessera_toml=unavailable; fi; tessera_toml_valid() { [ -n "$tessera_toml_python" ] || return 0; "$tessera_toml_python" -I -c 'import sys,importlib.util as u; __import__("tomllib" if u.find_spec("tomllib") else "tomli").load(open(sys.argv[1],"rb"))' "$1" >/dev/null 2>&1; }"#
 
     // Deployment publishes hash-verified immutable artifacts under their SHA.
     // Check that identity independently of hook bytes: another app can replace
@@ -4495,7 +4812,7 @@ try:
     sys.exit(0 if digest.hexdigest()==expected.rsplit('/',1)[-1] else 1)
 finally: os.close(fd)
 """#
-        return "(tessera_expected_native=''; case \"$(uname -s)-$(uname -m)\" in \(cases) esac; [ -n \"$tessera_expected_native\" ] && python3 -c \(shellQuote(verify)) \"$tessera_expected_native\" 2>/dev/null)"
+        return "(tessera_expected_native=''; case \"$(uname -s)-$(uname -m)\" in \(cases) esac; [ -n \"$tessera_expected_native\" ] && python3 -I -c \(shellQuote(verify)) \"$tessera_expected_native\" 2>/dev/null)"
 
     }
 
@@ -4678,7 +4995,7 @@ finally: os.close(fd)
         // older one left the same environment this script would, and a newer
         // app's shell integration keeps serving this app while the installed
         // floor admits it, which the installation probe decides separately.
-        let versionHelpers = #"tessera_loaded_ok() { case "$1" in ''|*[!0-9]*|??????*) return 1 ;; esac; [ "$1" -ge \#(shellIntegrationCompatibleFrom) ]; }; tessera_env_version() { sed -n 's/^'"$1"'=\([0-9]\{1,5\}\)$/\1/p' | head -n 1; }; "#
+        let versionHelpers = #"tessera_loaded_ok() { case "$1" in ''|*[!0-9]*|??????*) return 1 ;; esac; [ "$1" -ge \#(shellIntegrationCompatibleFrom) ]; }; tessera_env_version() { sed -n 's/^'"$1"'=\([0-9]\{1,5\}\)$/\1/p' | head -n 1; }; tessera_is_count() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; }; tessera_epoch() { [ -n "$1" ] || return 1; LC_ALL=C TZ=UTC0 date -j -f '%a %b %d %T %Y' "$1" +%s 2>/dev/null || LC_ALL=C TZ=UTC0 date -d "$1" +%s 2>/dev/null; }; "#
         func environmentCheck(tokenize: Bool) -> String {
             let source = tokenize
                 ? #"printf '%s\n' "$tessera_environment" | tr ' \t' '\n\n'"#
@@ -4688,7 +5005,16 @@ finally: os.close(fd)
         let inheritedChecks = allowInheritedEnvironment
             ? #"if [ -r "/proc/$tessera_pid/environ" ]; then tessera_environment="$(tr '\000' '\n' < "/proc/$tessera_pid/environ" 2>/dev/null)"; \#(environmentCheck(tokenize: false))fi; tessera_environment="$(ps eww -p "$tessera_pid" -o args= 2>/dev/null)"; \#(environmentCheck(tokenize: true))"#
             : ""
-        let identityCheck = #"if [ -r "$marker" ]; then tessera_markers=$((tessera_markers + 1)); tessera_marker_value="$(cat "$marker" 2>/dev/null)"; tessera_marker_version="${tessera_marker_value%%[|]*}"; if [ "$start" != 'ps:' ] && [ "$tessera_marker_value" = "$tessera_marker_version|$start|$tessera_marker_version" ] && tessera_loaded_ok "$tessera_marker_version"; then tessera_identities=$((tessera_identities + 1)); active=1; tessera_proof=process-identity; break; fi; fi; "#
+        // `ps -o lstart` prints in the caller's locale and zone, the shell
+        // wrote its marker in its own, and Apple's shells hide their
+        // environment from `ps eww`: a macOS shell started under another
+        // locale or zone never matched and stayed inactive. Its marker still
+        // proves the shell when the shell could have written it, no earlier
+        // than the process began, which a later process on a reused PID
+        // cannot claim; and when its start reads in C, as the start itself in
+        // some zone (a whole number of quarter hours within 14 hours of it).
+        // Times are epoch seconds, read in C and UTC.
+        let identityCheck = #"if [ -r "$marker" ]; then tessera_markers=$((tessera_markers + 1)); tessera_marker_value="$(cat "$marker" 2>/dev/null)"; tessera_marker_version="${tessera_marker_value%%[|]*}"; tessera_identity=0; if [ "$start" != 'ps:' ] && tessera_loaded_ok "$tessera_marker_version"; then if [ "$tessera_marker_value" = "$tessera_marker_version|$start|$tessera_marker_version" ]; then tessera_identity=1; elif [ "${start#ps:}" != "$start" ]; then case "$tessera_marker_value" in "$tessera_marker_version|ps:"?*"|$tessera_marker_version") tessera_recorded="${tessera_marker_value#"$tessera_marker_version|ps:"}"; tessera_recorded_at="$(tessera_epoch "${tessera_recorded%"|$tessera_marker_version"}")"; tessera_started_at="$(tessera_epoch "$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$tessera_pid" 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')")"; tessera_marked_at="$(stat -c %Y "$marker" 2>/dev/null || stat -f %m "$marker" 2>/dev/null)"; if tessera_is_count "$tessera_started_at" && tessera_is_count "$tessera_marked_at" && [ "$tessera_marked_at" -ge "$tessera_started_at" ]; then if ! tessera_is_count "$tessera_recorded_at"; then tessera_identity=1; else tessera_zone=$((tessera_recorded_at - tessera_started_at)); if [ $((tessera_zone % 900)) -eq 0 ] && [ "$tessera_zone" -ge -50400 ] && [ "$tessera_zone" -le 50400 ]; then tessera_identity=1; fi; fi; fi ;; esac; fi; fi; if [ "$tessera_identity" -eq 1 ]; then tessera_identities=$((tessera_identities + 1)); active=1; tessera_proof=process-identity; break; fi; fi; "#
         return "\(versionHelpers)active=0; tessera_candidates=0; tessera_markers=0; tessera_identities=0; tessera_proof=none; for tessera_pid in \(pidList); do tessera_candidates=$((tessera_candidates + 1)); \(inheritedChecks)marker=\"$HOME/.config/tessera/active-shells/$tessera_pid\"; start=''; if [ -r \"/proc/$tessera_pid/stat\" ]; then start=\"proc:$(sed 's/^.*) //' \"/proc/$tessera_pid/stat\" 2>/dev/null | awk '{print $20}')\"; fi; if [ -z \"$start\" ] || [ \"$start\" = 'proc:' ]; then start=\"ps:$(ps -o lstart= -p \"$tessera_pid\" 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')\"; fi; \(identityCheck)done; printf '%s proof=%s candidates=%s markers=%s identities=%s\\n' \(diagnosticPrefix) \"$tessera_proof\" \"$tessera_candidates\" \"$tessera_markers\" \"$tessera_identities\"; if [ \"$active\" -eq 1 ]; then printf '%s active\\n' \(prefix); else printf '%s inactive\\n' \(prefix); fi"
     }
 
@@ -4790,6 +5116,16 @@ finally: os.close(fd)
     /// One fixed, content-free process inventory program. Platform adapters
     /// contribute only an already-validated carrier marker or owned root PID;
     /// Core owns every executable, parser field, and foreground heuristic.
+    ///
+    /// The frame is always a closed tree, which the root-scoped parser
+    /// requires. The foreground job, which alone decides what the pane runs,
+    /// is kept whole with its ancestors; the rest of the 128 cap fills breadth
+    /// first and reports `truncated`. A foreground job that cannot fit, or a
+    /// PID listed twice, fails the read instead of misdescribing the pane. A
+    /// name outside the executable alphabet (or with a space) becomes
+    /// `unnamed` rather than being dropped and orphaning its children.
+    /// Dropping one such process, or capping in PID order, once made every
+    /// read of a busy agent pane "malformed".
     public static func makeProcessDiscoveryCommand(scope: AgentIntegrationProcessDiscoveryScope) -> String {
         let rootSetup: String
         switch scope {
@@ -4817,25 +5153,46 @@ finally: os.close(fd)
         \(rootSetup)
         case "$roots" in *[0-9]*) ;; *) exit 1 ;; esac
         printf '%s ' 'TESSERA_AGENT_PROCESS_DISCOVERY'
-        tessera_processes="$(ps -eo pid=,ppid=,pgid=,tpgid=,comm= 2>/dev/null || ps -axo pid=,ppid=,pgid=,tpgid=,comm= 2>/dev/null || ps -axo pid=,ppid=,pgid=,stat=,comm= 2>/dev/null | awk '{ tpgid = index($4, "+") ? $3 : -1; print $1, $2, $3, tpgid, $5 }')"
+        tessera_processes="$(ps -eo pid=,ppid=,pgid=,tpgid=,comm= 2>/dev/null || ps -axo pid=,ppid=,pgid=,tpgid=,comm= 2>/dev/null || ps -axo pid=,ppid=,pgid=,stat=,comm= 2>/dev/null | awk '{ tpgid = index($4, "+") ? $3 : -1; name = $0; sub(/^[ \\t]*[^ \\t]+[ \\t]+[^ \\t]+[ \\t]+[^ \\t]+[ \\t]+[^ \\t]+[ \\t]*/, "", name); print $1, $2, $3, tpgid, name }')"
         printf '%s\\n' "$tessera_processes" | awk -v roots="$roots" '
-        BEGIN { count=split(roots, seed, " "); for (i=1;i<=count;i++) if (seed[i] ~ /^[0-9]+$/) keep[seed[i]]=1 }
-        { pid[NR]=$1; ppid[NR]=$2; pgid[NR]=$3; tpgid[NR]=$4; exe[NR]=$5 }
+        function keep(i,   n, j) {
+          n=0
+          for (j=i; !picked[j] && n <= 128; j=row[ppid[j]]) { path[n++]=j; if (root[pid[j]]) break }
+          if (kept + n > 128) return 0
+          for (j=0;j<n;j++) picked[path[j]]=1
+          kept+=n
+          return 1
+        }
+        BEGIN { count=split(roots, seed, " "); for (i=1;i<=count;i++) if (seed[i] ~ /^[0-9]+$/) root[seed[i]]=1 }
+        $1 ~ /^[0-9]+$/ {
+          if ($1 in row) duplicate=1
+          name=$0; sub(/^[ \\t]*[^ \\t]+[ \\t]+[^ \\t]+[ \\t]+[^ \\t]+[ \\t]+[^ \\t]+[ \\t]*/, "", name)
+          rows++; pid[rows]=$1; ppid[rows]=$2; pgid[rows]=$3; tpgid[rows]=$4; exe[rows]=name; row[$1]=rows
+          if ($2 in last) next_sibling[last[$2]]=rows; else first_child[$2]=rows
+          last[$2]=rows
+        }
         END {
-          for (round=0;round<128;round++) {
-            changed=0
-            for (i=1;i<=NR;i++) if (!keep[pid[i]] && keep[ppid[i]]) { keep[pid[i]]=1; changed=1 }
-            if (!changed) break
-          }
-          printf "{\\\"v\\\":1,\\\"kind\\\":\\\"processDiscovery\\\",\\\"processes\\\":["
+          if (duplicate) exit 1
+          tail=0
+          for (i=1;i<=rows;i++) if (root[pid[i]]) { queued[i]=1; order[tail++]=i }
+          for (head=0;head<tail;head++)
+            for (c=first_child[pid[order[head]]]; c; c=next_sibling[c])
+              if (!queued[c]) { queued[c]=1; order[tail++]=c }
+          kept=0
+          for (k=0;k<tail;k++) { i=order[k]; if (tpgid[i] > 0 && pgid[i] == tpgid[i] && !keep(i)) exit 1 }
+          for (k=0;k<tail && kept<128;k++) keep(order[k])
+          printf "{\\"v\\":1,\\"kind\\":\\"processDiscovery\\",\\"processes\\":["
           emitted=0
-          for (i=1;i<=NR && emitted<128;i++) if (keep[pid[i]] && exe[i] ~ /^[A-Za-z0-9._+@:\\/-]+$/) {
-            if (emitted) printf ","
+          for (k=0;k<tail;k++) {
+            i=order[k]
+            if (!picked[i]) continue
+            name=exe[i]
+            if (name !~ /^[A-Za-z0-9._+@:\\/-]+$/ || length(name) > 256) name="unnamed"
+            if (emitted++) printf ","
             foreground=(tpgid[i] > 0 && pgid[i] == tpgid[i]) ? "true" : "false"
-            printf "{\\\"pid\\\":%d,\\\"ppid\\\":%d,\\\"executable\\\":\\\"%s\\\",\\\"foreground\\\":%s}", pid[i], ppid[i], exe[i], foreground
-            emitted++
+            printf "{\\"pid\\":%d,\\"ppid\\":%d,\\"executable\\":\\"%s\\",\\"foreground\\":%s}", pid[i], ppid[i], name, foreground
           }
-          printf "]}\\n"
+          printf "],\\"truncated\\":%s}\\n", (kept < tail ? "true" : "false")
         }'
         """.trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
     }

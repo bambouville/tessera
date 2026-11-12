@@ -27,7 +27,7 @@ import types
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "Packages/TesseraCore/Sources/TesseraAgentCore/Lifecycle/RemoteAgentLifecycleIntegrationInstaller.swift"
-START = 'exec "$tessera_python" -c \'\n'
+START = 'exec "$tessera_python" -I -c \'\n'
 END = '\ntry:\n    raw = sys.stdin.buffer.read(MAX_REQUEST + 1)'
 MIB = 1024 * 1024
 

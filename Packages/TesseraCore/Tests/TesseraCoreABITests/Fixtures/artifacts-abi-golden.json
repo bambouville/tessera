@@ -1,0 +1,259 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "openFile",
+      "symbol": "tessera_artifacts_reduce",
+      "requestJSON": "{\"action\":{\"nowMillis\":10,\"open\":{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t1\",\"origin\":\"files\",\"target\":{\"path\":\"/work/a.md\",\"type\":\"file\"},\"title\":\"a.md\"},\"type\":\"open\"},\"state\":{\"filter\":\"all\",\"tabCap\":64,\"tabs\":[],\"version\":1}}",
+      "responseJSON": "{\"evictedTabIDs\":[],\"focusedTabID\":\"t1\",\"state\":{\"filter\":\"all\",\"selectedID\":\"t1\",\"tabCap\":64,\"tabs\":[{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t1\",\"kind\":\"docs\",\"openedAt\":10,\"origin\":\"files\",\"pinned\":false,\"target\":{\"path\":\"/work/a.md\",\"type\":\"file\"},\"title\":\"a.md\",\"unseenChange\":false,\"viewedAt\":10}],\"version\":1}}"
+    },
+    {
+      "name": "emptyOverview",
+      "symbol": "tessera_artifacts_overview",
+      "requestJSON": "{\"filter\":\"all\",\"query\":\"\",\"state\":{\"filter\":\"all\",\"tabCap\":64,\"tabs\":[],\"version\":1}}",
+      "responseJSON": "{\"countsByKind\":{\"changes\":0,\"docs\":0,\"files\":0,\"pages\":0},\"filter\":\"all\",\"groups\":[],\"query\":\"\",\"totalCount\":0}"
+    },
+    {
+      "name": "parsePort",
+      "symbol": "tessera_artifacts_quick_open_parse",
+      "requestJSON": "{\"context\":{\"currentHostID\":\"h1\",\"cwd\":\"/work\",\"hosts\":[{\"home\":\"/home/me\",\"id\":\"h1\",\"label\":\"dev\"}],\"listeningPorts\":[]},\"input\":\":5173\"}",
+      "responseJSON": "{\"hostID\":\"h1\",\"path\":\"/\",\"port\":5173,\"scheme\":\"http\",\"type\":\"page\"}"
+    },
+    {
+      "name": "suggestOpenFile",
+      "symbol": "tessera_artifacts_quick_open_suggestions",
+      "requestJSON": "{\"context\":{\"currentHostID\":\"h1\",\"cwd\":\"/work\",\"hosts\":[{\"home\":\"/home/me\",\"id\":\"h1\",\"label\":\"dev\"}],\"listeningPorts\":[]},\"input\":\"a.md\",\"limit\":8,\"recents\":[],\"state\":{\"filter\":\"all\",\"selectedID\":\"t1\",\"tabCap\":64,\"tabs\":[{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t1\",\"kind\":\"docs\",\"openedAt\":10,\"origin\":\"files\",\"pinned\":false,\"target\":{\"path\":\"/work/a.md\",\"type\":\"file\"},\"title\":\"a.md\",\"unseenChange\":false,\"viewedAt\":10}],\"version\":1}}",
+      "responseJSON": "[{\"intent\":{\"hostID\":\"h1\",\"path\":\"/work/a.md\",\"type\":\"file\"},\"kind\":\"openTab\",\"subtitle\":\"dev · /work/a.md\",\"tabID\":\"t1\",\"title\":\"a.md\"}]"
+    },
+    {
+      "name": "suggestActiveForward",
+      "symbol": "tessera_artifacts_quick_open_suggestions",
+      "requestJSON": "{\"context\":{\"activeForwards\":[{\"hostID\":\"h1\",\"rule\":{\"autoStart\":true,\"bind\":{\"host\":\"127.0.0.1\",\"port\":15432},\"direction\":\"local\",\"enabled\":true,\"id\":\"22222222-2222-2222-2222-222222222222\",\"label\":\"db\",\"target\":{\"host\":\"localhost\",\"port\":5432}}},{\"hostID\":\"h1\",\"rule\":{\"autoStart\":true,\"bind\":{\"host\":\"127.0.0.1\",\"port\":15173},\"direction\":\"local\",\"enabled\":true,\"id\":\"11111111-1111-1111-1111-111111111111\",\"label\":\"vite\",\"target\":{\"host\":\"localhost\",\"port\":5173}}}],\"currentHostID\":\"h1\",\"cwd\":\"/work\",\"hosts\":[{\"home\":\"/home/me\",\"id\":\"h1\",\"label\":\"dev\"}],\"listeningPorts\":[]},\"input\":\"\",\"limit\":8,\"recents\":[],\"state\":{\"filter\":\"all\",\"selectedID\":\"t1\",\"tabCap\":64,\"tabs\":[{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t1\",\"kind\":\"docs\",\"openedAt\":10,\"origin\":\"files\",\"pinned\":false,\"target\":{\"path\":\"/work/a.md\",\"type\":\"file\"},\"title\":\"a.md\",\"unseenChange\":false,\"viewedAt\":10}],\"version\":1}}",
+      "responseJSON": "[{\"intent\":{\"hostID\":\"h1\",\"path\":\"/\",\"port\":5173,\"scheme\":\"http\",\"type\":\"page\"},\"kind\":\"activeForward\",\"subtitle\":\"dev · vite\",\"title\":\"localhost:5173\"},{\"intent\":{\"hostID\":\"h1\",\"path\":\"/work/a.md\",\"type\":\"file\"},\"kind\":\"openTab\",\"subtitle\":\"dev · /work/a.md\",\"tabID\":\"t1\",\"title\":\"a.md\"}]"
+    },
+    {
+      "name": "classifyIPv4Loopback",
+      "symbol": "tessera_artifacts_classify_link",
+      "requestJSON": "{\"urlString\":\"http://127.0.0.2:3000/x?y#z\"}",
+      "responseJSON": "{\"pathAndQuery\":\"/x?y#z\",\"port\":3000,\"scheme\":\"http\",\"type\":\"remoteLoopback\"}"
+    },
+    {
+      "name": "classifyUnicodeIPv4Loopback",
+      "symbol": "tessera_artifacts_classify_link",
+      "requestJSON": "{\"urlString\":\"http://１２７。０｡０．１:3000/x?y#z\"}",
+      "responseJSON": "{\"pathAndQuery\":\"/x?y#z\",\"port\":3000,\"scheme\":\"http\",\"type\":\"remoteLoopback\"}"
+    },
+    {
+      "name": "classifySoftHyphenLoopback",
+      "symbol": "tessera_artifacts_classify_link",
+      "requestJSON": "{\"urlString\":\"http://local\\u00adhost:3000/\"}",
+      "responseJSON": "{\"pathAndQuery\":\"/\",\"port\":3000,\"scheme\":\"http\",\"type\":\"remoteLoopback\"}"
+    },
+    {
+      "name": "classifyMappedIPv4Loopback",
+      "symbol": "tessera_artifacts_classify_link",
+      "requestJSON": "{\"urlString\":\"http://[::ffff:127.0.0.1]:3000/x?y#z\"}",
+      "responseJSON": "{\"pathAndQuery\":\"/x?y#z\",\"port\":3000,\"scheme\":\"http\",\"type\":\"remoteLoopback\"}"
+    },
+    {
+      "name": "classifyMappedHexLoopback",
+      "symbol": "tessera_artifacts_classify_link",
+      "requestJSON": "{\"urlString\":\"http://[::ffff:7f00:1]:3000/x?y#z\"}",
+      "responseJSON": "{\"pathAndQuery\":\"/x?y#z\",\"port\":3000,\"scheme\":\"http\",\"type\":\"remoteLoopback\"}"
+    },
+    {
+      "name": "classifyCompatibleIPv4Loopback",
+      "symbol": "tessera_artifacts_classify_link",
+      "requestJSON": "{\"urlString\":\"https://[::127.255.0.1]/\"}",
+      "responseJSON": "{\"pathAndQuery\":\"/\",\"port\":443,\"scheme\":\"https\",\"type\":\"remoteLoopback\"}"
+    },
+    {
+      "name": "classifyCompatibleHexLoopback",
+      "symbol": "tessera_artifacts_classify_link",
+      "requestJSON": "{\"urlString\":\"https://[::7fff:1]/\"}",
+      "responseJSON": "{\"pathAndQuery\":\"/\",\"port\":443,\"scheme\":\"https\",\"type\":\"remoteLoopback\"}"
+    },
+    {
+      "name": "classifyLocalhostSubdomain",
+      "symbol": "tessera_artifacts_classify_link",
+      "requestJSON": "{\"urlString\":\"http://app.localhost:3000/x\"}",
+      "responseJSON": "{\"pathAndQuery\":\"/x\",\"port\":3000,\"scheme\":\"http\",\"type\":\"remoteLoopback\"}"
+    },
+    {
+      "name": "refuseLoopbackUserinfo",
+      "symbol": "tessera_artifacts_classify_link",
+      "requestJSON": "{\"urlString\":\"http://viewer@127.0.0.1:3000/\"}",
+      "responseJSON": "{\"type\":\"refused\"}"
+    },
+    {
+      "name": "refuseEncodedLoopbackAuthority",
+      "symbol": "tessera_artifacts_classify_link",
+      "requestJSON": "{\"urlString\":\"http://%6cocalhost:3000/\"}",
+      "responseJSON": "{\"type\":\"refused\"}"
+    },
+    {
+      "name": "refuseEncodedSoftHyphenLoopback",
+      "symbol": "tessera_artifacts_classify_link",
+      "requestJSON": "{\"urlString\":\"http://local%C2%ADhost:3000/\"}",
+      "responseJSON": "{\"type\":\"refused\"}"
+    },
+    {
+      "name": "refuseSurplusLoopbackSlashes",
+      "symbol": "tessera_artifacts_classify_link",
+      "requestJSON": "{\"urlString\":\"http:////127.0.0.1:3000/\"}",
+      "responseJSON": "{\"type\":\"refused\"}"
+    },
+    {
+      "name": "refuseMissingLoopbackSlashes",
+      "symbol": "tessera_artifacts_classify_link",
+      "requestJSON": "{\"urlString\":\"http:localhost:3000/\"}",
+      "responseJSON": "{\"type\":\"refused\"}"
+    },
+    {
+      "name": "documentRelativeLink",
+      "symbol": "tessera_artifacts_document_link",
+      "requestJSON": "{\"documentPath\":\"/work/atlas/docs/guide.md\",\"link\":\"../README.md#setup\"}",
+      "responseJSON": "{\"path\":\"/work/atlas/README.md\",\"type\":\"file\"}"
+    },
+    {
+      "name": "documentHomeLink",
+      "symbol": "tessera_artifacts_document_link",
+      "requestJSON": "{\"documentPath\":\"/work/guide.md\",\"home\":\"/home/me\",\"link\":\"~/notes/a%20b.md\"}",
+      "responseJSON": "{\"path\":\"/home/me/notes/a b.md\",\"type\":\"file\"}"
+    },
+    {
+      "name": "documentLocalhostPage",
+      "symbol": "tessera_artifacts_document_link",
+      "requestJSON": "{\"documentPath\":\"/work/guide.md\",\"link\":\"http://localhost:3000/billing?x=1#top\"}",
+      "responseJSON": "{\"pathAndQuery\":\"/billing?x=1#top\",\"port\":3000,\"scheme\":\"http\",\"type\":\"page\"}"
+    },
+    {
+      "name": "documentExternalLink",
+      "symbol": "tessera_artifacts_document_link",
+      "requestJSON": "{\"documentPath\":\"/work/guide.md\",\"link\":\"https://example.com/docs\"}",
+      "responseJSON": "{\"type\":\"external\"}"
+    },
+    {
+      "name": "documentAnchorIgnored",
+      "symbol": "tessera_artifacts_document_link",
+      "requestJSON": "{\"documentPath\":\"/work/guide.md\",\"link\":\"#install\"}",
+      "responseJSON": "{\"type\":\"ignored\"}"
+    },
+    {
+      "name": "documentScriptRefused",
+      "symbol": "tessera_artifacts_document_link",
+      "requestJSON": "{\"documentPath\":\"/work/guide.md\",\"link\":\"javascript:alert(1)\"}",
+      "responseJSON": "{\"type\":\"refused\"}"
+    },
+    {
+      "name": "probeCommand",
+      "symbol": "tessera_artifacts_listening_ports_command",
+      "requestJSON": null,
+      "responseJSON": "{\"command\":\"sh -c '\\nprobe_pid=\\ntimer_pid=\\ncleanup() {\\n  [ -z \\\"$probe_pid\\\" ] || kill \\\"$probe_pid\\\" 2>/dev/null || :\\n  [ -z \\\"$timer_pid\\\" ] || kill \\\"$timer_pid\\\" 2>/dev/null || :\\n}\\ntrap cleanup 0\\ntrap \\\"exit 0\\\" ALRM HUP INT TERM\\n(sleep 1; kill -s ALRM \\\"$$\\\" 2>/dev/null) & timer_pid=$!\\nrun() {\\n  \\\"$@\\\" 2>/dev/null & probe_pid=$!\\n  wait \\\"$probe_pid\\\"\\n  result=$?\\n  probe_pid=\\n  return \\\"$result\\\"\\n}\\nif command -v ss >/dev/null 2>&1; then\\n  printf \\\"%s\\\\n\\\" \\\"TESSERA_ARTIFACTS_PORTS:ss\\\"\\n  run ss -Hltnp && exit 0\\nfi\\nif command -v netstat >/dev/null 2>&1; then\\n  if [ \\\"$(uname -s 2>/dev/null)\\\" != Darwin ]; then\\n    printf \\\"%s\\\\n\\\" \\\"TESSERA_ARTIFACTS_PORTS:netstatLinux\\\"\\n    run netstat -lnt && exit 0\\n  fi\\n  printf \\\"%s\\\\n\\\" \\\"TESSERA_ARTIFACTS_PORTS:netstatMacOS\\\"\\n  run netstat -anv -p tcp && exit 0\\nfi\\nif command -v lsof >/dev/null 2>&1; then\\n  printf \\\"%s\\\\n\\\" \\\"TESSERA_ARTIFACTS_PORTS:lsof\\\"\\n  run lsof -nP -iTCP -sTCP:LISTEN && exit 0\\nfi\\nprintf \\\"%s\\\\n\\\" \\\"TESSERA_ARTIFACTS_PORTS:none\\\"\\n'\"}"
+    },
+    {
+      "name": "parseSS",
+      "symbol": "tessera_artifacts_listening_ports_parse",
+      "requestJSON": "{\"output\":\"TESSERA_ARTIFACTS_PORTS:ss\\nLISTEN 0 128 127.0.0.1:8000 0.0.0.0:* users:((\\\"python3\\\",pid=12,fd=3))\\n\",\"sshPort\":2222}",
+      "responseJSON": "[{\"bindAddress\":\"127.0.0.1\",\"port\":8000,\"process\":\"python3\"}]"
+    },
+    {
+      "name": "freePortPlan",
+      "symbol": "tessera_artifacts_forward_plan",
+      "requestJSON": "{\"hostRules\":[],\"remotePort\":5173}",
+      "responseJSON": "{\"rule\":{\"autoStart\":false,\"bind\":{\"host\":\"127.0.0.1\",\"port\":5173},\"direction\":\"local\",\"enabled\":true,\"id\":\"00000000-0000-0000-0000-000000000000\",\"label\":\"\",\"target\":{\"host\":\"localhost\",\"port\":5173}},\"type\":\"ephemeral\"}"
+    },
+    {
+      "name": "keepAssignedRule",
+      "symbol": "tessera_artifacts_keep_as_rule",
+      "requestJSON": "{\"ephemeral\":{\"autoStart\":false,\"bind\":{\"host\":\"127.0.0.1\",\"port\":5173},\"direction\":\"local\",\"enabled\":true,\"id\":\"00000000-0000-0000-0000-000000000000\",\"label\":\"\",\"target\":{\"host\":\"localhost\",\"port\":5173}},\"hostRules\":[],\"label\":\"dev app\",\"ruleID\":\"11111111-1111-1111-1111-111111111111\"}",
+      "responseJSON": "{\"autoStart\":true,\"bind\":{\"host\":\"127.0.0.1\",\"port\":5173},\"direction\":\"local\",\"enabled\":true,\"id\":\"11111111-1111-1111-1111-111111111111\",\"label\":\"dev app\",\"target\":{\"host\":\"localhost\",\"port\":5173}}"
+    },
+    {
+      "name": "fileCacheKey",
+      "symbol": "tessera_artifacts_cache_key",
+      "requestJSON": "{\"tab\":{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t1\",\"kind\":\"docs\",\"openedAt\":10,\"origin\":\"files\",\"pinned\":false,\"target\":{\"path\":\"/work/a.md\",\"type\":\"file\"},\"title\":\"a.md\",\"unseenChange\":false,\"viewedAt\":10}}",
+      "responseJSON": "{\"key\":\"4ff55b7ab0798970181029584209307390b258f33c4795c031e90add72a3c18f\"}"
+    },
+    {
+      "name": "evictOldest",
+      "symbol": "tessera_artifacts_cache_evictions",
+      "requestJSON": "{\"budgetBytes\":100,\"entries\":[{\"key\":\"a\",\"pinned\":false,\"size\":100,\"viewedAt\":1},{\"key\":\"selected\",\"pinned\":false,\"size\":100,\"viewedAt\":2}],\"protectedKeys\":[\"selected\"]}",
+      "responseJSON": "{\"keys\":[\"a\"]}"
+    },
+    {
+      "name": "cachedOffline",
+      "symbol": "tessera_artifacts_cache_presentation",
+      "requestJSON": "{\"liveConnection\":false,\"nowMillis\":20,\"tab\":{\"cache\":{\"fetchedAt\":10,\"isStale\":false,\"remoteMTime\":1,\"size\":100},\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t1\",\"kind\":\"docs\",\"openedAt\":10,\"origin\":\"files\",\"pinned\":false,\"target\":{\"path\":\"/work/a.md\",\"type\":\"file\"},\"title\":\"a.md\",\"unseenChange\":false,\"viewedAt\":10}}",
+      "responseJSON": "{\"canRefresh\":false,\"fetchedAt\":10,\"state\":\"cached\"}"
+    },
+    {
+      "name": "dropMalformedTab",
+      "symbol": "tessera_artifacts_decode_state",
+      "requestJSON": "{\"futureField\":true,\"tabs\":[{\"broken\":true}],\"version\":1}",
+      "responseJSON": "{\"filter\":\"all\",\"tabCap\":64,\"tabs\":[],\"version\":1}"
+    },
+    {
+      "name": "markdownFamily",
+      "symbol": "tessera_artifacts_kind",
+      "requestJSON": "{\"mimeHint\":\"text/markdown\",\"path\":\"/work/PLAN.mdx\"}",
+      "responseJSON": "{\"kind\":\"docs\",\"viewer\":\"markdown\"}"
+    },
+    {
+      "name": "encodeInlineState",
+      "symbol": "tessera_artifacts_encode_state",
+      "requestJSON": "{\"filter\":\"all\",\"selectedID\":\"change\",\"tabCap\":64,\"tabs\":[{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"file\",\"kind\":\"docs\",\"openedAt\":1,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"path\":\"/report.md\",\"type\":\"file\"},\"title\":\"file\",\"unseenChange\":false,\"viewedAt\":1},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"change\",\"kind\":\"changes\",\"openedAt\":1,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"+café\\n\",\"path\":\"/a.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"change\",\"unseenChange\":false,\"viewedAt\":1}],\"version\":1}",
+      "responseJSON": "{\"filter\":\"all\",\"selectedID\":\"change\",\"tabCap\":64,\"tabs\":[{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"file\",\"kind\":\"docs\",\"openedAt\":1,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"path\":\"/report.md\",\"type\":\"file\"},\"title\":\"file\",\"unseenChange\":false,\"viewedAt\":1},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"change\",\"kind\":\"changes\",\"openedAt\":1,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"+café\\n\",\"path\":\"/a.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"change\",\"unseenChange\":false,\"viewedAt\":1}],\"version\":1}"
+    },
+    {
+      "name": "splitImmutableDiff",
+      "symbol": "tessera_artifacts_split_state",
+      "requestJSON": "{\"filter\":\"all\",\"selectedID\":\"change\",\"tabCap\":64,\"tabs\":[{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"file\",\"kind\":\"docs\",\"openedAt\":1,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"path\":\"/report.md\",\"type\":\"file\"},\"title\":\"file\",\"unseenChange\":false,\"viewedAt\":1},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"change\",\"kind\":\"changes\",\"openedAt\":1,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"+café\\n\",\"path\":\"/a.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"change\",\"unseenChange\":false,\"viewedAt\":1}],\"version\":1}",
+      "responseJSON": "{\"blobs\":{\"a7f61685866b7ec93e52977f80038f0dd67eaeddee1927f6118c576a90dd1550\":\"+café\\n\"},\"stateJSON\":\"{\\\"filter\\\":\\\"all\\\",\\\"selectedID\\\":\\\"change\\\",\\\"tabCap\\\":64,\\\"tabs\\\":[{\\\"hostID\\\":\\\"h1\\\",\\\"hostLabel\\\":\\\"dev\\\",\\\"id\\\":\\\"file\\\",\\\"kind\\\":\\\"docs\\\",\\\"openedAt\\\":1,\\\"origin\\\":\\\"agentEdit\\\",\\\"pinned\\\":false,\\\"target\\\":{\\\"path\\\":\\\"/report.md\\\",\\\"type\\\":\\\"file\\\"},\\\"title\\\":\\\"file\\\",\\\"unseenChange\\\":false,\\\"viewedAt\\\":1},{\\\"hostID\\\":\\\"h1\\\",\\\"hostLabel\\\":\\\"dev\\\",\\\"id\\\":\\\"change\\\",\\\"kind\\\":\\\"changes\\\",\\\"openedAt\\\":1,\\\"origin\\\":\\\"agentEdit\\\",\\\"pinned\\\":false,\\\"target\\\":{\\\"diffDigest\\\":\\\"a7f61685866b7ec93e52977f80038f0dd67eaeddee1927f6118c576a90dd1550\\\",\\\"path\\\":\\\"/a.swift\\\",\\\"summary\\\":\\\"edit\\\",\\\"type\\\":\\\"change\\\"},\\\"title\\\":\\\"change\\\",\\\"unseenChange\\\":false,\\\"viewedAt\\\":1}],\\\"version\\\":1}\"}"
+    },
+    {
+      "name": "blobReferencesIgnoreMalformedTabsAndUnsafeNames",
+      "symbol": "tessera_artifacts_state_blob_digests",
+      "requestJSON": "{\"filter\":\"all\",\"selectedID\":\"change\",\"tabCap\":64,\"tabs\":[null,{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"file\",\"kind\":\"docs\",\"openedAt\":1,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"path\":\"/report.md\",\"type\":\"file\"},\"title\":\"file\",\"unseenChange\":false,\"viewedAt\":1},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"change\",\"kind\":\"changes\",\"openedAt\":1,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diffDigest\":\"a7f61685866b7ec93e52977f80038f0dd67eaeddee1927f6118c576a90dd1550\",\"path\":\"/a.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"change\",\"unseenChange\":false,\"viewedAt\":1},{\"target\":{\"diffDigest\":\"../../state.json\",\"type\":\"change\"}},{\"target\":{\"diffDigest\":\"A7F61685866B7EC93E52977F80038F0DD67EAEDDEE1927F6118C576A90DD1550\",\"type\":\"change\"}}],\"version\":1}",
+      "responseJSON": "{\"digests\":[\"a7f61685866b7ec93e52977f80038f0dd67eaeddee1927f6118c576a90dd1550\"]}"
+    },
+    {
+      "name": "joinImmutableDiff",
+      "symbol": "tessera_artifacts_join_state",
+      "requestJSON": "{\"blobs\":{\"a7f61685866b7ec93e52977f80038f0dd67eaeddee1927f6118c576a90dd1550\":\"+café\\n\"},\"stateJSON\":\"{\\\"filter\\\":\\\"all\\\",\\\"selectedID\\\":\\\"change\\\",\\\"tabCap\\\":64,\\\"tabs\\\":[{\\\"hostID\\\":\\\"h1\\\",\\\"hostLabel\\\":\\\"dev\\\",\\\"id\\\":\\\"file\\\",\\\"kind\\\":\\\"docs\\\",\\\"openedAt\\\":1,\\\"origin\\\":\\\"agentEdit\\\",\\\"pinned\\\":false,\\\"target\\\":{\\\"path\\\":\\\"/report.md\\\",\\\"type\\\":\\\"file\\\"},\\\"title\\\":\\\"file\\\",\\\"unseenChange\\\":false,\\\"viewedAt\\\":1},{\\\"hostID\\\":\\\"h1\\\",\\\"hostLabel\\\":\\\"dev\\\",\\\"id\\\":\\\"change\\\",\\\"kind\\\":\\\"changes\\\",\\\"openedAt\\\":1,\\\"origin\\\":\\\"agentEdit\\\",\\\"pinned\\\":false,\\\"target\\\":{\\\"diffDigest\\\":\\\"a7f61685866b7ec93e52977f80038f0dd67eaeddee1927f6118c576a90dd1550\\\",\\\"path\\\":\\\"/a.swift\\\",\\\"summary\\\":\\\"edit\\\",\\\"type\\\":\\\"change\\\"},\\\"title\\\":\\\"change\\\",\\\"unseenChange\\\":false,\\\"viewedAt\\\":1}],\\\"version\\\":1}\"}",
+      "responseJSON": "{\"filter\":\"all\",\"selectedID\":\"change\",\"tabCap\":64,\"tabs\":[{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"file\",\"kind\":\"docs\",\"openedAt\":1,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"path\":\"/report.md\",\"type\":\"file\"},\"title\":\"file\",\"unseenChange\":false,\"viewedAt\":1},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"change\",\"kind\":\"changes\",\"openedAt\":1,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"+café\\n\",\"path\":\"/a.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"change\",\"unseenChange\":false,\"viewedAt\":1}],\"version\":1}"
+    },
+    {
+      "name": "joinMissingBlobDropsOnlyItsTab",
+      "symbol": "tessera_artifacts_join_state",
+      "requestJSON": "{\"blobs\":{},\"stateJSON\":\"{\\\"filter\\\":\\\"all\\\",\\\"selectedID\\\":\\\"change\\\",\\\"tabCap\\\":64,\\\"tabs\\\":[{\\\"hostID\\\":\\\"h1\\\",\\\"hostLabel\\\":\\\"dev\\\",\\\"id\\\":\\\"file\\\",\\\"kind\\\":\\\"docs\\\",\\\"openedAt\\\":1,\\\"origin\\\":\\\"agentEdit\\\",\\\"pinned\\\":false,\\\"target\\\":{\\\"path\\\":\\\"/report.md\\\",\\\"type\\\":\\\"file\\\"},\\\"title\\\":\\\"file\\\",\\\"unseenChange\\\":false,\\\"viewedAt\\\":1},{\\\"hostID\\\":\\\"h1\\\",\\\"hostLabel\\\":\\\"dev\\\",\\\"id\\\":\\\"change\\\",\\\"kind\\\":\\\"changes\\\",\\\"openedAt\\\":1,\\\"origin\\\":\\\"agentEdit\\\",\\\"pinned\\\":false,\\\"target\\\":{\\\"diffDigest\\\":\\\"a7f61685866b7ec93e52977f80038f0dd67eaeddee1927f6118c576a90dd1550\\\",\\\"path\\\":\\\"/a.swift\\\",\\\"summary\\\":\\\"edit\\\",\\\"type\\\":\\\"change\\\"},\\\"title\\\":\\\"change\\\",\\\"unseenChange\\\":false,\\\"viewedAt\\\":1}],\\\"version\\\":1}\"}",
+      "responseJSON": "{\"filter\":\"all\",\"tabCap\":64,\"tabs\":[{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"file\",\"kind\":\"docs\",\"openedAt\":1,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"path\":\"/report.md\",\"type\":\"file\"},\"title\":\"file\",\"unseenChange\":false,\"viewedAt\":1}],\"version\":1}"
+    },
+    {
+      "name": "joinTamperedBlobDropsOnlyItsTab",
+      "symbol": "tessera_artifacts_join_state",
+      "requestJSON": "{\"blobs\":{\"a7f61685866b7ec93e52977f80038f0dd67eaeddee1927f6118c576a90dd1550\":\"+tampered\\n\"},\"stateJSON\":\"{\\\"filter\\\":\\\"all\\\",\\\"selectedID\\\":\\\"change\\\",\\\"tabCap\\\":64,\\\"tabs\\\":[{\\\"hostID\\\":\\\"h1\\\",\\\"hostLabel\\\":\\\"dev\\\",\\\"id\\\":\\\"file\\\",\\\"kind\\\":\\\"docs\\\",\\\"openedAt\\\":1,\\\"origin\\\":\\\"agentEdit\\\",\\\"pinned\\\":false,\\\"target\\\":{\\\"path\\\":\\\"/report.md\\\",\\\"type\\\":\\\"file\\\"},\\\"title\\\":\\\"file\\\",\\\"unseenChange\\\":false,\\\"viewedAt\\\":1},{\\\"hostID\\\":\\\"h1\\\",\\\"hostLabel\\\":\\\"dev\\\",\\\"id\\\":\\\"change\\\",\\\"kind\\\":\\\"changes\\\",\\\"openedAt\\\":1,\\\"origin\\\":\\\"agentEdit\\\",\\\"pinned\\\":false,\\\"target\\\":{\\\"diffDigest\\\":\\\"a7f61685866b7ec93e52977f80038f0dd67eaeddee1927f6118c576a90dd1550\\\",\\\"path\\\":\\\"/a.swift\\\",\\\"summary\\\":\\\"edit\\\",\\\"type\\\":\\\"change\\\"},\\\"title\\\":\\\"change\\\",\\\"unseenChange\\\":false,\\\"viewedAt\\\":1}],\\\"version\\\":1}\"}",
+      "responseJSON": "{\"filter\":\"all\",\"tabCap\":64,\"tabs\":[{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"file\",\"kind\":\"docs\",\"openedAt\":1,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"path\":\"/report.md\",\"type\":\"file\"},\"title\":\"file\",\"unseenChange\":false,\"viewedAt\":1}],\"version\":1}"
+    },
+    {
+      "name": "joinLegacyInlineState",
+      "symbol": "tessera_artifacts_join_state",
+      "requestJSON": "{\"blobs\":{},\"stateJSON\":\"{\\\"filter\\\":\\\"all\\\",\\\"selectedID\\\":\\\"change\\\",\\\"tabCap\\\":64,\\\"tabs\\\":[{\\\"hostID\\\":\\\"h1\\\",\\\"hostLabel\\\":\\\"dev\\\",\\\"id\\\":\\\"file\\\",\\\"kind\\\":\\\"docs\\\",\\\"openedAt\\\":1,\\\"origin\\\":\\\"agentEdit\\\",\\\"pinned\\\":false,\\\"target\\\":{\\\"path\\\":\\\"/report.md\\\",\\\"type\\\":\\\"file\\\"},\\\"title\\\":\\\"file\\\",\\\"unseenChange\\\":false,\\\"viewedAt\\\":1},{\\\"hostID\\\":\\\"h1\\\",\\\"hostLabel\\\":\\\"dev\\\",\\\"id\\\":\\\"change\\\",\\\"kind\\\":\\\"changes\\\",\\\"openedAt\\\":1,\\\"origin\\\":\\\"agentEdit\\\",\\\"pinned\\\":false,\\\"target\\\":{\\\"diff\\\":\\\"+café\\\\n\\\",\\\"path\\\":\\\"/a.swift\\\",\\\"summary\\\":\\\"edit\\\",\\\"type\\\":\\\"change\\\"},\\\"title\\\":\\\"change\\\",\\\"unseenChange\\\":false,\\\"viewedAt\\\":1}],\\\"version\\\":1}\"}",
+      "responseJSON": "{\"filter\":\"all\",\"selectedID\":\"change\",\"tabCap\":64,\"tabs\":[{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"file\",\"kind\":\"docs\",\"openedAt\":1,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"path\":\"/report.md\",\"type\":\"file\"},\"title\":\"file\",\"unseenChange\":false,\"viewedAt\":1},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"change\",\"kind\":\"changes\",\"openedAt\":1,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"+café\\n\",\"path\":\"/a.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"change\",\"unseenChange\":false,\"viewedAt\":1}],\"version\":1}"
+    },
+    {
+      "name": "openDiffBudgetEvictsOldestUnprotectedChange",
+      "symbol": "tessera_artifacts_reduce",
+      "requestJSON": "{\"action\":{\"nowMillis\":100,\"open\":{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"new\",\"origin\":\"agentEdit\",\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/new.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"new\"},\"type\":\"open\"},\"state\":{\"filter\":\"all\",\"selectedID\":\"t1\",\"tabCap\":64,\"tabs\":[{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"file\",\"kind\":\"docs\",\"openedAt\":1,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"path\":\"/report.md\",\"type\":\"file\"},\"title\":\"file\",\"unseenChange\":false,\"viewedAt\":1},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t0\",\"kind\":\"changes\",\"openedAt\":0,\"origin\":\"agentEdit\",\"pinned\":true,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/0.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t0\",\"unseenChange\":false,\"viewedAt\":0},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t1\",\"kind\":\"changes\",\"openedAt\":1,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/1.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t1\",\"unseenChange\":false,\"viewedAt\":1},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t2\",\"kind\":\"changes\",\"openedAt\":2,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/2.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t2\",\"unseenChange\":false,\"viewedAt\":2},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t3\",\"kind\":\"changes\",\"openedAt\":3,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/3.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t3\",\"unseenChange\":false,\"viewedAt\":3},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t4\",\"kind\":\"changes\",\"openedAt\":4,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/4.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t4\",\"unseenChange\":false,\"viewedAt\":4},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t5\",\"kind\":\"changes\",\"openedAt\":5,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/5.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t5\",\"unseenChange\":false,\"viewedAt\":5},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t6\",\"kind\":\"changes\",\"openedAt\":6,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/6.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t6\",\"unseenChange\":false,\"viewedAt\":6},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t7\",\"kind\":\"changes\",\"openedAt\":7,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/7.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t7\",\"unseenChange\":false,\"viewedAt\":7},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t8\",\"kind\":\"changes\",\"openedAt\":8,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/8.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t8\",\"unseenChange\":false,\"viewedAt\":8},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t9\",\"kind\":\"changes\",\"openedAt\":9,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/9.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t9\",\"unseenChange\":false,\"viewedAt\":9},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t10\",\"kind\":\"changes\",\"openedAt\":10,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/10.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t10\",\"unseenChange\":false,\"viewedAt\":10},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t11\",\"kind\":\"changes\",\"openedAt\":11,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/11.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t11\",\"unseenChange\":false,\"viewedAt\":11},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t12\",\"kind\":\"changes\",\"openedAt\":12,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/12.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t12\",\"unseenChange\":false,\"viewedAt\":12},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t13\",\"kind\":\"changes\",\"openedAt\":13,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/13.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t13\",\"unseenChange\":false,\"viewedAt\":13},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t14\",\"kind\":\"changes\",\"openedAt\":14,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/14.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t14\",\"unseenChange\":false,\"viewedAt\":14},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t15\",\"kind\":\"changes\",\"openedAt\":15,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/15.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t15\",\"unseenChange\":false,\"viewedAt\":15}],\"version\":1}}",
+      "responseJSON": "{\"evictedTabIDs\":[\"t1\"],\"focusedTabID\":\"new\",\"state\":{\"filter\":\"all\",\"selectedID\":\"new\",\"tabCap\":64,\"tabs\":[{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"file\",\"kind\":\"docs\",\"openedAt\":1,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"path\":\"/report.md\",\"type\":\"file\"},\"title\":\"file\",\"unseenChange\":false,\"viewedAt\":1},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t0\",\"kind\":\"changes\",\"openedAt\":0,\"origin\":\"agentEdit\",\"pinned\":true,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/0.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t0\",\"unseenChange\":false,\"viewedAt\":0},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t2\",\"kind\":\"changes\",\"openedAt\":2,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/2.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t2\",\"unseenChange\":false,\"viewedAt\":2},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t3\",\"kind\":\"changes\",\"openedAt\":3,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/3.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t3\",\"unseenChange\":false,\"viewedAt\":3},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t4\",\"kind\":\"changes\",\"openedAt\":4,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/4.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t4\",\"unseenChange\":false,\"viewedAt\":4},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t5\",\"kind\":\"changes\",\"openedAt\":5,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/5.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t5\",\"unseenChange\":false,\"viewedAt\":5},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t6\",\"kind\":\"changes\",\"openedAt\":6,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/6.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t6\",\"unseenChange\":false,\"viewedAt\":6},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t7\",\"kind\":\"changes\",\"openedAt\":7,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/7.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t7\",\"unseenChange\":false,\"viewedAt\":7},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t8\",\"kind\":\"changes\",\"openedAt\":8,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/8.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t8\",\"unseenChange\":false,\"viewedAt\":8},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t9\",\"kind\":\"changes\",\"openedAt\":9,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/9.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t9\",\"unseenChange\":false,\"viewedAt\":9},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t10\",\"kind\":\"changes\",\"openedAt\":10,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/10.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t10\",\"unseenChange\":false,\"viewedAt\":10},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t11\",\"kind\":\"changes\",\"openedAt\":11,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/11.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t11\",\"unseenChange\":false,\"viewedAt\":11},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t12\",\"kind\":\"changes\",\"openedAt\":12,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/12.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t12\",\"unseenChange\":false,\"viewedAt\":12},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t13\",\"kind\":\"changes\",\"openedAt\":13,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/13.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t13\",\"unseenChange\":false,\"viewedAt\":13},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t14\",\"kind\":\"changes\",\"openedAt\":14,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/14.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t14\",\"unseenChange\":false,\"viewedAt\":14},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t15\",\"kind\":\"changes\",\"openedAt\":15,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/15.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t15\",\"unseenChange\":false,\"viewedAt\":15},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"new\",\"kind\":\"changes\",\"openedAt\":100,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/new.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"new\",\"unseenChange\":false,\"viewedAt\":100}],\"version\":1}}",
+      "repeatedDiffBytes": 262144
+    },
+    {
+      "name": "decodeDiffBudgetProtectsSelectionAndPins",
+      "symbol": "tessera_artifacts_decode_state",
+      "requestJSON": "{\"filter\":\"all\",\"selectedID\":\"t1\",\"tabCap\":64,\"tabs\":[{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"file\",\"kind\":\"docs\",\"openedAt\":1,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"path\":\"/report.md\",\"type\":\"file\"},\"title\":\"file\",\"unseenChange\":false,\"viewedAt\":1},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t0\",\"kind\":\"changes\",\"openedAt\":0,\"origin\":\"agentEdit\",\"pinned\":true,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/0.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t0\",\"unseenChange\":false,\"viewedAt\":0},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t1\",\"kind\":\"changes\",\"openedAt\":1,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/1.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t1\",\"unseenChange\":false,\"viewedAt\":1},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t2\",\"kind\":\"changes\",\"openedAt\":2,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/2.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t2\",\"unseenChange\":false,\"viewedAt\":2},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t3\",\"kind\":\"changes\",\"openedAt\":3,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/3.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t3\",\"unseenChange\":false,\"viewedAt\":3},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t4\",\"kind\":\"changes\",\"openedAt\":4,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/4.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t4\",\"unseenChange\":false,\"viewedAt\":4},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t5\",\"kind\":\"changes\",\"openedAt\":5,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/5.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t5\",\"unseenChange\":false,\"viewedAt\":5},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t6\",\"kind\":\"changes\",\"openedAt\":6,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/6.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t6\",\"unseenChange\":false,\"viewedAt\":6},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t7\",\"kind\":\"changes\",\"openedAt\":7,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/7.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t7\",\"unseenChange\":false,\"viewedAt\":7},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t8\",\"kind\":\"changes\",\"openedAt\":8,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/8.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t8\",\"unseenChange\":false,\"viewedAt\":8},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t9\",\"kind\":\"changes\",\"openedAt\":9,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/9.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t9\",\"unseenChange\":false,\"viewedAt\":9},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t10\",\"kind\":\"changes\",\"openedAt\":10,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/10.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t10\",\"unseenChange\":false,\"viewedAt\":10},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t11\",\"kind\":\"changes\",\"openedAt\":11,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/11.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t11\",\"unseenChange\":false,\"viewedAt\":11},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t12\",\"kind\":\"changes\",\"openedAt\":12,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/12.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t12\",\"unseenChange\":false,\"viewedAt\":12},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t13\",\"kind\":\"changes\",\"openedAt\":13,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/13.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t13\",\"unseenChange\":false,\"viewedAt\":13},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t14\",\"kind\":\"changes\",\"openedAt\":14,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/14.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t14\",\"unseenChange\":false,\"viewedAt\":14},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t15\",\"kind\":\"changes\",\"openedAt\":15,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/15.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t15\",\"unseenChange\":false,\"viewedAt\":15},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t16\",\"kind\":\"changes\",\"openedAt\":16,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/16.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t16\",\"unseenChange\":false,\"viewedAt\":16},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t17\",\"kind\":\"changes\",\"openedAt\":17,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/17.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t17\",\"unseenChange\":false,\"viewedAt\":17}],\"version\":1}",
+      "responseJSON": "{\"filter\":\"all\",\"selectedID\":\"t1\",\"tabCap\":64,\"tabs\":[{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"file\",\"kind\":\"docs\",\"openedAt\":1,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"path\":\"/report.md\",\"type\":\"file\"},\"title\":\"file\",\"unseenChange\":false,\"viewedAt\":1},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t0\",\"kind\":\"changes\",\"openedAt\":0,\"origin\":\"agentEdit\",\"pinned\":true,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/0.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t0\",\"unseenChange\":false,\"viewedAt\":0},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t1\",\"kind\":\"changes\",\"openedAt\":1,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/1.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t1\",\"unseenChange\":false,\"viewedAt\":1},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t4\",\"kind\":\"changes\",\"openedAt\":4,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/4.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t4\",\"unseenChange\":false,\"viewedAt\":4},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t5\",\"kind\":\"changes\",\"openedAt\":5,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/5.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t5\",\"unseenChange\":false,\"viewedAt\":5},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t6\",\"kind\":\"changes\",\"openedAt\":6,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/6.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t6\",\"unseenChange\":false,\"viewedAt\":6},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t7\",\"kind\":\"changes\",\"openedAt\":7,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/7.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t7\",\"unseenChange\":false,\"viewedAt\":7},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t8\",\"kind\":\"changes\",\"openedAt\":8,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/8.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t8\",\"unseenChange\":false,\"viewedAt\":8},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t9\",\"kind\":\"changes\",\"openedAt\":9,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/9.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t9\",\"unseenChange\":false,\"viewedAt\":9},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t10\",\"kind\":\"changes\",\"openedAt\":10,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/10.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t10\",\"unseenChange\":false,\"viewedAt\":10},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t11\",\"kind\":\"changes\",\"openedAt\":11,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/11.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t11\",\"unseenChange\":false,\"viewedAt\":11},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t12\",\"kind\":\"changes\",\"openedAt\":12,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/12.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t12\",\"unseenChange\":false,\"viewedAt\":12},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t13\",\"kind\":\"changes\",\"openedAt\":13,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/13.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t13\",\"unseenChange\":false,\"viewedAt\":13},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t14\",\"kind\":\"changes\",\"openedAt\":14,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/14.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t14\",\"unseenChange\":false,\"viewedAt\":14},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t15\",\"kind\":\"changes\",\"openedAt\":15,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/15.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t15\",\"unseenChange\":false,\"viewedAt\":15},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t16\",\"kind\":\"changes\",\"openedAt\":16,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/16.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t16\",\"unseenChange\":false,\"viewedAt\":16},{\"hostID\":\"h1\",\"hostLabel\":\"dev\",\"id\":\"t17\",\"kind\":\"changes\",\"openedAt\":17,\"origin\":\"agentEdit\",\"pinned\":false,\"target\":{\"diff\":\"__artifacts_diff_256k__\",\"path\":\"/17.swift\",\"summary\":\"edit\",\"type\":\"change\"},\"title\":\"t17\",\"unseenChange\":false,\"viewedAt\":17}],\"version\":1}",
+      "repeatedDiffBytes": 262144
+    }
+  ]
+}

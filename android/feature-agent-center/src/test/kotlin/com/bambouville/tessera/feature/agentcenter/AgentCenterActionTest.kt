@@ -22,6 +22,177 @@ import sun.misc.Unsafe
 
 /** Production action plans and receipts use the host JNI shared Core; endpoints never connect. */
 class AgentCenterActionTest {
+    @Test fun aCroppedClaudeQuestionAnswersThroughItsWaitingCall() = runBlocking<Unit> {
+        val rig = Rig(AgentEndpointTransport.MOSH_TMUX)
+        try {
+            val thread = watchCroppedQuestion(rig)
+            projectQuestionCall(rig, thread)
+            rig.await {
+                val prompt = it.projectedDetails[thread.row.key]?.prompt
+                prompt?.question == "Which database?" && prompt.fresh != null
+            }
+            val detail = rig.detail("A", rig.mosh)
+            val prompt = requireNotNull(detail.prompt)
+            assertTrue(detail.canAnswerPrompt())
+            // The fresh screen is read as the card was: through the thread's waiting call.
+            rig.onPresenter { it.requestPromptAnswer(detail, prompt, AgentPromptAnswerChoice.Option("2")) }
+            rig.await { rig.mosh.writes.any { bytes -> bytes.decodeToString() == "2" } }
+        } finally { rig.close() }
+    }
+
+    @Test fun aCroppedClaudeQuestionTakesNoCallItsHookClosedBeforeThePageArrived() = runBlocking<Unit> {
+        val rig = Rig(AgentEndpointTransport.MOSH_TMUX)
+        try {
+            val thread = watchCroppedQuestion(rig)
+            // The question is answered and the next one, drawn with the same
+            // choices, opens before the transcript page holding the first call.
+            rig.frame("A", rig.mosh, event = "PostToolUse", reason = "question", toolUseId = "toolu_A",
+                timestampNs = 1_799_999_999_000_000_000L)
+            rig.frame("A", rig.mosh, event = "PreToolUse", reason = "question", toolUseId = "toolu_B",
+                timestampNs = 1_800_000_000_000_000_000L)
+            rig.await {
+                val row = it.projectedDetails[thread.row.key]?.row
+                row?.lastActivityMillis == 1_800_000_000_000L && row.livePromptWatch
+            }
+            projectQuestionCall(rig, thread)
+            val seen = rig.mosh.inspections.get()
+            rig.await { rig.mosh.inspections.get() >= seen + 3 }
+            delay(100)
+            assertNull("the closed call must not name the dialog now on screen", rig.detail("A", rig.mosh).prompt)
+            // The page holding the next call names it.
+            projectQuestionCall(rig, thread, call = "toolu_B", answered = "toolu_A")
+            rig.await { it.projectedDetails[thread.row.key]?.prompt?.question == "Which database?" }
+        } finally { rig.close() }
+    }
+
+    @Test fun anAnswerPlannedForAClosedQuestionWritesNothingIntoTheNextOne() = runBlocking<Unit> {
+        val rig = Rig(AgentEndpointTransport.MOSH_TMUX)
+        try {
+            val thread = watchCroppedQuestion(rig)
+            projectQuestionCall(rig, thread)
+            rig.await { it.projectedDetails[thread.row.key]?.prompt?.fresh != null }
+            val detail = rig.detail("A", rig.mosh)
+            // The answer proves its process once before it plans and again
+            // before Core's check: that second proof is held while another
+            // terminal answers the question and Claude asks the next with the
+            // same choices, so the check sees both hooks.
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            rig.mosh.proofGate = Triple(rig.mosh.proofs.count { it } + 2, entered, release)
+            rig.onPresenter { it.requestPromptAnswer(detail, requireNotNull(detail.prompt), AgentPromptAnswerChoice.Option("2")) }
+            withTimeout(10_000) { entered.await() }
+            rig.frame("A", rig.mosh, event = "PostToolUse", reason = "question", toolUseId = "toolu_A",
+                timestampNs = 1_799_999_999_000_000_000L)
+            rig.frame("A", rig.mosh, event = "PreToolUse", reason = "question", toolUseId = "toolu_B",
+                timestampNs = 1_800_000_000_000_000_000L)
+            rig.await { it.projectedDetails[thread.row.key]?.row?.lastActivityMillis == 1_800_000_000_000L }
+            projectQuestionCall(rig, thread, call = "toolu_B", answered = "toolu_A")
+            release.complete(Unit)
+            rig.await { it.notice == "Prompt changed; review it in the terminal" }
+            assertTrue("the planned digit must not answer the next question", rig.mosh.writes.isEmpty())
+        } finally { rig.close() }
+    }
+
+    @Test fun anAnswerCoreClearedBeforeTheNextQuestionArrivedWritesNothingIntoIt() = runBlocking<Unit> {
+        val rig = Rig(AgentEndpointTransport.MOSH_TMUX)
+        try {
+            val thread = watchCroppedQuestion(rig)
+            projectQuestionCall(rig, thread)
+            rig.await { it.projectedDetails[thread.row.key]?.prompt?.fresh != null }
+            val detail = rig.detail("A", rig.mosh)
+            // Core answers the check while the question still waits. Before the
+            // presenter reads that yes, the next question is drawn and the live
+            // watch forwards it, so only the count of question input forwarded
+            // since the check can stop the write. The hook must not wait on the
+            // collector it holds: a lifecycle frame's bind would. A newer frame
+            // time restarts the watch's fast cadence within one 250 ms tick,
+            // well inside the check's own wait.
+            val watched = CompletableDeferred<Boolean>()
+            rig.beforePromptCurrent = {
+                val counted = rig.questionInputCount(thread.row.key)
+                rig.mosh.screen = nextQuestionScreen
+                rig.promptLifecycleNanos()[thread.row.key] = System.nanoTime()
+                watched.complete(withTimeoutOrNull(1_000) {
+                    while (rig.questionInputCount(thread.row.key) == counted) delay(10)
+                    true
+                } == true)
+            }
+            rig.onPresenter { it.requestPromptAnswer(detail, requireNotNull(detail.prompt), AgentPromptAnswerChoice.Option("2")) }
+            assertTrue("the live watch must forward the next question within 1 s", withTimeout(10_000) { watched.await() })
+            rig.await { it.notice == "Prompt changed; review it in the terminal" }
+            assertNull("the reply must have been held", rig.beforePromptCurrent)
+            assertTrue("Core must have been asked again and said the prompt changed", rig.events.any {
+                it is SharedAgentRuntimeEvent.Snapshot && it.snapshot.payload.string("code") == "promptChanged"
+            })
+            assertTrue("the planned digit must not answer the next question", rig.mosh.writes.isEmpty())
+        } finally { rig.close() }
+    }
+
+    /** Core refuses a capture under a stale fence, so the same screen under a newer one counts again. */
+    @Test fun theSameScreenUnderANewerFenceIsQuestionInputAgain() = runBlocking<Unit> {
+        val rig = Rig()
+        try {
+            fun capture(sequence: Long, text: String) = JSONObject().put("observedLifecycleSequence", sequence)
+                .put("bindingToken", "token").put("promptObservation", JSONObject().put("visibleText", text))
+            val counts = listOf(capture(1, "Q2"), capture(1, "Q2"), capture(2, "Q2"), capture(2, "Q3")).map {
+                rig.forwardQuestionScreen("thread", it)
+                rig.questionInputCount("thread")
+            }
+            assertEquals(listOf(1L, 1L, 2L, 3L), counts)
+            rig.forwardQuestionScreen("thread", capture(3, "Q4"), sent = false)
+            assertEquals("a capture Core never got is not input", 3L, rig.questionInputCount("thread"))
+        } finally { rig.close() }
+    }
+
+    /** Another question, drawn whole over the cropped one. */
+    private val nextQuestionScreen = "─".repeat(60) + "\n ☐ Cache\n\nWhich cache should the service use?\n\n" +
+        "❯ 1. Redis\n     In memory.\n  2. Memcached\n  3. Type something.\n" + "─".repeat(60) +
+        "\n  4. Chat about this\n\nEnter to select · ↑/↓ to navigate · Esc to cancel"
+
+    /** A Claude thread waiting on a question whose dialog is cropped to its choices. */
+    private suspend fun watchCroppedQuestion(rig: Rig): AgentThreadDetail {
+        rig.mosh.screen = "❯ 1. Postgres\n     Mature, transactional.\n  2. SQLite\n  3. Type something.\n\nEnter to select · ↑/↓ to navigate · Esc to cancel"
+        rig.onPresenter { presenter ->
+            AgentCenterPresenter::class.java.getDeclaredField("applicationForeground").also {
+                it.isAccessible = true
+            }.setBoolean(presenter, true)
+        }
+        rig.frame("A", rig.mosh)
+        rig.await { it.projectedDetails.containsKey(rig.mosh.threadKey("A")) }
+        rig.frame("A", rig.mosh, event = "PreToolUse", reason = "question", toolUseId = "toolu_A")
+        rig.await { it.projectedDetails[rig.mosh.threadKey("A")]?.row?.livePromptWatch == true }
+        return rig.detail("A", rig.mosh)
+    }
+
+    /**
+     * The transcript page holding the question's [call]; with [answered], the
+     * earlier call and its result come first.
+     */
+    private suspend fun projectQuestionCall(rig: Rig, thread: AgentThreadDetail, call: String = "toolu_A", answered: String? = null) {
+        val preview = """{"questions":[{"header":"Database","multiSelect":false,"options":[{"description":"Mature, transactional.","label":"Postgres"},{"label":"SQLite"}],"question":"Which database?"}]}"""
+        fun ask(id: String) = JSONObject().put("type", "message").put("role", "assistant")
+            .put("blocks", org.json.JSONArray().put(JSONObject().put("type", "tool_call").put("name", "AskUserQuestion")
+                .put("preview", preview).put("toolCallID", id)))
+        val records = listOfNotNull(
+            answered?.let { ask(it) },
+            answered?.let {
+                JSONObject().put("type", "message").put("role", "tool").put("blocks", org.json.JSONArray()
+                    .put(JSONObject().put("type", "tool_result").put("preview", "User answered.").put("toolCallID", it)))
+            },
+            ask(call),
+        )
+        val page = JSONObject().put("sourceIdentity", "source").put("cursor", "${records.size}").put("hasMore", false)
+            .put("records", org.json.JSONArray(records.mapIndexed { index, record ->
+                JSONObject().put("sequence", index + 1).put("recordID", "record-${index + 1}").put("record", record)
+            }))
+        assertEquals(CoreCallResult.Accepted, rig.onPresenter {
+            val token = rig.bindingTokens().getValue(thread.binding!!.toJson().tokenKey(thread.row.key))
+            rig.runtime.sendCanonical(JSONObject().put("v", 1).put("kind", "projection")
+                .put("threadID", thread.row.threadIDJson()).put("bindingToken", token)
+                .put("projection", page).toString().encodeToByteArray())
+        })
+    }
+
     @Test fun candidateAnswerSerializesItsPaneWithoutBlockingAnIndependentEndpoint() = runBlocking {
         val rig = Rig()
         try {
@@ -299,13 +470,19 @@ class AgentCenterActionTest {
             diagnostics = { event, fields -> logs.add(event to fields) })
         val runtime = coordinator.runtime()
         @Volatile var retireBeforeActionStart = false
+        /** Runs once, before the presenter sees Core's next "promptCurrent" reply. */
+        @Volatile var beforePromptCurrent: (suspend () -> Unit)? = null
         init {
             field("runtime").set(presenter, runtime)
             field("enabled").setBoolean(presenter, true)
             // Display watchers must not consume the action's inspection gate.
             field("applicationForeground").setBoolean(presenter, false)
             scope.launch { runtime.events.collect { event ->
-                events.add(event); presenter.consume(event)
+                events.add(event)
+                if (event is SharedAgentRuntimeEvent.Snapshot && event.snapshot.payload.string("code") == "promptCurrent") {
+                    beforePromptCurrent?.let { beforePromptCurrent = null; it() }
+                }
+                presenter.consume(event)
                 if (retireBeforeActionStart && event is SharedAgentRuntimeEvent.Snapshot &&
                     event.snapshot.kind == SharedAgentSnapshotKind.ActionPlan) {
                     retireBeforeActionStart = false
@@ -322,13 +499,19 @@ class AgentCenterActionTest {
         }
         fun register(endpoint: Endpoint) { endpoints.add(endpoint); registrations.add(registry.register(endpoint)) }
         suspend fun frame(session: String, endpoint: Endpoint, event: String = "SessionStart", provider: String = "claude",
-            child: String? = null, root: String? = null) = withContext(dispatcher) {
+            child: String? = null, root: String? = null, reason: String? = null,
+            timestampNs: Long = System.nanoTime(), toolUseId: String? = null) = withContext(dispatcher) {
             val transcript = Base64.getUrlEncoder().withoutPadding().encodeToString("/fixture/$session".encodeToByteArray())
             presenter.consumeLifecycle(endpoint, AgentLifecycleFrame(endpoint.binding.value, JSONObject()
                 .put("version", 9).put("provider", provider).put("event", event)
-                .put("state", if (event in setOf("SessionEnd", "WrapperExit")) "unavailable" else "idle")
-                .put("timestampNs", "${System.nanoTime()}").put("sessionId", session).put("agentPid", 42)
-                .putOpt("agentId", child).putOpt("rootAgentId", root)
+                .put("state", when (event) {
+                    "SessionEnd", "WrapperExit" -> "unavailable"
+                    "PreToolUse", "PostToolUse" -> "working"
+                    else -> "idle"
+                })
+                .putOpt("reason", reason)
+                .put("timestampNs", "$timestampNs").put("sessionId", session).put("agentPid", 42)
+                .putOpt("agentId", child).putOpt("rootAgentId", root).putOpt("toolUseId", toolUseId)
                 .put("transcriptRef", transcript).toString().encodeToByteArray()))
         }
         fun detail(session: String, endpoint: Endpoint, provider: String = "claude") = presenter.state.value.projectedDetails.getValue(endpoint.threadKey(session, provider))
@@ -367,6 +550,13 @@ class AgentCenterActionTest {
             }
                 ?: throw AssertionError("timed out; pending=${presenter.state.value.sendingThreads} logs=${logs.takeLast(20)}")
         @Suppress("UNCHECKED_CAST") fun bindingTokens() = field("bindingTokens").get(presenter) as MutableMap<String, String>
+        fun forwardQuestionScreen(threadKey: String, observation: JSONObject, sent: Boolean = true) = AgentCenterPresenter::class.java
+            .getDeclaredMethod("forwardQuestionScreen", String::class.java, JSONObject::class.java, Function0::class.java)
+            .also { it.isAccessible = true }.invoke(presenter, threadKey, observation, { sent }) as Boolean
+        @Suppress("UNCHECKED_CAST") fun promptLifecycleNanos() = field("latestPromptLifecycleNanos").get(presenter) as MutableMap<String, Long>
+        fun questionInputCount(threadKey: String) = AgentCenterPresenter::class.java
+            .getDeclaredMethod("questionInputCount", String::class.java).also { it.isAccessible = true }
+            .invoke(presenter, threadKey) as Long
         @Suppress("UNCHECKED_CAST") fun candidateBindings() = field("candidateActionsInFlight").get(presenter) as MutableMap<String, JSONObject>
         suspend fun close() {
             withContext(NonCancellable + dispatcher) { presenter.close(); integration.close(); coordinator.close() }
@@ -387,15 +577,22 @@ class AgentCenterActionTest {
         @Volatile var inspectionGate: Pair<CompletableDeferred<Unit>, CompletableDeferred<Unit>>? = null
         @Volatile var submitInspectionGate: Pair<CompletableDeferred<Unit>, CompletableDeferred<Unit>>? = null
         @Volatile var background = false
+        @Volatile var screen: String? = null
+        val inspections = java.util.concurrent.atomic.AtomicInteger()
         @Volatile var writeResult: AgentEndpointResult<Unit> = AgentEndpointResult.Success(Unit)
         val writes = CopyOnWriteArrayList<ByteArray>()
         val keys = CopyOnWriteArrayList<AgentSemanticKey>()
         val proofs = CopyOnWriteArrayList<Boolean>()
+        /** Holds the foreground proof with this ordinal among [proofs] until released. */
+        @Volatile var proofGate: Triple<Int, CompletableDeferred<Unit>, CompletableDeferred<Unit>>? = null
         private var draft = ""
         fun threadKey(session: String, provider: String = "claude") = canonicalAgentThreadKey(binding.value.hostID, provider, session)
         override fun isCurrentRoute(candidate: AgentEndpointBinding) = !closed && candidate.sameRouteAs(binding.value)
         override suspend fun proveProcess(binding: AgentEndpointBinding, claimedPID: Int, provider: AgentProofProvider, requireForeground: Boolean): AgentEndpointResult<AgentProcessProof> {
             proofs.add(requireForeground)
+            proofGate?.takeIf { requireForeground && it.first == proofs.count { foreground -> foreground } }?.let { (_, entered, release) ->
+                proofGate = null; entered.complete(Unit); release.await()
+            }
             return when {
                 !isCurrentRoute(binding) -> AgentEndpointResult.StaleBinding
                 requireForeground && background -> AgentEndpointResult.Failed("proof_exit_1", proofReason = "backgroundProcess")
@@ -403,8 +600,13 @@ class AgentCenterActionTest {
             }
         }
         override suspend fun inspect(binding: AgentEndpointBinding): AgentEndpointResult<AgentTerminalObservation> {
+            inspections.incrementAndGet()
             inspectionGate?.let { (entered, release) -> inspectionGate = null; entered.complete(Unit); release.await() }
             if (!isCurrentRoute(binding)) return AgentEndpointResult.StaleBinding
+            screen?.let {
+                return AgentEndpointResult.Success(AgentTerminalObservation(binding, it.encodeToByteArray(), false, true,
+                    cursorVisible = false))
+            }
             val line = "❯ $draft"
             return AgentEndpointResult.Success(AgentTerminalObservation(binding, "$line\n────\nctx:25%".encodeToByteArray(), false, true,
                 currentCursorLine = line, cursorRow = 0, cursorColumn = 2 + draft.length, cursorVisible = true))

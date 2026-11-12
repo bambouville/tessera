@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="forwarding_title">連接埠轉發</string>
+    <string name="forwarding_intro">本機和動態監聽器留在本裝置上。遠端綁定位於伺服器端。</string>
+    <string name="forwarding_add">加入</string>
+    <string name="forwarding_no_rules">沒有轉發規則。</string>
+    <string name="forwarding_enabled">已啟用</string>
+    <string name="forwarding_open">↗ 開啟</string>
+    <string name="forwarding_edit">編輯</string>
+    <string name="forwarding_delete">刪除</string>
+    <string name="forwarding_stop">停止</string>
+    <string name="forwarding_start">開始</string>
+    <string name="forwarding_summary_remote">%1$s → 裝置 %2$s</string>
+    <string name="forwarding_rule_title">轉發規則</string>
+    <string name="forwarding_edit_title">編輯 %1$s</string>
+    <string name="forwarding_cancel">取消</string>
+    <string name="forwarding_save">儲存</string>
+    <string name="forwarding_label">標籤</string>
+    <string name="forwarding_optional">選用</string>
+    <string name="forwarding_bind_address">綁定位址</string>
+    <string name="forwarding_loopback_only">僅限回送位址</string>
+    <string name="forwarding_bind_port">綁定連接埠</string>
+    <string name="forwarding_bind_port_zero_allowed">綁定連接埠 · 允許 0</string>
+    <string name="forwarding_remote_host">遠端主機</string>
+    <string name="forwarding_device_host">裝置端主機</string>
+    <string name="forwarding_target_port">目標連接埠</string>
+    <string name="forwarding_ports_whole_numbers">連接埠必須是整數。</string>
+    <string name="forwarding_direction_local">本機</string>
+    <string name="forwarding_direction_remote">遠端</string>
+    <string name="forwarding_direction_dynamic">動態</string>
+    <string name="forwarding_status_stopped">已停止</string>
+    <string name="forwarding_status_starting">正在啟動</string>
+    <string name="forwarding_status_serving">有服務回應 · 0 個作用中連線</string>
+    <string name="forwarding_status_nothing_serving">監聽中 · 遠端連接埠 %1$s 無服務回應</string>
+    <string name="forwarding_status_checking">監聽中 · 正在檢查…</string>
+    <string name="forwarding_status_listening">監聽中 · 0 個作用中連線</string>
+    <string name="forwarding_invalid_bind_address">需要填寫綁定位址。</string>
+    <string name="forwarding_invalid_bind_port">綁定連接埠必須有效。</string>
+    <string name="forwarding_non_loopback_local_bind">本機和動態轉發必須綁定到回送位址。</string>
+    <string name="forwarding_missing_target">需要填寫目標。</string>
+    <string name="forwarding_invalid_target_address">需要填寫目標主機。</string>
+    <string name="forwarding_invalid_target_port">目標連接埠必須有效。</string>
+    <string name="forwarding_dynamic_cannot_have_target">動態轉發會依每個 SOCKS 請求選擇目標。</string>
+    <string name="forwarding_bind_collision">另一個本機監聽器正在使用此連接埠。</string>
+    <string name="forwarding_runtime_unavailable">SSH 轉發無法使用</string>
+    <string name="forwarding_listener_stopped">轉發監聽器意外停止</string>
+    <string name="forwarding_mosh_without_side_channel">Mosh 沒有經過驗證的 SSH 側通道</string>
+    <string name="forwarding_transport_unsupported_local">此傳輸方式不支援本機轉發</string>
+    <string name="forwarding_transport_unsupported_remote">此傳輸方式不支援遠端轉發</string>
+    <string name="forwarding_transport_unsupported_dynamic">此傳輸方式不支援動態轉發</string>
+    <string name="forwarding_chrome_label">連接埠轉發</string>
+    <plurals name="forwarding_chrome_label_serving">
+        <item quantity="other">連接埠轉發，%1$d 個有服務回應</item>
+    </plurals>
+    <string name="forwarding_browser_back">返回</string>
+    <string name="forwarding_browser_forward">前進</string>
+    <string name="forwarding_browser_stop">停止</string>
+    <string name="forwarding_browser_reload">重新載入</string>
+    <string name="forwarding_browser_done">完成</string>
+    <string name="forwarding_browser_no_answer">這個通道沒有回應</string>
+    <string name="forwarding_browser_check_rule">請確認該規則正在聆聽，且遠端服務已啟動。</string>
+    <string name="forwarding_browser_retry">重試</string>
+    <string name="forwarding_browser_connection_failed">連線失敗</string>
+    <plurals name="forwarding_status_active_connections">
+        <item quantity="other">%1$d 個作用中連線</item>
+    </plurals>
+    <plurals name="forwarding_chrome_active_tunnels">
+        <item quantity="other">%1$d 個使用中的通道</item>
+    </plurals>
+    <plurals name="forwarding_chrome_active_tunnels_serving">
+        <item quantity="other">%1$d 個使用中的通道，%2$d 個有服務回應</item>
+    </plurals>
+</resources>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="markdown_image">[图片]</string>
+    <string name="markdown_image_with_alt">[图片：%1$s]</string>
+</resources>

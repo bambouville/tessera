@@ -3,6 +3,12 @@
 import SwiftUI
 import TmuxControl
 
+/// Where Duo's laptop-pose accessory bar seats the puck, globally.
+struct SwipePadDockKey: PreferenceKey {
+    static let defaultValue: CGRect? = nil
+    static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) { value = value ?? nextValue() }
+}
+
 enum SwipePadFloatingLayout {
     /// Fit the surface before clamping its centre, including on split views
     /// narrower than the preferred surface. The puck's position is untouched.
@@ -38,6 +44,12 @@ struct SwipePadOverlay: View {
     let onShowMore: (() -> Void)?
     @Bindable var profileStore: SwipePadProfileStore
     @Bindable var dictationController: SpeechDictationController
+    /// The accessory bar's seat for the puck, globally. Docked, the puck sits
+    /// there at the bar's button size, and picking it up moves the bar's pill.
+    var dock: CGRect?
+    /// Where a context covers this overlay from, globally (the laptop's
+    /// desk). The floating puck and its petals keep above it.
+    var floor: CGFloat?
 
     @Environment(AppearancePreferences.self) private var appearance
     // \.scenePhase does not reliably reach nested session views (see the
@@ -62,7 +74,9 @@ struct SwipePadOverlay: View {
         sessionIsActive: Bool = true,
         onShowMore: (() -> Void)? = nil,
         profileStore: SwipePadProfileStore,
-        dictationController: SpeechDictationController
+        dictationController: SpeechDictationController,
+        dock: CGRect? = nil,
+        floor: CGFloat? = nil
     ) {
         self.onSend = onSend
         self.tmux = tmux
@@ -74,6 +88,8 @@ struct SwipePadOverlay: View {
         self.onShowMore = onShowMore
         self.profileStore = profileStore
         self.dictationController = dictationController
+        self.dock = dock
+        self.floor = floor
     }
 
     private var hookSnapshot: SwipePadAgentSnapshot? { agentContext?.snapshot }
@@ -111,22 +127,29 @@ struct SwipePadOverlay: View {
             EmptyView()
         } else {
             GeometryReader { proxy in
-                let canvasSize = proxy.size
+                let canvasSize = Self.floatingCanvas(proxy.size, in: proxy.frame(in: .global), floor: floor)
                 let configuredDiameter = Self.diameter(for: appearance.swipePadSize)
-                let diameter = UIDevice.current.userInterfaceIdiom == .phone
+                let floatingDiameter = UIDevice.current.userInterfaceIdiom == .phone
                     ? min(configuredDiameter, 52)
                     : configuredDiameter
+                let seat = dock.map { Self.seat($0, in: proxy.frame(in: .global)) }
+                let diameter = seat?.diameter ?? floatingDiameter
+                let center = seat?.center ?? puckPosition
 
                 Group {
-                    if compactLandscapeKeyboardActive(in: canvasSize) {
+                    // The whole overlay's shape, not the floored canvas: a
+                    // laptop's terminal half is wide but is not landscape.
+                    if compactLandscapeKeyboardActive(in: proxy.size) {
                         Color.clear
                             .allowsHitTesting(false)
                     } else {
                         ZStack {
                             SwipePadView(
                                 diameter: diameter,
-                                position: puckPosition,
-                                canvasSize: canvasSize,
+                                position: center,
+                                // Seated, the petals fan up from the bar, over
+                                // the terminal and never under the context.
+                                canvasSize: seat?.canvas ?? canvasSize,
                                 safeAreaInsets: proxy.safeAreaInsets,
                                 resolver: resolver,
                                 tmux: tmux,
@@ -140,14 +163,21 @@ struct SwipePadOverlay: View {
                                 sessionIsActive: sessionIsActive,
                                 onFireMacro: fireMacro(_:),
                                 onRelocate: { proposedPosition in
-                                    relocate(
-                                        proposedPosition,
-                                        in: canvasSize,
-                                        diameter: diameter
-                                    )
+                                    if seat != nil {
+                                        moveSeat(to: proposedPosition, in: canvasSize)
+                                    } else {
+                                        relocate(
+                                            proposedPosition,
+                                            in: canvasSize,
+                                            diameter: floatingDiameter
+                                        )
+                                    }
                                 }
                             )
-                            .position(x: puckPosition.x, y: puckPosition.y)
+                            .position(x: center.x, y: center.y)
+                            // The seat reports where the bar comes to rest;
+                            // follow it on about the keyboard's own timing.
+                            .animation(.smooth(duration: 0.3), value: dock)
                             .transition(.scale(scale: 0.82).combined(with: .opacity))
                         }
                     }
@@ -158,7 +188,7 @@ struct SwipePadOverlay: View {
                     resolver.setSuspended(!pollingKey.allowsPolling)
                     syncPosition(
                         in: canvasSize,
-                        diameter: diameter,
+                        diameter: floatingDiameter,
                         animated: false,
                         force: !hasInitializedPosition
                     )
@@ -245,7 +275,7 @@ struct SwipePadOverlay: View {
                     // (or apply the corner fallback if no position saved).
                     syncPosition(
                         in: newSize,
-                        diameter: diameter,
+                        diameter: floatingDiameter,
                         animated: false,
                         force: true
                     )
@@ -258,7 +288,7 @@ struct SwipePadOverlay: View {
                     appearance.swipePadLastY = -1
                     syncPosition(
                         in: canvasSize,
-                        diameter: diameter,
+                        diameter: floatingDiameter,
                         animated: true,
                         force: true
                     )
@@ -294,6 +324,41 @@ struct SwipePadOverlay: View {
                 }
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.72), value: appearance.swipePadEnabled)
+        }
+    }
+
+    struct Seat: Equatable {
+        var center: CGPoint
+        var diameter: CGFloat
+        var canvas: CGSize
+    }
+
+    /// The part of the overlay above `floor`, where the floating puck lives.
+    static func floatingCanvas(_ size: CGSize, in frame: CGRect, floor: CGFloat?) -> CGSize {
+        guard let floor else { return size }
+        return CGSize(width: size.width, height: min(size.height, max(0, floor - frame.minY)))
+    }
+
+    /// The bar's seat in this overlay's canvas. The canvas the petals fan in
+    /// ends at the seat's bottom, so they open upward from the bar.
+    static func seat(_ dock: CGRect, in canvas: CGRect) -> Seat {
+        let local = dock.offsetBy(dx: -canvas.minX, dy: -canvas.minY)
+        return Seat(
+            center: CGPoint(x: local.midX, y: local.midY),
+            diameter: min(local.width, local.height),
+            canvas: CGSize(width: canvas.width, height: max(0, local.maxY))
+        )
+    }
+
+    /// Picking up the seated puck carries the bar's pill: dropped past the
+    /// middle, the pill changes edge.
+    private func moveSeat(to proposed: CGPoint, in size: CGSize) {
+        let edge = SessionAccessoryBar.pillEdge(
+            releasedAt: proposed.x, deckWidth: size.width,
+            current: appearance.duoBarEdge == "leading" ? .leading : .trailing
+        )
+        withAnimation(.snappy(duration: 0.3)) {
+            appearance.duoBarEdge = edge == .leading ? "leading" : "trailing"
         }
     }
 

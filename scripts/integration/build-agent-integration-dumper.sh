@@ -41,6 +41,8 @@ mkdir -p "$MODULE_CACHE"
     "$REPO_ROOT/Packages/TesseraCore/Sources/TesseraAgentCore/Projection/AgentIngestionWindow.swift" \
     "$REPO_ROOT/Packages/TesseraCore/Sources/TesseraAgentCore/Projection/AgentProjectionContinuation.swift" \
     "$REPO_ROOT/Packages/TesseraCore/Sources/TesseraAgentCore/Providers/AgentProviders.swift" \
+    "$REPO_ROOT/Packages/TesseraCore/Sources/TesseraAgentCore/Providers/AgentClaudeEdit.swift" \
+    "$REPO_ROOT/Packages/TesseraCore/Sources/TesseraAgentCore/Providers/AgentClaudeQuestion.swift" \
     "$REPO_ROOT/Packages/TesseraCore/Sources/TesseraAgentCore/Providers/AgentTierCAdapters.swift" \
     "$REPO_ROOT/Packages/TesseraCore/Sources/TesseraAgentCore/Reducer/AgentCenterRuntime.swift" \
     "$REPO_ROOT/Packages/TesseraCore/Sources/TesseraAgentCore/Reducer/AgentContentBudget.swift" \

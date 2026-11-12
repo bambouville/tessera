@@ -2,9 +2,28 @@ import SwiftData
 import SwiftUI
 import UIKit
 
+/// "Set up as new" already makes a device key, so the empty state offers to
+/// generate a key only when there is none; otherwise it opens the keys.
+enum HostsEmptyKeyAction: Equatable {
+    case generate
+    case view
+
+    init(hasKeys: Bool) { self = hasKeys ? .view : .generate }
+}
+
+private enum HostsLandingQueries {
+    /// One key is enough to tell which way the empty state's key action goes.
+    static var anyKey: FetchDescriptor<StoredKey> {
+        var descriptor = FetchDescriptor<StoredKey>()
+        descriptor.fetchLimit = 1
+        return descriptor
+    }
+}
+
 struct HostsLandingView: View {
     @Environment(AppearancePreferences.self) private var appearance
     @Query(sort: \PersistedHost.sortOrder) private var hosts: [PersistedHost]
+    @Query(HostsLandingQueries.anyKey) private var anyKey: [StoredKey]
 
     let onConnect: (PersistedHost) -> Void
     let onEdit: (PersistedHost) -> Void
@@ -12,13 +31,30 @@ struct HostsLandingView: View {
     let onNewHost: () -> Void
     let onQuickConnect: (String) -> Void
     let onOpenKeys: () -> Void
+    let onGenerateKey: () -> Void
     let activeHostKeys: Set<String>
     let activeHostTmuxUsage: [UUID: Bool]
+    var isManagementSplit = false
+    var selectedHostID: UUID?
+    var sharedSearch: Binding<String>?
+    var onSearchFocusChange: ((Bool) -> Void)?
 
     @Environment(\.designTokens) private var T
     @Environment(ConnectionActivityStore.self) private var connectionActivity
-    @State private var search: String = ""
+    @State private var localSearch = ""
+    @State private var availableWidth: CGFloat = 0
     @State private var pendingRemovalHost: PersistedHost?
+    @FocusState private var searchFocused: Bool
+
+    private var searchBinding: Binding<String> { sharedSearch ?? $localSearch }
+    private var search: String {
+        get { searchBinding.wrappedValue }
+        nonmutating set { searchBinding.wrappedValue = newValue }
+    }
+
+    private var isNarrowColumn: Bool {
+        HostsSplitLayout.usesSingleColumn(isSplit: isManagementSplit, width: availableWidth)
+    }
 
     private var isPhone: Bool {
         UIDevice.current.userInterfaceIdiom == .phone
@@ -63,23 +99,42 @@ struct HostsLandingView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     pageHeader
                     quickConnectRow
-                    emptyState
+                    if isManagementSplit {
+                        ScrollView { emptyState }
+                    } else {
+                        emptyState
+                    }
                 }
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        pageHeader
-                        quickConnectRow
-                        if search.isEmpty, !recentHosts.isEmpty {
-                            recentSection
+                // A split's title carries the only section switcher in laptop
+                // pose (no tab bar), so it stays put above its scrolling hosts
+                // as on the other pages. One tree either way: the search field
+                // keeps its focus across a pose change.
+                VStack(alignment: .leading, spacing: 0) {
+                    if isManagementSplit { pageHeader }
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            if !isManagementSplit { pageHeader }
+                            quickConnectRow
+                            if search.isEmpty, !recentHosts.isEmpty {
+                                recentSection
+                            }
+                            allHostsSection
                         }
-                        allHostsSection
                     }
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(T.bg.ignoresSafeArea())
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
+        .onChange(of: searchFocused) { _, focused in onSearchFocusChange?(focused) }
+        .onChange(of: selectedHostID) { _, id in
+            if id != nil { searchFocused = false }
+        }
+        .onDisappear {
+            if searchFocused { onSearchFocusChange?(false) }
+        }
         .confirmationDialog(
             pendingRemovalHost.map { "remove \($0.name.isEmpty ? $0.address : $0.name)?" }
                 ?? "remove host?",
@@ -121,7 +176,7 @@ struct HostsLandingView: View {
                 .frame(maxWidth: 340)
                 .padding(.bottom, 24)
 
-            HStack(spacing: 10) {
+            emptyStateActionsLayout {
                 Btn(style: .primary, action: onNewHost) {
                     HStack(spacing: 8) {
                         Text("add your first host")
@@ -134,8 +189,15 @@ struct HostsLandingView: View {
                 }
                 .onboardingAnchor(.addHost)
 
-                Btn(style: .default, action: onOpenKeys) {
-                    Text("generate a key")
+                switch HostsEmptyKeyAction(hasKeys: !anyKey.isEmpty) {
+                case .generate:
+                    Btn(style: .default, action: onGenerateKey) {
+                        Text("generate a key")
+                    }
+                case .view:
+                    Btn(style: .default, action: onOpenKeys) {
+                        Text("view your keys")
+                    }
                 }
             }
 
@@ -150,6 +212,15 @@ struct HostsLandingView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, isPhone ? 20 : 40)
         .padding(.bottom, isPhone ? 20 : 60)
+    }
+
+    private var emptyStateActionsLayout: AnyLayout {
+        isNarrowColumn ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))
+    }
+
+    private func editHost(_ host: PersistedHost) {
+        if isManagementSplit { searchFocused = false }
+        onEdit(host)
     }
 
     private var filteredHosts: [PersistedHost] {
@@ -180,9 +251,13 @@ struct HostsLandingView: View {
     private var pageHeader: some View {
         VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
-                Text("hosts")
-                    .font(Typography.heroTitle)
-                    .foregroundStyle(T.fg)
+                DuoTitleSwitcher(identifier: "hosts-title-switcher") {
+                    Text("hosts")
+                        .font(Typography.heroTitle)
+                        .foregroundStyle(T.fg)
+                        .lineLimit(isNarrowColumn ? 1 : nil)
+                        .minimumScaleFactor(isNarrowColumn ? 0.7 : 1)
+                }
 
                 Spacer()
 
@@ -217,10 +292,13 @@ struct HostsLandingView: View {
                 .font(.system(size: 14, weight: .regular))
                 .foregroundStyle(T.fgMuted)
 
-            TextField(searchPlaceholder, text: $search)
+            TextField(searchPlaceholder, text: searchBinding)
+                .focused($searchFocused)
                 .font(Typography.tesseraMono(size: 13))
                 .foregroundStyle(T.fg)
                 .textFieldStyle(.plain)
+                .frame(minWidth: isNarrowColumn ? 0 : nil, maxWidth: isNarrowColumn ? .infinity : nil)
+                .layoutPriority(isNarrowColumn ? 1 : 0)
                 .literalTextInput()
                 .submitLabel(.go)
                 .onSubmit {
@@ -255,8 +333,11 @@ struct HostsLandingView: View {
                             host: host,
                             isActive: activeHostKeys.contains(host.connectionKey),
                             onConnect: onConnect,
-                            onEdit: onEdit,
-                            onDelete: { pendingRemovalHost = $0 }
+                            onEdit: editHost,
+                            onDelete: { pendingRemovalHost = $0 },
+                            isSelected: isManagementSplit && selectedHostID == host.id,
+                            fitsNarrowColumn: isNarrowColumn,
+                            onSelect: isManagementSplit ? { editHost(host) } : nil
                         )
                     }
                 }
@@ -287,8 +368,11 @@ struct HostsLandingView: View {
                         isActive: activeHostKeys.contains(host.connectionKey),
                         activeSessionUsesTmux: activeHostTmuxUsage[host.id],
                         onOpen: { onConnect(host) },
-                        onEdit: isPhone ? { onEdit(host) } : nil,
-                        onDelete: isPhone ? { pendingRemovalHost = host } : nil
+                        onEdit: isPhone ? { editHost(host) } : nil,
+                        onDelete: isPhone ? { pendingRemovalHost = host } : nil,
+                        isSelected: isManagementSplit && selectedHostID == host.id,
+                        fitsNarrowColumn: isNarrowColumn,
+                        onSelect: isManagementSplit ? { editHost(host) } : nil
                     )
                 }
             }
@@ -301,7 +385,7 @@ struct HostsLandingView: View {
     private var recentColumns: [GridItem] {
         Array(
             repeating: GridItem(.flexible(), spacing: 10),
-            count: isPhone ? 2 : 3
+            count: isNarrowColumn ? 1 : (isPhone ? 2 : 3)
         )
     }
 
@@ -356,6 +440,9 @@ private struct CompactHostRow: View {
     let onConnect: (PersistedHost) -> Void
     let onEdit: (PersistedHost) -> Void
     let onDelete: (PersistedHost) -> Void
+    var isSelected = false
+    var fitsNarrowColumn = false
+    var onSelect: (() -> Void)?
 
     @Environment(\.designTokens) private var T
     @Environment(ConnectionActivityStore.self) private var connectionActivity
@@ -363,7 +450,7 @@ private struct CompactHostRow: View {
     var body: some View {
         HStack(spacing: 11) {
             Button {
-                onConnect(host)
+                if let onSelect { onSelect() } else { onConnect(host) }
             } label: {
                 HStack(spacing: 11) {
                     ZStack(alignment: .topTrailing) {
@@ -399,6 +486,8 @@ private struct CompactHostRow: View {
                         .font(Typography.tesseraMono(size: 10))
                         .foregroundStyle(T.fgDim)
                     }
+                    .frame(minWidth: fitsNarrowColumn ? 0 : nil,
+                           maxWidth: fitsNarrowColumn ? .infinity : nil, alignment: .leading)
 
                     Spacer(minLength: 8)
 
@@ -415,6 +504,8 @@ private struct CompactHostRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
+            .accessibilityIdentifier("host-row-\(host.id)")
 
             Button {
                 onEdit(host)
@@ -444,6 +535,12 @@ private struct CompactHostRow: View {
             Rectangle()
                 .fill(T.border)
                 .frame(height: 1)
+        }
+        .overlay {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(T.accent, lineWidth: 0.5)
+            }
         }
     }
 

@@ -77,6 +77,7 @@ final class FilesContextMenuProbe: XCTestCase {
     /// `tessera-diagnostics.log`. The runner reads the file back out of the
     /// simulator container.
     func testDiagnosticsReachTheExportedLog() throws {
+        try requireRig()
         app.launchEnvironment.removeValue(forKey: "TESSERA_FILES_MENU_DIAG")
         app.launchArguments += ["-Diagnostics.ScrollEnabled", "YES"]
         app.launch()
@@ -174,10 +175,18 @@ final class FilesContextMenuProbe: XCTestCase {
 
         let row = app.descendants(matching: .any)["files.row.report_0003_analysis.md"]
         XCTAssertTrue(row.waitForExistence(timeout: 15), "synthetic listing never appeared")
-        row.tap()
 
+        // A loaded simulator can stretch the synthesized tap to ~300 ms; the
+        // row's context-menu interaction then starts its lift and cancels the
+        // touch, as it would for a real press that long. Tap again only while
+        // the row is still uncovered; a row tap that never opens Quick Look
+        // still fails every attempt.
         let done = app.buttons["Done"]
-        XCTAssertTrue(done.waitForExistence(timeout: 15), "row tap did not open the preview")
+        for _ in 0..<3 {
+            row.tap()
+            if done.waitForExistence(timeout: 8) || !row.isHittable { break }
+        }
+        XCTAssertTrue(done.waitForExistence(timeout: 8), "row tap did not open the preview")
         done.tap()
     }
 
@@ -214,6 +223,7 @@ final class FilesContextMenuProbe: XCTestCase {
         rowIdentifier: String = "files.row.report_0003_analysis.md",
         firedAction: String? = "send:report_0003_analysis.md"
     ) throws {
+        try requireRig()
         app.launch()
 
         let row = app.descendants(matching: .any)[rowIdentifier]
@@ -252,6 +262,15 @@ final class FilesContextMenuProbe: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    /// The hold arms and the export check are graded by the rig's recording,
+    /// churn log and exported file; bare, each costs two minutes and its own
+    /// assertions prove little, so only the rig runs them.
+    private func requireRig() throws {
+        guard ProcessInfo.processInfo.environment["TESSERA_FILES_CONTEXT_MENU_RIG"] == "1" else {
+            throw XCTSkip("driven by scripts/uitest/run-files-context-menu.sh")
+        }
+    }
 
     private func verifyLocalizedUIKitRow(
         language: String,

@@ -23,12 +23,14 @@ DETACHED_UI_TEST=testInitiallyDetachedWindowCanPage
 PROGRESS_UI_TEST=testReadProgressNeverShiftsAShownTranscript
 SHORT_UI_TEST=testShortTranscriptSitsAtTheEndAndFillsFromHistory
 SPLIT_UI_TEST=testFollowerKeepsTheNewestRowsWhenARevisionSplitsItsRolledHead
+LANDING_UI_TEST=testSearchLandingStartsATallMatchAtItsTop
 if [[ "${1:-}" == --phone ]]; then
     CHAT_UI_TEST=testChatFollowsSameRecordGrowthOnPhone
     DETACHED_UI_TEST=testInitiallyDetachedWindowCanPageOnPhone
     PROGRESS_UI_TEST=testReadProgressNeverShiftsAShownTranscriptOnPhone
     SHORT_UI_TEST=testShortTranscriptSitsAtTheEndAndFillsFromHistoryOnPhone
     SPLIT_UI_TEST=testFollowerKeepsTheNewestRowsWhenARevisionSplitsItsRolledHeadOnPhone
+    LANDING_UI_TEST=testSearchLandingStartsATallMatchAtItsTopOnPhone
 fi
 RUN_DIR="$(mktemp -d /private/tmp/tessera-window-ui.XXXXXXXX)"
 export TESSERA_INTEGRATION_SIMULATOR_RUN_ID="window-$(date -u +%Y%m%dT%H%M%SZ)-$$"
@@ -79,6 +81,7 @@ TESSERA_VISUAL_CAPTURE=1 integration_xcodebuild test \
     "-only-testing:TesseraUITests/VisualCaptureProbe/$PROGRESS_UI_TEST" \
     "-only-testing:TesseraUITests/VisualCaptureProbe/$SHORT_UI_TEST" \
     "-only-testing:TesseraUITests/VisualCaptureProbe/$SPLIT_UI_TEST" \
+    "-only-testing:TesseraUITests/VisualCaptureProbe/$LANDING_UI_TEST" \
     -only-testing:TesseraUITests/VisualCaptureProbe/testAgentComposerSendShortcutHint \
     >"$RUN_DIR/test.log" 2>&1
 xcrun simctl io "$WINDOW_TEST_UDID" screenshot "$RUN_DIR/final.png" >/dev/null

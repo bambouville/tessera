@@ -9,6 +9,7 @@ import android.graphics.Canvas;
 import android.graphics.drawable.Drawable;
 import android.graphics.Typeface;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -26,7 +27,9 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewTreeObserver;
+import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityManager;
+import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.autofill.AutofillManager;
 import android.view.autofill.AutofillValue;
 import android.view.inputmethod.BaseInputConnection;
@@ -36,14 +39,17 @@ import android.widget.OverScroller;
 
 import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
+import androidx.annotation.VisibleForTesting;
 
 import java.util.Objects;
 
 import com.bambouville.tessera.core.bridge.SharedScrollRoute;
 import com.bambouville.tessera.core.bridge.SharedScrollRouting;
+import com.bambouville.tessera.terminal.R;
 import com.bambouville.tessera.terminal.RemoteTmuxPane;
 import com.bambouville.tessera.terminal.TerminalSmoothScrollPolicy;
 import com.termux.terminal.KeyHandler;
+import com.termux.terminal.TerminalBuffer;
 import com.termux.terminal.TerminalEmulator;
 import com.termux.terminal.TerminalSession;
 import com.termux.view.textselection.TextSelectionCursorController;
@@ -73,6 +79,9 @@ public final class TerminalView extends View {
      * the raw arguments go to logcat only under the key-logging flag.
      */
     private java.util.function.Consumer<String> mImeTraceSink;
+
+    /** Whether the session takes keys now; null takes them all. */
+    @Nullable private java.util.function.BooleanSupplier mInputAdmission;
 
     private TextSelectionCursorController mTextSelectionCursorController;
 
@@ -171,7 +180,13 @@ public final class TerminalView extends View {
      */
     private String[] mAutoFillHints = new String[0];
 
-    private final boolean mAccessibilityEnabled;
+    private final AccessibilityManager mAccessibilityManager;
+    /** Stands in for the accessibility manager's state in tests; null asks the manager. */
+    @Nullable private Boolean mAccessibilityActiveOverride;
+    /** The top row and page actions TalkBack was last told of; see {@link #noteAccessibilityState()}. */
+    private long mAccessibilityState = Long.MIN_VALUE;
+    private final Runnable mAccessibilityRefresh = this::refreshAccessibilityNode;
+    private static final long ACCESSIBILITY_REFRESH_DELAY_MS = 150;
 
     private static final String LOG_TAG = "TerminalView";
 
@@ -270,6 +285,7 @@ public final class TerminalView extends View {
                 // This mirrors UIScrollView and prevents a prior fling from
                 // writing after the user begins a deliberate drag.
                 cancelSmoothScroll();
+                dropRebuildScroll();
                 // Why is true not returned here?
                 // https://developer.android.com/training/gestures/detector.html#detect-a-subset-of-supported-gestures
                 // Although setting this to true still does not solve the following errors when long pressing in terminal view text area
@@ -296,8 +312,7 @@ public final class TerminalView extends View {
             }
         });
         mScroller = new OverScroller(context);
-        AccessibilityManager am = (AccessibilityManager) context.getSystemService(Context.ACCESSIBILITY_SERVICE);
-        mAccessibilityEnabled = am.isEnabled();
+        mAccessibilityManager = (AccessibilityManager) context.getSystemService(Context.ACCESSIBILITY_SERVICE);
     }
 
 
@@ -317,6 +332,15 @@ public final class TerminalView extends View {
      */
     public void setIsTerminalViewKeyLoggingEnabled(boolean value) {
         TERMINAL_VIEW_KEY_LOGGING_ENABLED = value;
+    }
+
+    /**
+     * The session's input gate, which refuses keys while resuming, veiled or
+     * reclaiming: a TalkBack page key it would refuse is no page, so TalkBack
+     * hears the edge. Typed keys meet the same gate where they are sent.
+     */
+    public void setInputAdmission(@Nullable java.util.function.BooleanSupplier admission) {
+        mInputAdmission = admission;
     }
 
     /** Installs (or, with null, removes) the content-free IME trace sink. */
@@ -352,6 +376,7 @@ public final class TerminalView extends View {
         if (mMouseReportingImpliesAltScreen == implies) return;
         mMouseReportingImpliesAltScreen = implies;
         if (scrollRoute() != SharedScrollRoute.LocalScrollback) followLiveOutput();
+        noteAccessibilityState();
     }
 
     public boolean mouseReportingImpliesAltScreen() {
@@ -363,6 +388,7 @@ public final class TerminalView extends View {
         if (Objects.equals(mRemoteTmuxPane, pane)) return;
         mRemoteTmuxPane = pane;
         if (scrollRoute() != SharedScrollRoute.LocalScrollback) followLiveOutput();
+        noteAccessibilityState();
     }
 
     @Nullable
@@ -401,6 +427,8 @@ public final class TerminalView extends View {
     private Runnable mHistoryScrollRequest;
     private boolean mHistoryScrollPending;
     private float mPendingHistoryPosition;
+    // Rows a taller grid pulled back from the pane's history over the pending place; see mRebuildPulledRows.
+    private int mPendingPulledRows;
     private int mDeferredHistoryFlingVelocity;
 
     private void startLocalFling(int pixelsPerSecond) {
@@ -415,6 +443,7 @@ public final class TerminalView extends View {
     public void setHistoryScrollRequest(Runnable request) {
         mHistoryScrollRequest = request;
         if (request == null) cancelHistoryScroll();
+        noteAccessibilityState();
     }
 
     public boolean isHistoryScrollPending() { return mHistoryScrollPending; }
@@ -424,14 +453,96 @@ public final class TerminalView extends View {
 
     public void beginHistoryScroll() {
         if (mHistoryScrollPending) return;
+        // The reader's own gesture places them now, not a rebuild's hold.
+        dropRebuildScroll();
         mHistoryScrollPending = true;
         mPendingHistoryPosition = getScrollPositionPixels();
+        mPendingPulledRows = 0;
     }
 
     public void cancelHistoryScroll() {
         mHistoryScrollPending = false;
         mPendingHistoryPosition = 0;
+        mPendingPulledRows = 0;
         cancelSmoothScroll();
+    }
+
+    // The reader's place when a capture bind rebuilds their own pane's
+    // transcript with no gesture asking (a resize, a font change, a repaint
+    // that could not refresh in place), held for the owner that bind
+    // installs. The rebuild's deep capture under that owner settles it.
+    private boolean mRebuildScrollHeld;
+    private float mRebuildScrollPosition;
+    private Object mRebuildScrollOwner;
+    // Nothing has fed the transcript since the held owner's bind emptied it.
+    private boolean mRebuildAwaitingContent;
+    // What the reader saw: tmux repaints the rebuilt transcript in its own
+    // rows, which after a new width need not be this view's.
+    private ReaderText mRebuildReaderText;
+    // Rows a taller grid pulled back from the pane's history over the held
+    // place, which the emptied transcript shows as blank rows below the
+    // cursor: a shorter grid drops those where the pane pushes its rows back.
+    private int mRebuildPulledRows;
+
+    /** Before a bind that rebuilds the same pane under {@code owner}: keeps the reader's place for its settle. */
+    public void holdScrollForRebuild(Object owner) {
+        // A latched gesture places the reader instead.
+        if (mHistoryScrollPending) {
+            dropRebuildScroll();
+            return;
+        }
+        // Nothing has filled the transcript since the previous bind emptied
+        // it, or only that rebuild's visible capture, ahead of its deep one:
+        // less than a screen of history, the rows a repaint into a surface
+        // taller than its pane scrolls off the top. There was nothing to
+        // read, so the place held before that clear travels on to this owner.
+        // A reader who moved since dropped the hold and is sampled instead.
+        boolean knowsOnlyTheTail = mRebuildAwaitingContent || mEmulator == null
+            || mEmulator.getScreen().getActiveTranscriptRows() < mEmulator.mRows;
+        if (mRebuildScrollHeld && knowsOnlyTheTail) {
+            mRebuildScrollOwner = owner;
+            mRebuildAwaitingContent = true;
+            return;
+        }
+        float position = getScrollPositionPixels();
+        mRebuildScrollHeld = position < 0;
+        mRebuildScrollPosition = mRebuildScrollHeld ? position : 0;
+        mRebuildScrollOwner = mRebuildScrollHeld ? owner : null;
+        mRebuildAwaitingContent = mRebuildScrollHeld;
+        mRebuildReaderText = mRebuildScrollHeld ? readerText(position) : null;
+        mRebuildPulledRows = 0;
+    }
+
+    /** The bound owner's page arrived, even an empty one, or an admitted painter frame. */
+    public void noteRebuildContent() {
+        mRebuildAwaitingContent = false;
+    }
+
+    /** The rebuild under {@code owner} settled: the reader returns to their distance from the live screen. */
+    public void completeRebuildScroll(Object owner) {
+        if (!mRebuildScrollHeld || owner == null || !owner.equals(mRebuildScrollOwner)) return;
+        float position = mRebuildScrollPosition;
+        final ReaderText text = mRebuildReaderText;
+        dropRebuildScroll();
+        if (mEmulator == null || mRenderer == null) return;
+        cancelSmoothScroll();
+        // The rows from the live screen can land elsewhere in tmux's rows;
+        // the reader's text, near there, doesn't.
+        if (text != null && !mEmulator.isAlternateBufferActive()) {
+            final Float found = positionOf(text, position, Math.abs(position));
+            if (found != null) position = found;
+        }
+        setLocalScrollPosition(position);
+    }
+
+    /** The reader moved on (a touch, a scroll key, typing): no settle puts them back. */
+    public void dropRebuildScroll() {
+        mRebuildScrollHeld = false;
+        mRebuildScrollPosition = 0;
+        mRebuildScrollOwner = null;
+        mRebuildAwaitingContent = false;
+        mRebuildReaderText = null;
+        mRebuildPulledRows = 0;
     }
 
     /** A capture bind rebuilds rows, but must not discard its pending gesture. */
@@ -451,6 +562,7 @@ public final class TerminalView extends View {
         float position = mPendingHistoryPosition;
         mHistoryScrollPending = false;
         mPendingHistoryPosition = 0;
+        mPendingPulledRows = 0;
         setLocalScrollPosition(position);
         final int deferredVelocity = mDeferredHistoryFlingVelocity;
         mDeferredHistoryFlingVelocity = 0;
@@ -1051,6 +1163,7 @@ public final class TerminalView extends View {
     /** Return to the live cursor for actual typing/paste, never terminal auto-replies. */
     public void followLiveOutput() {
         cancelHistoryScroll();
+        dropRebuildScroll();
         if (mTopRow == 0 && mScrollOffsetPixels == 0) return;
         mTopRow = 0;
         mScrollOffsetPixels = 0;
@@ -1096,7 +1209,58 @@ public final class TerminalView extends View {
         mEmulator.clearScrollCounter();
 
         invalidate();
-        if (mAccessibilityEnabled) setContentDescription(getText());
+        refreshAccessibilityText();
+    }
+
+    /**
+     * The rows on screen, for TalkBack to read: after output and after a
+     * page. Asked each time, since TalkBack can start after the view does.
+     */
+    private void refreshAccessibilityText() {
+        if (mEmulator != null && accessibilityActive()) setContentDescription(getText());
+    }
+
+    private boolean accessibilityActive() {
+        return mAccessibilityActiveOverride != null ? mAccessibilityActiveOverride : mAccessibilityManager.isEnabled();
+    }
+
+    @VisibleForTesting
+    public void setAccessibilityActiveForTesting(@Nullable Boolean active) {
+        mAccessibilityActiveOverride = active;
+    }
+
+    /**
+     * TalkBack keeps the node it fetched until it hears the node changed, so
+     * a finger's scroll, a fling, a history completion or a route flip left
+     * it reading old rows and offering a page that could no longer move, or
+     * none that now could. Checked after each draw and route change; told
+     * once the change settles, so a glide sends one event, not one a frame.
+     */
+    private void noteAccessibilityState() {
+        if (mEmulator == null || mRenderer == null || !accessibilityActive()) return;
+        final long state = accessibilityState();
+        if (state == mAccessibilityState) return;
+        mAccessibilityState = state;
+        removeCallbacks(mAccessibilityRefresh);
+        postDelayed(mAccessibilityRefresh, ACCESSIBILITY_REFRESH_DELAY_MS);
+    }
+
+    private long accessibilityState() {
+        final boolean history = scrollRoute() == SharedScrollRoute.LocalScrollback;
+        return ((long) mTopRow << 3) | (history ? 1 : 0)
+            | (history && canPageHistory(true) ? 2 : 0) | (history && canPageHistory(false) ? 4 : 0);
+    }
+
+    /**
+     * Asks again whether accessibility is on: TalkBack can go off while this
+     * waits, and an unchecked event sent from the main thread then throws.
+     */
+    private void refreshAccessibilityNode() {
+        if (mEmulator == null || !accessibilityActive()) return;
+        refreshAccessibilityText();
+        final AccessibilityEvent event = new AccessibilityEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED);
+        event.setContentChangeTypes(AccessibilityEvent.CONTENT_CHANGE_TYPE_UNDEFINED);
+        sendAccessibilityEventUnchecked(event);
     }
 
     /** This must be called by the hosting activity in {@link Activity#onContextMenuClosed(Menu)}
@@ -1121,6 +1285,40 @@ public final class TerminalView extends View {
         mRenderer = new TerminalRenderer(mRenderer.mTextSize, newTypeface);
         updateSize();
         invalidate();
+    }
+
+    private boolean mResizeAfterFontLayout;
+
+    /**
+     * Sets size and face together, leaving the grid alone until the next layout.
+     * A parent that measures this view in exact cells of a fixed grid first
+     * resizes it for the new cells; resizing against the old bounds instead
+     * would reflow that grid twice and send the reader back to the live tail.
+     */
+    public void setFont(int textSize, Typeface typeface) {
+        final int previousLineSpacing = mRenderer == null ? 0 : mRenderer.mFontLineSpacing;
+        mRenderer = new TerminalRenderer(textSize, typeface);
+        // A glide and a part-row offset are measured in the old row height: the
+        // reader keeps the row they were on, as does a pending history gesture.
+        if (!mHistoryScrollPending) cancelSmoothScroll();
+        if (previousLineSpacing > 0) {
+            final float scale = (float) Math.max(1, mRenderer.mFontLineSpacing) / previousLineSpacing;
+            mScrollOffsetPixels *= scale;
+            mPendingHistoryPosition *= scale;
+            mRebuildScrollPosition *= scale;
+        }
+        mResizeAfterFontLayout = true;
+        requestLayout();
+        invalidate();
+    }
+
+    @Override
+    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+        super.onLayout(changed, left, top, right, bottom);
+        if (!mResizeAfterFontLayout) return;
+        mResizeAfterFontLayout = false;
+        // Bounds the new font left unchanged still hold a different grid.
+        updateSize();
     }
 
     /** Current renderer face; used by the adapter and its font regression test. */
@@ -1222,6 +1420,7 @@ public final class TerminalView extends View {
 
     /** Perform a scroll, either from dragging the screen or by scrolling a mouse wheel. */
     boolean doScroll(MotionEvent event, int rowsDown) {
+        dropRebuildScroll();
         boolean up = rowsDown < 0;
         int amount = Math.abs(rowsDown);
         boolean changed = false;
@@ -1271,6 +1470,8 @@ public final class TerminalView extends View {
         }
         if (mHistoryScrollPending) {
             mPendingHistoryPosition = Math.min(0, mPendingHistoryPosition + delta);
+            // Dragged onto the live tail, the reader follows it: no rows come back to them.
+            if (mPendingHistoryPosition == 0) mPendingPulledRows = 0;
             return true;
         }
         float proposed = getScrollPositionPixels() + delta;
@@ -1382,6 +1583,129 @@ public final class TerminalView extends View {
 
         mGestureRecognizer.onTouchEvent(event);
         return true;
+    }
+
+    /**
+     * An accessibility click (TalkBack's double-tap, Switch Access) does what
+     * a finger tap does in {@code onSingleTapUp}: leave text selection, or
+     * focus the terminal and let the client raise the keyboard. A finger tap
+     * keeps its own path through the gesture recogniser.
+     */
+    @Override
+    public boolean performClick() {
+        boolean handled = super.performClick();
+        if (mEmulator == null) return handled;
+        if (isSelectingText()) {
+            stopTextSelectionMode();
+            return true;
+        }
+        requestFocus();
+        mClient.onSingleTapUp(null);
+        return true;
+    }
+
+    /**
+     * Only accessibility services see the terminal as clickable. The view
+     * itself stays unclickable: View would otherwise consume touchscreen
+     * hover and turn Enter and D-pad centre into clicks.
+     *
+     * TalkBack pages the terminal through labelled Page up and Page down
+     * actions, as VoiceOver's page does on iOS: on the shell a page of
+     * history, offered only in a direction that can move, and in a
+     * full-screen program its own page keys. They are custom actions, not
+     * scroll actions, because TalkBack scrolls a focused scrollable node
+     * itself when a swipe reaches its edge: every swipe would page history
+     * (on a mosh canvas, without end) or type into a pager instead of moving
+     * focus on.
+     */
+    @Override
+    public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
+        super.onInitializeAccessibilityNodeInfo(info);
+        info.setClickable(true);
+        info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_CLICK);
+        if (mEmulator == null || mRenderer == null) return;
+        final boolean history = scrollRoute() == SharedScrollRoute.LocalScrollback;
+        if (!history || canPageHistory(true)) {
+            info.addAction(new AccessibilityNodeInfo.AccessibilityAction(
+                R.id.terminal_accessibility_page_up, getResources().getString(R.string.terminal_page_up)));
+        }
+        if (!history || canPageHistory(false)) {
+            info.addAction(new AccessibilityNodeInfo.AccessibilityAction(
+                R.id.terminal_accessibility_page_down, getResources().getString(R.string.terminal_page_down)));
+        }
+    }
+
+    @Override
+    public boolean performAccessibilityAction(int action, Bundle arguments) {
+        if (action == AccessibilityNodeInfo.ACTION_CLICK) return performClick();
+        if (action == R.id.terminal_accessibility_page_up || action == R.id.terminal_accessibility_page_down) {
+            final boolean up = action == R.id.terminal_accessibility_page_up;
+            return scrollRoute() == SharedScrollRoute.LocalScrollback
+                ? accessibilityPageHistory(up) : accessibilityPageKey(up);
+        }
+        return super.performAccessibilityAction(action, arguments);
+    }
+
+    /** Whether a page of local history would move: older rows, or the pane's deeper history, or newer ones. */
+    private boolean canPageHistory(boolean older) {
+        final int lineHeight = Math.max(1, mRenderer.mFontLineSpacing);
+        if (older) {
+            return mHistoryScrollRequest != null
+                || getScrollPositionPixels() > -mEmulator.getScreen().getActiveTranscriptRows() * lineHeight;
+        }
+        return mHistoryScrollPending ? mPendingHistoryPosition < 0 : getScrollPositionPixels() < 0;
+    }
+
+    /**
+     * On the shell a page of history, less a row of context, held through
+     * output like a finger's; at the oldest row or the live tail it reports
+     * the edge. TalkBack then reads the rows the page shows.
+     */
+    private boolean accessibilityPageHistory(boolean up) {
+        if (mEmulator == null || mRenderer == null || scrollRoute() != SharedScrollRoute.LocalScrollback) return false;
+        cancelSmoothScroll();
+        dropRebuildScroll();
+        final float before = getScrollPositionPixels();
+        final int rows = Math.max(1, mEmulator.mRows - 1);
+        scrollLocalPixels((up ? -rows : rows) * mRenderer.mFontLineSpacing);
+        if (before == getScrollPositionPixels() && !mHistoryScrollPending) return false;
+        refreshAccessibilityText();
+        sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_SCROLLED);
+        return true;
+    }
+
+    /**
+     * A full-screen program has no local history: it gets its Page Up or
+     * Page Down key, which pagers, editors and monitors take with the mouse
+     * on or off. The key is typing: it leaves a selection and the IME's line,
+     * and goes to the live screen. A scroll event gives TalkBack's earcon.
+     */
+    private boolean accessibilityPageKey(boolean up) {
+        if (mEmulator == null || scrollRoute() == SharedScrollRoute.LocalScrollback) return false;
+        final java.util.function.BooleanSupplier admission = mInputAdmission;
+        if (admission != null && !admission.getAsBoolean()) return false;
+        final int keyCode = up ? KeyEvent.KEYCODE_PAGE_UP : KeyEvent.KEYCODE_PAGE_DOWN;
+        if (isSelectingText()) stopTextSelectionMode();
+        if (mImeConnection != null) mImeConnection.noteExternalKey(keyCode);
+        if (!handleKeyCode(keyCode, 0)) return false;
+        sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_SCROLLED);
+        return true;
+    }
+
+    /**
+     * A page of history's position in rows, as iOS's "first of all", for
+     * TalkBack to speak; a full-screen program's page has none to give.
+     */
+    @Override
+    public void onInitializeAccessibilityEvent(AccessibilityEvent event) {
+        super.onInitializeAccessibilityEvent(event);
+        if (event.getEventType() != AccessibilityEvent.TYPE_VIEW_SCROLLED || mEmulator == null
+            || scrollRoute() != SharedScrollRoute.LocalScrollback) return;
+        final int history = mEmulator.getScreen().getActiveTranscriptRows();
+        event.setScrollable(true);
+        event.setItemCount(history + mEmulator.mRows);
+        event.setFromIndex(history + mTopRow);
+        event.setToIndex(history + mTopRow + mEmulator.mRows - 1);
     }
 
     @Override
@@ -1525,10 +1849,6 @@ public final class TerminalView extends View {
             return true;
         } else if (event.isSystem() && (!mClient.shouldBackButtonBeMappedToEscape() || keyCode != KeyEvent.KEYCODE_BACK)) {
             return super.onKeyDown(keyCode, event);
-        } else if (event.getAction() == KeyEvent.ACTION_MULTIPLE && keyCode == KeyEvent.KEYCODE_UNKNOWN) {
-            followLiveOutput();
-            mTermSession.write(event.getCharacters());
-            return true;
         }
 
         final int metaState = event.getMetaState();
@@ -1763,6 +2083,7 @@ public final class TerminalView extends View {
         int newRows = Math.max(4, (viewHeight - mRenderer.mFontLineSpacingAndAscent) / mRenderer.mFontLineSpacing);
 
         if (mEmulator == null || (newColumns != mEmulator.mColumns || newRows != mEmulator.mRows)) {
+            final ReaderPlaces places = sampleReaderPlaces();
             mTermSession.updateSize(newColumns, newRows, (int) mRenderer.getFontWidth(), mRenderer.getFontLineSpacing());
             mEmulator = mTermSession.getEmulator();
             mClient.onEmulatorSet();
@@ -1771,12 +2092,291 @@ public final class TerminalView extends View {
             if (mTerminalCursorBlinkerRunnable != null)
                 mTerminalCursorBlinkerRunnable.setEmulator(mEmulator);
 
-            cancelSmoothScroll();
+            // A pending history gesture keeps its release motion for the page.
+            if (!mHistoryScrollPending) cancelSmoothScroll();
             mTopRow = 0;
             mScrollOffsetPixels = 0;
+            keepReaderPlaces(places);
             scrollTo(0, 0);
             invalidate();
         }
+    }
+
+    /** A grid change made outside {@link #updateSize()} (a pane's explicit grid) keeps a history reader too. */
+    public void keepReaderAcross(Runnable gridChange) {
+        final ReaderPlaces places = sampleReaderPlaces();
+        gridChange.run();
+        keepReaderPlaces(places);
+    }
+
+    /**
+     * A row's place that a grid change (a font, a rotation, a fold) keeps:
+     * the lines from its line down to the cursor's, and the cells into its
+     * own line where it starts. Rows move in a grid change: a shorter grid
+     * drops the blank rows below the cursor, a narrower one rewraps the lines
+     * above it. The cursor's line and the lines above it stay.
+     */
+    private static final class LinePlace {
+        final int linesAboveCursor;
+        final int column;
+        /** Rows beyond the transcript's top, for a held place the next page fills. */
+        final int rowsAboveTranscript;
+        /** Rows below the cursor's, for a held place a taller grid pulled onto the screen. */
+        final int rowsBelowCursor;
+        final float fraction;
+
+        LinePlace(int linesAboveCursor, int column, int rowsAboveTranscript, int rowsBelowCursor, float fraction) {
+            this.linesAboveCursor = linesAboveCursor;
+            this.column = column;
+            this.rowsAboveTranscript = rowsAboveTranscript;
+            this.rowsBelowCursor = rowsBelowCursor;
+            this.fraction = fraction;
+        }
+    }
+
+    /**
+     * The reader's place in history, and the places a rebuild or a page holds
+     * for them: before, a grid change put the reader on the live tail before
+     * the rebuild that follows it sampled their place, so the rebuild
+     * restored the tail.
+     */
+    private static final class ReaderPlaces {
+        final LinePlace view;
+        final LinePlace rebuild;
+        final LinePlace pending;
+        final int rows;
+        final int columns;
+        final int cursorRow;
+
+        ReaderPlaces(LinePlace view, LinePlace rebuild, LinePlace pending, int rows, int columns, int cursorRow) {
+            this.view = view;
+            this.rebuild = rebuild;
+            this.pending = pending;
+            this.rows = rows;
+            this.columns = columns;
+            this.cursorRow = cursorRow;
+        }
+    }
+
+    private ReaderPlaces sampleReaderPlaces() {
+        if (mEmulator == null || mRenderer == null || mEmulator.isAlternateBufferActive()) return null;
+        final int cursor = cursorRow();
+        final float view = getScrollPositionPixels();
+        final LinePlace viewPlace = view < 0 ? linePlace(view, cursor) : null;
+        final LinePlace rebuild = mRebuildScrollHeld ? linePlace(mRebuildScrollPosition, cursor) : null;
+        final LinePlace pending = mHistoryScrollPending && (mPendingHistoryPosition < 0 || mPendingPulledRows > 0)
+            ? linePlace(mPendingHistoryPosition, cursor) : null;
+        if (viewPlace == null && rebuild == null && pending == null) return null;
+        return new ReaderPlaces(viewPlace, rebuild, pending, mEmulator.mRows, mEmulator.mColumns, cursor);
+    }
+
+    private void keepReaderPlaces(ReaderPlaces places) {
+        if (places == null || mEmulator == null || mRenderer == null || mEmulator.isAlternateBufferActive()) return;
+        final TerminalBuffer screen = mEmulator.getScreen();
+        // A resize can push the cursor's line above the screen, and the
+        // emulator's cursor to the screen's top row, which is another line.
+        final boolean resized = mEmulator.mRows != places.rows || mEmulator.mColumns != places.columns;
+        final int cursor = resized
+            ? Math.max(-screen.getActiveTranscriptRows(), Math.min(mEmulator.mRows - 1, screen.getResizedCursorRow()))
+            : cursorRow();
+        if (places.view != null) setLocalScrollPosition(scrollPosition(places.view, 0, cursor));
+        // A held place belongs to the pane's own history, which moves as the
+        // pane resizes, not as this transcript does. A taller pane pulls its
+        // history back over the new rows wherever its cursor is; this
+        // transcript may not have those rows (a bind emptied it, or never
+        // fed them) and adds blank rows below the cursor instead. A shorter
+        // pane drops its rows below the cursor first, which are those blank
+        // rows' fewer, and pushes the rest into history.
+        if (places.rebuild != null) {
+            final int[] moved = paneMove(places, cursor, mRebuildPulledRows);
+            mRebuildPulledRows = moved[1];
+            mRebuildScrollPosition = scrollPosition(places.rebuild, moved[0], cursor);
+        }
+        if (places.pending != null) {
+            final int[] moved = paneMove(places, cursor, mPendingPulledRows);
+            mPendingPulledRows = moved[1];
+            mPendingHistoryPosition = scrollPosition(places.pending, moved[0], cursor);
+        }
+    }
+
+    /**
+     * How many rows lower a held place goes than the cursor's line puts it, and the pulled rows after: rows this
+     * transcript shows below its cursor that the pane holds above its own.
+     */
+    private int[] paneMove(ReaderPlaces places, int cursor, int pulledRows) {
+        final int grown = mEmulator.mRows - places.rows;
+        if (grown == 0) return new int[] {0, pulledRows};
+        final int pushed = places.cursorRow - cursor;
+        final int paneBelow = Math.max(0, places.rows - 1 - places.cursorRow - pulledRows);
+        final int paneBelowAfter = grown > 0 ? paneBelow : Math.max(0, paneBelow + grown);
+        final int below = mEmulator.mRows - 1 - Math.max(0, cursor);
+        // This transcript pushed `pushed` rows, the pane pulled `grown` or pushed what its rows below couldn't take.
+        final int shift = grown > 0 ? grown + pushed : pushed - Math.max(0, -grown - paneBelow);
+        return new int[] {shift, Math.max(0, below - paneBelowAfter)};
+    }
+
+    private int cursorRow() {
+        return Math.max(0, Math.min(mEmulator.mRows - 1, mEmulator.getCursorRow()));
+    }
+
+    private LinePlace linePlace(float position, int cursor) {
+        final int lineHeight = Math.max(1, mRenderer.mFontLineSpacing);
+        final int row = (int) Math.floor(position / lineHeight);
+        final TerminalBuffer screen = mEmulator.getScreen();
+        final int top = -screen.getActiveTranscriptRows();
+        final int placed = Math.max(top, Math.min(cursor, row));
+        int start = placed;
+        while (start > top && screen.getLineWrap(start - 1)) start--;
+        int lines = 0;
+        for (int r = start; r < cursor; r++) if (!screen.getLineWrap(r)) lines++;
+        return new LinePlace(lines, (placed - start) * mEmulator.mColumns, Math.max(0, top - row),
+            Math.max(0, row - cursor), position - row * lineHeight);
+    }
+
+    /** The scroll position of {@code place} in the current grid from the cursor's row, {@code shift} rows lower. */
+    private float scrollPosition(LinePlace place, int shift, int cursor) {
+        final TerminalBuffer screen = mEmulator.getScreen();
+        final int top = -screen.getActiveTranscriptRows();
+        int start = cursor;
+        while (start > top && screen.getLineWrap(start - 1)) start--;
+        int lines = place.linesAboveCursor;
+        while (lines > 0 && start > top) {
+            start--;
+            while (start > top && screen.getLineWrap(start - 1)) start--;
+            lines--;
+        }
+        int row;
+        if (lines > 0) {
+            // Lines past the transcript's top are a row each.
+            row = start - lines;
+        } else {
+            int end = start;
+            while (end < cursor && screen.getLineWrap(end)) end++;
+            row = Math.min(end, start + place.column / mEmulator.mColumns);
+        }
+        row += shift - place.rowsAboveTranscript + place.rowsBelowCursor;
+        return row * Math.max(1, mRenderer.mFontLineSpacing) + place.fraction;
+    }
+
+    /**
+     * The text the reader sees from a position, without its blanks. A tmux
+     * rebuild after a new width repaints history in tmux's rows, which need
+     * not be the ones this view rewrapped, but the characters keep their
+     * order.
+     */
+    private static final class ReaderText {
+        final String characters;
+        /** Rows from the reader's top row down to the first character's. */
+        final int leadRows;
+        final float fraction;
+
+        ReaderText(String characters, int leadRows, float fraction) {
+            this.characters = characters;
+            this.leadRows = leadRows;
+            this.fraction = fraction;
+        }
+    }
+
+    private static final int READER_TEXT_ROWS = 16;
+    private static final int READER_TEXT_LENGTH = 48;
+    private static final int READER_TEXT_MINIMUM = 8;
+
+    /** Null on the alternate screen and above blank rows. */
+    private ReaderText readerText(float position) {
+        if (mEmulator == null || mRenderer == null || mEmulator.isAlternateBufferActive()) return null;
+        final int lineHeight = Math.max(1, mRenderer.mFontLineSpacing);
+        final int row = (int) Math.floor(position / lineHeight);
+        final TerminalBuffer screen = mEmulator.getScreen();
+        if (row < -screen.getActiveTranscriptRows()) return null;
+        final StringBuilder characters = new StringBuilder();
+        int leadRows = -1;
+        final int last = Math.min(cursorRow(), row + READER_TEXT_ROWS);
+        for (int r = row; r <= last && characters.length() < READER_TEXT_LENGTH; r++) {
+            final String text = rowText(screen, r);
+            for (int i = 0; i < text.length() && characters.length() < READER_TEXT_LENGTH; ) {
+                final int codePoint = text.codePointAt(i);
+                i += Character.charCount(codePoint);
+                if (!isInk(codePoint)) continue;
+                if (leadRows < 0) leadRows = r - row;
+                characters.appendCodePoint(codePoint);
+            }
+        }
+        // A lone prompt sign would match the nearest other one.
+        if (leadRows < 0 || characters.length() < READER_TEXT_MINIMUM) return null;
+        return new ReaderText(characters.toString(), leadRows, position - row * lineHeight);
+    }
+
+    /**
+     * The position that puts {@code text} back at the top of the view, where
+     * it is nearest to {@code estimate} and no farther from it than
+     * {@code distance}; null when the transcript doesn't have it there.
+     */
+    private Float positionOf(ReaderText text, float estimate, float distance) {
+        if (text.characters.isEmpty()) return null;
+        final int lineHeight = Math.max(1, mRenderer.mFontLineSpacing);
+        final TerminalBuffer screen = mEmulator.getScreen();
+        final int top = -screen.getActiveTranscriptRows();
+        final int target = (int) Math.floor(estimate / lineHeight) + text.leadRows;
+        final int screens = 2 * mEmulator.mRows;
+        final int reach = Math.max(screens, (int) Math.ceil(distance / lineHeight));
+        // Nearby first; the whole reach only when that misses.
+        for (int span : reach > screens ? new int[] {screens, reach} : new int[] {reach}) {
+            final int low = Math.max(top, target - span);
+            final int high = Math.min(mEmulator.mRows - 1, target + span + READER_TEXT_ROWS);
+            if (low > high) continue;
+            final Integer found = rowOf(screen, text.characters, low, high, target);
+            if (found != null) return (float) (found - text.leadRows) * lineHeight + text.fraction;
+        }
+        return null;
+    }
+
+    /**
+     * The row holding the first character of the occurrence of {@code characters}, blanks aside, nearest to
+     * {@code target}. One pass (Knuth-Morris-Pratt) that keeps only the rows of the last code points it matched,
+     * however many rows it reads.
+     */
+    private Integer rowOf(TerminalBuffer screen, String characters, int low, int high, int target) {
+        final int[] pattern = characters.codePoints().toArray();
+        final int count = pattern.length;
+        if (count == 0) return null;
+        // How much of the pattern still matches after a mismatch.
+        final int[] fallback = new int[count];
+        for (int index = 1, length = 0; index < count; index++) {
+            while (length > 0 && pattern[index] != pattern[length]) length = fallback[length - 1];
+            if (pattern[index] == pattern[length]) length++;
+            fallback[index] = length;
+        }
+        final int[] recentRows = new int[count];
+        long seen = 0;
+        int matched = 0;
+        Integer best = null;
+        for (int r = low; r <= high; r++) {
+            final String text = rowText(screen, r);
+            for (int i = 0; i < text.length(); ) {
+                final int codePoint = text.codePointAt(i);
+                i += Character.charCount(codePoint);
+                if (!isInk(codePoint)) continue;
+                recentRows[(int) (seen % count)] = r;
+                seen++;
+                while (matched > 0 && codePoint != pattern[matched]) matched = fallback[matched - 1];
+                if (codePoint == pattern[matched]) matched++;
+                if (matched < count) continue;
+                // The first of the last `count` code points.
+                final int start = recentRows[(int) (seen % count)];
+                if (best == null || Math.abs(start - target) < Math.abs(best - target)) best = start;
+                matched = fallback[matched - 1];
+            }
+        }
+        return best;
+    }
+
+    private String rowText(TerminalBuffer screen, int row) {
+        return screen.getSelectedText(0, row, mEmulator.mColumns - 1, row);
+    }
+
+    /** Not a blank, nor an empty cell. */
+    private static boolean isInk(int codePoint) {
+        return codePoint != 0 && !Character.isWhitespace(codePoint) && !Character.isSpaceChar(codePoint);
     }
 
     @Override
@@ -1792,6 +2392,7 @@ public final class TerminalView extends View {
 
             // render the text selection handles
             renderTextSelection();
+            noteAccessibilityState();
         }
     }
 
@@ -2238,6 +2839,8 @@ public final class TerminalView extends View {
     @Override
     protected void onDetachedFromWindow() {
         cancelHistoryScroll();
+        removeCallbacks(mAccessibilityRefresh);
+        mAccessibilityState = Long.MIN_VALUE;
         boolean hadPendingLayoutResize = mPendingLayoutResize != null;
         cancelPendingLayoutResize();
         mResumeLayoutResizeOnAttach = hadPendingLayoutResize;

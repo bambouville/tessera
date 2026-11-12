@@ -18,4 +18,25 @@
     <string name="tmux_split_left">向左分割</string>
     <string name="tmux_split_down">向下分割</string>
     <string name="tmux_split_up">向上分割</string>
+
+    <!-- tmux window and pane verbs shared by the switcher, the window strip and their dialogs -->
+    <string name="session_new_tmux_window">新增 tmux 視窗</string>
+    <string name="session_tmux_rename">重新命名</string>
+    <string name="session_tmux_zoom_pane_menu">縮放窗格</string>
+    <string name="session_tmux_unzoom_pane_menu">取消縮放窗格</string>
+    <string name="session_tmux_close_window_menu">關閉視窗</string>
+    <string name="session_tmux_close_window_title">要關閉 %1$s 嗎？</string>
+    <string name="session_tmux_close_pane_title">要關閉窗格 %1$s 嗎？</string>
+    <string name="session_tmux_close_body">此目標中的遠端 tmux 程序將被終止。</string>
+    <string name="session_tmux_rename_window_title">重新命名視窗</string>
+    <string name="session_tmux_rename_confirm">重新命名</string>
+    <string name="session_tmux_window_name">視窗名稱</string>
+    <string name="session_tmux_rename_window_description">重新命名視窗</string>
+    <string name="session_tmux_split_left_right_description">左右分割窗格</string>
+    <string name="session_tmux_split_top_bottom_description">上下分割窗格</string>
+    <string name="session_tmux_zoom_pane_description">縮放窗格</string>
+    <string name="session_tmux_unzoom_pane_description">取消縮放窗格</string>
+    <string name="session_tmux_panes_kicker">窗格</string>
+    <string name="session_tmux_close_pane_description">關閉窗格</string>
+    <string name="session_tmux_close_window_description">關閉視窗</string>
 </resources>

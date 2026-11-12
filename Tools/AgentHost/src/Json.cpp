@@ -1,6 +1,7 @@
 #include "Json.h"
 #include "PlainASCII.h"
 #include <algorithm>
+#include <cstring>
 #include <stdexcept>
 
 namespace tessera::json {
@@ -92,6 +93,17 @@ std::string displayText(std::string_view value, size_t maximum) {
     std::string result;
     result.reserve(std::min(value.size(), maximum));
     for (size_t index = 0; index < value.size();) {
+        // Printable ASCII runs are always safe (DEL is not): copy them whole,
+        // up to the limit.
+        auto run = detail::plainASCII(value.substr(index));
+        if (const void* del = run ? std::memchr(value.data() + index, 0x7f, run) : nullptr)
+            run = static_cast<size_t>(static_cast<const char*>(del) - (value.data() + index));
+        if (run) {
+            const auto room = maximum - result.size();
+            result.append(value.substr(index, std::min(run, room)));
+            if (run > room) break;
+            index += run; continue;
+        }
         const auto byte = static_cast<unsigned char>(value[index]);
         const size_t length = byte < 0x80 ? 1 : byte < 0xe0 ? 2 : byte < 0xf0 ? 3 : 4;
         if (index + length > value.size()) break;

@@ -18,4 +18,25 @@
     <string name="tmux_split_left">Links teilen</string>
     <string name="tmux_split_down">Nach unten teilen</string>
     <string name="tmux_split_up">Nach oben teilen</string>
+
+    <!-- tmux window and pane verbs shared by the switcher, the window strip and their dialogs -->
+    <string name="session_new_tmux_window">Neues tmux-Fenster</string>
+    <string name="session_tmux_rename">Umbenennen</string>
+    <string name="session_tmux_zoom_pane_menu">Bereich zoomen</string>
+    <string name="session_tmux_unzoom_pane_menu">Bereichszoom aufheben</string>
+    <string name="session_tmux_close_window_menu">Fenster schließen</string>
+    <string name="session_tmux_close_window_title">%1$s schließen?</string>
+    <string name="session_tmux_close_pane_title">Bereich %1$s schließen?</string>
+    <string name="session_tmux_close_body">Der entfernte tmux-Prozess in diesem Ziel wird beendet.</string>
+    <string name="session_tmux_rename_window_title">Fenster umbenennen</string>
+    <string name="session_tmux_rename_confirm">Umbenennen</string>
+    <string name="session_tmux_window_name">Fenstername</string>
+    <string name="session_tmux_rename_window_description">Fenster umbenennen</string>
+    <string name="session_tmux_split_left_right_description">Bereich links und rechts teilen</string>
+    <string name="session_tmux_split_top_bottom_description">Bereich oben und unten teilen</string>
+    <string name="session_tmux_zoom_pane_description">Bereich zoomen</string>
+    <string name="session_tmux_unzoom_pane_description">Bereichszoom aufheben</string>
+    <string name="session_tmux_panes_kicker">Bereiche</string>
+    <string name="session_tmux_close_pane_description">Bereich schließen</string>
+    <string name="session_tmux_close_window_description">Fenster schließen</string>
 </resources>

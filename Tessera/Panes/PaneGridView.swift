@@ -921,6 +921,8 @@ struct PaneGridView: View {
     let onSwitcherShortcut: ((TesseraSwitcherShortcut) -> Void)?
     let onOpenSettings: (() -> Void)?
     let onOpenAgentCenter: (() -> Void)?
+    /// Terminal links; true when the session opened one as an artifact tab.
+    var onOpenLink: ((String) -> Bool)? = nil
     /// §3 selection-menu path actions, forwarded to every pane surface
     /// (the handler resolves against the focused pane's cwd).
     let onSelectionPathAction: ((TesseraTerminalSelectionPathAction, String) -> Void)?
@@ -943,6 +945,8 @@ struct PaneGridView: View {
     /// software keyboard, change the viewport twice and re-fence a show's
     /// claim.
     let forceResignFirstResponder: Bool
+    /// The phone Files sheet is up: see `TerminalSurfaceBound.coveringSheetPresented`.
+    var coveringSheetPresented = false
     /// Phone presentation: keep the remote split layout unchanged, but mount
     /// only the active pane and scale that pane's authoritative cell grid to
     /// the available local viewport.
@@ -1333,12 +1337,20 @@ struct PaneGridView: View {
                 },
                 onTitle: { _ in },
                 onUserActivity: onUserActivity,
+                // A reader who typed or scrolled since a rebuild has moved
+                // on: its deep capture must not put them back.
+                onReaderInput: { [box = runtime.box] in box.noteReaderInput() },
                 focusOnlyTap: isFocused ? nil : {
                     onUserActivity?()
                     modifierState.requestSoftwareKeyboardOnTerminalTap()
                     _ = sessionCommands.dispatch(.selectTmuxPane(paneId.description))
                 },
                 onBell: { [paneId] in onPaneBell(paneTitle(paneId)) },
+                onOpenLink: { link in
+                    guard onOpenLink?(link) == true else { return false }
+                    _ = runtime.box.view?.resignFirstResponder()
+                    return true
+                },
                 onPrimaryScrollbackUnderflow: { [paneId] view, pointsY, proposedOffsetY, maxOffsetY in
                     onPanePrimaryScrollbackUnderflow?(
                         paneId,
@@ -1363,7 +1375,9 @@ struct PaneGridView: View {
                 // first responder (and not while the find bar holds it).
                 suppressFirstResponderReclaim: !isFocused || suppressFindReclaim,
                 forceResignFirstResponder: forceResignFirstResponder,
+                coveringSheetPresented: coveringSheetPresented,
                 onHardwareKey: nil,
+                refusesInput: inputSuppressed,
                 onTerminalScrolled: { [paneId] view in
                     onPaneScrolled?(paneId, view)
                 },

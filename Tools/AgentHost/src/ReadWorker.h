@@ -2,10 +2,13 @@
 #include "Catalog.h"
 #include "CodexReader.h"
 #include "FileWakeups.h"
+#include "SearchFold.h"
 #include "WindowSession.h"
 #include <condition_variable>
 #include <deque>
 #include <map>
+#include <set>
+#include <optional>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -65,12 +68,36 @@ private:
     std::vector<std::string> changes_;
     std::map<std::string, Cursor> cursors_;
     std::deque<std::string> cursorOrder_;
-    struct Inventory { std::vector<Source> sources; std::string generation; };
+    // What one walk found, kept with each client's pages: a later refresh
+    // for another client must not relabel a snapshot being paged.
+    struct InventoryWalk {
+        std::vector<Source> sources; std::string fallback, skipReason;
+        size_t skipped = 0; bool incomplete = false;
+    };
+    struct Inventory { InventoryWalk walk; std::string generation; };
     std::map<uint64_t, Inventory> inventories_;
-    std::vector<Source> sharedInventory_;
+    // A transcript search in progress: the threads left to read, in the
+    // client's order, and the read position in the current one. Each request
+    // returns within one bounded read slice; the next continues here. A thread
+    // is read to its oldest record unless the client caps its candidates or
+    // reports it satisfied (the client matches exactly; the host cannot).
+    struct Search {
+        uint64_t client = 0;
+        std::string request;
+        search::Query query;
+        std::vector<std::string> threads;
+        std::set<std::string> satisfied;
+        size_t next = 0, limit = SIZE_MAX, found = 0;
+        // The thread being read: where its next page ends, and the Codex
+        // file whose canonical header its first page checked.
+        std::string identity, codexPath;
+        std::optional<WindowAnchor> anchor;
+        std::chrono::steady_clock::time_point expires{};
+    };
+    std::map<std::string, Search> searches_;
+    InventoryWalk sharedInventory_;
     std::chrono::steady_clock::time_point inventoryRefresh_{};
-    std::string inventoryFallback_;
-    std::vector<Source> inventory();
+    InventoryWalk inventory();
     std::mutex mutex_;
     std::condition_variable changed_;
     std::deque<ReadJob> jobs_;

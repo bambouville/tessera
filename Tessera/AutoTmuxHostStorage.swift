@@ -1,6 +1,9 @@
+import CryptoKit
 import Foundation
 import Observation
+import os
 import TmuxControl
+import TmuxControlCore
 import TesseraProtocolCore
 
 /// Device-local, non-secret history for truthful host recency and key-use UI.
@@ -316,6 +319,139 @@ enum HostRuntimeStateStore {
             state.tmuxSessionName = name
             state.tmuxUnavailable = false
             save(state, for: host)
+        }
+    }
+}
+
+/// The grids each tmux session's controller owned under this device's
+/// stamps, kept across a process death (§6.9) so a relaunch whose stamp
+/// still stands is not veiled as another device. One small file, read off
+/// main before the first attach needs it and rewritten off main after every
+/// change, since a process can die at any moment; a burst of changes (a
+/// live resize owning grid after grid) writes once. Keyed by a hash of the
+/// host's runtime key and the stamp's tmux
+/// session, so no host or session name is stored; each session keeps the
+/// newest `TmuxOwnedGeometryRecord.restoreLimit` generations, and the file
+/// the `sessionLimit` sessions kept most recently.
+@MainActor
+final class TmuxOwnedGeometryFileStore {
+    static let shared = TmuxOwnedGeometryFileStore()
+    static let sessionLimit = 64
+
+    private struct Entry: Codable, Equatable, Sendable {
+        var key: String
+        var records: [TmuxOwnedGeometryRecord]
+    }
+
+    private let url: URL
+    private let writeQueue = DispatchQueue(label: "com.bambouville.tessera.tmux-owned-geometry", qos: .utility)
+    /// Least recently kept first; nil until the file is read.
+    private var entries: [Entry]?
+    private var preloading = false
+    /// The newest entries not yet written. The write queue takes them, so
+    /// keeps that land before it runs ride the one write already queued.
+    private let pendingWrite = OSAllocatedUnfairLock<[Entry]?>(initialState: nil)
+
+    init(url: URL = TmuxOwnedGeometryFileStore.defaultURL) {
+        self.url = url
+    }
+
+    nonisolated static var defaultURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("tmux-owned-geometry.json", isDirectory: false)
+    }
+
+    func store(for host: Host) -> TmuxController.OwnedGeometryStore {
+        let hostKey = HostRuntimeStateStore.key(for: host)
+        preload()
+        return .init(
+            records: { [self] session in records(forKey: Self.key(hostKey: hostKey, session: session)) },
+            keep: { [self] record, session in keep(record, forKey: Self.key(hostKey: hostKey, session: session)) }
+        )
+    }
+
+    func records(forKey key: String) -> [TmuxOwnedGeometryRecord] {
+        loadedEntries().first { $0.key == key }?.records ?? []
+    }
+
+    func keep(_ record: TmuxOwnedGeometryRecord, forKey key: String) {
+        var entries = loadedEntries()
+        let earlier = entries.firstIndex { $0.key == key }.map { entries.remove(at: $0).records } ?? []
+        entries.append(Entry(key: key, records: TmuxOwnedGeometryRecord.keeping(record, in: earlier)))
+        if entries.count > Self.sessionLimit {
+            entries.removeFirst(entries.count - Self.sessionLimit)
+        }
+        self.entries = entries
+        let kept = entries
+        let queued = pendingWrite.withLock { pending in
+            defer { pending = kept }
+            return pending != nil
+        }
+        guard !queued else { return }
+        let url = self.url, pendingWrite = self.pendingWrite
+        writeQueue.async {
+            let snapshot = pendingWrite.withLock { pending in
+                defer { pending = nil }
+                return pending
+            }
+            guard let snapshot, let data = try? JSONEncoder().encode(snapshot) else { return }
+            Self.write(data, to: url)
+        }
+    }
+
+    /// Waits for the writes already queued; tests read the file after it.
+    func flushForTesting() {
+        writeQueue.sync {}
+    }
+
+    nonisolated static func key(hostKey: String, session: String) -> String {
+        SHA256.hash(data: Data("\(hostKey)\u{0}\(session)".utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
+    private func loadedEntries() -> [Entry] {
+        if let entries { return entries }
+        let read = Self.read(url)
+        entries = read
+        return read
+    }
+
+    /// Reads the file on the write queue, ahead of the writes this process
+    /// queues later; a read on main that got there first wins.
+    private func preload() {
+        guard entries == nil, !preloading else { return }
+        preloading = true
+        let url = self.url
+        writeQueue.async {
+            let read = Self.read(url)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    self.preloading = false
+                    if self.entries == nil { self.entries = read }
+                }
+            }
+        }
+    }
+
+    /// A missing or unreadable file keeps nothing: the relaunch reads as it
+    /// did before records were kept.
+    private nonisolated static func read(_ url: URL) -> [Entry] {
+        (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode([Entry].self, from: $0) } ?? []
+    }
+
+    private nonisolated static func write(_ data: Data, to url: URL) {
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            var url = url
+            try url.setResourceValues(values)
+        } catch {
+            DiagnosticLogStore.append(.tmux, "owned-geometry write failed type=\(type(of: error))")
         }
     }
 }

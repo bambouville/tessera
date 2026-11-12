@@ -1,7 +1,5 @@
 package com.bambouville.tessera.feature.hosts
 
-import android.app.Activity
-import android.app.KeyguardManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -51,6 +49,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.ImeAction
@@ -95,6 +94,8 @@ import com.bambouville.tessera.data.TmuxModes
 import com.bambouville.tessera.data.TransportKinds
 import com.bambouville.tessera.data.KnownHostsRepository
 import com.bambouville.tessera.security.AndroidKeystoreCredentialStore
+import com.bambouville.tessera.security.KeySecurityLevel
+import com.bambouville.tessera.security.confirmDeviceOwner
 import java.util.UUID
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
@@ -108,9 +109,11 @@ fun HostListScreen(
     identities: IdentityRepository,
     modifier: Modifier = Modifier,
     connectedHostIds: Set<String> = emptySet(),
+    addHostButtonModifier: Modifier = Modifier,
     onOpenHost: (SavedHost) -> Unit,
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val tokens = LocalTesseraTokens.current
     val hostExportTitle = stringResource(R.string.host_export_title)
     val scope = rememberCoroutineScope()
@@ -134,13 +137,15 @@ fun HostListScreen(
             try {
                 val contents = withContext(Dispatchers.IO) {
                     context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                        ?: error("The selected host file is unavailable")
+                        ?: error(resources.getString(R.string.hosts_import_file_unavailable))
                 }
                 val payload = HostImportCodec.decode(contents)
                 val saved = repository.save(payload.host)
                 forwardingStore.replace(saved.id, payload.forwardingRules)
             } catch (failure: Throwable) {
-                importError = failure.message ?: "The host could not be imported"
+                importError = (failure as? HostImportRejected)?.let { resources.getString(it.reason) }
+                    ?: failure.message
+                    ?: resources.getString(R.string.hosts_import_failed_fallback)
             }
         }
     }
@@ -154,7 +159,7 @@ fun HostListScreen(
     }
 
     Column(modifier.background(tokens.bg)) {
-        TesseraPageHeader(title = stringResource(R.string.hosts_title).lowercase(), hero = true) {
+        TesseraPageHeader(title = stringResource(R.string.hosts_title), hero = true) {
             TesseraIconButton(
                 icon = TesseraIcons.Download,
                 contentDescription = stringResource(R.string.host_import_action),
@@ -164,6 +169,7 @@ fun HostListScreen(
                 icon = TesseraIcons.Plus,
                 contentDescription = stringResource(R.string.host_add),
                 onClick = { creating = true },
+                modifier = addHostButtonModifier,
                 prominent = true,
             )
         }
@@ -291,9 +297,9 @@ private fun HostForwardingEditor(
     val tokens = LocalTesseraTokens.current
     Column(Modifier.fillMaxSize().background(tokens.bg)) {
         TesseraSubPageHeader(
-            title = "${host.displayName} · forwarding",
+            title = stringResource(R.string.hosts_forwarding_title, host.displayName),
             onBack = onDismiss,
-            backContentDescription = "Back to hosts",
+            backContentDescription = stringResource(R.string.hosts_back_to_hosts),
         )
         TesseraHairline()
         PortForwardingPanel(
@@ -301,6 +307,7 @@ private fun HostForwardingEditor(
             states = emptyMap(),
             onRulesChanged = { updated -> scope.launch { store.replace(host.id, updated) } },
             modifier = Modifier.fillMaxSize().weight(1f),
+            hostId = host.id,
         )
     }
 }
@@ -309,14 +316,14 @@ private fun HostForwardingEditor(
 private fun EmptyHosts(modifier: Modifier, filtered: Boolean, onAdd: () -> Unit) {
     if (filtered) {
         TesseraEmptyState(
-            title = stringResource(R.string.hosts_no_results).lowercase(),
+            title = stringResource(R.string.hosts_no_results),
             body = stringResource(R.string.hosts_no_results_body),
             icon = TesseraIcons.Search,
             modifier = modifier,
         )
     } else {
         TesseraEmptyState(
-            title = stringResource(R.string.hosts_empty_title).lowercase(),
+            title = stringResource(R.string.hosts_empty_title),
             body = stringResource(R.string.hosts_empty_body),
             mark = { TesseraLogoMark(size = 56.dp) },
             modifier = modifier,
@@ -416,7 +423,7 @@ private fun CompactHostRow(
                     onClick = { menuOpen = false; onExport() },
                 )
                 DropdownMenuItem(
-                    text = { Text("port forwarding") },
+                    text = { Text(stringResource(R.string.hosts_port_forwarding)) },
                     onClick = { menuOpen = false; onForwarding() },
                 )
                 DropdownMenuItem(
@@ -466,6 +473,7 @@ private fun HostEditorForm(
     var envVars by remember(host?.id) { mutableStateOf(host?.envVars.orEmpty()) }
     var startupSnippet by remember(host?.id) { mutableStateOf(host?.startupSnippet.orEmpty()) }
     val scope = rememberCoroutineScope()
+    val portNotNumber = stringResource(R.string.hosts_port_not_number)
 
     fun save() {
         if (saving) return
@@ -479,7 +487,7 @@ private fun HostEditorForm(
                         displayName = displayName,
                         hostname = hostname,
                         port = port.toIntOrNull()
-                            ?: throw IllegalArgumentException("port must be a number"),
+                            ?: throw IllegalArgumentException(portNotNumber),
                         username = username,
                         jumpHostId = jumpHostId,
                         identityId = identityId,
@@ -643,12 +651,12 @@ private fun HostEditorForm(
             onClick = { identityPicker = true },
             inputTestTag = "host-auth-selector",
         )
-        Text("Optional host data", style = TesseraType.body)
-        Text("Stored only on this device unless explicitly selected during pairing. Shell fields run on connect; review imported commands before connecting.", style = TesseraType.bodySmall, color = LocalTesseraTokens.current.fgMuted)
-        TesseraTextField(value = notes, onValueChange = { notes = it }, label = "notes", singleLine = false, modifier = Modifier.fillMaxWidth(), inputTestTag = "host-notes")
-        TesseraTextField(value = envVars, onValueChange = { envVars = it }, label = "environment variables (KEY=value)", singleLine = false, modifier = Modifier.fillMaxWidth(), inputTestTag = "host-env-vars")
-        TesseraTextField(value = startupSnippet, onValueChange = { startupSnippet = it }, label = "startup snippet", singleLine = false, modifier = Modifier.fillMaxWidth(), inputTestTag = "host-startup-snippet")
-        TesseraTextField(value = launchCommand, onValueChange = { launchCommand = it }, label = "custom command (when tmux is off)", singleLine = false, modifier = Modifier.fillMaxWidth(), inputTestTag = "host-launch-command")
+        Text(stringResource(R.string.hosts_optional_data_title), style = TesseraType.body)
+        Text(stringResource(R.string.hosts_optional_data_body), style = TesseraType.bodySmall, color = LocalTesseraTokens.current.fgMuted)
+        TesseraTextField(value = notes, onValueChange = { notes = it }, label = stringResource(R.string.hosts_notes), singleLine = false, modifier = Modifier.fillMaxWidth(), inputTestTag = "host-notes")
+        TesseraTextField(value = envVars, onValueChange = { envVars = it }, label = stringResource(R.string.hosts_env_vars), singleLine = false, modifier = Modifier.fillMaxWidth(), inputTestTag = "host-env-vars")
+        TesseraTextField(value = startupSnippet, onValueChange = { startupSnippet = it }, label = stringResource(R.string.hosts_startup_snippet), singleLine = false, modifier = Modifier.fillMaxWidth(), inputTestTag = "host-startup-snippet")
+        TesseraTextField(value = launchCommand, onValueChange = { launchCommand = it }, label = stringResource(R.string.hosts_launch_command), singleLine = false, modifier = Modifier.fillMaxWidth(), inputTestTag = "host-launch-command")
         error?.let { TesseraBanner(text = it) }
         Spacer(Modifier.height(8.dp))
     }
@@ -686,7 +694,7 @@ fun IdentityListScreen(
     knownHostsRepository: KnownHostsRepository,
     credentialStore: AndroidKeystoreCredentialStore,
     modifier: Modifier = Modifier,
-    onSystemUiActiveChanged: (Boolean) -> Unit = {},
+    onBack: (() -> Unit)? = null,
 ) {
     val tokens = LocalTesseraTokens.current
     val focusManager = LocalFocusManager.current
@@ -748,7 +756,15 @@ fun IdentityListScreen(
     }
 
     Column(modifier.background(tokens.bg).imePadding()) {
-        TesseraPageHeader(stringResource(R.string.identities_title).lowercase())
+        if (onBack == null) {
+            TesseraPageHeader(stringResource(R.string.identities_title))
+        } else {
+            TesseraSubPageHeader(
+                title = stringResource(R.string.identities_title),
+                onBack = onBack,
+                backContentDescription = stringResource(R.string.hosts_back_to_settings),
+            )
+        }
         TesseraHairline()
         if (loadedIdentities == null) {
             Spacer(Modifier.fillMaxWidth().weight(1f))
@@ -781,7 +797,7 @@ fun IdentityListScreen(
                             IdentityStatusLine(identity, credentialStore)
                         }
                         TesseraButton(
-                            text = stringResource(R.string.identity_details).lowercase(),
+                            text = stringResource(R.string.identity_details),
                             onClick = { selectedIdentity = identity },
                             modifier = Modifier.testTag("identity-details-${identity.id}"),
                             compact = true,
@@ -859,7 +875,6 @@ fun IdentityListScreen(
             identityRepository = repository,
             knownHostsRepository = knownHostsRepository,
             credentialStore = credentialStore,
-            onSystemUiActiveChanged = onSystemUiActiveChanged,
             onDismiss = { installingIdentity = null },
         )
     }
@@ -933,6 +948,7 @@ private fun IdentityDetailsDialog(
     val context = LocalContext.current
     val tokens = LocalTesseraTokens.current
     val sharePublicKeyTitle = stringResource(R.string.identity_share_public_key)
+    val publicKeyClipLabel = stringResource(R.string.hosts_public_key_clip_label)
     val credentialResult by produceState<Result<com.bambouville.tessera.security.StoredKeystoreCredential>?>(
         initialValue = null,
         key1 = identity.credentialReference,
@@ -983,7 +999,7 @@ private fun IdentityDetailsDialog(
             credential == null -> TesseraBanner(text = stringResource(R.string.identity_unavailable))
             else -> {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TesseraTag(credential.capabilities.securityLevel.name.lowercase().replace('_', ' '))
+                    TesseraTag(credential.capabilities.securityLevel.label())
                     TesseraTag(
                         if (credential.capabilities.ownerAuthenticationRequired) {
                             stringResource(R.string.identity_protected)
@@ -1013,7 +1029,7 @@ private fun IdentityDetailsDialog(
                             text = stringResource(R.string.identity_copy_public_key),
                             onClick = {
                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                clipboard.setPrimaryClip(ClipData.newPlainText("SSH public key", publicKey))
+                                clipboard.setPrimaryClip(ClipData.newPlainText(publicKeyClipLabel, publicKey))
                             },
                             modifier = Modifier.weight(1f),
                             icon = TesseraIcons.Copy,
@@ -1072,10 +1088,10 @@ private fun InstallKeyToHostDialog(
     identityRepository: IdentityRepository,
     knownHostsRepository: KnownHostsRepository,
     credentialStore: AndroidKeystoreCredentialStore,
-    onSystemUiActiveChanged: (Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val tokens = LocalTesseraTokens.current
     val scope = rememberCoroutineScope()
     val controller = remember(identity.id, hostRepository, identityRepository, knownHostsRepository) {
@@ -1093,22 +1109,16 @@ private fun InstallKeyToHostDialog(
     var password by remember((state as? AuthorizedKeyInstallState.AwaitingPassword)?.hop?.id) {
         mutableStateOf("")
     }
-    val ownerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        onSystemUiActiveChanged(false)
-        controller.decideOwnerAuthorization(result.resultCode == Activity.RESULT_OK)
-    }
     val ownerRequest = state as? AuthorizedKeyInstallState.AwaitingOwnerAuthorization
     LaunchedEffect(ownerRequest?.requestId) {
         val request = ownerRequest ?: return@LaunchedEffect
-        val keyguard = context.getSystemService(KeyguardManager::class.java)
-        val intent = keyguard.createConfirmDeviceCredentialIntent(
-            "Unlock Tessera key",
-            "Use ${request.hop.username}@${request.hop.endpoint.host} key",
+        controller.decideOwnerAuthorization(
+            confirmDeviceOwner(
+                context,
+                resources.getString(R.string.hosts_unlock_key_title),
+                resources.getString(R.string.hosts_unlock_key_body, request.hop.username, request.hop.endpoint.host),
+            ),
         )
-        if (intent == null) controller.decideOwnerAuthorization(false) else {
-            onSystemUiActiveChanged(true)
-            ownerLauncher.launch(intent)
-        }
     }
     fun dismiss() {
         controller.cancel()
@@ -1205,7 +1215,9 @@ private fun InstallKeyToHostDialog(
                 text = stringResource(R.string.identity_install_succeeded),
                 tone = com.bambouville.tessera.design.TesseraBannerTone.Info,
             )
-            is AuthorizedKeyInstallState.Failed -> TesseraBanner(text = value.message)
+            is AuthorizedKeyInstallState.Failed -> TesseraBanner(
+                text = value.messageRes?.let { stringResource(it) } ?: value.message,
+            )
             is AuthorizedKeyInstallState.AwaitingPassword -> {
                 TesseraTextField(
                     value = password,
@@ -1270,6 +1282,18 @@ private fun ProgressLine(text: String) {
         com.bambouville.tessera.design.TesseraProgressTrack(progress = null)
     }
 }
+
+/** The Keystore's storage level, worded for the key details tag. */
+@Composable
+private fun KeySecurityLevel.label(): String = stringResource(
+    when (this) {
+        KeySecurityLevel.SOFTWARE -> R.string.hosts_security_level_software
+        KeySecurityLevel.TRUSTED_ENVIRONMENT -> R.string.hosts_security_level_trusted_environment
+        KeySecurityLevel.STRONGBOX -> R.string.hosts_security_level_strongbox
+        KeySecurityLevel.UNKNOWN_SECURE -> R.string.hosts_security_level_unknown_secure
+        KeySecurityLevel.UNKNOWN -> R.string.hosts_security_level_unknown
+    },
+)
 
 private fun String.openSshComment(): String =
     trim().replace(Regex("\\s+"), "-").filter { it.code in 33..126 }.take(64).ifEmpty { "tessera-android" }

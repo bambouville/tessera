@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 @testable import TesseraCoreABI
+import TmuxControlCore
 
 /// Version 2 of the lifecycle ABI: the whole show-rule session over the same
 /// handle. Policy is pinned in `AuthoritySessionTests`; these tests pin the
@@ -671,6 +672,38 @@ final class TmuxAuthoritySessionABITests: XCTestCase {
         XCTAssertNil(resolved["claim"])
     }
 
+    /// A relaunch hands back the record an earlier process kept: our stamp
+    /// still stands over a grid this device owned, so the read replays it
+    /// with no veil, and the response projects the record to keep next.
+    func testARelaunchReplaysTheGridsItsStandingStampOwned() throws {
+        let handle = tesseraTmuxAuthorityLifecycleCreateSeeded(initialGeneration: 0)!
+        defer { tesseraTmuxAuthorityLifecycleDestroy(handle: handle) }
+        let restored = try reduce(handle, "restoreOwnedGeometry", at: 0, [
+            "localDeviceID": "SELF",
+            "ownedGeometryRecords": [
+                ["generation": 2, "sizes": [["columns": 120, "rows": 40]]],
+                ["generation": 3, "sizes": [["columns": 92, "rows": 38]]],
+            ],
+        ])
+        XCTAssertEqual(restored["trace"] as? String,
+                       "event=restoreOwnedGeometry(g3 g2) authority=unknown claim=none restored=0->2")
+        XCTAssertNil(restored["ownedGeometryRecord"], "nothing is owned under a standing stamp yet")
+        try reduce(handle, "attached", at: 1)
+        try reduce(handle, "adoptShown", at: 2)
+        try reduce(handle, "localSize", at: 3, ["columns": 100, "rows": 40])
+        try reduce(handle, "windowFacts", at: 4, window(1, 92, 38))
+        try reduce(handle, "windowSizePolicyReplied", at: 5, ["windowID": 1, "rawPolicy": "latest"])
+        let resolved = try reduce(handle, "queryReplied", at: 100, ["queryID": 1, "rawAuthorityValue": Self.mine])
+        XCTAssertEqual(kinds(resolved), ["authorityChanged", "releaseGeometry"])
+        XCTAssertEqual(effect(resolved, "releaseGeometry")?["release"] as? String, "ownerReplay")
+        XCTAssertEqual(presentation(resolved)?["kind"] as? String, "none")
+        XCTAssertTrue((resolved["trace"] as? String)?.contains("restored=2->0") == true)
+        let record = try XCTUnwrap(resolved["ownedGeometryRecord"] as? [String: Any])
+        XCTAssertEqual(uint(record["generation"]), 3)
+        let sizes = try XCTUnwrap(record["sizes"] as? [[String: Any]])
+        XCTAssertEqual(sizes.map { [int($0["columns"]), int($0["rows"])] }, [[92, 38], [100, 40]])
+    }
+
     func testATapIntentKeepsItsBaselineAndExpiresOrHides() throws {
         let handle = try yielded()
         defer { tesseraTmuxAuthorityLifecycleDestroy(handle: handle) }
@@ -935,6 +968,15 @@ final class TmuxAuthoritySessionABITests: XCTestCase {
             request("windowSizePolicyReplied", ["windowID": 1]),
             request("abort", ["generation": 1, "reason": "contestedByPeer"]),
             request("abort"),
+            request("restoreOwnedGeometry"),
+            request("restoreOwnedGeometry", ["ownedGeometryRecords": [["generation": 3, "sizes": [] as [Any]]]]),
+            request("restoreOwnedGeometry", ["ownedGeometryRecords": [["generation": 3, "sizes": [["columns": 0, "rows": 24]]]]]),
+            request("restoreOwnedGeometry", ["ownedGeometryRecords": [["sizes": [["columns": 80, "rows": 24]]]]]),
+            request("restoreOwnedGeometry", ["ownedGeometryRecords": [["generation": 3,
+                "sizes": Array(repeating: ["columns": 80, "rows": 24], count: TmuxOwnedSizeHistory.limit + 1)]]]),
+            request("restoreOwnedGeometry", ["ownedGeometryRecords": (0...TmuxAuthoritySessionRequest.maximumRestoredRecords).map {
+                ["generation": $0, "sizes": [["columns": 80, "rows": 24]]]
+            }]),
         ]
         rejected.append(request("fenceSucceeded", ["generation": 1]))
         for event in ["repaintSucceeded", "stampCommitSucceeded", "settle"] {
@@ -943,7 +985,7 @@ final class TmuxAuthoritySessionABITests: XCTestCase {
         for request in rejected {
             try assertRejectedWithoutMutation(handle, request)
         }
-        XCTAssertEqual(rejected.count, 35)
+        XCTAssertEqual(rejected.count, 41)
     }
 
     /// Review F5: an extreme clock value through JNI must never trap (which

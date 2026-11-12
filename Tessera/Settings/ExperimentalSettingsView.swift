@@ -167,8 +167,7 @@ struct ExperimentalSettingsView: View {
         .task {
             guard appearance.agentCenterEnabled,
                   appearance.agentCenterNotificationsEnabled else { return }
-            let status = await bellController.requestPermissionIfNeeded()
-            if status == .denied { showNotificationDenialSheet = true }
+            if await bellController.requestPermission().deniedBeforeAsking { showNotificationDenialSheet = true }
         }
     }
 
@@ -181,8 +180,7 @@ struct ExperimentalSettingsView: View {
 
     private func requestAgentNotificationPermission() {
         Task {
-            let status = await bellController.requestPermissionIfNeeded()
-            if status == .denied { showNotificationDenialSheet = true }
+            if await bellController.requestPermission().deniedBeforeAsking { showNotificationDenialSheet = true }
         }
     }
 

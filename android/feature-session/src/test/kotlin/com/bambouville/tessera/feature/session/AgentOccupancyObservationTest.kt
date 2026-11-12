@@ -7,6 +7,8 @@ import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.lang.reflect.Proxy
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
 import net.schmizz.sshj.SSHClient
 import net.schmizz.sshj.connection.channel.direct.Session
 import org.json.JSONArray
@@ -16,14 +18,51 @@ import org.junit.Test
 
 /** Real endpoint and Core discovery parsing; SSH execs have no sockets. */
 class AgentOccupancyObservationTest {
+    @Test fun paneSetSignalsOnlyRemovalsAndRetainsOnePendingInvalidation() = runBlocking {
+        for (transport in listOf(AgentEndpointTransport.SSH_TMUX, AgentEndpointTransport.MOSH_TMUX)) {
+            val route = route(InventoryClient(emptyList()))
+            val endpoint = endpoint(route, transport) { error("pane-set diff must not do remote work") }
+            var removals = 0
+            val observer = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                endpoint.tmuxPaneRemovals.collect { removals++ }
+            }
+            try {
+                val first = mutableSetOf(75, 76)
+                endpoint.noteTmuxPaneSet(first)
+                first.clear() // The endpoint owns its baseline, not the caller's mutable set.
+                endpoint.noteTmuxPaneSet(setOf(75, 76, 77))
+                endpoint.noteTmuxPaneSet(setOf(75, 76, 77))
+                kotlinx.coroutines.yield()
+                assertEquals(0, removals)
+                endpoint.noteTmuxPaneSet(setOf(75, 77, 78)) // Replacement also removes a pane.
+                kotlinx.coroutines.yield()
+                assertEquals(1, removals)
+                endpoint.noteTmuxPaneSet(emptySet())
+                kotlinx.coroutines.yield()
+                assertEquals(2, removals)
+                assertEquals(listOf(Unit), endpoint.tmuxPaneRemovals.replayCache)
+                endpoint.close()
+                endpoint.noteTmuxPaneSet(setOf(75))
+                endpoint.noteTmuxPaneSet(emptySet())
+                kotlinx.coroutines.yield()
+                assertEquals(2, removals)
+            } finally { observer.cancel(); endpoint.close(); route.close() }
+        }
+    }
+
     @Test fun paneListsAreBoundedAndMalformedOrFailedListsProveNothing() {
         assertEquals(mapOf("%75" to 100, "%76" to 200),
             parseAgentOccupancyPanes(AgentTmuxControlAck(true, listOf("%75 100", "%76 200")))!!.roots)
-        assertTrue(parseAgentOccupancyPanes(AgentTmuxControlAck(true, emptyList()))!!.complete)
+        // A view session grouped with its owner lists every shared pane again.
+        val grouped = parseAgentOccupancyPanes(AgentTmuxControlAck(true, listOf("%75 100", "%76 200", "%75 100", "%76 200")))!!
+        assertEquals(mapOf("%75" to 100, "%76" to 200), grouped.roots)
+        assertTrue(grouped.complete)
+        val full = parseAgentOccupancyPanes(AgentTmuxControlAck(true, listOf("%75 100", "%76 200", "%75 100")), limit = 2)!!
+        assertTrue(full.complete)
         val bounded = parseAgentOccupancyPanes(AgentTmuxControlAck(true, listOf("%75 100", "%76 200")), limit = 1)!!
         assertFalse(bounded.complete)
         assertEquals(mapOf("%75" to 100), bounded.roots)
-        for (lines in listOf(listOf("%75 nope"), listOf("%75 1"), listOf("@1 100"),
+        for (lines in listOf(emptyList(), listOf("%75 nope"), listOf("%75 1"), listOf("@1 100"),
             listOf("%75 100 extra"), listOf("%75 100", "%75 200"))) {
             assertNull(parseAgentOccupancyPanes(AgentTmuxControlAck(true, lines)))
         }
@@ -61,7 +100,7 @@ class AgentOccupancyObservationTest {
             val client = InventoryClient(emptyList())
             val route = route(client)
             val endpoint = endpoint(route, AgentEndpointTransport.SSH_TMUX) {
-                AgentTmuxControlAck(mode != "failed", if (mode == "incomplete") (0..256).map { "%$it ${it + 100}" } else emptyList())
+                AgentTmuxControlAck(mode != "failed", if (mode == "incomplete") (0..256).map { "%$it ${it + 100}" } else listOf("%1 100", "%1 100"))
             }
             try {
                 endpoint.updateActiveTmuxTarget(1, 999)

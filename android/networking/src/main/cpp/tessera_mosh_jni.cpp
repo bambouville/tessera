@@ -71,6 +71,9 @@ NativeClient* get(jlong handle) {
 }
 
 void throw_java(JNIEnv* env, const char* message) {
+  // A failed lookup leaves its own exception pending, and any JNI call made
+  // over it aborts the process; let that one reach Kotlin instead.
+  if (env->ExceptionCheck()) return;
   jclass type = env->FindClass("java/lang/IllegalStateException");
   if (type != nullptr) env->ThrowNew(type, message == nullptr ? "native Mosh failure" : message);
 }
@@ -155,7 +158,8 @@ Java_com_bambouville_tessera_networking_mosh_JniMoshNativeClient_nativeCreate(
     return 0;
   }
   native->callback_target = env->NewGlobalRef(receiver);
-  jclass clazz = env->GetObjectClass(receiver);
+  // A failed NewGlobalRef leaves an exception pending: make no JNI call over it.
+  jclass clazz = native->callback_target == nullptr ? nullptr : env->GetObjectClass(receiver);
   native->output_method = clazz == nullptr ? nullptr : env->GetMethodID(clazz, "onNativeOutput", "([B)V");
   if (clazz != nullptr) env->DeleteLocalRef(clazz);
   if (native->callback_target == nullptr || native->output_method == nullptr) {

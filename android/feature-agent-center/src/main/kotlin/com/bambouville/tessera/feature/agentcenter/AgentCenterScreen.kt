@@ -1,5 +1,6 @@
 package com.bambouville.tessera.feature.agentcenter
 
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import android.Manifest
 import android.content.res.Configuration
@@ -14,7 +15,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -53,11 +53,14 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -89,6 +92,8 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -104,6 +109,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.ensureActive
+import com.bambouville.tessera.design.LocalArtifactOpener
 import com.bambouville.tessera.design.LocalTesseraTokens
 import com.bambouville.tessera.design.TesseraButton
 import com.bambouville.tessera.design.TesseraButtonStyle
@@ -152,8 +158,26 @@ fun AgentCenterScreen(
     /** Candidates have no conversation authority; this only reveals their host terminal. */
     onOpenCandidateTerminal: (AgentTerminalCandidate) -> Unit = {},
     captureProtectionEnabled: Boolean = true,
+    /** Whether a thread's bound live session is connected now; read only when a menu opens. */
+    isBoundSessionConnected: (AgentThreadDetail) -> Boolean = { false },
+    /**
+     * A transcript path for the thread's bound, connected session (Open in
+     * Artifacts, Reveal in Files). Null: no session route, so a selection
+     * offers Reveal nowhere and opens only absolute paths and loopback links.
+     */
+    onSelectionPathAction: ((AgentThreadDetail, AgentSelectionPathAction, String) -> Unit)? = null,
 ) {
     val state by presenter.state.collectAsState()
+    val currentBoundSessionConnected by rememberUpdatedState(isBoundSessionConnected)
+    val currentSelectionPathAction by rememberUpdatedState(onSelectionPathAction)
+    val selectionActions = remember(presenter) {
+        AgentTranscriptSelectionActions(
+            isSessionConnected = { detail -> currentSelectionPathAction != null && currentBoundSessionConnected(detail) },
+            onPathAction = { detail, action, selection -> currentSelectionPathAction?.invoke(detail, action, selection) },
+            onMiss = presenter::reportSelectionMiss,
+            onSessionUnavailable = presenter::reportTerminalUnavailable,
+        )
+    }
     AgentCenterWindowPrivacy(enabled = captureProtectionEnabled)
     val context = LocalContext.current
     val speech = remember(context) { AndroidAgentSpeechAdapter(context) }
@@ -179,6 +203,17 @@ fun AgentCenterScreen(
     }
     var launchKind by remember { mutableStateOf<AgentLaunchKind?>(null) }
     var compactDetail by remember { mutableStateOf(false) }
+    // Hand folds of waiting rows, per question. Held here, above both layouts,
+    // so a phone's drill-in and a window crossing the split width keep them.
+    var answerFolds by remember { mutableStateOf(AgentRowAnswerFolds()) }
+    val waitingQuestions = remember(state.threads, state.projectedDetails) {
+        agentWaitingQuestions(state.threads, state.projectedDetails)
+    }
+    LaunchedEffect(waitingQuestions) { answerFolds = answerFolds.retainingCurrent(waitingQuestions) }
+    // Typed answers, shared by a row's card and the detail's, so a row that
+    // folds or a card that moves to the detail keeps what was typed.
+    val promptDrafts = remember { AgentPromptDrafts() }
+    val toggleAnswers: (AgentRowPromptKey, Boolean) -> Unit = { key, open -> answerFolds = answerFolds.choosing(key, open) }
     val searchFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { presenter.activate() }
 
@@ -246,6 +281,7 @@ fun AgentCenterScreen(
                     state = state,
                     onSearch = presenter::search,
                     onSelect = presenter::select,
+                    onOpenSearchResult = presenter::openSearchResult,
                     onGroupingChange = presenter::setGrouping,
                     onSpawn = { launchKind = AgentLaunchKind.Spawn },
                     onPromptAnswer = presenter::requestPromptAnswer,
@@ -255,11 +291,17 @@ fun AgentCenterScreen(
                     searchFocus = searchFocus,
                     onTitleWidthChange = presenter::setTitleCharacterBudget,
                     onCardVisibility = presenter::setCardVisible,
+                    // The detail beside shows the selected thread (`visibleThreadKey`).
+                    detailBeside = true,
+                    answerFolds = answerFolds,
+                    onToggleAnswers = toggleAnswers,
+                    promptDrafts = promptDrafts,
                     modifier = Modifier.widthIn(min = 300.dp, max = 360.dp).fillMaxHeight(),
                 )
                 TesseraHairline(Modifier.width(1.dp).fillMaxHeight())
                 AgentDetailPane(
                     detail = selected,
+                    promptDrafts = promptDrafts,
                     draft = draft,
                     onDraftChange = setDraft,
                     onSend = { selected?.let { detail ->
@@ -270,8 +312,12 @@ fun AgentCenterScreen(
                     onNewestVisible = { recordID -> selected?.let { presenter.acknowledge(it.row.key, recordID) } },
                     onCompletionVisible = { selected?.let { presenter.acknowledgeCompletion(it.row.key) } },
                     onLoadNewer = { selected?.let { presenter.loadNewer(it.row.key) } },
-                    onReturnToLatest = { selected?.let { presenter.loadNewer(it.row.key, latest = true) } },
+                    onReturnToLatest = { selected?.let { presenter.returnToLatest(it.row.key) } },
                     onViewportAnchor = { recordID -> selected?.let { presenter.viewportAnchor(it.row.key, recordID) } },
+                    searchLanding = state.searchLanding,
+                    onSearchLanded = presenter::finishSearchLanding,
+                    opensAtLatest = state.latestOpening != null && state.latestOpening == selected?.row?.key,
+                    onOpenedAtLatest = { selected?.let { presenter.finishLatestOpening(it.row.key) } },
                     onLoadMore = { selected?.let { presenter.loadMore(it.row.key) } },
                     onFillHistory = { selected?.let { presenter.fillHistory(it.row.key) } },
                     onRetainBridgedRows = { selected?.let { presenter.retainBridgedRows(it.row.key) } },
@@ -288,12 +334,14 @@ fun AgentCenterScreen(
                     loadingTranscript = draftKey in state.loadingTranscriptThreads,
                     capacityLimited = draftKey in state.ingestionCapacityThreads,
                     readStatus = state.ingestionReadStatuses[draftKey],
+                    selectionActions = selectionActions,
                     modifier = Modifier.weight(1f),
                 )
             }
         } else if (compactDetail && selected != null) {
             AgentDetailPane(
                 detail = selected,
+                promptDrafts = promptDrafts,
                 draft = draft,
                 onDraftChange = setDraft,
                 onSend = {
@@ -304,8 +352,12 @@ fun AgentCenterScreen(
                 onNewestVisible = { recordID -> presenter.acknowledge(selected.row.key, recordID) },
                 onCompletionVisible = { presenter.acknowledgeCompletion(selected.row.key) },
                 onLoadNewer = { presenter.loadNewer(selected.row.key) },
-                onReturnToLatest = { presenter.loadNewer(selected.row.key, latest = true) },
+                onReturnToLatest = { presenter.returnToLatest(selected.row.key) },
                 onViewportAnchor = { presenter.viewportAnchor(selected.row.key, it) },
+                searchLanding = state.searchLanding,
+                onSearchLanded = presenter::finishSearchLanding,
+                opensAtLatest = state.latestOpening == selected.row.key,
+                onOpenedAtLatest = { presenter.finishLatestOpening(selected.row.key) },
                 onLoadMore = { presenter.loadMore(selected.row.key) },
                 onFillHistory = { presenter.fillHistory(selected.row.key) },
                 onRetainBridgedRows = { presenter.retainBridgedRows(selected.row.key) },
@@ -322,6 +374,7 @@ fun AgentCenterScreen(
                 loadingTranscript = draftKey in state.loadingTranscriptThreads,
                 capacityLimited = draftKey in state.ingestionCapacityThreads,
                 readStatus = state.ingestionReadStatuses[draftKey],
+                selectionActions = selectionActions,
                 onBack = { compactDetail = false },
                 modifier = Modifier.fillMaxSize(),
             )
@@ -330,6 +383,7 @@ fun AgentCenterScreen(
                 state = state,
                 onSearch = presenter::search,
                 onSelect = { key -> presenter.select(key); compactDetail = true },
+                onOpenSearchResult = { result -> presenter.openSearchResult(result); compactDetail = true },
                 onGroupingChange = presenter::setGrouping,
                 onSpawn = { launchKind = AgentLaunchKind.Spawn },
                 onPromptAnswer = presenter::requestPromptAnswer,
@@ -339,6 +393,9 @@ fun AgentCenterScreen(
                 searchFocus = searchFocus,
                 onTitleWidthChange = presenter::setTitleCharacterBudget,
                 onCardVisibility = presenter::setCardVisible,
+                answerFolds = answerFolds,
+                onToggleAnswers = toggleAnswers,
+                promptDrafts = promptDrafts,
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -367,14 +424,16 @@ internal fun AgentNoticeDialog(
     onSendAnyway: (() -> Unit)? = null,
     captureProtectionEnabled: Boolean = false,
 ) {
+    val notices = rememberAgentNoticeLocalizer()
+    val sendAnyway = stringResource(R.string.agent_center_send_anyway)
     AlertDialog(
         properties = androidx.compose.ui.window.DialogProperties(securePolicy = if (captureProtectionEnabled)
             androidx.compose.ui.window.SecureFlagPolicy.SecureOn else androidx.compose.ui.window.SecureFlagPolicy.Inherit),
         onDismissRequest = onDismiss,
-        title = { Text("agents", style = TesseraType.sheet) },
-        text = { Text(notice, style = TesseraType.body) },
-        confirmButton = { TesseraButton("ok", onDismiss, compact = true) },
-        dismissButton = onSendAnyway?.let { send -> { TesseraButton("Send anyway", send, compact = true) } },
+        title = { Text(stringResource(R.string.agent_center_title), style = TesseraType.sheet) },
+        text = { Text(remember(notice, notices) { notices.localize(notice) }, style = TesseraType.body) },
+        confirmButton = { TesseraButton(stringResource(R.string.agent_center_ok), onDismiss, compact = true) },
+        dismissButton = onSendAnyway?.let { send -> { TesseraButton(sendAnyway, send, compact = true) } },
     )
 }
 
@@ -386,6 +445,8 @@ internal fun AgentListPane(
     onGroupingChange: (String) -> Unit,
     onSpawn: () -> Unit,
     modifier: Modifier,
+    /** Opens a match's thread at the match; a plain selection by default. */
+    onOpenSearchResult: (AgentSearchResultRow) -> Unit = { onSelect(it.threadKey) },
     searchFocus: FocusRequester = FocusRequester(),
     onPromptAnswer: (AgentThreadDetail, AgentPrompt, AgentPromptAnswerChoice) -> Unit = { _, _, _ -> },
     onCandidatePromptAnswer: (AgentTerminalCandidate, AgentPrompt, AgentPromptOption) -> Unit = { _, _, _ -> },
@@ -398,6 +459,15 @@ internal fun AgentListPane(
      */
     onTitleWidthChange: (Int) -> Unit = {},
     onCardVisibility: (String, Boolean) -> Unit = { _, _ -> },
+    /**
+     * Whether the detail pane is open beside this list, showing
+     * `state.selectedThreadKey`. That row folds its answers by default.
+     */
+    detailBeside: Boolean = false,
+    answerFolds: AgentRowAnswerFolds = AgentRowAnswerFolds(),
+    /** A row's chevron: the question and whether to leave its answers open. */
+    onToggleAnswers: (AgentRowPromptKey, Boolean) -> Unit = { _, _ -> },
+    promptDrafts: AgentPromptDrafts = remember { AgentPromptDrafts() },
 ) {
     val tokens = LocalTesseraTokens.current
     // A list row's capability is not enough to launch: this sheet needs the
@@ -415,51 +485,68 @@ internal fun AgentListPane(
             if (available > 0f) onTitleWidthChange((available / AGENT_ROW_TITLE_GLYPH_DP).toInt())
         },
     ) {
-        TesseraPageHeader("agents", trailing = {
-            TesseraIconButton(TesseraIcons.Plus, "spawn agent", onSpawn, enabled = spawnAvailable)
+        TesseraPageHeader(stringResource(R.string.agent_center_title), trailing = {
+            TesseraIconButton(TesseraIcons.Plus, stringResource(R.string.agent_center_spawn_agent), onSpawn, enabled = spawnAvailable)
         })
         TesseraSearchField(
             value = state.searchQuery,
             onValueChange = onSearch,
-            placeholder = "search agents",
-            clearContentDescription = "clear agent search",
+            placeholder = stringResource(R.string.agent_center_search_placeholder),
+            clearContentDescription = stringResource(R.string.agent_center_search_clear),
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             inputModifier = Modifier.focusRequester(searchFocus),
             inputTestTag = "agent-search",
         )
         TesseraSegmented(
-            options = AGENT_GROUPINGS,
-            selectedIndex = AGENT_GROUPINGS.indexOf(state.grouping).coerceAtLeast(0),
-            onSelect = { index -> onGroupingChange(AGENT_GROUPINGS[index]) },
+            options = AGENT_GROUPINGS.map { stringResource(it.second) },
+            selectedIndex = AGENT_GROUPINGS.indexOfFirst { it.first == state.grouping }.coerceAtLeast(0),
+            onSelect = { index -> onGroupingChange(AGENT_GROUPINGS[index].first) },
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).testTag("agent-grouping"),
         )
         // On a compact device this remains visible after navigating back from
         // the detail route: answering does not require a second drill-in.
-        if (state.searchQuery.isNotBlank() && state.unavailableSearchHostCount > 0) {
+        if (state.searchQuery.isNotBlank() && !state.searching && state.unavailableSearchHostCount > 0) {
             Text(
-                "${state.unavailableSearchHostCount} connected host${if (state.unavailableSearchHostCount == 1) "" else "s"} unavailable",
+                pluralStringResource(R.plurals.agent_center_search_hosts_unavailable, state.unavailableSearchHostCount,
+                    state.unavailableSearchHostCount),
                 Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 style = TesseraType.rowMicro,
                 color = tokens.fgMuted,
             )
         }
         when {
-            state.loading -> Text("loading agent center…", Modifier.padding(20.dp), style = TesseraType.body, color = tokens.fgMuted)
-            state.unavailableReason != null -> TesseraEmptyState("agents unavailable", state.unavailableReason, modifier = Modifier.fillMaxSize(), icon = TesseraIcons.Sessions)
-            state.searchQuery.isNotBlank() && state.searchResults.isEmpty() -> TesseraEmptyState("no transcript matches", "Available connected-host transcripts did not contain this query.", modifier = Modifier.fillMaxSize(), icon = TesseraIcons.Sessions)
+            state.loading -> Text(stringResource(R.string.agent_center_loading), Modifier.padding(20.dp), style = TesseraType.body, color = tokens.fgMuted)
+            state.unavailableReason != null -> {
+                val notices = rememberAgentNoticeLocalizer()
+                TesseraEmptyState(stringResource(R.string.agent_center_unavailable_title),
+                    remember(state.unavailableReason, notices) { notices.localize(state.unavailableReason) },
+                    modifier = Modifier.fillMaxSize(), icon = TesseraIcons.Sessions)
+            }
+            state.searchQuery.isNotBlank() && state.searchResults.isEmpty() && !state.searching -> TesseraEmptyState(stringResource(R.string.agent_center_no_matches_title),
+                stringResource(R.string.agent_center_no_matches_body), modifier = Modifier.fillMaxSize(), icon = TesseraIcons.Sessions)
             state.searchQuery.isNotBlank() -> LazyColumn(Modifier.fillMaxSize()) {
                 items(state.searchResults, key = { "${it.threadKey}:${it.recordID}" }) { result ->
                     Column(
-                        Modifier.fillMaxWidth().clickable(role = Role.Button) { onSelect(result.threadKey) }
+                        Modifier.fillMaxWidth().clickable(role = Role.Button) { onOpenSearchResult(result) }
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                     ) {
-                        Text(state.threads.firstOrNull { it.key == result.threadKey }?.title ?: "agent thread", style = TesseraType.rowTitle, color = tokens.fg)
+                        Text(state.threads.firstOrNull { it.key == result.threadKey }?.title
+                            ?: stringResource(R.string.agent_center_search_result_untitled), style = TesseraType.rowTitle, color = tokens.fg)
                         Text(result.excerpt, Modifier.padding(top = 4.dp), style = TesseraType.bodySmall, color = tokens.fgMuted, maxLines = 4, overflow = TextOverflow.Ellipsis)
                     }
                     TesseraHairline()
                 }
+                // Rows show as sources find them; the spinner stays below
+                // them until the search ends.
+                if (state.searching) item(key = "agent-search-progress") {
+                    Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(Modifier.size(20.dp).testTag("agent-search-progress"),
+                            color = tokens.fgMuted, strokeWidth = 2.dp)
+                    }
+                }
             }
-            state.threads.isEmpty() && state.candidates.isEmpty() -> TesseraEmptyState("no live agents", "Connect an SSH, SSH+tmux, Mosh, or Mosh+tmux session with an available agent integration.", modifier = Modifier.fillMaxSize(), icon = TesseraIcons.Sessions)
+            state.threads.isEmpty() && state.candidates.isEmpty() -> TesseraEmptyState(stringResource(R.string.agent_center_empty_title),
+                stringResource(R.string.agent_center_empty_body), modifier = Modifier.fillMaxSize(), icon = TesseraIcons.Sessions)
             else -> LazyColumn(Modifier.fillMaxSize().onKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionDown || event.key == Key.DirectionUp)) {
                     val current = state.threads.indexOfFirst { it.key == state.selectedThreadKey }.coerceAtLeast(0)
@@ -468,7 +555,7 @@ internal fun AgentListPane(
                 } else false
             }) {
                 if (state.candidates.isNotEmpty()) {
-                    item { Text("live terminals", Modifier.fillMaxWidth().padding(start = 16.dp, top = 12.dp, bottom = 5.dp), style = TesseraType.rowMicro, color = tokens.fgDim) }
+                    item { Text(stringResource(R.string.agent_center_live_terminals), Modifier.fillMaxWidth().padding(start = 16.dp, top = 12.dp, bottom = 5.dp), style = TesseraType.rowMicro, color = tokens.fgDim) }
                     items(state.candidates, key = { it.key }) { candidate ->
                         AgentCandidateRow(candidate, onOpenCandidateTerminal, onCandidatePromptAnswer)
                         TesseraHairline()
@@ -480,7 +567,8 @@ internal fun AgentListPane(
                         onDispose { onCardVisibility(row.key, false) }
                     }
                     val group = row.groupLabel(state.grouping)
-                    if (index == 0 || state.threads[index - 1].groupLabel(state.grouping) != group) {
+                    val previousGroup = if (index == 0) null else state.threads[index - 1].groupLabel(state.grouping)
+                    if (previousGroup != group) {
                         Text(
                             group,
                             Modifier.fillMaxWidth().padding(start = 16.dp, top = 12.dp, bottom = 5.dp),
@@ -488,23 +576,31 @@ internal fun AgentListPane(
                             color = if (state.grouping == "attention" && row.attention == "needsYou") tokens.amber else tokens.fgDim,
                         )
                     }
-                    AgentThreadRow(row, selected = row.key == state.selectedThreadKey, onClick = { onSelect(row.key) })
                     // Projection data is snapshot-derived and ephemeral. This
                     // keeps a phone's urgent action at zero drill-down depth
                     // without guessing a prompt from the row summary.
-                    state.projectedDetails[row.key]
-                        ?.takeIf { it.row.attention == "needsYou" }
-                        ?.prompt
-                        ?.let { prompt ->
-                            val detail = state.projectedDetails.getValue(row.key)
-                            AgentUrgentPrompt(
-                                prompt = prompt,
-                                actionAvailable = detail.canAnswerPrompt(),
-                                pending = row.key in state.actionThreads,
-                                onAnswer = { answer -> onPromptAnswer(detail, prompt, answer) },
-                                onOpenTerminal = { onOpenTerminal(detail) },
-                            )
-                        }
+                    val waiting = state.projectedDetails[row.key]?.takeIf { it.row.attention == "needsYou" }
+                    val prompt = waiting?.prompt
+                    val promptKey = prompt?.let { AgentRowPromptKey(row.key, it.actionToken) }
+                    val fold = promptKey?.let { answerFolds.fold(it, state.selectedThreadKey, detailBeside) }
+                    AgentThreadRow(
+                        row,
+                        selected = row.key == state.selectedThreadKey,
+                        onClick = { onSelect(row.key) },
+                        answerFold = fold,
+                        onToggleAnswers = { promptKey?.let { onToggleAnswers(it, fold?.folded == true) } },
+                    )
+                    if (waiting != null && prompt != null && fold == AgentRowAnswerFold.Open) {
+                        AgentUrgentPrompt(
+                            prompt = prompt,
+                            threadKey = row.key,
+                            drafts = promptDrafts,
+                            actionAvailable = waiting.canAnswerPrompt(),
+                            pending = row.key in state.actionThreads,
+                            onAnswer = { answer -> onPromptAnswer(waiting, prompt, answer) },
+                            onOpenTerminal = { onOpenTerminal(waiting) },
+                        )
+                    }
                     TesseraHairline()
                 }
             }
@@ -524,10 +620,10 @@ private fun AgentCandidateRow(
         Row(verticalAlignment = Alignment.CenterVertically) {
             TesseraStatusDot(if (candidate.status == "waitingForInput") tokens.amber else tokens.fgFaint, size = 7.dp)
             Text(candidate.title, Modifier.padding(start = 10.dp).weight(1f), style = TesseraType.rowTitle, color = tokens.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            TesseraButton("open terminal", { onOpenTerminal(candidate) }, compact = true)
+            TesseraButton(stringResource(R.string.agent_center_open_terminal), { onOpenTerminal(candidate) }, compact = true)
         }
         Text(listOf(candidate.provider, candidate.host, candidate.location).filter(String::isNotBlank).joinToString(" · "), Modifier.padding(start = 17.dp, top = 4.dp), style = TesseraType.rowMeta, color = tokens.fgMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text("Transcript identity unavailable; review in terminal.", Modifier.padding(start = 17.dp, top = 3.dp), style = TesseraType.rowMicro, color = tokens.fgDim)
+        Text(stringResource(R.string.agent_center_candidate_identity_unavailable), Modifier.padding(start = 17.dp, top = 3.dp), style = TesseraType.rowMicro, color = tokens.fgDim)
         candidate.prompt?.let { prompt ->
             Text(prompt.title, Modifier.padding(start = 17.dp, top = 8.dp), style = TesseraType.bodySmall, color = tokens.fg)
             if (candidate.canAnswerPrompt()) {
@@ -541,7 +637,7 @@ private fun AgentCandidateRow(
                     )
                 }
             } else {
-                TesseraButton("Open terminal to answer", { onOpenTerminal(candidate) }, compact = true, modifier = Modifier.padding(start = 17.dp, top = 5.dp))
+                TesseraButton(stringResource(R.string.agent_center_open_terminal_to_answer), { onOpenTerminal(candidate) }, compact = true, modifier = Modifier.padding(start = 17.dp, top = 5.dp))
             }
         }
         if (candidate.liveTail.isNotBlank()) Text(candidate.liveTail, Modifier.padding(start = 17.dp, top = 5.dp), style = TesseraType.bodySmall, color = tokens.fgMuted, maxLines = 3, overflow = TextOverflow.Ellipsis)
@@ -553,21 +649,21 @@ internal fun AgentTerminalCandidate.canAnswerPrompt(): Boolean =
     prompt != null && (binding?.number("capabilities")?.toIntOrNull()?.and(8) == 8) &&
         (binding.number("agentPID")?.toIntOrNull() ?: -1) > 1
 
+/** [answerFold] is non-null for a waiting row with answers to fold; see [AgentRowAnswerFolds]. */
 @Composable
-private fun AgentThreadRow(row: AgentThreadRow, selected: Boolean, onClick: () -> Unit) {
+private fun AgentThreadRow(
+    row: AgentThreadRow,
+    selected: Boolean,
+    onClick: () -> Unit,
+    answerFold: AgentRowAnswerFold? = null,
+    onToggleAnswers: () -> Unit = {},
+) {
     val tokens = LocalTesseraTokens.current
+    val words = rememberAgentRowWords()
+    val description = row.accessibilityDescription(words)
     Row(
         Modifier.fillMaxWidth().semantics {
-            contentDescription = listOfNotNull(
-                row.title,
-                row.provider,
-                row.permissionMode,
-                row.host.takeIf { it.isNotBlank() }?.let { "host $it" },
-                row.status.replaceFirstChar(Char::uppercase),
-                row.queuedCount?.let { "$it queued" },
-                if (row.isFork) "fork" else null,
-                row.attention.takeIf { it == "needsYou" }?.let { "needs your attention" },
-            ).joinToString(", ")
+            contentDescription = description
         }.clickable(role = Role.Button, onClick = onClick)
             .background(if (selected) tokens.accentSoft else tokens.bg).padding(horizontal = 16.dp, vertical = 13.dp),
         verticalAlignment = Alignment.Top,
@@ -577,41 +673,64 @@ private fun AgentThreadRow(row: AgentThreadRow, selected: Boolean, onClick: () -
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(row.title, Modifier.weight(1f), style = TesseraType.rowTitle, color = tokens.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (row.attention == "needsYou") Text("needs you", style = TesseraType.rowMicro, color = tokens.amber)
+                if (row.attention == "needsYou") Text(stringResource(R.string.agent_center_needs_you), style = TesseraType.rowMicro, color = tokens.amber)
                 row.lastActivityMillis?.let { lastActivity ->
                     Text(
-                        agentRelativeTime(lastActivity),
+                        agentRelativeTime(lastActivity, words = words),
                         Modifier.padding(start = 6.dp).testTag("agent-thread-last-activity"),
                         style = TesseraType.rowMicro,
                         color = tokens.fgDim,
                     )
                 }
             }
-            Text(listOfNotNull(row.provider, row.model, row.permissionMode, row.status.takeIf { it.isNotBlank() }).joinToString(" · "), style = TesseraType.rowMeta, color = tokens.fgMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            row.queuedCount?.takeIf { it != "0" }?.let { Text("$it queued", Modifier.padding(top = 2.dp), style = TesseraType.rowMicro, color = tokens.fgDim) }
+            Text(row.listMetadata(words), style = TesseraType.rowMeta, color = tokens.fgMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            row.queuedCount?.takeIf { it != "0" }?.let { Text(stringResource(R.string.agent_center_queued, it), Modifier.padding(top = 2.dp), style = TesseraType.rowMicro, color = tokens.fgDim) }
             row.preview?.let { Text(it, Modifier.padding(top = 3.dp), style = TesseraType.bodySmall, color = tokens.fgMuted, maxLines = 2, overflow = TextOverflow.Ellipsis) }
-            row.summaryMeter(row.tokenMeterText())?.let { Text(it, Modifier.padding(top = 3.dp), style = TesseraType.rowMicro, color = tokens.fgDim, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-            if (row.host.isNotBlank()) {
-                val host = row.host
-                Text(listOf(host, row.location).filter(String::isNotBlank).joinToString(" · "), Modifier.padding(top = 3.dp), style = TesseraType.rowMicro, color = tokens.fgDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            } else if (row.location.isNotBlank()) {
-                Text(row.location, Modifier.padding(top = 3.dp), style = TesseraType.rowMicro, color = tokens.fgDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (answerFold == AgentRowAnswerFold.AnswerBeside) {
+                // The detail sits beside the list, so this points at the
+                // thread rather than at a direction.
+                Text(
+                    stringResource(R.string.agent_row_answer_beside),
+                    Modifier.padding(top = 4.dp).border(1.dp, tokens.borderStrong, RoundedCornerShape(7.dp))
+                        .padding(horizontal = 6.dp, vertical = 1.dp).testTag("agent-row-answer-beside-${row.key}"),
+                    style = TesseraType.rowMicro,
+                    color = tokens.fgDim,
+                    maxLines = 1,
+                )
             }
+            row.summaryMeter(row.tokenMeterText(), words)?.let { Text(it, Modifier.padding(top = 3.dp), style = TesseraType.rowMicro, color = tokens.fgDim, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            if (row.host.isNotBlank()) {
+                Text(row.host, Modifier.padding(top = 3.dp), style = TesseraType.rowMicro, color = tokens.fgDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        answerFold?.let { fold ->
+            // Its own 48dp click target: folding never selects the row.
+            TesseraIconButton(
+                if (fold.folded) TesseraIcons.ChevronDown else TesseraIcons.ChevronUp,
+                stringResource(if (fold.folded) R.string.agent_row_answers_show else R.string.agent_row_answers_fold),
+                onToggleAnswers,
+                modifier = Modifier.align(Alignment.CenterVertically).testTag("agent-row-answers-${row.key}"),
+            )
         }
     }
 }
 
-private val AGENT_GROUPINGS = listOf("attention", "host")
+/** The shared runtime's grouping values, with their segment labels. */
+private val AGENT_GROUPINGS = listOf(
+    "attention" to R.string.agent_center_grouping_attention,
+    "host" to R.string.agent_center_grouping_host,
+)
 
 /** Headers merely expose the contiguous shared-runtime order; Android never re-sorts rows. */
+@Composable
 private fun AgentThreadRow.groupLabel(grouping: String): String = when (grouping) {
-    "host" -> host.ifBlank { "unlabeled host" }
-    else -> when {
-        attention == "needsYou" -> "needs you"
-        status == "working" -> "working"
-        attention == "unreadCompletion" -> "finished"
-        else -> "recent"
-    }
+    "host" -> host.ifBlank { stringResource(R.string.agent_center_unlabeled_host) }
+    else -> stringResource(when {
+        attention == "needsYou" -> R.string.agent_center_needs_you
+        status == "working" -> R.string.agent_center_working
+        attention == "unreadCompletion" -> R.string.agent_center_finished
+        else -> R.string.agent_center_recent
+    })
 }
 
 /** Shared by phone/tablet rows and the detail metadata header. */
@@ -620,24 +739,33 @@ private fun AgentThreadRow.tokenMeterText(): String? = compactContextTokens()?.l
     stringResource(R.string.agent_context_tokens, it)
 }
 
+/** [agentPermissionModeDisplay]'s words in the reader's language. */
+@Composable
+private fun permissionModeLabel(mode: String): String = when (mode) {
+    "default" -> stringResource(R.string.agent_center_permission_default)
+    "auto" -> stringResource(R.string.agent_center_permission_auto)
+    "plan" -> stringResource(R.string.agent_center_permission_plan)
+    "read only" -> stringResource(R.string.agent_center_permission_read_only)
+    else -> mode
+}
+
 private fun String.trimTrailingZero(): String = removeSuffix(".0")
 
 /** Derived context is fractional; show whole percent like iOS. */
 internal fun String.wholePercent(): String = toDoubleOrNull()?.toInt()?.toString() ?: trimTrailingZero()
 
 /** Same display semantics as iOS `Text(date, style: .relative)`, in compact terminal copy. */
-internal fun agentRelativeTime(timestampMillis: Long, nowMillis: Long = System.currentTimeMillis()): String {
+internal fun agentRelativeTime(timestampMillis: Long, nowMillis: Long = System.currentTimeMillis(), words: AgentRowWords): String {
     val delta = timestampMillis - nowMillis
     val future = delta > 0
     val seconds = (kotlin.math.abs(delta) / 1_000).coerceAtLeast(0)
-    val (value, unit) = when {
-        seconds < 60 -> 0L to "m"
-        seconds < 3_600 -> seconds / 60 to "m"
-        seconds < 86_400 -> seconds / 3_600 to "h"
-        else -> seconds / 86_400 to "d"
+    val (value, ago, ahead) = when {
+        seconds < 60 -> Triple(0L, words.minutesAgo, words.inMinutes)
+        seconds < 3_600 -> Triple(seconds / 60, words.minutesAgo, words.inMinutes)
+        seconds < 86_400 -> Triple(seconds / 3_600, words.hoursAgo, words.inHours)
+        else -> Triple(seconds / 86_400, words.daysAgo, words.inDays)
     }
-    val label = if (value == 0L) "now" else "$value$unit"
-    return if (future && value != 0L) "in $label" else if (value == 0L) label else "$label ago"
+    return if (value == 0L) words.now else if (future) ahead.invoke(value) else ago.invoke(value)
 }
 
 /** iOS renders activity `displayTime` in a locale-independent 24-hour HH:mm form. */
@@ -689,15 +817,38 @@ internal fun AgentDetailPane(
     /** The newer page that retains a bridged window's rows; see `retainBridgedRows`. */
     onRetainBridgedRows: () -> Unit = {},
     onViewportAnchor: (String?) -> Unit = {},
+    /** A search result to open at; [onSearchLanded] once its row is reached. */
+    searchLanding: AgentSearchLanding? = null,
+    onSearchLanded: (AgentSearchLanding) -> Unit = {},
+    /** Opens at the newest page whatever place the reader kept; [onOpenedAtLatest] once it does. */
+    opensAtLatest: Boolean = false,
+    onOpenedAtLatest: () -> Unit = {},
     onCompletionVisible: () -> Unit = {},
+    /** Transcript selection items; null keeps every text menu plain. */
+    selectionActions: AgentTranscriptSelectionActions? = null,
+    /** Typed prompt answers; AgentCenterScreen shares one with the list. */
+    promptDrafts: AgentPromptDrafts = remember { AgentPromptDrafts() },
 ) {
     val tokens = LocalTesseraTokens.current
     if (detail == null) {
-        TesseraEmptyState("select an agent", "Choose a live agent from the list.", modifier = modifier.background(tokens.bg), icon = TesseraIcons.Sessions)
+        TesseraEmptyState(stringResource(R.string.agent_center_select_title), stringResource(R.string.agent_center_select_body),
+            modifier = modifier.background(tokens.bg), icon = TesseraIcons.Sessions)
         return
     }
+    val currentDetail by rememberUpdatedState(detail)
+    val artifactOpener = LocalArtifactOpener.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val selectionScope = remember(selectionActions, artifactOpener, keyboardController, focusManager) {
+        selectionActions?.let { actions ->
+            AgentTranscriptSelectionScope(actions, { currentDetail }, artifactOpener) {
+                keyboardController?.hide()
+                focusManager.clearFocus(force = true)
+            }
+        }
+    }
     Column(modifier.background(tokens.bg).imePadding()) {
-        if (onBack != null) TesseraSubPageHeader(detail.row.title, onBack, "back to agents", trailing = { DetailActions(detail, onInterrupt, onOpenTerminal, onFork) })
+        if (onBack != null) TesseraSubPageHeader(detail.row.title, onBack, stringResource(R.string.agent_center_back_to_agents), trailing = { DetailActions(detail, onInterrupt, onOpenTerminal, onFork) })
         else TesseraPageHeader(detail.row.title, trailing = { DetailActions(detail, onInterrupt, onOpenTerminal, onFork) })
         Text(listOfNotNull(detail.row.provider, detail.row.model, detail.row.location.takeIf { it.isNotBlank() }).joinToString(" · "), Modifier.padding(horizontal = 18.dp), style = TesseraType.rowMeta, color = tokens.fgMuted)
         AgentDetailMetadata(detail)
@@ -707,6 +858,8 @@ internal fun AgentDetailPane(
         detail.prompt?.let { prompt ->
             AgentUrgentPrompt(
                 prompt = prompt,
+                threadKey = detail.row.key,
+                drafts = promptDrafts,
                 actionAvailable = detail.canAnswerPrompt(),
                 pending = promptActionPending,
                 onAnswer = { answer -> onPromptAnswer(prompt, answer) },
@@ -738,17 +891,25 @@ internal fun AgentDetailPane(
         val outgoingTail = outgoingMessages.lastOrNull()?.id
         var observedOutgoingTail by remember(detail.row.key) { mutableStateOf<String?>(null) }
         // Follow is a reader choice, not the visibility of yesterday's tail.
-        var followingLatest by remember(detail.row.key) { mutableStateOf(detail.window?.atLiveHead != false) }
+        var followingLatest by remember(detail.row.key) { mutableStateOf(detail.window?.atLiveHead != false || opensAtLatest) }
         var positioned by remember(detail.row.key) { mutableStateOf(false) }
         var nearHistoryEdge by remember(detail.row.key) { mutableStateOf(false) }
         var requestedCursor by remember(detail.row.key) { mutableStateOf<String?>(null) }
-        var nextPageAttempt by remember(detail.row.key) { mutableStateOf(0L) }
-        var pageRetryDelay by remember(detail.row.key) { mutableStateOf(1_000L) }
+        var nextPageAttempt by remember(detail.row.key) { mutableLongStateOf(0L) }
+        var pageRetryDelay by remember(detail.row.key) { mutableLongStateOf(1_000L) }
         var historyDemand by remember(detail.row.key) { mutableStateOf("") }
-        var automaticPages by remember(detail.row.key) { mutableStateOf(0) }
-        var historyDemandGeneration by remember(detail.row.key) { mutableStateOf(0) }
+        var automaticPages by remember(detail.row.key) { mutableIntStateOf(0) }
+        var historyDemandGeneration by remember(detail.row.key) { mutableIntStateOf(0) }
+        // A notification opens the newest reply rather than the place the
+        // reader kept, as Return to latest does.
+        LaunchedEffect(detail.row.key, opensAtLatest) {
+            if (!opensAtLatest) return@LaunchedEffect
+            followingLatest = true
+            historyDemand = ""; automaticPages = 0; historyDemandGeneration++
+            onOpenedAtLatest()
+        }
         // Pages asked for to fill a short transcript since it last filled.
-        var fillPages by remember(detail.row.key) { mutableStateOf(0) }
+        var fillPages by remember(detail.row.key) { mutableIntStateOf(0) }
         val currentDisplayItems by rememberUpdatedState(displayItems)
         val currentViewportAnchor by rememberUpdatedState(onViewportAnchor)
         val chatScrollConnection = remember(detail.row.key, blockListState) {
@@ -799,6 +960,33 @@ internal fun AgentDetailPane(
                     if (reading != null) kotlinx.coroutines.delay(VIEWPORT_ANCHOR_SETTLE_MILLIS)
                     currentViewportAnchor(reading?.second)
                 }
+        }
+        // A search result opens at its match once the transcript holds it
+        // and no read can move the window off it: its row starts the
+        // viewport, marked for a moment, and the reader keeps it while the
+        // head rolls.
+        var searchHighlightKey by remember(detail.row.key) { mutableStateOf<String?>(null) }
+        val landing = searchLanding?.takeIf { it.threadKey == detail.row.key }
+        LaunchedEffect(landing, displayItems, loadingTranscript) {
+            if (landing == null || loadingTranscript) return@LaunchedEffect
+            val index = displayItems.indexOfFirst { item ->
+                when (item) {
+                    is AgentTranscriptItem.Block -> item.block.recordID == landing.recordID
+                    is AgentTranscriptItem.ToolRun -> item.entries.any { it.block.recordID == landing.recordID }
+                }
+            }
+            if (index < 0) return@LaunchedEffect
+            followingLatest = false
+            historyDemand = ""; automaticPages = 0
+            blockListState.requestScrollToItem(index)
+            if (landing.marked) searchHighlightKey = displayItems[index].key
+            currentViewportAnchor(landing.recordID)
+            onSearchLanded(landing)
+        }
+        LaunchedEffect(searchHighlightKey) {
+            if (searchHighlightKey == null) return@LaunchedEffect
+            kotlinx.coroutines.delay(SEARCH_HIGHLIGHT_MILLIS)
+            searchHighlightKey = null
         }
         val currentLoadMore by rememberUpdatedState(onLoadMore)
         val currentFillHistory by rememberUpdatedState(onFillHistory)
@@ -899,7 +1087,7 @@ internal fun AgentDetailPane(
         // page that retains them, backing off an unchanged cursor.
         val currentRetainBridgedRows by rememberUpdatedState(onRetainBridgedRows)
         var requestedBridgeCursor by remember(detail.row.key) { mutableStateOf<String?>(null) }
-        var bridgeRetryDelay by remember(detail.row.key) { mutableStateOf(1_000L) }
+        var bridgeRetryDelay by remember(detail.row.key) { mutableLongStateOf(1_000L) }
         LaunchedEffect(detail.row.key, detail.window?.version, detail.window?.bridgesToHead, loadingTranscript, followingLatest) {
             val cursor = detail.window?.takeIf { it.bridgesToHead }?.after
             if (!followingLatest || loadingTranscript || cursor == null) return@LaunchedEffect
@@ -974,25 +1162,30 @@ internal fun AgentDetailPane(
             if (!shownReadStatus.isProgress) androidx.compose.material3.TextButton(
                 onClick = onReturnToLatest, enabled = !loadingTranscript,
                 modifier = Modifier.heightIn(min = 48.dp).testTag("agent-read-retry")) {
-                Text("Retry", style = TesseraType.rowMeta, color = tokens.fg)
+                Text(stringResource(R.string.agent_center_retry), style = TesseraType.rowMeta, color = tokens.fg)
             }
         }
-        if (!followingLatest || detail.window?.atLiveHead == false || capacityLimited) {
-            if (capacityLimited) Text("Live updates paused while this history view is retained.",
+        // A match still being read can be given up for the newest page.
+        val landingPending = landing != null && loadingTranscript
+        if (landingPending || !followingLatest || detail.window?.atLiveHead == false || capacityLimited) {
+            if (capacityLimited) Text(stringResource(R.string.agent_center_live_updates_paused),
                 Modifier.padding(horizontal = 16.dp), style = TesseraType.rowMeta, color = tokens.fgMuted)
             androidx.compose.material3.TextButton(onClick = {
                 followingLatest = true
                 historyDemand = ""; automaticPages = 0; historyDemandGeneration++
-                if (detail.window?.atLiveHead == false || capacityLimited) onReturnToLatest()
-            }, enabled = !loadingTranscript,
+                if (landingPending || detail.window?.atLiveHead == false || capacityLimited) onReturnToLatest()
+            }, enabled = landingPending || !loadingTranscript,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("agent-return-latest")) {
-                Text("Return to latest", style = TesseraType.rowMeta, color = tokens.fg)
+                Text(stringResource(R.string.agent_center_return_to_latest), style = TesseraType.rowMeta, color = tokens.fg)
             }
         }
         if (blocks.isEmpty() && outgoingMessages.isEmpty() && detail.livePreview == null && !detail.hasMore) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-            if (readStatus == null) Text(if (loadingTranscript) "loading conversation…" else "live projection is unavailable",
+            if (readStatus == null) Text(stringResource(if (loadingTranscript) R.string.agent_center_loading_conversation
+                else R.string.agent_center_projection_unavailable),
                 style = TesseraType.body, color = tokens.fgMuted)
         } else Box(Modifier.weight(1f).fillMaxWidth()) {
+        // Only the transcript's selections gain the terminal's menu items.
+        CompositionLocalProvider(LocalAgentTranscriptSelection provides selectionScope) {
         // A short transcript sits against the composer, as a chat does.
         LazyColumn(Modifier.fillMaxSize().layout { measurable, constraints ->
             // The IME and window resizes relayout the list without
@@ -1011,8 +1204,10 @@ internal fun AgentDetailPane(
             items(displayItems, key = { it.key }, contentType = { item ->
                 if (item is AgentTranscriptItem.ToolRun) "agent-tool-run" else "agent-block"
             }) { item ->
+                Box(if (item.key == searchHighlightKey) Modifier.background(tokens.panelBg, RoundedCornerShape(8.dp))
+                    .border(1.dp, tokens.border, RoundedCornerShape(8.dp)).testTag("agent-search-landing") else Modifier) {
                 when (item) {
-                    is AgentTranscriptItem.Block -> AgentBlockCard(item.block)
+                    is AgentTranscriptItem.Block -> AgentBlockCard(item.block, detail.row.hostID, detail.liveSessionID())
                     is AgentTranscriptItem.ToolRun -> AgentToolRunCard(item,
                         expanded = item.entries.any { it.key in expandedToolEntries },
                         onExpandedChange = { expanded ->
@@ -1021,13 +1216,15 @@ internal fun AgentDetailPane(
                         },
                     )
                 }
+                }
             }
             if (newestBlockKey != null) item(key = newestBlockKey) { Spacer(Modifier.height(1.dp)) }
             if (detail.livePreview != null) item(key = "agent-live-preview") {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag("agent-live-preview")) {
-                    Text(if (detail.livePreviewHasGap) "live preview · awaiting missing text" else "live preview · syncing transcript",
+                    Text(stringResource(if (detail.livePreviewHasGap) R.string.agent_center_live_preview_gap
+                        else R.string.agent_center_live_preview_syncing),
                         style = TesseraType.rowMicro, color = tokens.fgDim)
-                    SelectionContainer { Text(detail.livePreview, style = TesseraType.bodySmall, color = tokens.fg) }
+                    AgentTranscriptSelectionContainer { Text(detail.livePreview, style = TesseraType.bodySmall, color = tokens.fg) }
                 }
             }
             items(outgoingMessages, key = { "agent-outgoing:${it.id}" }, contentType = { "agent-outgoing" }) { message ->
@@ -1035,14 +1232,14 @@ internal fun AgentDetailPane(
                     Column(Modifier.fillMaxWidth(0.8f).background(tokens.panelBg, RoundedCornerShape(11.dp))
                         .border(1.dp, tokens.border, RoundedCornerShape(11.dp)).padding(10.dp)
                         .testTag("agent-outgoing-${message.status}")) {
-                        SelectionContainer { Text(message.text, style = TesseraType.bodySmall, color = tokens.fgDim) }
-                        Text(when (message.status) {
-                            "sending" -> "sending…"
-                            "queueing" -> "queueing…"
-                            "awaitingReceipt" -> "sent · waiting for transcript…"
-                            "sentUnconfirmed" -> "sent · transcript receipt unavailable"
-                            else -> "receipt unconfirmed · check terminal before retrying"
-                        }, Modifier.padding(top = 4.dp), style = TesseraType.rowMicro, color = tokens.fgDim)
+                        AgentTranscriptSelectionContainer { Text(message.text, style = TesseraType.bodySmall, color = tokens.fgDim) }
+                        Text(stringResource(when (message.status) {
+                            "sending" -> R.string.agent_center_outgoing_sending
+                            "queueing" -> R.string.agent_center_outgoing_queueing
+                            "awaitingReceipt" -> R.string.agent_center_outgoing_awaiting_receipt
+                            "sentUnconfirmed" -> R.string.agent_center_outgoing_sent_unconfirmed
+                            else -> R.string.agent_center_outgoing_unconfirmed
+                        }), Modifier.padding(top = 4.dp), style = TesseraType.rowMicro, color = tokens.fgDim)
                     }
                 }
             }
@@ -1050,6 +1247,7 @@ internal fun AgentDetailPane(
                 AgentHistoryLoadingGlyph(loadingTranscript && detail.hasMore)
             }
             item(key = "agent-conversation-bottom") { Spacer(Modifier.height(1.dp)) }
+        }
         }
         // A keyed loading header would remain the first visible item at the
         // very top and pin the reader to the new page. Only messages anchor.
@@ -1074,12 +1272,15 @@ internal fun AgentDetailPane(
 }
 
 private const val VIEWPORT_ANCHOR_SETTLE_MILLIS = 150L
+/** How long a search landing marks its row. */
+private const val SEARCH_HIGHLIGHT_MILLIS = 2_400L
 /** Older pages a short transcript may ask for before it fills. */
 private const val AGENT_FILL_PAGE_LIMIT = 8
 
 @Composable
 private fun AgentHistoryLoadingGlyph(loading: Boolean) {
     val tokens = LocalTesseraTokens.current
+    val loadingMessages = stringResource(R.string.agent_center_loading_messages)
     var showGlyph by remember { mutableStateOf(false) }
     LaunchedEffect(loading) {
         showGlyph = false
@@ -1090,7 +1291,7 @@ private fun AgentHistoryLoadingGlyph(loading: Boolean) {
     }
     Box(Modifier.fillMaxWidth().height(24.dp), contentAlignment = Alignment.Center) {
         if (showGlyph) CircularProgressIndicator(Modifier.size(18.dp).testTag("agent-history-loading")
-            .semantics { contentDescription = "loading messages" }, color = tokens.fgMuted, strokeWidth = 2.dp)
+            .semantics { contentDescription = loadingMessages }, color = tokens.fgMuted, strokeWidth = 2.dp)
     }
 }
 
@@ -1100,18 +1301,19 @@ private fun AgentDetailMetadata(detail: AgentThreadDetail) {
     val tokens = LocalTesseraTokens.current
     val binding = detail.binding
     val terminal = listOfNotNull(
-        detail.row.host.takeIf { it.isNotBlank() }?.let { "host $it" },
+        detail.row.host.takeIf { it.isNotBlank() }?.let { stringResource(R.string.agent_center_host, it) },
         binding?.string("transport"),
-        binding?.string("tmuxSession")?.let { "session $it" },
-        binding?.string("windowID")?.let { "window $it" },
-        binding?.string("paneID")?.let { "pane $it" },
+        binding?.string("tmuxSession")?.let { stringResource(R.string.agent_center_route_session, it) },
+        // tmux's window ID is no window number, so only the pane shows, in
+        // tmux's own `%21` syntax.
+        binding?.string("paneID")?.let { stringResource(R.string.agent_center_route_pane, if (it.startsWith("%")) it else "%$it") },
     ).joinToString(" · ")
     val summary = listOfNotNull(
-        detail.row.permissionMode?.let { "mode $it" },
-        detail.row.contextPercent?.let { "${it.wholePercent()}% context" } ?: detail.row.tokenMeterText(),
+        detail.row.permissionMode?.let { stringResource(R.string.agent_center_permission_mode, permissionModeLabel(it)) },
+        detail.row.contextPercent?.let { stringResource(R.string.agent_center_context_percent, it.wholePercent()) } ?: detail.row.tokenMeterText(),
         detail.row.totalCost?.let { "$$it" },
-        detail.row.queuedCount?.takeIf { it != "0" }?.let { "$it queued" },
-        if (detail.row.isFork) "fork" else null,
+        detail.row.queuedCount?.takeIf { it != "0" }?.let { stringResource(R.string.agent_center_queued, it) },
+        if (detail.row.isFork) stringResource(R.string.agent_center_fork) else null,
     ).joinToString(" · ")
     if (terminal.isNotBlank()) Text(terminal, Modifier.padding(horizontal = 18.dp, vertical = 2.dp), style = TesseraType.rowMicro, color = tokens.fgDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
     if (summary.isNotBlank()) Text(summary, Modifier.padding(horizontal = 18.dp, vertical = 2.dp), style = TesseraType.rowMicro, color = tokens.fgDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1124,8 +1326,8 @@ private fun AgentToolRunCard(run: AgentTranscriptItem.ToolRun, expanded: Boolean
         .border(1.dp, tokens.border, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(run.summaryTitle, Modifier.weight(1f), style = TesseraType.rowMeta, color = tokens.fg)
-            TesseraButton(if (expanded) "collapse" else "details", { onExpandedChange(!expanded) }, compact = true,
-                modifier = Modifier.testTag("agent-tool-run-${run.key}"))
+            TesseraButton(stringResource(if (expanded) R.string.agent_center_collapse else R.string.agent_center_details),
+                { onExpandedChange(!expanded) }, compact = true, modifier = Modifier.testTag("agent-tool-run-${run.key}"))
         }
         run.latestSummary?.let {
             Text(it, style = TesseraType.rowMicro, color = tokens.fgMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1136,6 +1338,8 @@ private fun AgentToolRunCard(run: AgentTranscriptItem.ToolRun, expanded: Boolean
 @Composable
 private fun AgentUrgentPrompt(
     prompt: AgentPrompt,
+    threadKey: String,
+    drafts: AgentPromptDrafts,
     actionAvailable: Boolean,
     pending: Boolean,
     onAnswer: (AgentPromptAnswerChoice) -> Unit,
@@ -1144,8 +1348,9 @@ private fun AgentUrgentPrompt(
     val tokens = LocalTesseraTokens.current
     val enabled = actionAvailable && !pending
     var detailExpanded by remember(prompt.actionToken) { mutableStateOf(false) }
-    var textRow by remember(prompt.actionToken) { mutableStateOf<String?>(null) }
-    var answerText by remember(prompt.actionToken, textRow) { mutableStateOf("") }
+    val typed = drafts[threadKey, prompt.actionToken]
+    val textRow = typed?.optionID
+    val answerText = typed?.text.orEmpty()
     val reveal = remember(prompt.actionToken) { BringIntoViewRequester() }
     fun sendText() {
         if (enabled && answerText.isNotBlank()) onAnswer(AgentPromptAnswerChoice.Text(answerText))
@@ -1168,13 +1373,13 @@ private fun AgentUrgentPrompt(
             }
             .verticalScroll(rememberScrollState()).padding(12.dp),
     ) {
-        TesseraKicker("needs your answer")
+        TesseraKicker(stringResource(R.string.agent_center_needs_your_answer))
         if (prompt.kind == "deferred") {
             // Collapsed async questions: the count is the whole message.
             val count = prompt.pendingCount ?: 0
-            Text(if (count == 1) "1 question waiting" else "$count questions waiting", Modifier.padding(top = 4.dp),
+            Text(pluralStringResource(R.plurals.agent_center_questions_waiting, count, count), Modifier.padding(top = 4.dp),
                 style = TesseraType.section, color = tokens.fg)
-            Text("Codex keeps working while they wait", style = TesseraType.rowMicro, color = tokens.fgMuted)
+            Text(stringResource(R.string.agent_center_codex_keeps_working), style = TesseraType.rowMicro, color = tokens.fgMuted)
         } else {
             Text(prompt.title, Modifier.padding(top = 4.dp), style = TesseraType.section, color = tokens.fg)
             prompt.progress?.let { Text(it, Modifier.padding(top = 4.dp), style = TesseraType.rowMicro, color = tokens.fgDim) }
@@ -1186,15 +1391,16 @@ private fun AgentUrgentPrompt(
                 Text(detail, style = TesseraType.bodySmall, color = tokens.fgMuted,
                     maxLines = if (detailExpanded) Int.MAX_VALUE else 8, overflow = TextOverflow.Ellipsis)
                 if (detail.lines().size > 8 || detail.length > 400) {
-                    TesseraButton(if (detailExpanded) "less" else "more", { detailExpanded = !detailExpanded },
+                    TesseraButton(stringResource(if (detailExpanded) R.string.agent_center_less else R.string.agent_center_more),
+                        { detailExpanded = !detailExpanded },
                         compact = true, modifier = Modifier.padding(top = 4.dp).heightIn(min = 48.dp))
                 }
             }
         }
-        if (!prompt.isBlocking && prompt.kind != "deferred") Text("The agent keeps working while this waits", Modifier.padding(top = 6.dp),
-            style = TesseraType.rowMicro, color = tokens.fgMuted)
+        if (!prompt.isBlocking && prompt.kind != "deferred") Text(stringResource(R.string.agent_center_agent_keeps_working),
+            Modifier.padding(top = 6.dp), style = TesseraType.rowMicro, color = tokens.fgMuted)
         prompt.entry?.text?.takeIf(String::isNotEmpty)?.let {
-            Text("In the terminal: $it", Modifier.padding(top = 6.dp), style = TesseraType.rowMicro, color = tokens.fgMuted)
+            Text(stringResource(R.string.agent_center_in_terminal, it), Modifier.padding(top = 6.dp), style = TesseraType.rowMicro, color = tokens.fgMuted)
         }
         if (prompt.options.isNotEmpty()) {
             Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1203,8 +1409,9 @@ private fun AgentUrgentPrompt(
                         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
                             .border(1.dp, if (option.isDefault) tokens.borderStrong else tokens.border, RoundedCornerShape(6.dp))
                             .clickable(enabled = enabled) {
-                                if (option.acceptsText) textRow = option.id
-                                else onAnswer(AgentPromptAnswerChoice.Option(option.id))
+                                if (option.acceptsText) {
+                                    if (textRow != option.id) drafts[threadKey] = AgentPromptDraft(prompt.actionToken, option.id, "")
+                                } else onAnswer(AgentPromptAnswerChoice.Option(option.id))
                             }.testTag("agent-answer-${option.id}").padding(horizontal = 10.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically) {
                             if (prompt.kind == "multiSelect") {
@@ -1220,7 +1427,8 @@ private fun AgentUrgentPrompt(
                             }
                         }
                         if (option.acceptsText && textRow == option.id) {
-                            AgentPromptTextField(answerText, { answerText = it }, enabled, ::sendText, reveal,
+                            AgentPromptTextField(answerText, { drafts[threadKey] = AgentPromptDraft(prompt.actionToken, option.id, it) },
+                                enabled, ::sendText, reveal,
                                 Modifier.padding(top = 6.dp))
                         }
                     }
@@ -1228,8 +1436,8 @@ private fun AgentUrgentPrompt(
             }
         }
         if (prompt.kind == "textEntry") {
-            AgentPromptTextField(answerText, { answerText = it }, enabled, ::sendText, reveal,
-                Modifier.padding(top = 8.dp))
+            AgentPromptTextField(answerText, { drafts[threadKey] = AgentPromptDraft(prompt.actionToken, null, it) },
+                enabled, ::sendText, reveal, Modifier.padding(top = 8.dp))
         }
         if (prompt.controls.isNotEmpty()) {
             Column(Modifier.fillMaxWidth().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1237,10 +1445,10 @@ private fun AgentUrgentPrompt(
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         controls.forEach { control ->
                             val label = when (control.kind) {
-                                "next" -> "Next"
-                                "skip" -> "Skip"
-                                "cancel" -> "Cancel"
-                                "open" -> "Answer"
+                                "next" -> stringResource(R.string.agent_center_prompt_next)
+                                "skip" -> stringResource(R.string.agent_center_prompt_skip)
+                                "cancel" -> stringResource(R.string.agent_center_prompt_cancel)
+                                "open" -> stringResource(R.string.agent_center_prompt_answer)
                                 else -> control.label
                             }
                             TesseraButton(label, { onAnswer(AgentPromptAnswerChoice.Control(control.kind)) },
@@ -1254,8 +1462,8 @@ private fun AgentUrgentPrompt(
             }
         }
         if (!actionAvailable && !pending) {
-            Text("Open terminal to answer", Modifier.padding(top = 8.dp), style = TesseraType.bodySmall, color = tokens.fgMuted)
-            TesseraButton("open terminal", onOpenTerminal, modifier = Modifier.padding(top = 4.dp).heightIn(min = 48.dp))
+            Text(stringResource(R.string.agent_center_open_terminal_to_answer), Modifier.padding(top = 8.dp), style = TesseraType.bodySmall, color = tokens.fgMuted)
+            TesseraButton(stringResource(R.string.agent_center_open_terminal), onOpenTerminal, modifier = Modifier.padding(top = 4.dp).heightIn(min = 48.dp))
         }
     }
 }
@@ -1278,19 +1486,25 @@ private fun AgentPromptTextField(value: String, onValueChange: (String) -> Unit,
             enabled = enabled, singleLine = true, textStyle = TesseraType.body.copy(color = tokens.fg),
             cursorBrush = SolidColor(tokens.fg), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(onSend = { onSend() }))
-        TesseraButton("Send", onSend, modifier = Modifier.testTag("agent-answer-send").heightIn(min = 48.dp),
+        TesseraButton(stringResource(R.string.agent_center_prompt_send), onSend, modifier = Modifier.testTag("agent-answer-send").heightIn(min = 48.dp),
             style = TesseraButtonStyle.Primary, enabled = enabled && value.isNotBlank(), compact = true)
     }
 }
 
 @Composable private fun DetailActions(detail: AgentThreadDetail, onInterrupt: () -> Unit, onOpenTerminal: () -> Unit, onFork: () -> Unit) {
-    TesseraIconButton(TesseraIcons.Sessions, "open terminal", onOpenTerminal)
-    TesseraIconButton(TesseraIcons.Plus, "fork agent", onFork, enabled = detail.row.forkAvailable && detail.launchTargetOrNull() != null)
-    TesseraIconButton(TesseraIcons.Close, "interrupt agent", onInterrupt, danger = true, enabled = detail.row.actionAvailable && detail.binding != null)
+    TesseraIconButton(TesseraIcons.Sessions, stringResource(R.string.agent_center_open_terminal), onOpenTerminal)
+    TesseraIconButton(TesseraIcons.Plus, stringResource(R.string.agent_center_fork_agent), onFork,
+        enabled = detail.row.forkAvailable && detail.launchTargetOrNull() != null)
+    TesseraIconButton(TesseraIcons.Close, stringResource(R.string.agent_center_interrupt_agent), onInterrupt, danger = true,
+        enabled = detail.row.actionAvailable && detail.binding != null)
 }
 
-@Composable private fun AgentBlockCard(block: AgentBlock) {
+@Composable private fun AgentBlockCard(block: AgentBlock, hostId: String, sessionHint: String?) {
     val tokens = LocalTesseraTokens.current
+    val artifactOpener = LocalArtifactOpener.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val change = remember(block, hostId, sessionHint) { block.artifactChange(hostId, sessionHint) }
     var expanded by remember(block.recordID, block.body) { mutableStateOf(false) }
     // Prose is the conversation itself.  It deliberately has no event card or
     // wire-derived heading: assistant turns read as a transcript and user turns
@@ -1301,7 +1515,7 @@ private fun AgentPromptTextField(value: String, onValueChange: (String) -> Unit,
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
             horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
         ) {
-            SelectionContainer {
+            AgentTranscriptSelectionContainer {
                 TesseraMarkdownText(
                     source = block.body,
                     modifier = Modifier.then(
@@ -1320,16 +1534,31 @@ private fun AgentPromptTextField(value: String, onValueChange: (String) -> Unit,
         return
     }
     val semanticTitle = when (block.kind.lowercase()) {
-        "thinking" -> "thinking"
-        "toolcall", "tool_call" -> listOf("tool call", block.title.takeIf { it.isNotBlank() && it != "tool" }).filterNotNull().joinToString(" · ")
-        "toolresult", "tool_result" -> "tool result"
-        "workflow", "workflowtasks" -> "workflow"
-        "subagent", "subagentgroup" -> "subagents"
-        "edit", "change", "diff" -> listOf("change", block.title.takeIf { it.isNotBlank() && it != "edit" }).filterNotNull().joinToString(" · ")
-        "completion" -> "completed"
-        "compactsummary" -> "context compacted"
-        else -> block.title
+        "thinking" -> stringResource(R.string.agent_center_block_thinking)
+        "toolcall", "tool_call" -> block.title.takeIf { it.isNotBlank() && it != "tool" }
+            ?.let { stringResource(R.string.agent_center_block_tool_call_named, it) } ?: stringResource(R.string.agent_center_block_tool_call)
+        "toolresult", "tool_result" -> stringResource(R.string.agent_center_block_tool_result)
+        "workflow", "workflowtasks" -> stringResource(R.string.agent_center_block_workflow)
+        "subagent", "subagentgroup" -> stringResource(R.string.agent_center_block_subagents)
+        "edit", "change", "diff" -> block.title.takeIf { it.isNotBlank() && it != "edit" }
+            ?.let { stringResource(R.string.agent_center_block_change_named, it) } ?: stringResource(R.string.agent_center_block_change)
+        "completion" -> stringResource(R.string.agent_center_block_completed)
+        "compactsummary" -> stringResource(R.string.agent_center_block_context_compacted)
+        // The other headings AgentPresentation fixes; an action prompt's or an attachment's is its own.
+        else -> when (block.kind) {
+            "permission" -> stringResource(R.string.agent_center_block_permission)
+            "question" -> stringResource(R.string.agent_center_block_question)
+            "queuedMessage" -> stringResource(R.string.agent_center_block_queued_message)
+            "systemEvent" -> stringResource(R.string.agent_center_block_system)
+            "attachment" -> block.title.takeUnless { it == AGENT_ATTACHMENT_PLACEHOLDER_TITLE }
+                ?: stringResource(R.string.agent_center_block_attachment)
+            else -> if (block.kind in AGENT_BLOCK_KINDS && block.kind != "unknown") block.title
+                else stringResource(R.string.agent_center_block_unsupported)
+        }
     }
+    val body = if (block.kind == "completion" && block.body == AGENT_COMPLETION_PLACEHOLDER_BODY) {
+        stringResource(R.string.agent_center_finished)
+    } else block.body
     val collapsible = block.kind.lowercase() in setOf("thinking", "toolcall", "tool_call", "toolresult", "tool_result", "workflow", "workflowtasks", "subagent", "subagentgroup", "edit", "change", "diff", "compactsummary")
     // A compaction summary is long provider boilerplate: collapsed, it is a
     // single marker row with no preview line.
@@ -1342,20 +1571,32 @@ private fun AgentPromptTextField(value: String, onValueChange: (String) -> Unit,
                 Text(agentDisplayTime(displayTime), style = TesseraType.rowMicro, color = tokens.fgDim)
                 Spacer(Modifier.width(8.dp))
             }
-            if (collapsible) TesseraButton(if (expanded) "collapse" else "details", { expanded = !expanded }, compact = true,
-                modifier = Modifier.testTag("agent-block-expand-${block.recordID}"))
+            if (collapsible) TesseraButton(stringResource(if (expanded) R.string.agent_center_collapse else R.string.agent_center_details),
+                { expanded = !expanded }, compact = true, modifier = Modifier.testTag("agent-block-expand-${block.recordID}"))
         }
         val summary = block.body.lineSequence().firstOrNull().orEmpty()
         if (collapsible && !expanded) {
             if (collapsedPreview) Text(summary, Modifier.padding(top = 5.dp), style = TesseraType.bodySmall, color = tokens.fgMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         } else {
-            SelectionContainer {
+            AgentTranscriptSelectionContainer {
                 if (block.kind == "subagentGroup" || block.kind == "compactSummary") {
                     TesseraMarkdownText(block.body, Modifier.padding(top = 5.dp))
                 } else {
-                    Text(block.body, Modifier.padding(top = 5.dp), style = TesseraType.bodySmall, color = tokens.fg)
+                    Text(body, Modifier.padding(top = 5.dp), style = TesseraType.bodySmall, color = tokens.fg)
                 }
             }
+        }
+        if (artifactOpener != null && change != null) {
+            TesseraButton(
+                text = stringResource(R.string.agent_center_open_as_tab),
+                onClick = {
+                    keyboardController?.hide()
+                    focusManager.clearFocus(force = true)
+                    artifactOpener.open(change)
+                },
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp).heightIn(min = 48.dp)
+                    .testTag("agent-edit-open-${block.recordID}"),
+            )
         }
     }
 }
@@ -1415,16 +1656,16 @@ private fun AgentPromptTextField(value: String, onValueChange: (String) -> Unit,
         TesseraHairline()
         Row(Modifier.padding(horizontal = 12.dp, vertical = 7.dp).fillMaxWidth()
             .border(1.dp, tokens.border, RoundedCornerShape(24.dp)).testTag("agent-composer-frame"), verticalAlignment = Alignment.Bottom) {
-        if (uploading) ComposerProgress("uploading attachment", "agent-upload-progress")
+        if (uploading) ComposerProgress(stringResource(R.string.agent_center_uploading_attachment), "agent-upload-progress")
         else Box {
-            TesseraIconButton(TesseraIcons.Plus, "add attachment", { attachmentMenu = true },
+            TesseraIconButton(TesseraIcons.Plus, stringResource(R.string.agent_center_add_attachment), { attachmentMenu = true },
                 enabled = enabled && !sending, modifier = Modifier.testTag("agent-attach"))
             DropdownMenu(expanded = attachmentMenu, onDismissRequest = { attachmentMenu = false }) {
-                DropdownMenuItem(text = { Text("File") }, onClick = {
+                DropdownMenuItem(text = { Text(stringResource(R.string.agent_center_attach_file)) }, onClick = {
                     attachmentMenu = false
                     onAttach()
                 }, enabled = enabled && !sending, modifier = Modifier.testTag("agent-attach-file"))
-                DropdownMenuItem(text = { Text("Photo") }, onClick = {
+                DropdownMenuItem(text = { Text(stringResource(R.string.agent_center_attach_photo)) }, onClick = {
                     attachmentMenu = false
                     onAttachPhoto()
                 }, enabled = enabled && !sending, modifier = Modifier.testTag("agent-attach-photo"))
@@ -1435,7 +1676,11 @@ private fun AgentPromptTextField(value: String, onValueChange: (String) -> Unit,
             singleLine = false, maxLines = 5, enabled = enabled,
             textStyle = TesseraType.body.copy(color = tokens.fg), cursorBrush = SolidColor(tokens.fg),
             decorationBox = { field ->
-                Box { if (draft.isEmpty()) Text(if (enabled) "message…" else "open terminal to continue", style = TesseraType.body, color = tokens.fgDim); field() }
+                Box {
+                    if (draft.isEmpty()) Text(stringResource(if (enabled) R.string.agent_center_composer_placeholder
+                        else R.string.agent_center_composer_placeholder_disabled), style = TesseraType.body, color = tokens.fgDim)
+                    field()
+                }
             },
             modifier = Modifier.weight(1f).padding(top = 14.dp, bottom = 14.dp)
                 .testTag("agent-composer")
@@ -1466,15 +1711,21 @@ private fun AgentPromptTextField(value: String, onValueChange: (String) -> Unit,
             },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
         )
-        if (sending) ComposerProgress("sending message", "agent-send-progress")
+        if (sending) ComposerProgress(stringResource(R.string.agent_center_sending_message), "agent-send-progress")
         else Box {
+            val sendDescription = stringResource(when {
+                draft.isNotBlank() -> R.string.agent_center_send
+                speechAvailable -> R.string.agent_center_dictate_message
+                else -> R.string.agent_center_dictation_unavailable
+            })
+            val queueOptions = stringResource(R.string.agent_center_queue_options)
             Box(Modifier.size(48.dp)
                 .testTag(if (draft.isBlank()) "agent-dictation" else "agent-send")
-                .semantics { contentDescription = if (draft.isBlank()) { if (speechAvailable) "dictate message" else "on-device dictation unavailable" } else "send" }
+                .semantics { contentDescription = sendDescription }
                 .combinedClickable(
                     enabled = enabled && !uploading && (if (draft.isBlank()) speechAvailable else draft.isSafeComposerDraft()),
                     role = Role.Button,
-                    onLongClickLabel = if (onQueue != null && draft.isNotBlank()) "queue options" else null,
+                    onLongClickLabel = if (onQueue != null && draft.isNotBlank()) queueOptions else null,
                     onLongClick = if (onQueue != null && draft.isNotBlank()) ({ queueMenu = true }) else null,
                     onClick = { if (draft.isBlank()) onStartSpeech() else onSend() },
                 ), contentAlignment = Alignment.Center) {
@@ -1490,7 +1741,7 @@ private fun AgentPromptTextField(value: String, onValueChange: (String) -> Unit,
                 }
             }
             DropdownMenu(expanded = queueMenu, onDismissRequest = { queueMenu = false }) {
-                DropdownMenuItem(text = { Text("Queue message") }, onClick = {
+                DropdownMenuItem(text = { Text(stringResource(R.string.agent_center_queue_message)) }, onClick = {
                     queueMenu = false
                     if (enabled && !uploading && !sending && draft.isSafeComposerDraft()) onQueue?.invoke()
                 })
@@ -1498,7 +1749,7 @@ private fun AgentPromptTextField(value: String, onValueChange: (String) -> Unit,
         }
         }
         if (draft.any { (it.code < 32 && it != '\n') || it.code == 127 }) {
-            Text("Control-key paste requires Open terminal.", Modifier.padding(top = 4.dp), style = TesseraType.rowMicro, color = tokens.fgMuted)
+            Text(stringResource(R.string.agent_center_control_key_paste), Modifier.padding(top = 4.dp), style = TesseraType.rowMicro, color = tokens.fgMuted)
         }
     }
 }
@@ -1566,7 +1817,8 @@ internal fun AgentSpawnSheet(
         Column(
             Modifier.fillMaxWidth().imePadding().padding(horizontal = 18.dp).padding(bottom = 18.dp),
         ) {
-            Text(if (kind == AgentLaunchKind.Fork) "fork agent" else "spawn agent", style = TesseraType.sheet)
+            Text(stringResource(if (kind == AgentLaunchKind.Fork) R.string.agent_center_fork_agent else R.string.agent_center_spawn_agent),
+                style = TesseraType.sheet)
             // The form takes whatever height the sheet has left once the
             // keyboard and the action row are placed, so "cancel" and
             // "spawn" stay reachable on a phone while a field is focused.
@@ -1575,18 +1827,21 @@ internal fun AgentSpawnSheet(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 if (!capable || target == null) {
-                    Text("This live endpoint does not currently advertise ${if (kind == AgentLaunchKind.Fork) "fork" else "spawn"}.", style = TesseraType.body)
+                    Text(stringResource(if (kind == AgentLaunchKind.Fork) R.string.agent_center_fork_unadvertised
+                        else R.string.agent_center_spawn_unadvertised), style = TesseraType.body)
                 } else {
-                    TesseraKicker("provider")
+                    TesseraKicker(stringResource(R.string.agent_center_launch_provider))
                     TesseraSegmented(
                         providerIDs.map(::launchProviderLabel),
                         providerIDs.indexOf(providerID).coerceAtLeast(0),
                         onSelect = { index -> providerID = providerIDs[index] },
                     )
-                    Text("Target: ${target.hostLabel} · ${target.tmuxSession ?: "tmux"}", style = TesseraType.bodySmall)
-                    TesseraTextField(draft.task, { draft = draft.copy(task = it) }, label = "task", placeholder = "instruction", singleLine = false, inputTestTag = "agent-launch-task")
-                    TesseraTextField(draft.name, { draft = draft.copy(name = it) }, label = "name (optional)", placeholder = "agent name", inputTestTag = "agent-launch-name")
-                    TesseraKicker("directory")
+                    Text(stringResource(R.string.agent_center_launch_target, target.hostLabel, target.tmuxSession ?: "tmux"), style = TesseraType.bodySmall)
+                    TesseraTextField(draft.task, { draft = draft.copy(task = it) }, label = stringResource(R.string.agent_center_launch_task),
+                        placeholder = stringResource(R.string.agent_center_launch_task_placeholder), singleLine = false, inputTestTag = "agent-launch-task")
+                    TesseraTextField(draft.name, { draft = draft.copy(name = it) }, label = stringResource(R.string.agent_center_launch_name),
+                        placeholder = stringResource(R.string.agent_center_launch_name_placeholder), inputTestTag = "agent-launch-name")
+                    TesseraKicker(stringResource(R.string.agent_center_launch_directory))
                     // Choices are the only just-proven paths this route may
                     // launch in.  Typing is retained for accessibility/paste,
                     // but it must exactly match one of those live proofs.
@@ -1603,33 +1858,45 @@ internal fun AgentSpawnSheet(
                     TesseraTextField(
                         draft.directory,
                         { draft = draft.copy(directory = it.take(2_048)) },
-                        label = "directory",
-                        placeholder = "choose a proven directory",
-                        supporting = if (directoryIsProven) "currently proven for this pane" else "must exactly match a currently proven directory",
+                        label = stringResource(R.string.agent_center_launch_directory),
+                        placeholder = stringResource(R.string.agent_center_launch_directory_placeholder),
+                        supporting = stringResource(if (directoryIsProven) R.string.agent_center_launch_directory_proven
+                            else R.string.agent_center_launch_directory_must_match),
                         inputTestTag = "agent-launch-directory",
                         isError = draft.directory.isNotBlank() && !directoryIsProven,
                     )
-                    TesseraKicker("placement")
-                    TesseraSegmented(listOf("new window", "split right", "split down"), draft.placement.ordinal, { index ->
+                    TesseraKicker(stringResource(R.string.agent_center_launch_placement))
+                    TesseraSegmented(listOf(
+                        stringResource(R.string.agent_center_launch_new_window),
+                        stringResource(R.string.agent_center_launch_split_right),
+                        stringResource(R.string.agent_center_launch_split_down),
+                    ), draft.placement.ordinal, { index ->
                         draft = draft.copy(placement = AgentLaunchPlacement.entries[index])
                     })
                     if (draft.placement != AgentLaunchPlacement.NewWindow) {
-                        Text("Window ${target.windowID ?: "unavailable"} · pane ${target.paneID ?: "unavailable"}", style = TesseraType.bodySmall)
+                        val unavailable = stringResource(R.string.agent_center_unavailable)
+                        Text(stringResource(R.string.agent_center_launch_split_target, target.windowID ?: unavailable, target.paneID ?: unavailable),
+                            style = TesseraType.bodySmall)
                     }
-                    TesseraKicker("isolation")
-                    TesseraSegmented(listOf("current worktree", "new worktree"), if (draft.newWorktree) 1 else 0, { index ->
+                    TesseraKicker(stringResource(R.string.agent_center_launch_isolation))
+                    TesseraSegmented(listOf(
+                        stringResource(R.string.agent_center_launch_current_worktree),
+                        stringResource(R.string.agent_center_launch_new_worktree),
+                    ), if (draft.newWorktree) 1 else 0, { index ->
                         draft = draft.copy(newWorktree = index == 1)
                     })
-                    if (draft.newWorktree) TesseraTextField(draft.branch, { draft = draft.copy(branch = it) }, label = "branch", placeholder = "feature/agent-task", inputTestTag = "agent-launch-branch")
-                    if (onLaunchRequested == null) Text("Launch execution is unavailable until this app binds a generation-safe endpoint executor.", style = TesseraType.bodySmall)
+                    // The placeholder is an example branch name, not prose.
+                    if (draft.newWorktree) TesseraTextField(draft.branch, { draft = draft.copy(branch = it) },
+                        label = stringResource(R.string.agent_center_launch_branch), placeholder = "feature/agent-task", inputTestTag = "agent-launch-branch")
+                    if (onLaunchRequested == null) Text(stringResource(R.string.agent_center_launch_unavailable), style = TesseraType.bodySmall)
                 }
             }
             Row(
                 Modifier.fillMaxWidth().padding(top = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
             ) {
-                TesseraButton("cancel", onDismiss, compact = true)
-                TesseraButton(if (kind == AgentLaunchKind.Fork) "fork" else "spawn", {
+                TesseraButton(stringResource(R.string.agent_center_launch_cancel), onDismiss, compact = true)
+                TesseraButton(stringResource(if (kind == AgentLaunchKind.Fork) R.string.agent_center_launch_fork else R.string.agent_center_launch_spawn), {
                     request?.let { onLaunchRequested?.invoke(it); onDismiss() }
                 }, style = TesseraButtonStyle.Primary, compact = true, enabled = executable)
             }

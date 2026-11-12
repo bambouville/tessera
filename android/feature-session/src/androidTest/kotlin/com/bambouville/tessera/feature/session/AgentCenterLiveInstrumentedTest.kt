@@ -14,7 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -548,7 +548,7 @@ class AgentCenterLiveInstrumentedTest {
                 while (true) {
                     when (val state = target.state.value) {
                         SshSessionUiState.Connected -> return@withTimeoutOrNull true
-                        is SshSessionUiState.Failed -> error("$label controller failed: ${state.message}")
+                        is SshSessionUiState.Failed -> error("$label controller failed: ${state.message.resolve(context.resources)}")
                         else -> Unit
                     }
                     delay(POLL_MS)

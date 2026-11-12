@@ -28,6 +28,14 @@ done
   exit 1
 }
 
+# Swift 6.3.3 cannot compile package manifests against Xcode 27's macOS SDK
+# (unknown argument -target-arch-variant). Use a macOS 26 SDK when one exists.
+if [[ -z "${SDKROOT:-}" ]]; then
+  for macos_sdk in /Library/Developer/CommandLineTools/SDKs/MacOSX26.*.sdk; do
+    [[ -d "$macos_sdk" ]] && export SDKROOT="$macos_sdk"
+  done
+fi
+
 export TESSERA_FIXTURE_CONFIG="$fixture_config"
 export TESSERA_INTEGRATION_FIXTURE_STATE_DIR="${TESSERA_INTEGRATION_FIXTURE_STATE_DIR:-$(dirname "$fixture_config")/.state}"
 # shellcheck source=../integration/lib.sh

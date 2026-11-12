@@ -18,4 +18,25 @@
     <string name="tmux_split_left">Dividir a la izquierda</string>
     <string name="tmux_split_down">Dividir abajo</string>
     <string name="tmux_split_up">Dividir arriba</string>
+
+    <!-- tmux window and pane verbs shared by the switcher, the window strip and their dialogs -->
+    <string name="session_new_tmux_window">Ventana de tmux nueva</string>
+    <string name="session_tmux_rename">renombrar</string>
+    <string name="session_tmux_zoom_pane_menu">ampliar el panel</string>
+    <string name="session_tmux_unzoom_pane_menu">reducir el panel</string>
+    <string name="session_tmux_close_window_menu">cerrar ventana</string>
+    <string name="session_tmux_close_window_title">¿Cerrar %1$s?</string>
+    <string name="session_tmux_close_pane_title">¿Cerrar el panel %1$s?</string>
+    <string name="session_tmux_close_body">Se terminará el proceso remoto de tmux de este destino.</string>
+    <string name="session_tmux_rename_window_title">renombrar la ventana</string>
+    <string name="session_tmux_rename_confirm">Renombrar</string>
+    <string name="session_tmux_window_name">Nombre de la ventana</string>
+    <string name="session_tmux_rename_window_description">Renombrar la ventana</string>
+    <string name="session_tmux_split_left_right_description">Dividir el panel a izquierda y derecha</string>
+    <string name="session_tmux_split_top_bottom_description">Dividir el panel arriba y abajo</string>
+    <string name="session_tmux_zoom_pane_description">Ampliar el panel</string>
+    <string name="session_tmux_unzoom_pane_description">Reducir el panel</string>
+    <string name="session_tmux_panes_kicker">paneles</string>
+    <string name="session_tmux_close_pane_description">Cerrar el panel</string>
+    <string name="session_tmux_close_window_description">Cerrar la ventana</string>
 </resources>

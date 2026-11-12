@@ -608,7 +608,7 @@ public final class SSHSession: ObservableObject, TerminalSession {
         let startedAt = Date()
         do {
             DiagnosticLogStore.appendSSH("connect step=auth-resolve")
-            let (chain, connectedHost) = try await withPendingSSHConnectionAttempt {
+            let (chain, connectedHost) = try await withPendingSSHConnectionAttempt { [self] in
                 DiagnosticLogStore.appendSSH(
                     "connect step=ssh-handshake hops=\(fallbackHost.jumpChain.count + 1)"
                 )
@@ -875,7 +875,7 @@ public final class SSHSession: ObservableObject, TerminalSession {
             attemptID: attemptID,
             ptyGeneration: ptyGeneration
         )
-        let diagnosticHostID = await self.host.id
+        let diagnosticHostID = self.host.id
         let diagnosticHost = diagnosticHostID.uuidString.prefix(8)
         let eventLoopPulseDiagnostics = SessionLatencyDiagnostics.queue(
             host: diagnosticHostID,

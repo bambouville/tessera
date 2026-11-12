@@ -1,6 +1,8 @@
 import SwiftUI
 import SwiftData
 import Combine
+import PortForwarding
+import TesseraArtifactsCore
 import TesseraCore
 import TesseraSessionCore
 import TmuxControl
@@ -9,11 +11,70 @@ import UIKit
 import CoreFoundation
 #endif
 
+extension Notification.Name {
+    static let tesseraToggleArtifacts = Notification.Name("tesseraToggleArtifacts")
+}
+
+extension View {
+    /// Ends a long modifier chain's concrete type here. A view's first render
+    /// builds its whole nested value on the main thread: unoptimized code
+    /// keeps a copy of the growing value for every link in each getter's
+    /// frame, and the Swift runtime recurses once per generic nesting level to
+    /// resolve its type. A device gives the main thread 1 MB of stack (a
+    /// simulator gives it 8 MB); the root shell and the session views each
+    /// outgrew it, so every iPad launch, and every session opened, overflowed.
+    /// The wrapped type never changes, so identity and state are kept.
+    func stackBoundary() -> AnyView { AnyView(self) }
+}
+
 private struct RestoreStateEvent {
     let liveSessionID: UUID
     let persistedHostID: UUID?
     let transport: String
     let state: SessionState
+    /// The transport object that published it: a restore can reuse a
+    /// snapshot's live session id for a new session.
+    let source: AnyObject
+}
+
+/// The state each live session's handler last acted on. SwiftUI rebuilds
+/// `sessionStatePublisher` on every body evaluation and `@Published` replays
+/// the current state to each new subscriber, so most deliveries repeat a
+/// state already handled: each one used to persist the restore snapshot (a
+/// defaults write), write the share extension's targets and restart the
+/// continuity broadcast. Not observed, so recording never renders.
+@MainActor
+final class SessionStateLedger {
+    private struct Entry {
+        weak var source: AnyObject?
+        let state: SessionState
+    }
+
+    private var entries: [UUID: Entry] = [:]
+
+    /// Records a delivery; false when it repeats the state its session
+    /// object was last handled in.
+    func admit(liveSessionID: UUID, state: SessionState, source: AnyObject) -> Bool {
+        if let entry = entries[liveSessionID], entry.source === source, entry.state == state {
+            return false
+        }
+        entries[liveSessionID] = Entry(source: source, state: state)
+        return true
+    }
+
+    func retain(_ liveSessionIDs: Set<UUID>) {
+        entries = entries.filter { liveSessionIDs.contains($0.key) }
+    }
+}
+
+/// What a restore write reads besides the sessions, the selection and the
+/// app phase, which persist on their own changes. Replays of session state
+/// used to write after any of these changed.
+private struct RestorePersistInputs: Equatable {
+    let startupEvaluated: Bool
+    let inactivePreserved: Bool
+    let windowOpen: Bool
+    let cohort: [UUID]
 }
 
 private struct ShareExtensionUploadTargetsDocument: Codable {
@@ -179,6 +240,7 @@ struct ContentView: View {
     @State private var restorePrompt: SessionRestorePrompt?
     @State private var restoreAlwaysReopen = false
     @State private var didEvaluateStartupRestore = false
+    @State private var sessionStateLedger = SessionStateLedger()
     #if DEBUG
     @State private var onboardingMatrixTask: Task<Void, Never>?
     /// `TESSERA_SHOW_EDGE_PROBE`: the show coordinator's app facts, read by
@@ -265,12 +327,18 @@ struct ContentView: View {
     /// palette via the environment.
     @State private var sessionRegistry = SessionRegistry()
     @State private var commandPalette = CommandPalette()
+    @State private var railActionCenter = SessionRailActionCenter()
+    @State private var artifactsStore = ArtifactsStore()
+    @Query private var artifactHosts: [PersistedHost]
     /// Production starts inert. `onAppear` applies the persisted experimental
     /// preference before any registered session source is allowed to discover.
     /// The shared runtime is the only Agent Center reducer in the app shell.
     @State private var agentCenterV2 = AgentCenterV2Coordinator()
     @State private var programStatusCenter = ProgramStatusCenter()
     @State private var agentCenterReturnItem: SidebarItem?
+    @State private var agentCenterReturnTab: CompactRootTab = .hosts
+    @State private var artifactsReturnItem: SidebarItem?
+    @State private var artifactsReturnTab: CompactRootTab = .hosts
 
     /// One FileBridge (dedicated SSH + SFTP) per remote endpoint, shared
     /// across all sessions to that host regardless of transport. Bridges
@@ -278,6 +346,24 @@ struct ContentView: View {
     /// connects until the user opens a panel.
     @State private var fileBridges = FileBridgeRegistry()
     @State private var compactPresentation = CompactNavigationPresentation()
+    @State private var railEdge: HorizontalEdge?
+    /// The settled fold in window coordinates.
+    @State private var shellFold: DuoFold?
+    /// The safe area's bottom in window coordinates, whatever the keyboard.
+    @State private var shellSafeBottom: CGFloat = 0
+    /// Global frames of the rail-mode tabs' content and of the detail layer
+    /// beside the TabView; their difference is the rail the layer must leave.
+    @State private var railTabContentFrames: [CompactRootTab: CGRect] = [:]
+    @State private var compactOverlayFrame: CGRect = .zero
+    /// The window's global frame: the canvas a rail-mode session's picture spans.
+    @State private var railCanvas: CGRect?
+    @State private var lastRailSessionID: UUID?
+    @State private var duoWorkspaceStates: [UUID: DuoWorkspaceState] = [:]
+    @State private var duoContextSelections: [UUID: DuoContextSelection] = [:]
+    @State private var inactiveDuoWorkspaceState = DuoWorkspaceState()
+    @State private var inactiveDuoContextSelection = DuoContextSelection.automatic
+    @State private var duoArrangement: DuoPaneArrangement = .single
+    @State private var artifactChildSheetPresented = false
     @State private var continuationOverlay: ContinuationOverlayPresentation?
     @State private var continuationLiveSessionID: UUID?
     @State private var continuationConnectionHostID: UUID?
@@ -293,6 +379,7 @@ struct ContentView: View {
     @State private var continuityFailureBanner: ContinuityFailureBanner?
     @State private var continuityFailureDismissTask: Task<Void, Never>?
     @State private var keysPagePresentation = KeysPagePresentationState()
+    @State private var settingsSection: SettingsSection?
 
     private let sessionRestoreStore = SessionRestoreStore()
     private let shareInboxAppGroupID = "group.com.bambouville.TesseraApp"
@@ -301,6 +388,7 @@ struct ContentView: View {
     private let shareInboxMetadataFileName = "metadata.json"
     private let shareInboxConsumedDefaultsKey = "ShareInbox.ConsumedIDs"
     private let shareInboxConsumedLimit = 200
+    @State private var shareInboxQueued = ShareInboxQueuedSignal()
 
     #if DEBUG
     /// Test-only fixture seam for production-shell transition coverage. The
@@ -312,11 +400,182 @@ struct ContentView: View {
     ) {
         _activeSessions = State(initialValue: debugInitialSessions)
         _selectedItem = State(initialValue: debugInitialSelectedItem)
+        if case .session(let id) = debugInitialSelectedItem {
+            _lastRailSessionID = State(initialValue: id)
+        }
     }
     #endif
 
     private var isPhone: Bool {
         CompactLayout.isPhone(horizontalSizeClass)
+    }
+
+    private var isRailMode: Bool {
+        RailShellPolicy.isRailMode(isPhone: isPhone, railEdge: railEdge)
+    }
+
+    /// Laptop pose has no tab bar: its sections ride the switcher instead.
+    private var isLaptopShell: Bool {
+        LaptopShellPolicy.isLaptopPose(isPhone: isPhone, railEdge: railEdge, fold: shellFold)
+    }
+
+    private var selectedRailSessionID: UUID? {
+        guard case .session(let id) = selectedItem,
+              activeSessions.contains(where: { $0.id == id }) else { return nil }
+        return id
+    }
+
+    private var compactOverlayBackgroundEdges: Edge.Set {
+        RailShellPolicy.overlayIgnoredEdges(isPhone: isPhone, railEdge: railEdge)
+    }
+
+    private var railOverlayInset: CGFloat {
+        guard isRailMode else { return 0 }
+        return RailShellPolicy.overlayRailInset(
+            railEdge: railEdge, overlay: compactOverlayFrame,
+            tabContent: railTabContentFrames[railOverlayTab]
+        )
+    }
+
+    /// The tab under the layer. Its frame outlives a visit to another section,
+    /// so returning never lays the panes out without the rail first.
+    private var railOverlayTab: CompactRootTab {
+        switch selectedItem {
+        case .session: return .sessions
+        case .host: return .hosts
+        default: return compactPresentation.tab
+        }
+    }
+
+    /// The session's terminal theme, for the chrome around it in rail mode:
+    /// the rail's backdrop and the docked context.
+    private var railSessionTheme: TerminalTheme? {
+        guard isRailMode, isSessionSelected else { return nil }
+        return TerminalTheme.find(id: appearance.terminalThemeID)
+    }
+
+    /// The selected session's background picture. In rail mode it spans the
+    /// whole window, one image across both panes, the strip between them and
+    /// the rail, each painting its crop through `terminalBackdropCanvas`.
+    private var railSessionBackground: ResolvedTerminalBackground? {
+        guard railSessionTheme != nil, let id = selectedRailSessionID,
+              let live = activeSessions.first(where: { $0.id == id }) else { return nil }
+        return ResolvedTerminalBackground.resolve(
+            hostID: live.session.terminalSession.host.id,
+            appearance: appearance,
+            hostStore: hostBackgrounds
+        )
+    }
+
+    /// The session's canvas for the chrome around its panes in rail mode.
+    @ViewBuilder
+    private func railSessionCanvas(_ theme: TerminalTheme) -> some View {
+        if let background = railSessionBackground {
+            TerminalBackdrop(background: background, baseColor: theme.bg)
+        } else {
+            theme.bg
+        }
+    }
+
+    private func noteRailTabContentFrame(_ frame: CGRect, for tab: CompactRootTab) {
+        if railTabContentFrames[tab] != frame { railTabContentFrames[tab] = frame }
+    }
+
+    private var selectedDuoWorkspaceState: Binding<DuoWorkspaceState> {
+        guard let id = selectedRailSessionID else { return $inactiveDuoWorkspaceState }
+        return Binding(
+            get: { duoWorkspaceStates[id] ?? DuoWorkspaceState() },
+            set: { state in
+                guard activeSessions.contains(where: { $0.id == id }) else { return }
+                duoWorkspaceStates[id] = state
+            }
+        )
+    }
+
+    private var duoMainIdealWidth: CGFloat {
+        let font = TerminalFontResolver.uiFont(
+            id: appearance.terminalFontID,
+            size: CGFloat(appearance.fontSize)
+        )
+        let cell = TerminalCellMetrics.cellSize(font: font, scale: UIScreen.main.scale)
+        return RailShellPolicy.mainIdealWidth(
+            cellWidth: cell.width,
+            isPhone: isPhone,
+            cornerInset: SessionView.cornerInset
+        )
+    }
+
+    private var selectedDuoContextSelection: Binding<DuoContextSelection> {
+        guard let id = selectedRailSessionID else { return $inactiveDuoContextSelection }
+        return Binding(
+            get: { duoContextSelections[id] ?? .automatic },
+            set: { selection in
+                guard activeSessions.contains(where: { $0.id == id }) else { return }
+                duoContextSelections[id] = selection
+            }
+        )
+    }
+
+    private func toggleRailContext() {
+        guard isRailMode, selectedRailSessionID != nil else { return }
+        selectedDuoWorkspaceState.wrappedValue.toggleContext(arrangement: duoArrangement)
+    }
+
+    /// Two panes, beside each other or the context on the laptop's desk: the
+    /// context already lists the session's files, so Files opens there
+    /// instead of in a sheet over both panes.
+    private var duoFilesDocked: Bool { (isRailMode || isLaptopShell) && duoArrangement != .single }
+
+    private var duoShowFilesInContext: DuoPaneAction? {
+        guard duoFilesDocked else { return nil }
+        return DuoPaneAction { id in showFilesInContext(sessionID: id) }
+    }
+
+    private var duoLeaveFilesInContext: DuoPaneAction? {
+        guard duoFilesDocked else { return nil }
+        return DuoPaneAction { id in leaveFilesInContext(sessionID: id) }
+    }
+
+    /// The folder button while the context shows the session's files: the
+    /// tab it showed last comes back, and leaving the slot closes the panel.
+    /// With no tab for the host, files stay.
+    private func leaveFilesInContext(sessionID id: UUID) {
+        guard let live = activeSessions.first(where: { $0.id == id }),
+              let tabID = DuoContextPolicy.tabLeavingFiles(hostID: live.session.terminalSession.host.id,
+                                                           tabs: artifactsStore.state.tabs)
+        else { return }
+        duoContextSelections[id] = .tab(tabID)
+    }
+
+    /// Runs from the panel's animated open: the panes must not inherit its
+    /// animation, which would drag a live terminal across the frame.
+    private func showFilesInContext(sessionID id: UUID) {
+        guard activeSessions.contains(where: { $0.id == id }) else { return }
+        // On the laptop's desk the keyboard would cover the files.
+        if duoArrangement == .stacked {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            duoContextSelections[id] = .extra("files")
+            duoWorkspaceStates[id] = DuoContextPolicy.revealingContext(duoWorkspaceStates[id] ?? DuoWorkspaceState())
+        }
+    }
+
+    /// Laptop pose: from the fold's bottom to the safe area's, where a
+    /// half-height sheet rests instead of ending on the hinge.
+    private var laptopDeskHeight: CGFloat? {
+        guard isLaptopShell else { return nil }
+        return LaptopSheetLayout.deskHeight(safeBottom: shellSafeBottom, fold: shellFold)
+    }
+
+    private var shellSafeBottomReader: some View {
+        Color.clear
+            .ignoresSafeArea(.keyboard)
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { bottom in
+                if shellSafeBottom != bottom { shellSafeBottom = bottom }
+            }
     }
     /// Compact has no multi-session restore chooser. A legacy/default `.ask`
     /// preference therefore means reopen on phone until the user explicitly
@@ -326,6 +585,15 @@ struct ContentView: View {
         SessionRestorePresentationPolicy.effective(
             stored: appearance.sessionRestorePolicy,
             usesCompactShell: isPhone
+        )
+    }
+
+    private var restorePersistInputs: RestorePersistInputs {
+        RestorePersistInputs(
+            startupEvaluated: didEvaluateStartupRestore,
+            inactivePreserved: hasInactivePreservedRestoreSnapshots,
+            windowOpen: foregroundRestoreWindowOpenedAt != nil,
+            cohort: foregroundRestoreCohort.map(\.liveSessionID)
         )
     }
 
@@ -356,20 +624,103 @@ struct ContentView: View {
             // first: inserting the compact root ahead of this subtree changes
             // its variadic child identity even though detailContent itself is
             // unconditional.
-            detailContent
+            DuoWorkspace(
+                state: selectedDuoWorkspaceState,
+                isEnabled: isRailMode && isSessionSelected,
+                primaryTakesInput: isSessionSelected,
+                mainIdealWidth: isRailMode ? duoMainIdealWidth : 0,
+                primaryHasDesk: isPhone && isSessionSelected
+            ) {
+                detailContent
+                    .environment(\.duoFilesDocked, duoFilesDocked)
+                    .environment(\.duoShowFilesInContext, duoShowFilesInContext)
+                    .environment(\.duoLeaveFilesInContext, duoLeaveFilesInContext)
+                    .environment(\.duoPanesOverPicture, railSessionBackground != nil)
+                    .background {
+                        RailWorkspaceArrangementReader { arrangement in
+                            duoArrangement = arrangement ?? .single
+                        }
+                    }
+            } secondary: {
+                if let id = selectedRailSessionID, let live = activeSessions.first(where: { $0.id == id }) {
+                    // Docked beside the terminal, the context belongs to it,
+                    // as the iPad's inspector does.
+                    let theme = TerminalTheme.find(id: appearance.terminalThemeID)
+                    let tokens = theme.chromeTokens(applying: appearance)
+                    let actions = RailShellPolicy.sessionActions(for: id, published: railActionCenter.actions)
+                    SessionDuoContextPane(live: live, selection: selectedDuoContextSelection,
+                                          filesPanel: actions?.filesPanel, openFiles: actions?.toggleFiles,
+                                          filesConnectUnprompted: duoFilesDocked && actions?.filesConnectUnprompted == true,
+                                          // A context in a sheet keeps the listing: the panel docks only beside.
+                                          openFilesInPlace: duoFilesDocked ? actions?.openFilesInPlace : nil)
+                        // The session's picture, drawn behind both panes, runs on under it.
+                        .environment(\.designTokens, railSessionBackground == nil ? tokens : tokens.overPicture())
+                        .environment(\.colorScheme, theme.isLight ? .light : .dark)
+                        .id(live.id)
+                }
+            }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background {
                     if isPhone {
-                        T.presentationBg.ignoresSafeArea()
+                        // A session's fold strip and pane gaps belong to its
+                        // terminal, as does what shows under its context.
+                        if let theme = railSessionTheme {
+                            railSessionCanvas(theme)
+                                .ignoresSafeArea(.all, edges: compactOverlayBackgroundEdges)
+                        } else {
+                            T.presentationBg
+                                .ignoresSafeArea(.all, edges: compactOverlayBackgroundEdges)
+                        }
                     }
                 }
-                .opacity(!isPhone || isCompactOverlaySelected ? 1 : 0)
-                .allowsHitTesting(!isPhone || isCompactOverlaySelected)
-                .accessibilityHidden(isPhone && !isCompactOverlaySelected)
+                .onPreferenceChange(KeyboardSpanningBarFrameKey.self) { keyboardSpanningBar = $0 }
+                // Session and host-editor backgrounds ignore their own safe
+                // areas. Bound their drawing and input before leaving the
+                // rail's inset intact; the other three edges remain full bleed,
+                // keyboard included, as before rail mode existed. The accessory
+                // bar alone runs on over the rail with the keyboard under it.
+                .mask {
+                    CompactOverlayMask(
+                        bottom: hostsSplitTabBottom, railEdge: railEdge,
+                        railInset: railOverlayInset, keyboardBar: keyboardSpanningBar
+                    )
+                    // A mask draws nothing past its own frame: reach over the
+                    // rail for the bar, and inset everything else back off it.
+                    .padding(railEdge == .leading ? .leading : .trailing, -railOverlayInset)
+                    .ignoresSafeArea(.all, edges: compactOverlayBackgroundEdges)
+                }
+                .onGeometryChange(for: CGPoint.self) { $0.frame(in: .global).origin } action: { origin in
+                    if compactOverlayOrigin != origin { compactOverlayOrigin = origin }
+                }
+                // Only the compact shell bounds input. A full-frame content
+                // shape on this layer in the regular iPad shell won the hit
+                // test over the floating "show sidebar" overlay. Switching the
+                // shape's kinds rather than the modifier keeps this one detail
+                // tree's identity across a width change.
+                .contentShape(
+                    isPhone ? .interaction : [],
+                    CompactOverlayHitShape(
+                        bottom: hostsSplitTabBottom.map { $0 - compactOverlayOrigin.y },
+                        keyboardBar: keyboardSpanningBar.map {
+                            $0.offsetBy(dx: -compactOverlayOrigin.x, dy: -compactOverlayOrigin.y)
+                        }
+                    )
+                )
+                // Drawing, input and the panes' container all stop at the rail.
+                .padding(railEdge == .leading ? .leading : .trailing, railOverlayInset)
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                    if compactOverlayFrame != frame { compactOverlayFrame = frame }
+                }
+                .ignoresSafeArea(.container, edges: isRailMode ? compactOverlayBackgroundEdges : [])
+                .opacity(!isPhone || isCompactOverlaySelected || showsHostsSplitOverlay ? 1 : 0)
+                .allowsHitTesting(!isPhone || isCompactOverlaySelected || showsHostsSplitOverlay)
+                .accessibilityHidden(isPhone && !isCompactOverlaySelected && !showsHostsSplitOverlay)
+                .stackBoundary()
                 .zIndex(isPhone ? 10 : 0)
 
             if isPhone {
                 compactNavigationShell
+                    .stackBoundary()
             }
 
             if !isPhone && effectiveRegularSidebarVisible && isSessionSelected {
@@ -400,7 +751,7 @@ struct ContentView: View {
         }
         // Reveal affordance for regular browse pages when the sidebar is hidden.
         .overlay(alignment: .topLeading) {
-            if !isPhone && !effectiveRegularSidebarVisible && !isSessionSelected {
+            if !isPhone && !effectiveRegularSidebarVisible && !isSessionSelected && selectedItem != .artifacts {
                 sidebarRevealButton
                     .transition(.opacity)
             }
@@ -416,12 +767,39 @@ struct ContentView: View {
             }
         }
         .background(T.bg)
-        .animation(.easeInOut(duration: 0.18), value: isCompactOverlaySelected)
+        .background {
+            Color.clear
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                    if railCanvas != frame { railCanvas = frame }
+                }
+                // Read over the whole window, keyboard included, so the
+                // fold is reported in window coordinates.
+                .onDuoFoldChange { fold in
+                    if shellFold != fold { shellFold = fold }
+                }
+                .ignoresSafeArea()
+        }
+        .background(shellSafeBottomReader)
+        .environment(\.terminalBackdropCanvas, isRailMode ? railCanvas : nil)
+        .environment(\.duoWindowFrame, isRailMode ? railCanvas : nil)
+        .environment(\.laptopDeskHeight, laptopDeskHeight)
+        .environment(\.laptopFoldBottom, laptopDeskHeight == nil ? nil : shellFold?.frame.maxY)
+        .onDuoRailEdgeChange { railEdge = $0 }
+        .onChange(of: railOverlayInset) { _, inset in
+            NSLog(
+                "duo-rail inset=%.1f overlay=%@ content=%@", inset, String(describing: compactOverlayFrame),
+                railTabContentFrames[railOverlayTab].map { String(describing: $0) } ?? "none"
+            )
+        }
+        // The rail's colours switch with the section at once; a fade would
+        // show the next section's rail beside the departing session.
+        .animation(isRailMode ? nil : .easeInOut(duration: 0.18), value: isCompactOverlaySelected)
         .animation(.easeInOut(duration: 0.24), value: sidebarVisible)
         .animation(.easeInOut(duration: 0.24), value: agentCenterAutomaticallyCollapsesSidebar)
         .onChange(of: agentCenterAutomaticallyCollapsesSidebar) { _, collapses in
             if collapses { agentCenterSidebarTemporarilyRevealed = false }
         }
+        .stackBoundary()
         // The four chords below come from the user's keymap, not from literals:
         // these hidden buttons are the *only* registration for ⌘N (the terminal
         // container has no selector for it), so a literal here means the editor
@@ -453,6 +831,12 @@ struct ContentView: View {
             }
         }
         .background(
+            Button("Toggle Artifacts", action: toggleArtifacts)
+                .storedKeyboardShortcut(.toggleArtifacts, in: shortcutStore)
+                .opacity(0)
+                .frame(width: 0, height: 0)
+        )
+        .background(
             // Global ⌘, — the platform-standard "open Settings" chord.
             // Covers the landing page, host editor, and other browse
             // pages where no terminal holds first responder. Inside a
@@ -466,9 +850,16 @@ struct ContentView: View {
         )
         .environment(sessionRegistry)
         .environment(commandPalette)
+        .environment(railActionCenter)
         .environment(agentCenterV2)
+        .environment(artifactsStore)
+        .environment(\.openArtifact, artifactOpenAction)
         .environment(programStatusCenter)
         .environment(\.programStatusObscured, programStatusObscured)
+        .environment(\.artifactPresentationObscured, artifactPresentationObscured)
+        .onPreferenceChange(ArtifactCoveringSheetPreferenceKey.self) { artifactChildSheetPresented = $0 }
+        .environment(\.duoRailMode, isRailMode)
+        .environment(\.duoOpenSwitcher, isRailMode || isLaptopShell ? DuoSwitcherAction { openPalette() } : nil)
         .onChange(of: programStatusObscured, initial: true) { _, obscured in
             programStatusCenter.setApplicationObscured(obscured)
         }
@@ -477,108 +868,413 @@ struct ContentView: View {
             programStatusCenter.setApplicationActive(active)
         }
         .environment(fileBridges)
+        .onChange(of: artifactsHostDirectory, initial: true) { _, directory in
+            artifactsStore.syncHosts(directory)
+        }
+        .onChange(of: artifactsStore.state.tabs, initial: true) { _, tabs in
+            commandPalette.updateArtifacts(tabs)
+        }
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            artifactsStore.setApplicationForeground(phase != .background)
+        }
+        // Education is modal: a mounted terminal must not reclaim the keyboard under it.
+        .environment(\.onboardingInputSuppressed, onboarding.phase != .inactive)
         .overlay {
             if commandPalette.isOpen {
                 CommandPaletteView(
                     palette: commandPalette,
+                    sections: laptopPaletteSections,
                     onTmuxClose: sessionRegistry.requestTmuxClose,
                     onTmuxMutation: sessionRegistry.requestTmuxMutation,
                     onCommit: handleCommandPaletteCommit
                 )
                 // The overlay sits outside this view's environment modifiers.
                 .environment(agentCenterV2)
+                .environment(artifactsStore)
+                .environment(\.openArtifact, artifactOpenAction)
                 .environment(programStatusCenter)
                 .transition(.opacity)
                 .zIndex(50)
             }
         }
+        .stackBoundary()
     }
 
     private var compactNavigationShell: some View {
-        TabView(selection: $compactPresentation.tab) {
-            landing
+        TabView(selection: compactTabSelection) {
+            compactHostsTab
+                .laptopTabBarHidden(isLaptopShell)
                 .tag(CompactRootTab.hosts)
                 .tabItem {
                     Label("hosts", systemImage: "server.rack")
                 }
 
-            CompactSessionsPage(
-                activeSessions: activeSessions,
-                selectedView: $compactPresentation.sessionsView,
-                agentCenterV2: agentCenterV2,
-                agentCenterEnabled: appearance.agentCenterEnabled,
-                onSelectSession: selectSession,
-                onDisconnectSession: dismiss
-            )
+            compactSessionsTab
+            .laptopTabBarHidden(isLaptopShell)
             .tag(CompactRootTab.sessions)
             .tabItem {
                 Label("sessions", systemImage: "rectangle.stack.fill")
             }
             .badge(compactSessionBadge)
 
-            VStack(spacing: 0) {
-                CompactViewSelector(
-                    leadingTitle: "keys",
-                    trailingTitle: "known hosts",
-                    selection: Binding(
-                        get: { compactPresentation.keysView == .keys },
-                        set: {
-                            compactPresentation.keysView = $0 ? .keys : .knownHosts
-                        }
-                    )
-                )
-
-                switch compactPresentation.keysView {
-                case .keys:
-                    KeysPageView(presentation: keysPagePresentation)
-                case .knownHosts:
-                    KnownHostsPageView()
+            if appearance.agentCenterEnabled {
+                AgentCenterV2RootView(
+                    model: agentCenterV2.presentation,
+                    includesNavigationSidebar: false
+                ) { EmptyView() }
+                .laptopTabBarHidden(isLaptopShell)
+                .tag(CompactRootTab.agents)
+                .tabItem {
+                    Label("agents", systemImage: "sparkles")
                 }
-            }
-            .tag(CompactRootTab.keys)
-            .tabItem {
-                Label("keys", systemImage: "key.fill")
+                .badge(compactAgentBadge)
             }
 
-            SettingsPageView(
-                onUploadDiagnosticLog: uploadDiagnosticLog
-            )
-            .tag(CompactRootTab.settings)
-            .tabItem {
-                Label("settings", systemImage: "gearshape.fill")
-            }
+            ArtifactsRootView()
+                .environment(\.artifactSurfaceVisible, selectedItem == .artifacts)
+                .laptopTabBarHidden(isLaptopShell)
+                .tag(CompactRootTab.artifacts)
+                .tabItem {
+                    Label("artifacts", systemImage: "square.stack.3d.up")
+                }
+
+            settingsPage
+                .laptopTabBarHidden(isLaptopShell)
+                .tag(CompactRootTab.settings)
+                .tabItem {
+                    Label("settings", systemImage: "gearshape.fill")
+                }
         }
         .tint(T.accent)
         .background(T.bg)
-        .onChange(of: compactPresentation.tab) { _, tab in
+        .onboardingTabBarAnchors(
+            agentCenterEnabled: appearance.agentCenterEnabled,
+            isVisible: !isLaptopShell && (isRailMode || !isCompactOverlaySelected)
+        )
+        .onChange(of: compactPresentation.tab) { previousTab, tab in
+            // Rail taps are handled by the binding setter. Programmatic tab
+            // reconciliation must keep a newly selected session/host intact.
+            if isRailMode { return }
             guard !isCompactOverlaySelected else { return }
+            if tab == .artifacts, previousTab != .artifacts {
+                if selectedItem != .artifacts { artifactsReturnItem = selectedItem }
+                artifactsReturnTab = previousTab
+            }
+            if tab == .agents, previousTab != .agents {
+                if selectedItem != .agents { agentCenterReturnItem = selectedItem }
+                agentCenterReturnTab = previousTab
+            }
             switch tab {
-            case .hosts:
+            case .hosts, .sessions:
                 selectedItem = nil
-            case .sessions:
-                if compactPresentation.sessionsView == .agents {
-                    selectedItem = .agents
-                } else if selectedItem != .agents {
-                    selectedItem = nil
-                }
-            case .keys:
-                selectedItem = compactPresentation.keysView == .keys ? .keys : .knownHosts
+            case .agents:
+                selectedItem = .agents
+            case .artifacts:
+                selectedItem = .artifacts
             case .settings:
                 selectedItem = .settings
             }
             updateAgentSurfaceDemand()
         }
-        .onChange(of: compactPresentation.sessionsView) { _, view in
-            switch view {
-            case .sessions:
-                if selectedItem == .agents {
-                    selectedItem = nil
+    }
+
+    /// A disappearing Agents tab must never remain the TabView's selection,
+    /// even for the update before the preference's onChange reconciles routes.
+    private var compactTabSelection: Binding<CompactRootTab> {
+        Binding(
+            get: {
+                let tab = compactPresentation.tab
+                return tab == .agents && !appearance.agentCenterEnabled ? .sessions : tab
+            },
+            set: { tab in
+                let tab = tab == .agents && !appearance.agentCenterEnabled ? .sessions : tab
+                if isRailMode {
+                    navigateRail(from: compactPresentation.tab, to: tab)
+                } else {
+                    compactPresentation.tab = tab
                 }
-            case .agents:
-                selectedItem = .agents
             }
-            updateAgentSurfaceDemand()
+        )
+    }
+
+    @ViewBuilder
+    private var compactHostsTab: some View {
+        if isRailMode {
+            NavigationStack {
+                compactHostsLanding
+                    .navigationTitle("")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+                    .ignoresSafeArea(.container, edges: .top)
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                        noteRailTabContentFrame($0, for: .hosts)
+                    }
+                    .toolbar {
+                        RailSessionToolbar(
+                            sessionID: nil,
+                            actions: nil,
+                            onBack: { selectedItem = nil },
+                            onOpenPalette: openPalette,
+                            onToggleContext: toggleRailContext,
+                            showsContext: false,
+                            onNewHost: createAndEditNewHost
+                        )
+                    }
+            }
+        } else {
+            compactHostsLanding
         }
+    }
+
+    @State private var hostsFold: DuoFold?
+    @State private var hostsSearch = ""
+    @State private var hostsUsesSharedSearch = false
+    @State private var hostsSearchFocused = false
+    @State private var hostsLastEditorSize: CGSize?
+    @State private var hostsContainerSize: CGSize = .zero
+    /// The Hosts tab's content bottom, above the tab bar, in global space.
+    @State private var hostsTabContentMaxY: CGFloat?
+    @State private var compactOverlayOrigin: CGPoint = .zero
+    /// The session's accessory bar while it spans the docked keyboard, which
+    /// runs under the rail too.
+    @State private var keyboardSpanningBar: CGRect?
+
+    private var hasHostsLaptopFold: Bool {
+        isPhone && hostsFold?.splitsSideBySide == false
+    }
+
+    private var selectedHostsHostID: UUID? {
+        guard case .host(let id) = selectedItem else { return nil }
+        return id
+    }
+
+    /// The shell's overlay visibility and hit testing include this even with
+    /// no host selected; the split list and its empty detail remain present.
+    private var showsHostsSplitOverlay: Bool {
+        guard isPhone,
+              selectedHostsHostID != nil || (selectedItem == nil && compactPresentation.tab == .hosts) else { return false }
+        return hostsLayout(container: hostsContainerSize, selectedHostID: selectedHostsHostID).isSplit
+    }
+
+    /// With no host selected, a split without a rail still belongs to the Hosts
+    /// tab, so it stops above the tab bar (global y). An editor covers the bar
+    /// as it does on every iPhone. Laptop pose has no bar to stop above.
+    private var hostsSplitTabBottom: CGFloat? {
+        guard showsHostsSplitOverlay, !isRailMode, !isLaptopShell, selectedHostsHostID == nil else { return nil }
+        return hostsTabContentMaxY
+    }
+
+    private func noteHostsFold(_ settledFold: DuoFold?) {
+        if isRailMode || settledFold != nil { hostsUsesSharedSearch = true }
+        if hostsFold != settledFold { hostsFold = settledFold }
+    }
+
+    private func hostsLayout(container: CGSize, selectedHostID: UUID?) -> HostsSplitLayout {
+        HostsSplitLayout.layout(
+            isPhone: isPhone, isRailMode: isRailMode, container: container,
+            fold: hostsFold, selectedHostID: selectedHostID,
+            isSearching: hostsSearchFocused, retainedEditorSize: hostsLastEditorSize
+        )
+    }
+
+    @ViewBuilder
+    private var compactHostsLanding: some View {
+        if isRailMode || hasHostsLaptopFold {
+            GeometryReader { geometry in
+                let layout = hostsLayout(container: geometry.size, selectedHostID: selectedHostsHostID)
+                Group {
+                    if layout.isSplit {
+                        // The split's one list lives beside the stable editor
+                        // in the overlay, including while nothing is selected.
+                        Color.clear
+                    } else {
+                        landing
+                    }
+                }
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                    if hostsContainerSize != frame.size { hostsContainerSize = frame.size }
+                    if hostsTabContentMaxY != frame.maxY { hostsTabContentMaxY = frame.maxY }
+                }
+            }
+            .background {
+                // Read against the keyboard-free frame: typing on the desk
+                // ends the landing at the fold's top, and the split must hold.
+                Color.clear
+                    .ignoresSafeArea(.keyboard)
+                    .onDuoFoldChange(noteHostsFold)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        } else {
+            landing.onDuoFoldChange(noteHostsFold)
+        }
+    }
+
+    private func hostsSplitLanding(_ layout: HostsSplitLayout) -> some View {
+        ZStack(alignment: .topLeading) {
+            landing(isSplit: layout.isSplit)
+                .frame(width: layout.list.width, height: layout.list.height)
+                .clipped()
+                .position(x: layout.list.midX, y: layout.list.midY)
+            if layout.detailContent == .empty {
+                hostsEmptyDetail
+                    .frame(width: layout.detail.width, height: layout.detail.height)
+                    .clipped()
+                    .position(x: layout.detail.midX, y: layout.detail.midY)
+            }
+            if case .listBesideDetail = layout.arrangement, hostsFold == nil {
+                Rectangle()
+                    .fill(T.border)
+                    .frame(width: 0.5, height: layout.list.height)
+                    .offset(x: layout.list.maxX - 0.25)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(T.bg)
+    }
+
+    private var hostsEmptyDetail: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "server.rack")
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(T.fgDim)
+                .accessibilityHidden(true)
+            Text("select a host")
+                .font(Typography.tesseraMono(size: 13))
+                .foregroundStyle(T.fgMuted)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(T.panelBg.opacity(0.65))
+        .background(.regularMaterial)
+        .overlay { Rectangle().stroke(T.border, lineWidth: 0.5) }
+        .accessibilityIdentifier("duo-hosts-empty-detail")
+    }
+
+    @ViewBuilder
+    private var compactSessionsTab: some View {
+        if isRailMode {
+            NavigationStack {
+                compactSessionsPage
+                    // The session's layer leaves the rail to the TabView, so
+                    // the rail's backdrop is this tab's: the terminal's colour.
+                    .overlay {
+                        if let theme = railSessionTheme {
+                            railSessionCanvas(theme)
+                                .ignoresSafeArea()
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    .navigationTitle("")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+                    .toolbarColorScheme(railSessionTheme.map { $0.isLight ? .light : .dark }, for: .navigationBar, .tabBar)
+                    .ignoresSafeArea(.container, edges: .top)
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                        noteRailTabContentFrame($0, for: .sessions)
+                    }
+                    .toolbar {
+                        RailSessionToolbar(
+                            sessionID: selectedRailSessionID,
+                            actions: railActionCenter.actions,
+                            onBack: { selectedItem = nil },
+                            onOpenPalette: openPalette,
+                            onToggleContext: toggleRailContext,
+                            showsContext: duoArrangement != .single,
+                            contextShown: selectedDuoWorkspaceState.wrappedValue
+                                .showsContextPane(arrangement: duoArrangement),
+                            onNewHost: createAndEditNewHost
+                        )
+                    }
+                    .duoRailPrefersActions(RailShellPolicy.prefersRailActions(
+                        sessionShown: selectedRailSessionID != nil,
+                        otherTabBadged: appearance.agentCenterEnabled && compactAgentBadge > 0
+                    ))
+            }
+        } else {
+            compactSessionsPage
+        }
+    }
+
+    private var compactSessionsPage: some View {
+        CompactSessionsPage(
+            activeSessions: activeSessions,
+            onSelectSession: selectSession,
+            onDisconnectSession: dismiss
+        )
+    }
+
+    private func navigateRail(from previousTab: CompactRootTab, to tab: CompactRootTab) {
+        if tab == .artifacts, previousTab != .artifacts {
+            if selectedItem != .artifacts { artifactsReturnItem = selectedItem }
+            artifactsReturnTab = previousTab
+        }
+        if tab == .agents, previousTab != .agents, appearance.agentCenterEnabled {
+            if selectedItem != .agents { agentCenterReturnItem = selectedItem }
+            agentCenterReturnTab = previousTab
+        }
+        let selection = RailNavigationPolicy.selection(
+            previousTab: previousTab,
+            newTab: tab,
+            currentSelection: selectedItem,
+            lastSessionID: lastRailSessionID,
+            liveSessionIDs: Set(activeSessions.map(\.id)),
+            agentCenterEnabled: appearance.agentCenterEnabled
+        )
+        let visibleTab = RailNavigationPolicy.visibleTab(tab, agentCenterEnabled: appearance.agentCenterEnabled)
+        if compactPresentation.tab != visibleTab { compactPresentation.tab = visibleTab }
+        if case .session(let id) = selection {
+            selectSession(id)
+        } else {
+            selectedItem = selection
+        }
+        updateAgentSurfaceDemand()
+    }
+
+    /// Laptop pose: the switcher carries the sections, laid out like the tab
+    /// bar it replaces, and hangs above the fold.
+    private var laptopPaletteSections: CommandPaletteSections? {
+        guard isLaptopShell, let fold = shellFold else { return nil }
+        return CommandPaletteSections(
+            sections: LaptopShellPolicy.sections(agentCenterEnabled: appearance.agentCenterEnabled),
+            current: compactTabSelection.wrappedValue,
+            foldTop: fold.frame.minY,
+            badges: [.sessions: compactSessionBadge, .agents: compactAgentBadge],
+            onSelect: selectLaptopSection
+        )
+    }
+
+    /// A section does what its tab would. From a session or host editor,
+    /// which the tab bar never shows beside it, it leaves that first.
+    private func selectLaptopSection(_ tab: CompactRootTab) {
+        let change = LaptopShellPolicy.change(
+            to: tab,
+            currentTab: compactPresentation.tab,
+            currentSelection: selectedItem,
+            agentCenterEnabled: appearance.agentCenterEnabled
+        )
+        switch change {
+        case .stay:
+            break
+        case .selectTab(let tab):
+            compactTabSelection.wrappedValue = tab
+        case .leave(let destination, let tab):
+            // A destination's own onChange keeps the return route, as
+            // ⌘⇧A and the artifacts chord do.
+            selectedItem = destination
+            if destination == nil { sidebarVisible = true }
+            compactPresentation.tab = tab
+        }
+    }
+
+    private var settingsPage: some View {
+        SettingsPageView(
+            selectedSection: $settingsSection,
+            keysPagePresentation: keysPagePresentation,
+            onUploadDiagnosticLog: uploadDiagnosticLog
+        )
     }
 
     private var isCompactOverlaySelected: Bool {
@@ -591,9 +1287,14 @@ struct ContentView: View {
     }
 
     private var programStatusObscured: Bool {
-        appLockController.isLocked
+        artifactPresentationObscured
             || !isSessionSelected
             || (isPhone && !isCompactOverlaySelected)
+    }
+
+    private var artifactPresentationObscured: Bool {
+        appLockController.isLocked
+            || artifactChildSheetPresented
             || hostKeyRequest != nil
             || restorePrompt != nil
             || uploadRequest != nil
@@ -616,11 +1317,19 @@ struct ContentView: View {
         programStatusCenter.counts(agentCenter: agentCenterV2).total
     }
 
+    private var compactAgentBadge: Int {
+        let counts = agentCenterV2.attentionBadgeCounts
+        return counts.waiting + counts.finished
+    }
+
     /// Keep the compact shell ready for the authoritative regular route before
     /// it is mounted, then run the same reconciliation again at the actual
     /// width boundary as a safety net for restore/lifecycle updates.
     private func reconcileCompactPresentation(with selection: SidebarItem?) {
-        compactPresentation.reconcile(with: selection)
+        compactPresentation.reconcile(
+            with: selection,
+            agentCenterEnabled: appearance.agentCenterEnabled
+        )
     }
 
     private var agentAwareContent: some View {
@@ -628,7 +1337,7 @@ struct ContentView: View {
         // First-launch walkthrough. Mounted last so it floats above the sidebar
         // (zIndex 2) and the command palette (zIndex 50). `overlayPreferenceValue`
         // resolves the onboarding anchors published by the landing CTA and the
-        // sidebar keys row — both descendants of this ZStack — so the overlay can
+        // sidebar navigation rows — descendants of this ZStack — so the overlay can
         // spotlight elements that live in different subtrees.
         .overlayPreferenceValue(OnboardingAnchorKey.self) { anchors in
             GeometryReader { proxy in
@@ -641,13 +1350,21 @@ struct ContentView: View {
             }
             .ignoresSafeArea()
         }
+        .onChange(of: activeSessions.map(\.id), initial: true) { _, newIDs in
+            let liveIDs = Set(newIDs)
+            duoWorkspaceStates = RailShellPolicy.workspaceStates(duoWorkspaceStates, liveSessionIDs: liveIDs)
+            duoContextSelections = DuoContextPolicy.retainedSelections(duoContextSelections, liveSessionIDs: liveIDs)
+            if let id = lastRailSessionID, !liveIDs.contains(id) { lastRailSessionID = nil }
+        }
         .onChange(of: activeSessions.map(\.id)) { oldIDs, newIDs in
             // A closed session's controller is going away. A replaced one was
             // already renamed in place by `replaceSlot`.
             for removed in Set(oldIDs).subtracting(newIDs) {
                 showEdges.removeSlot(removed)
             }
+            sessionStateLedger.retain(Set(newIDs))
             sessionRegistry.syncActiveSessions(activeSessions)
+            artifactsStore.updateSessions(activeSessions)
             refreshCommandPaletteSnapshot()
             logRestoreDiag(
                 "active-sessions-changed count=\(activeSessions.count) sessions=\(activeSessionSummary())"
@@ -658,6 +1375,29 @@ struct ContentView: View {
             presentQueuedShareForSelectedHostIfClear(reason: "active-sessions")
         }
         .onChange(of: selectedItem) { oldValue, newValue in
+            // The tunnels page left the sidebar: its pages are artifact tabs.
+            if newValue == .tunnels {
+                selectedItem = .artifacts
+                return
+            }
+            if let section = SettingsSection.legacyDestination(for: newValue) {
+                settingsSection = section
+                selectedItem = .settings
+                reconcileCompactPresentation(with: .settings)
+                return
+            }
+            if newValue == .agents, oldValue != .agents {
+                agentCenterReturnItem = oldValue
+                if compactPresentation.tab != .agents {
+                    agentCenterReturnTab = compactPresentation.tab
+                }
+            }
+            if newValue == .artifacts, oldValue != .artifacts {
+                artifactsReturnItem = oldValue
+                if compactPresentation.tab != .artifacts {
+                    artifactsReturnTab = compactPresentation.tab
+                }
+            }
             // A nil selection means the regular Hosts destination, but in the
             // compact shell it also represents the Sessions root. Preserve a
             // compact tab the user just chose; regular navigation and the
@@ -665,21 +1405,27 @@ struct ContentView: View {
             if !isPhone || newValue != nil {
                 reconcileCompactPresentation(with: newValue)
             }
-            if newValue == .agents, oldValue != .agents {
-                agentCenterReturnItem = oldValue
-            }
             if case .session(let id) = newValue {
+                lastRailSessionID = id
                 sessionRegistry.markTouched(id)
             }
             logRestoreDiag(
                 "selected-changed selected=\(sidebarItemDescription(newValue)) active=\(appPhase.isActive)"
             )
             persistRestoreSnapshots()
+            refreshUploadCandidatesIfPresented()
             publishShareExtensionTargets(reason: "selected")
             presentQueuedShareForSelectedHostIfClear(reason: "selected")
             updateAgentSurfaceDemand()
         }
         .onChange(of: isPhone, initial: true) { _, usesCompactShell in
+            if selectedItem == .tunnels {
+                selectedItem = .artifacts
+            }
+            if let section = SettingsSection.legacyDestination(for: selectedItem) {
+                settingsSection = section
+                selectedItem = .settings
+            }
             guard usesCompactShell else { return }
             reconcileCompactPresentation(with: selectedItem)
         }
@@ -702,10 +1448,16 @@ struct ContentView: View {
             refreshCommandPaletteSnapshot()
             updateAgentSurfaceDemand()
         }
+        .onReceive(NotificationCenter.default.publisher(
+            for: .tesseraToggleArtifacts
+        )) { _ in
+            toggleArtifacts()
+        }
         .onChange(of: appearance.agentCenterNotificationsEnabled) { _, enabled in
             updateAgentV2NotificationDelivery(enabled: enabled)
             updateAgentAttentionBackgroundKeepAlive(reason: "notification-setting")
         }
+        .stackBoundary()
     }
 
     private var presentedContent: some View {
@@ -782,6 +1534,7 @@ struct ContentView: View {
                 .zIndex(140)
             }
         }
+        .stackBoundary()
     }
 
     /// Keep continuation observation out of `body`'s already-large generic
@@ -1035,7 +1788,7 @@ struct ContentView: View {
                 hasCompletedFirstOpen: bootstrapCoordinator.hasCompletedFirstOpen
             ) {
             case .hideOnboarding: onboarding.phase = .inactive
-            case .completeWelcome: appearance.hasSeenWelcome = true
+            case .completeWelcome: onboarding.completeWelcome()
             case .resumeOnboarding: maybeBeginOnboarding()
             case .none: break
             }
@@ -1069,6 +1822,8 @@ struct ContentView: View {
                 presentParkedUploadIfClear()
                 scheduleShareInboxSweep(reason: "unlock")
                 presentQueuedShareForSelectedHostIfClear(reason: "unlock")
+                maybeBeginOnboarding()
+                reconsiderMoshServerLoss()
             } else {
                 continuityBroadcastTask?.cancel()
             }
@@ -1104,6 +1859,29 @@ struct ContentView: View {
             reconcileContinuationSecurityPolicy()
             reconcileEnrollmentSecurityPolicy()
             reconcileCrossDevicePairingSecurityPolicy()
+            // A host edit changes what the share extension offers, and with
+            // sessions open, which may be restored and whether the selected
+            // one broadcasts.
+            publishShareExtensionTargets(reason: "hosts-saved")
+            guard !activeSessions.isEmpty else { return }
+            persistRestoreSnapshots()
+            refreshUploadCandidatesIfPresented()
+            if case .session = selectedItem {
+                refreshContinuityBroadcast(reason: "hosts-saved")
+            }
+        }
+        .onChange(of: effectiveSessionRestorePolicy) { _, _ in
+            guard !activeSessions.isEmpty else { return }
+            persistRestoreSnapshots()
+        }
+        .onChange(of: appearance.sessionRestorePolicy) { _, _ in
+            // The preference, not the effective policy: a window narrowed to
+            // compact width must not rerun a kept session's launch command.
+            reconsiderMoshServerLoss()
+        }
+        .onChange(of: restorePersistInputs) { _, _ in
+            guard !activeSessions.isEmpty else { return }
+            persistRestoreSnapshots()
         }
         .onReceive(
             NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
@@ -1128,14 +1906,17 @@ struct ContentView: View {
                 requiresBiometricForKeyUse: capturedValue
             )
         }
+        .onChange(of: restorePrompt == nil) { _, cleared in
+            if cleared { maybeBeginOnboarding() }
+        }
         .onChange(of: onboarding.phase) { _, newPhase in
-            // A spotlight step needs its target on screen. The replay path
-            // starts from Settings (or a live session), so drop back to the
-            // home host list and reveal the sidebar — that surfaces both the
-            // add-host affordance (step ①) and the sidebar keys row (step ②).
+            // The add-host spotlight needs the host list on screen, so drop
+            // back home and reveal the sidebar. The bar's own spotlights
+            // (agents, artifacts, settings) keep the current screen and fall
+            // back to a centered card when a full-screen session hides them.
             guard case .touring(let index) = newPhase,
-                  index >= 0, index < onboarding.steps.count,
-                  case .spotlight = onboarding.steps[index].kind
+                  onboarding.steps.indices.contains(index),
+                  case .spotlight(.addHost, _) = onboarding.steps[index].presentation(compact: isPhone).kind
             else { return }
             selectedItem = nil
             sidebarVisible = true
@@ -1171,6 +1952,9 @@ struct ContentView: View {
                 publishShareExtensionTargets(reason: "foreground")
                 scheduleShareInboxSweep(reason: "foreground")
                 presentQueuedShareForSelectedHostIfClear(reason: "foreground")
+                // The inactive edge withdrew Handoff; a session that kept its
+                // state through the trip publishes no change to bring it back.
+                refreshContinuityBroadcast(reason: "foreground")
                 return
             }
             if isActive {
@@ -1186,6 +1970,7 @@ struct ContentView: View {
                 reason: "app-phase-\(state.rawValue)"
             )
         }
+        .stackBoundary()
     }
 
     var body: some View {
@@ -1239,6 +2024,21 @@ struct ContentView: View {
                 "content-appear locked=\(appLockController.isLocked) active=\(appPhase.isActive) activeCount=\(activeSessions.count) didEvaluateStartupRestore=\(didEvaluateStartupRestore)"
             )
             sessionRegistry.syncActiveSessions(activeSessions)
+            artifactsStore.syncHosts(artifactsHostDirectory)
+            artifactsStore.configure(bridges: fileBridges, sessions: activeSessions) { hostID, rule in
+                guard let host = fetchHost(hostID) else { throw CocoaError(.fileNoSuchFile) }
+                let previous = host.portForwardRulesData
+                let rules = RuleCodec.decode(previous)
+                guard PortForwarding.PortForwardRuleValidator.validate(rule, against: rules) == nil else {
+                    throw FileBridgeError.remoteOperationFailed(String(localized: "this forwarding rule conflicts with an existing rule"))
+                }
+                host.setPortForwardRules(rules + [rule])
+                do { try modelContext.save() }
+                catch { host.portForwardRulesData = previous; throw error }
+            }
+            agentCenterV2.onAgentEditObserved = { hostID, absolutePath in
+                artifactsStore.agentEditObserved(hostID: hostID, absolutePath: absolutePath)
+            }
             agentCenterV2.configureSpeech(controller: dictationController)
             agentCenterV2.onUploadAttachment = { binding, url in
                 guard let live = activeSessions.first(where: { $0.id == binding.liveSessionID }) else {
@@ -1269,7 +2069,6 @@ struct ContentView: View {
                 }
                 if isPhone {
                     compactPresentation.tab = .sessions
-                    compactPresentation.sessionsView = .sessions
                 }
             }
             programStatusCenter.onOpenTerminal = { sessionID, windowID, paneID in
@@ -1284,7 +2083,6 @@ struct ContentView: View {
                 }
                 if isPhone {
                     compactPresentation.tab = .sessions
-                    compactPresentation.sessionsView = .sessions
                 }
             }
             agentCenterV2.onNotificationThreadSelected = { _ in
@@ -1314,6 +2112,7 @@ struct ContentView: View {
             }
             refreshContinuityBroadcast(reason: "appear")
         }
+        .stackBoundary()
         .statusBarHidden(isPhone ? isSessionSelected : true)
         .persistentSystemOverlays(isPhone ? .automatic : .hidden)
         .sheet(item: $hostKeyRequest) { request in
@@ -1412,14 +2211,24 @@ struct ContentView: View {
             persistDetectedOSHint(detection.osHint, forHostID: detection.hostID)
         }
         .onReceive(sessionStatePublisher) { event in
-            logRestoreDiag(
-                "session-state live=\(shortID(event.liveSessionID)) host=\(shortID(event.persistedHostID)) transport=\(event.transport) state=\(stateDescription(event.state)) active=\(appPhase.isActive)"
+            let isNew = sessionStateLedger.admit(
+                liveSessionID: event.liveSessionID,
+                state: event.state,
+                source: event.source
             )
-            if event.transport == "mosh", case .failed = event.state {
-                attemptMoshJumpFallback(liveSessionID: event.liveSessionID)
-                attemptMoshServerLossReconnect(liveSessionID: event.liveSessionID)
+            if isNew {
+                logRestoreDiag(
+                    "session-state live=\(shortID(event.liveSessionID)) host=\(shortID(event.persistedHostID)) transport=\(event.transport) state=\(stateDescription(event.state)) active=\(appPhase.isActive)"
+                )
+                if event.transport == "mosh", case .failed = event.state {
+                    attemptMoshJumpFallback(liveSessionID: event.liveSessionID)
+                    attemptMoshServerLossReconnect(liveSessionID: event.liveSessionID)
+                }
             }
             updateContinuationOverlay(for: event)
+            // A replay changes nothing below; the inputs these read besides
+            // session state trigger them on their own changes.
+            guard isNew else { return }
             if case .session(event.liveSessionID) = selectedItem {
                 refreshContinuityBroadcast(reason: "session-state")
             }
@@ -1427,6 +2236,10 @@ struct ContentView: View {
             refreshUploadCandidatesIfPresented()
             publishShareExtensionTargets(reason: "session-state")
             presentQueuedShareForSelectedHostIfClear(reason: "session-state")
+        }
+        .onReceive(shareInboxQueued.queued) { _ in
+            // The extension queued an upload while this scene stayed active.
+            scheduleShareInboxSweep(reason: "share-queued")
         }
         .onReceive(remoteCwdPublisher) { _ in
             refreshUploadCandidatesIfPresented()
@@ -1893,7 +2706,7 @@ struct ContentView: View {
 
     private func requestBootstrapAgentNotificationPermission() async {
         guard appearance.agentCenterEnabled, appearance.agentCenterNotificationsEnabled else { return }
-        if await bellController.requestPermissionIfNeeded() == .denied {
+        if await bellController.requestPermission().deniedBeforeAsking {
             bootstrapAgentNotificationDenied = true
         }
     }
@@ -2040,13 +2853,15 @@ struct ContentView: View {
                 case .ssh: transport = "ssh"
                 case .mosh: transport = "mosh"
                 }
+                let source: AnyObject = live.session.terminalSession
                 return live.session.terminalSession.sessionCommands.statePublisher
                     .map {
                         RestoreStateEvent(
                             liveSessionID: live.id,
                             persistedHostID: live.persistedHostID,
                             transport: transport,
-                            state: legacySessionState(from: $0)
+                            state: legacySessionState(from: $0),
+                            source: source
                         )
                     }
                     .eraseToAnyPublisher()
@@ -2224,24 +3039,19 @@ struct ContentView: View {
             // Host editor identity is independent of the responsive shell.
             // Keeping it at one structural position preserves the staged draft,
             // validation, focus, and transient credential boundary while the
-            // iPad crosses compact/regular width classes.
+            // iPad crosses compact/regular width classes or Duo changes pose.
             if !isSessionSelected {
+                hostsSplitOverlay
                 Group {
                     switch selectedItem {
                     case .host(let hostID):
                         if let host = fetchHost(hostID) {
-                            hostEditor(host)
-                                .id(host.id)
+                            hostsEditorPlacement(host)
                         } else if isPhone {
                             Color.clear
+                                .allowsHitTesting(false)
                         } else {
                             landing
-                        }
-                    case .keys:
-                        if isPhone {
-                            Color.clear
-                        } else {
-                            KeysPageView(presentation: keysPagePresentation)
                         }
                     case .agents:
                         if !isPhone && appearance.agentCenterEnabled {
@@ -2258,29 +3068,74 @@ struct ContentView: View {
                         } else {
                             landing
                         }
-                    case .knownHosts:
-                        if isPhone { Color.clear } else { KnownHostsPageView() }
-                    case .tunnels:
+                    case .artifacts:
                         if isPhone {
                             Color.clear
                         } else {
-                            TunnelsPageView { persistedHost in
-                                selectedItem = .host(persistedHost.id)
-                            }
+                            ArtifactsRootView()
+                                .environment(\.artifactSurfaceVisible, selectedItem == .artifacts)
+                                .environment(\.artifactsRevealSidebar,
+                                             effectiveRegularSidebarVisible ? nil : DuoSwitcherAction(revealSidebar))
                         }
-                    case .settings:
+                    case .settings, .keys, .knownHosts, .tunnels:
                         if isPhone {
                             Color.clear
                         } else {
-                            SettingsPageView(onUploadDiagnosticLog: uploadDiagnosticLog)
+                            settingsPage
                         }
                     default:
                         if isPhone { Color.clear } else { landing }
                     }
                 }
+                .allowsHitTesting(!showsHostsSplitOverlay || selectedHostsHostID != nil)
                 .padding(.leading, !isPhone && effectiveRegularSidebarVisible ? SessionSidebar.width : 0)
-                .padding(.top, !isPhone && !sidebarVisible ? 50 : 0)
+                // The strip for the floating show-sidebar button. The
+                // artifacts browser leads its address bar with it instead.
+                .padding(.top, !isPhone && !sidebarVisible && selectedItem != .artifacts ? 50 : 0)
             }
+        }
+    }
+
+    private var hostsSplitOverlay: some View {
+        ZStack {
+            if showsHostsSplitOverlay {
+                GeometryReader { geometry in
+                    let id = selectedHostsHostID.flatMap { fetchHost($0)?.id }
+                    let bottom = hostsSplitTabBottom.map { max(0, $0 - geometry.frame(in: .global).minY) }
+                    let size = CGSize(width: geometry.size.width, height: min(geometry.size.height, bottom ?? .infinity))
+                    let layout = hostsLayout(container: size, selectedHostID: id)
+                    hostsSplitLanding(layout)
+                        .frame(height: size.height)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        .opacity(layout.editorCoversList ? 0 : 1)
+                        .allowsHitTesting(!layout.editorCoversList)
+                        .accessibilityHidden(layout.editorCoversList)
+                }
+            }
+        }
+    }
+
+    private func hostsEditorPlacement(_ host: PersistedHost) -> some View {
+        GeometryReader { geometry in
+            let layout = hostsLayout(container: geometry.size, selectedHostID: host.id)
+            // Only the placement changes. In particular, no arrangement
+            // branch or NavigationStack encloses the live editor.
+            hostEditor(host)
+                .id(host.id)
+                .frame(width: layout.isSplit ? layout.editor.width : nil,
+                       height: layout.isSplit ? layout.editor.height : nil)
+                .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+                    if !layout.editorCoversList && !hostsSearchFocused, size.width > 0, size.height > 0 {
+                        hostsLastEditorSize = size
+                    }
+                }
+                .mask {
+                    Rectangle().ignoresSafeArea(.all, edges: layout.isSplit ? [] : .all)
+                }
+                .contentShape(Rectangle())
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.leading, layout.isSplit ? layout.editor.minX : 0)
+                .padding(.top, layout.isSplit ? layout.editor.minY : 0)
         }
     }
 
@@ -2451,6 +3306,10 @@ struct ContentView: View {
 
 
     private var landing: some View {
+        landing(isSplit: false)
+    }
+
+    private func landing(isSplit: Bool) -> some View {
         HostsLandingView(
             onConnect: { host in
                 if hostRouteHasUsableCredentials(host) {
@@ -2462,19 +3321,34 @@ struct ContentView: View {
             },
             onEdit: { host in selectedItem = .host(host.id) },
             onDelete: { host in
-                dismissEditor(host: host, deleteIfDraft: false, force: true)
+                dismissEditor(
+                    host: host, deleteIfDraft: false, force: true,
+                    clearsSelection: HostsSplitLayout.deletionClearsSelection(
+                        deleted: host.id, selected: selectedHostsHostID
+                    )
+                )
             },
             onNewHost: createAndEditNewHost,
             onQuickConnect: handleQuickConnect,
             onOpenKeys: {
-                if isPhone {
-                    compactPresentation.tab = .keys
-                    compactPresentation.keysView = .keys
-                }
-                selectedItem = .keys
+                settingsSection = .keys
+                openSettings()
+            },
+            onGenerateKey: {
+                settingsSection = .keys
+                openSettings()
+                keysPagePresentation.presentGenerator(
+                    initialProtection: KeyOwnerPresencePolicy.initialKeyPreference(
+                        globalPreference: appearance.requireBiometricForKeyUse
+                    )
+                )
             },
             activeHostKeys: Set(activeSessions.map { $0.hostKey }),
-            activeHostTmuxUsage: HostCardRuntimeBadges.activeTmuxUsage(in: activeSessions)
+            activeHostTmuxUsage: HostCardRuntimeBadges.activeTmuxUsage(in: activeSessions),
+            isManagementSplit: isSplit,
+            selectedHostID: isSplit ? selectedHostsHostID : nil,
+            sharedSearch: hostsUsesSharedSearch || isSplit || isRailMode || hasHostsLaptopFold ? $hostsSearch : nil,
+            onSearchFocusChange: isSplit ? { hostsSearchFocused = $0 } : nil
         )
     }
 
@@ -2482,7 +3356,9 @@ struct ContentView: View {
     /// the host is always deleted (the trash button). With `deleteIfDraft: true`
     /// the host is deleted only if it's still empty (a never-filled-in ⌘N
     /// draft) so cancel doesn't leave litter in the host list.
-    private func dismissEditor(host: PersistedHost, deleteIfDraft: Bool, force: Bool = false) {
+    private func dismissEditor(
+        host: PersistedHost, deleteIfDraft: Bool, force: Bool = false, clearsSelection: Bool = true
+    ) {
         let isDraft = host.name.trimmingCharacters(in: .whitespaces).isEmpty
             && host.address.trimmingCharacters(in: .whitespaces).isEmpty
         if force || (deleteIfDraft && isDraft) {
@@ -2495,7 +3371,7 @@ struct ContentView: View {
             modelContext.delete(host)
             try? modelContext.save()
         }
-        selectedItem = nil
+        if clearsSelection { selectedItem = nil }
     }
 
     private func fetchHost(_ id: UUID) -> PersistedHost? {
@@ -3588,21 +4464,25 @@ struct ContentView: View {
     /// the `hasSeenWelcome` + zero-hosts conditions, so this is safe to call on
     /// every appearance.
     private func maybeBeginOnboarding() {
-        guard activeSessions.isEmpty, selectedItem == nil else { return }
+        // The 0.4.1 card waits behind app lock and a restore prompt, as the
+        // welcome waits behind the setup sheet; each re-runs this on clearing.
+        guard !appLockController.isLocked, restorePrompt == nil else { return }
         #if DEBUG
-        if ProcessInfo.processInfo.environment["TESSERA_ONBOARDING_MATRIX_AUTOPLAY"] == "1" {
-            beginOnboardingMatrixSequenceIfNeeded()
-            return
-        }
-        if ProcessInfo.processInfo.environment["TESSERA_FORCE_TOUR_WELCOME"] == "1" {
-            onboarding.phase = .welcome
-            return
-        }
-        if let rawStep = ProcessInfo.processInfo.environment["TESSERA_FORCE_TOUR_STEP"],
-           let step = Int(rawStep),
-           onboarding.steps.indices.contains(step) {
-            onboarding.phase = .touring(step)
-            return
+        if activeSessions.isEmpty, selectedItem == nil {
+            if ProcessInfo.processInfo.environment["TESSERA_ONBOARDING_MATRIX_AUTOPLAY"] == "1" {
+                beginOnboardingMatrixSequenceIfNeeded()
+                return
+            }
+            if ProcessInfo.processInfo.environment["TESSERA_FORCE_TOUR_WELCOME"] == "1" {
+                onboarding.phase = .welcome
+                return
+            }
+            if let rawStep = ProcessInfo.processInfo.environment["TESSERA_FORCE_TOUR_STEP"],
+               let step = Int(rawStep),
+               onboarding.steps.indices.contains(step) {
+                onboarding.phase = .touring(step)
+                return
+            }
         }
         #endif
         // `presentedContent` mounts before this outer view's onAppear. Start
@@ -3613,8 +4493,18 @@ struct ContentView: View {
             onboarding.phase = .inactive
             return
         }
+        let hostCount = fetchHosts().count
+        // Before the empty-landing guard: someone updating with restored
+        // sessions still gets the card.
+        onboarding.beginWhatsNewIfNeeded(
+            hostCount: hostCount,
+            isLocked: appLockController.isLocked,
+            isSetupPresented: bootstrapCoordinator.isPresented
+        )
+        guard onboarding.phase == .inactive,
+              activeSessions.isEmpty, selectedItem == nil else { return }
         onboarding.beginIfFirstLaunch(
-            hasHosts: !fetchHosts().isEmpty,
+            hasHosts: hostCount > 0,
             hasSeen: appearance.hasSeenWelcome
         )
     }
@@ -3636,6 +4526,9 @@ struct ContentView: View {
             ("step-7", .touring(6)),
             ("step-8", .touring(7)),
             ("step-9", .touring(8)),
+            ("step-10", .touring(9)),
+            ("step-11", .touring(10)),
+            ("whats-new", .whatsNew),
         ]
         let markerURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("tessera-onboarding-matrix-state.txt")
@@ -3837,6 +4730,8 @@ struct ContentView: View {
         restoreAlwaysReopen = false
         closeForegroundRestoreWindow(reason: "skip-restore")
         sessionRestoreStore.clear()
+        // The sessions open now are not the ones declined.
+        if !activeSessions.isEmpty { persistRestoreSnapshots() }
     }
 
     private func restorePreviousConnections(
@@ -3867,6 +4762,7 @@ struct ContentView: View {
         guard plan.hasRestorableSessions else {
             logRestoreDiag("restore-clear reason=no-restorable-at-restore-time")
             sessionRestoreStore.clear()
+            if !activeSessions.isEmpty { persistRestoreSnapshots() }
             return
         }
 
@@ -5390,7 +6286,7 @@ struct ContentView: View {
         if let identities = try? modelContext.fetch(FetchDescriptor<Identity>()) {
             let identityIDs = Set(recovery.identityIDs)
             for identity in identities where identityIDs.contains(identity.id) {
-                try? KeychainHelper.deletePassword(forIdentityID: identity.id)
+                _ = try? KeychainHelper.deletePassword(forIdentityID: identity.id)
                 modelContext.delete(identity)
             }
         }
@@ -5559,8 +6455,9 @@ struct ContentView: View {
             requireBiometric: moshSession.requireBiometric,
             isSecureEnclave: moshSession.isSecureEnclave,
             preserveTmuxGeometry: moshSession.preserveTmuxGeometry,
-            // The decision above saw this session's snapshot; the rebuild
-            // launches the live host, which an edit may have changed.
+            // The decision above saw this session's snapshot, and so does the
+            // rebuild's launch (mode, command, tmux name); only credentials
+            // and endpoints are read from the live host.
             serverLossRecoveryRestorePolicy: effectiveSessionRestorePolicy
         )
         let replacement = LiveSession(
@@ -5581,6 +6478,19 @@ struct ContentView: View {
         logRestoreDiag(
             "mosh-server-lost-reconnect live=\(shortID(old.id)) replacement=\(shortID(replacement.id)) host=\(shortID(old.persistedHostID))"
         )
+    }
+
+    /// A mosh session whose server is gone stays failed while the recovery
+    /// keeps it: behind the lock, or under a policy that keeps it. Its state
+    /// does not change when those do.
+    private func reconsiderMoshServerLoss() {
+        let failed = activeSessions.filter { live in
+            guard case .mosh = live.session, case .failed = sharedState(of: live) else { return false }
+            return true
+        }
+        for live in failed {
+            attemptMoshServerLossReconnect(liveSessionID: live.id)
+        }
     }
 
     /// Host-key and Face ID prompts (both behind the handshake prompt gate)
@@ -5609,6 +6519,9 @@ struct ContentView: View {
         }
         if agentCenterReturnItem == .session(oldID) {
             agentCenterReturnItem = .session(newID)
+        }
+        if artifactsReturnItem == .session(oldID) {
+            artifactsReturnItem = .session(newID)
         }
     }
 
@@ -5916,6 +6829,10 @@ struct ContentView: View {
 
     private func handleCommandPaletteCommit(_ result: CommandPaletteCommit) {
         switch result {
+        case .artifact(let tabID):
+            guard let tab = artifactsStore.tab(tabID) else { return }
+            artifactsStore.select(tabID)
+            showArtifact(tabID: tabID, hostID: UUID(uuidString: tab.hostID))
         case .home:
             selectedItem = nil
             sidebarVisible = true
@@ -5939,31 +6856,107 @@ struct ContentView: View {
 
     private func toggleAgentCenter() {
         guard appearance.agentCenterEnabled || selectedItem == .agents else { return }
-        if isPhone {
-            selectedItem = .agents
-            compactPresentation.sessionsView = .agents
-            compactPresentation.tab = .sessions
-            return
-        }
         if selectedItem == .agents {
-            if case .session(let id) = agentCenterReturnItem,
-               !activeSessions.contains(where: { $0.id == id }) {
-                selectedItem = nil
-                sidebarVisible = true
-            } else {
-                let target = agentCenterReturnItem
-                selectedItem = target
-                if case .some(.session) = target {
-                    sidebarVisible = false
-                } else {
-                    sidebarVisible = true
-                }
-            }
+            returnFromNavigationToggle(to: agentCenterReturnItem, tab: agentCenterReturnTab)
         } else {
             agentCenterReturnItem = selectedItem
+            agentCenterReturnTab = compactPresentation.tab
             selectedItem = .agents
+            // Arrive collapsed so the thread list and conversation get the
+            // whole width. Every route here is a deliberate "show me Agent
+            // Center" — the ⌘⇧A chord (or its remap) from a browse page or a
+            // terminal, the ⌘ chip, the in-session agent buttons — while the
+            // sidebar's own agents row selects `.agents` directly and keeps
+            // the sidebar it was tapped in. The reveal control still brings
+            // navigation back, and toggling out restores it as before.
+            if !isPhone { sidebarVisible = false }
+        }
+    }
+
+    private func toggleArtifacts() {
+        if selectedItem == .artifacts {
+            returnFromNavigationToggle(to: artifactsReturnItem, tab: artifactsReturnTab)
+        } else {
+            showArtifacts()
+        }
+    }
+
+    private var artifactsHostDirectory: [ArtifactsHostDirectoryEntry] {
+        artifactHosts.map {
+            ArtifactsHostDirectoryEntry(id: $0.id, label: $0.name.isEmpty ? $0.address : $0.name,
+                                        rules: RuleCodec.decode($0.portForwardRulesData))
+        }
+    }
+
+    private var artifactOpenAction: OpenArtifactAction {
+        OpenArtifactAction { request in
+            artifactsStore.syncHosts(artifactsHostDirectory)
+            guard let tabID = artifactsStore.open(request) else { return }
+            showArtifact(tabID: tabID, hostID: request.hostID)
+        }
+    }
+
+    /// Beside the session, in its context, when the tab is on the session's
+    /// host and the shell lays the context out; otherwise the artifacts
+    /// section.
+    private func showArtifact(tabID: String, hostID: UUID?) {
+        let live = activeSessions.first { $0.id == selectedRailSessionID }
+        let destination = hostID.map {
+            DuoContextPolicy.openDestination(
+                docksContext: isRailMode || isLaptopShell, selectedSessionID: live?.id,
+                selectedHostID: live?.session.terminalSession.host.id,
+                requestHostID: $0, arrangement: duoArrangement
+            )
+        } ?? .artifacts
+        switch destination {
+        case .artifacts:
+            showArtifacts()
+        case let .context(sessionID):
+            duoContextSelections[sessionID] = .tab(tabID)
+            duoWorkspaceStates[sessionID] = DuoContextPolicy.revealingContext(
+                duoWorkspaceStates[sessionID] ?? DuoWorkspaceState()
+            )
+        }
+    }
+
+    private func showArtifacts() {
+        if selectedItem != .artifacts {
+            artifactsReturnItem = selectedItem
+            artifactsReturnTab = compactPresentation.tab
+        }
+        selectedItem = .artifacts
+        if isPhone { compactPresentation.tab = .artifacts }
+        else { sidebarVisible = false }
+    }
+
+    private func returnFromNavigationToggle(to item: SidebarItem?, tab: CompactRootTab) {
+        var target = item
+        switch item {
+        case .session(let id) where !activeSessions.contains(where: { $0.id == id }):
+            target = nil
+        case .host(let id) where fetchHost(id) == nil:
+            target = nil
+        case .agents where !appearance.agentCenterEnabled:
+            target = nil
+        default:
+            break
+        }
+
+        selectedItem = target
+        if isPhone {
+            if target == nil {
+                // Hosts and Sessions both use nil selection in the compact shell.
+                compactPresentation.tab = item == nil && tab == .sessions ? .sessions : .hosts
+            } else {
+                reconcileCompactPresentation(with: target)
+            }
+        }
+        if case .session = target {
+            sidebarVisible = false
+        } else {
             sidebarVisible = true
         }
+        updateAgentSurfaceDemand()
     }
 
     /// Shows Agent Center on the thread the coordinator already selected.
@@ -5971,8 +6964,7 @@ struct ContentView: View {
     private func revealAgentCenterOnSelectedThread() {
         selectedItem = .agents
         if isPhone {
-            compactPresentation.sessionsView = .agents
-            compactPresentation.tab = .sessions
+            compactPresentation.tab = .agents
         } else {
             sidebarVisible = true
         }
@@ -5981,8 +6973,8 @@ struct ContentView: View {
 
     private func updateAgentSurfaceDemand() {
         let compactAgentListVisible = isPhone
-            && compactPresentation.tab == .sessions
-            && compactPresentation.sessionsView == .agents
+            && compactPresentation.tab == .agents
+            && !isCompactOverlaySelected
         let demanded = appearance.agentCenterEnabled
                 && (compactAgentListVisible
                     || (!isPhone && selectedItem == .agents)
@@ -6135,6 +7127,8 @@ struct ContentView: View {
             return "keys"
         case .agents:
             return "agents"
+        case .artifacts:
+            return "artifacts"
         case .knownHosts:
             return "knownHosts"
         case .tunnels:
@@ -6169,102 +7163,167 @@ struct ContentView: View {
     }
 }
 
+@MainActor
+private struct SessionDuoContextPane: View {
+    @Environment(\.designTokens) private var T
+    @Environment(FileBridgeRegistry.self) private var fileBridges
+    let live: LiveSession
+    @Binding var selection: DuoContextSelection
+    /// The session's Files panel; open, it takes the files slot.
+    let filesPanel: FilesPanelController?
+    let openFiles: (() -> Void)?
+    let filesConnectUnprompted: Bool
+    let openFilesInPlace: (() -> Bool)?
+    @State private var directory: String?
+
+    init(live: LiveSession, selection: Binding<DuoContextSelection>,
+         filesPanel: FilesPanelController?, openFiles: (() -> Void)?,
+         filesConnectUnprompted: Bool, openFilesInPlace: (() -> Bool)?) {
+        self.live = live
+        self._selection = selection
+        self.filesPanel = filesPanel
+        self.openFiles = openFiles
+        self.filesConnectUnprompted = filesConnectUnprompted
+        self.openFilesInPlace = openFilesInPlace
+        self._directory = State(initialValue: live.session.terminalSession.sessionCommands.workingDirectory)
+    }
+
+    /// The bridge the panel opens on, not any of the host's: only this one
+    /// lets the panel open without a dial.
+    private var panelBridgeConnected: Bool {
+        fileBridges.bridges[FileBridgeKey(host: live.session.terminalSession.host)]?.state == .connected
+    }
+
+    var body: some View {
+        let hostID = live.session.terminalSession.host.id
+        DuoContextPane(
+            hostID: hostID,
+            extras: [DuoContextExtra(id: "files", title: "files", systemImage: "folder", content: {
+                let slot = DuoContextPolicy.filesSlot(panelOpen: filesPanel?.isOpen == true,
+                                                      panelBridgeConnected: panelBridgeConnected,
+                                                      connectsUnprompted: filesConnectUnprompted)
+                let listing = AnyView(DuoFilesContext(hostID: hostID, directory: directory, onOpenFiles: openFiles))
+                if let filesPanel, slot == .panel {
+                    // A dead bridge heals by itself only when that asks for
+                    // nothing; otherwise the panel offers its retry.
+                    return AnyView(FilesPanelView(controller: filesPanel, T: T, sessionIsActive: filesConnectUnprompted,
+                                                  docked: true)
+                        // Open only while on screen: another context, a hidden
+                        // pane or the other session's context closes it.
+                        .onDisappear { filesPanel.close() })
+                } else if slot == .opensPanel, let openFilesInPlace {
+                    return AnyView(DuoFilesInPlaceOpener(open: openFilesInPlace, listing: listing))
+                } else {
+                    return listing
+                }
+            })],
+            fallbackExtraID: "files", selection: $selection
+        )
+        .onReceive(live.session.terminalSession.sessionCommands.workingDirectoryPublisher) { directory = $0 }
+    }
+}
+
+/// Opens the session's Files panel in the files slot once the pane is on
+/// screen, so a locked or covered pane connects nothing. A refused open
+/// leaves the listing rather than an empty slot.
+private struct DuoFilesInPlaceOpener: View {
+    @Environment(\.artifactSurfaceVisible) private var visible
+    let open: () -> Bool
+    let listing: AnyView
+    @State private var refused = false
+
+    var body: some View {
+        if refused {
+            listing
+        } else {
+            Color.clear
+                .onAppear(perform: attempt)
+                .onChange(of: visible) { _, _ in attempt() }
+        }
+    }
+
+    private func attempt() {
+        if visible, !open() { refused = true }
+    }
+}
+
+/// The toolbar lives below the workspace's sibling layer, so relay only the
+/// arrangement instead of copying the workspace's geometry or action closures.
+private struct RailWorkspaceArrangementReader: View {
+    @Environment(\.duoWorkspace) private var workspace
+    let onChange: (DuoPaneArrangement?) -> Void
+
+    var body: some View {
+        Color.clear
+            .allowsHitTesting(false)
+            .onChange(of: workspace?.arrangement, initial: true) { _, arrangement in
+                onChange(arrangement)
+            }
+    }
+}
+
 enum CompactRootTab: Hashable {
     case hosts
     case sessions
-    case keys
-    case settings
-}
-
-enum CompactSessionsView: Equatable {
-    case sessions
     case agents
-}
-
-enum CompactKeysView: Equatable {
-    case keys
-    case knownHosts
+    case artifacts
+    case settings
 }
 
 struct CompactNavigationPresentation: Equatable {
     var tab: CompactRootTab = .hosts
-    var sessionsView: CompactSessionsView = .sessions
-    var keysView: CompactKeysView = .keys
 
-    mutating func reconcile(with selection: SidebarItem?) {
+    mutating func reconcile(with selection: SidebarItem?, agentCenterEnabled: Bool = true) {
         switch selection {
         case nil, .host:
             tab = .hosts
         case .session:
             tab = .sessions
-            sessionsView = .sessions
         case .agents:
-            tab = .sessions
-            sessionsView = .agents
-        case .keys:
-            tab = .keys
-            keysView = .keys
-        case .knownHosts:
-            tab = .keys
-            keysView = .knownHosts
-        case .settings:
+            tab = agentCenterEnabled ? .agents : .sessions
+        case .artifacts, .tunnels:
+            tab = .artifacts
+        case .settings, .keys, .knownHosts:
             tab = .settings
-        case .tunnels:
-            // Compact intentionally has no Tunnels destination. Show Hosts but
-            // leave the authoritative `.tunnels` selection untouched so a
-            // compact -> regular round trip restores the iPad-only page.
-            tab = .hosts
         }
     }
 }
 
 private struct CompactSessionsPage: View {
     let activeSessions: [LiveSession]
-    @Binding var selectedView: CompactSessionsView
-    @Bindable var agentCenterV2: AgentCenterV2Coordinator
-    let agentCenterEnabled: Bool
     let onSelectSession: (UUID) -> Void
     let onDisconnectSession: (LiveSession) -> Void
 
     @Environment(\.designTokens) private var T
+    @State private var fold: DuoFold?
+
+    /// Laptop pose: the list ends above the fold, so no row waits on the
+    /// hinge.
+    private var heightAboveTheFold: CGFloat? {
+        guard let fold, !fold.splitsSideBySide else { return nil }
+        return max(0, fold.frame.minY)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("sessions")
-                .font(Typography.pageTitle)
-                .foregroundStyle(T.fg)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 18)
-                .padding(.top, 16)
-                .padding(.bottom, 14)
-
-            if agentCenterEnabled {
-                CompactViewSelector(
-                    leadingTitle: "sessions",
-                    trailingTitle: "agents",
-                    selection: Binding(
-                        get: { selectedView == .sessions },
-                        set: { selectedView = $0 ? .sessions : .agents }
-                    )
-                )
+            DuoTitleSwitcher(identifier: "sessions-title-switcher") {
+                Text("sessions")
+                    .font(Typography.pageTitle)
+                    .foregroundStyle(T.fg)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 18)
+            .padding(.top, 16)
+            .padding(.bottom, 14)
 
-            switch selectedView {
-            case .sessions:
-                sessionList
-            case .agents:
-                if agentCenterEnabled {
-                    AgentCenterV2RootView(
-                        model: agentCenterV2.presentation,
-                        includesNavigationSidebar: false
-                    ) { EmptyView() }
-                } else {
-                    sessionList
-                }
-            }
+            sessionList
         }
+        .frame(maxWidth: .infinity, maxHeight: heightAboveTheFold ?? .infinity, alignment: .top)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(T.bg.ignoresSafeArea())
+        .onDuoFoldChange { next in
+            if fold != next { fold = next }
+        }
     }
 
     private var sessionList: some View {
@@ -6469,54 +7528,6 @@ private struct CompactSessionRowBody<S: ObservableObject & TerminalSession>: Vie
     }
 }
 
-private struct CompactViewSelector: View {
-    let leadingTitle: LocalizedStringKey
-    let trailingTitle: LocalizedStringKey
-    @Binding var selection: Bool
-
-    @Environment(\.designTokens) private var T
-
-    var body: some View {
-        HStack(spacing: 3) {
-            segment(leadingTitle, selected: selection) {
-                selection = true
-            }
-            segment(trailingTitle, selected: !selection) {
-                selection = false
-            }
-        }
-        .padding(3)
-        .background(T.inputBg)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(T.border, lineWidth: 1)
-        }
-        .padding(.horizontal, 18)
-        .padding(.bottom, 4)
-    }
-
-    private func segment(
-        _ title: LocalizedStringKey,
-        selected: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(Typography.tesseraMono(size: 11, weight: selected ? .semibold : .regular))
-                .foregroundStyle(selected ? T.accent : T.fgMuted)
-                .frame(maxWidth: .infinity)
-                .frame(minHeight: 30)
-                .background(selected ? T.accentSoft : Color.clear)
-                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityValue(selected ? "selected" : "not selected")
-    }
-}
-
 private func requiresOwnerPresenceForKeyUse(
     key: StoredKey?,
     globalPreference: Bool,
@@ -6535,6 +7546,50 @@ private func requiresOwnerPresenceForKeyUse(
         // through the migration plan — every container in the repo now has a
         // single source of truth for schema + plan.
         .modelContainer(try! TesseraModelContainer.make(inMemory: true))
+}
+
+/// Posted by the share extension once a queued upload's metadata lands. Same
+/// name as its `ShareInbox.queuedNotification`.
+private let shareInboxQueuedNotification = "com.bambouville.TesseraApp.share-inbox.queued"
+
+/// Tessera can stay active beside the app that shares to it (Split View,
+/// Slide Over, Stage Manager), so no foreground edge sweeps the inbox when the
+/// extension queues an upload. Darwin notifications carry no payload: the
+/// sweep reads the inbox itself.
+private final class ShareInboxQueuedSignal {
+    let queued = PassthroughSubject<Void, Never>()
+
+    init() {
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            Unmanaged.passUnretained(self).toOpaque(),
+            shareInboxQueuedNotificationCallback,
+            shareInboxQueuedNotification as CFString,
+            nil,
+            .deliverImmediately
+        )
+    }
+
+    deinit {
+        CFNotificationCenterRemoveObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            Unmanaged.passUnretained(self).toOpaque(),
+            nil,
+            nil
+        )
+    }
+
+    fileprivate func receive() {
+        DispatchQueue.main.async { [weak self] in
+            self?.queued.send()
+        }
+    }
+}
+
+private let shareInboxQueuedNotificationCallback: CFNotificationCallback = {
+    _, observer, _, _, _ in
+    guard let observer else { return }
+    Unmanaged<ShareInboxQueuedSignal>.fromOpaque(observer).takeUnretainedValue().receive()
 }
 
 #if DEBUG
@@ -6608,20 +7663,22 @@ struct CompactNavigationTransitionHarnessView: View {
     @StateObject private var widthController: CompactNavigationHarnessWidthController
     @StateObject private var fixtureSSHSession: SSHSession
     private let fixtureSession: LiveSession
-    private let startsWithSession: Bool
+    private let initialRoute: String
+    private let usesSystemSizeClass: Bool
 
     init() {
-        let startsCompact = ProcessInfo.processInfo.environment[
+        let initialSize = ProcessInfo.processInfo.environment[
             "TESSERA_COMPACT_NAVIGATION_INITIAL_SIZE"
-        ] == "compact"
+        ]
+        usesSystemSizeClass = initialSize == "system"
         _widthController = StateObject(
             wrappedValue: CompactNavigationHarnessWidthController(
-                startsCompact: startsCompact
+                startsCompact: initialSize == "compact"
             )
         )
-        startsWithSession = ProcessInfo.processInfo.environment[
+        initialRoute = ProcessInfo.processInfo.environment[
             "TESSERA_COMPACT_NAVIGATION_INITIAL_ROUTE"
-        ] == "session"
+        ] ?? "hosts"
 
         let host = Host(
             name: "navigation fixture session",
@@ -6639,33 +7696,58 @@ struct CompactNavigationTransitionHarnessView: View {
         )
     }
 
+    private var initialSelection: SidebarItem? {
+        switch initialRoute {
+        case "session": return .session(fixtureSession.id)
+        case "keys": return .keys
+        case "known-hosts": return .knownHosts
+        case "tunnels": return .tunnels
+        case "agents": return .agents
+        case "artifacts": return .artifacts
+        case "settings": return .settings
+        default: return nil
+        }
+    }
+
+    /// The shell reaches the screen's top edge, as in the app; the counters
+    /// stay readable to accessibility only.
+    private let fullBleed = ProcessInfo.processInfo.environment["TESSERA_COMPACT_NAVIGATION_FULL_BLEED"] == "1"
+
+    private var harnessLabels: some View {
+        HStack(spacing: 12) {
+            Text(usesSystemSizeClass ? "system" : (widthController.usesCompactWidth ? "compact" : "regular"))
+                .accessibilityIdentifier("compact-navigation-harness-size")
+
+            Text(String(fixtureSSHSession.compactNavigationHarnessSessionTaskStartCount))
+                .accessibilityIdentifier(
+                    "compact-navigation-session-task-start-count"
+                )
+
+            Text(String(fixtureSSHSession.compactNavigationHarnessConnectCallCount))
+                .accessibilityIdentifier("compact-navigation-connect-call-count")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Text(widthController.usesCompactWidth ? "compact" : "regular")
-                    .accessibilityIdentifier("compact-navigation-harness-size")
-
-                Text(String(fixtureSSHSession.compactNavigationHarnessSessionTaskStartCount))
-                    .accessibilityIdentifier(
-                        "compact-navigation-session-task-start-count"
-                    )
-
-                Text(String(fixtureSSHSession.compactNavigationHarnessConnectCallCount))
-                    .accessibilityIdentifier("compact-navigation-connect-call-count")
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            if !fullBleed { harnessLabels }
 
             ContentView(
                 debugInitialSessions: [fixtureSession],
-                debugInitialSelectedItem: startsWithSession
-                    ? .session(fixtureSession.id)
-                    : nil
+                debugInitialSelectedItem: initialSelection
             )
-                .environment(
-                    \.horizontalSizeClass,
-                    widthController.usesCompactWidth ? .compact : .regular
-                )
+                .transformEnvironment(\.horizontalSizeClass) { sizeClass in
+                    sizeClass = RailShellPolicy.harnessSizeClass(
+                        usesSystemSizeClass: usesSystemSizeClass,
+                        usesCompactWidth: widthController.usesCompactWidth,
+                        systemSizeClass: sizeClass
+                    )
+                }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if fullBleed { harnessLabels.opacity(0.02).allowsHitTesting(false) }
         }
         .task { seedFixtureHostIfNeeded() }
         .onAppear {
@@ -6695,3 +7777,51 @@ struct CompactNavigationTransitionHarnessView: View {
     }
 }
 #endif
+
+/// What the compact overlay draws: the band above a global `bottom`, short of
+/// the rail by `railInset`, plus the accessory bar spanning a docked keyboard
+/// (in global coordinates).
+struct CompactOverlayMask: View {
+    var bottom: CGFloat?
+    var railEdge: HorizontalEdge?
+    var railInset: CGFloat
+    var keyboardBar: CGRect?
+
+    var body: some View {
+        GeometryReader { proxy in
+            let origin = proxy.frame(in: .global).origin
+            Rectangle()
+                .frame(height: bottom.map { max(0, $0 - origin.y) })
+                .frame(maxHeight: .infinity, alignment: .top)
+                .padding(railEdge == .leading ? .leading : .trailing, railInset)
+                // An overlay, so the bar takes no part in sizing. As a stack
+                // sibling it widened the stack to the window on the outer
+                // display, the stack handed that width back to the rectangle
+                // above, and the session covered the whole rail while typing.
+                .overlay(alignment: .topLeading) {
+                    if let keyboardBar {
+                        Rectangle()
+                            .frame(width: keyboardBar.width, height: keyboardBar.height)
+                            .offset(x: keyboardBar.minX - origin.x, y: keyboardBar.minY - origin.y)
+                    }
+                }
+        }
+    }
+}
+
+/// The compact overlay's hit area: its whole frame, or only the band above a
+/// local `bottom` so the tab bar below keeps its taps.
+struct CompactOverlayHitShape: Shape {
+    var bottom: CGFloat?
+    /// In the shape's own space.
+    var keyboardBar: CGRect?
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path(bottom.map {
+            CGRect(x: rect.minX, y: rect.minY, width: rect.width,
+                   height: max(0, min(rect.height, $0 - rect.minY)))
+        } ?? rect)
+        if let keyboardBar { path.addRect(keyboardBar) }
+        return path
+    }
+}

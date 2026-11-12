@@ -118,6 +118,15 @@ enum AppShortcutDispatcher {
     }
 }
 
+extension TesseraTerminalContainer {
+    /// The terminal owns the selector while SwiftTerm has first responder.
+    /// ContentView receives the same navigation request for SSH, mosh and
+    /// pane-grid terminals, as well as chords from the on-screen Command chip.
+    @objc func openArtifacts() {
+        NotificationCenter.default.post(name: .tesseraToggleArtifacts, object: self)
+    }
+}
+
 extension BindingKey {
     /// The binding key an accessory chip stands for, so a chip tap under an
     /// armed ⌘ can be looked up in the same registry a hardware press is.

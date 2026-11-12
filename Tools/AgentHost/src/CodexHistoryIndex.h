@@ -35,12 +35,12 @@ public:
     Entry entry(JsonlReader& reader, size_t position);
     size_t bytes() const;
     bool lazy() const { return lazy_; }
+    // A record read back contradicted the index: rebuild on the next refresh.
+    void contradicted() const { contradicted_ = true; }
+    // An ancestor prefix's identity, cut and boundary witness: stable across
+    // cache eviction while the prefix is unchanged.
     std::string sourceWitness() const {
-        const auto fingerprint = validation_.fingerprint();
-        static constexpr char hex[] = "0123456789abcdef";
-        std::string result = identity_ + ":";
-        for (auto byte : fingerprint) { result += hex[byte >> 4]; result += hex[byte & 15]; }
-        return result;
+        return identity_ + ":" + std::to_string(position_) + ":" + std::to_string(witness_);
     }
 private:
     struct Compact {
@@ -98,6 +98,7 @@ private:
     std::string lineageWitness_, lineageGeneration_;
     SourceValidation validation_;
     uint64_t validationRevision_ = 0;
+    mutable bool contradicted_ = false;
 };
 
 class CodexHistoryCache {

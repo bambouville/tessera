@@ -56,6 +56,7 @@ android {
 
     defaultConfig {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        consumerProguardFiles("consumer-rules.pro")
         buildConfigField("boolean", "TESSERA_MOSH_NATIVE_ENABLED", enableMoshNative.toString())
         if (enableMoshNative) {
             ndk {
@@ -103,6 +104,9 @@ dependencies {
     implementation(libs.conscrypt.android)
     testImplementation(libs.junit4)
     testImplementation(project(":agent-platform"))
+    // Forwarding runtimes read the shared core's JSON policy; android.jar's
+    // org.json is a stub that throws on the JVM.
+    testImplementation(libs.json)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
 }

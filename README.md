@@ -50,7 +50,7 @@ collection.
 - **Seven languages.** English, French, German, Spanish, Japanese, Simplified
   Chinese, and Traditional Chinese.
 
-Requires iOS or iPadOS 17 or later. The Android app (Android 13 or later) is
+Requires iOS or iPadOS 18 or later. The Android app (Android 13 or later) is
 built from the same repository. Mosh and tmux features require `mosh-server` /
 `tmux` installed on the server.
 

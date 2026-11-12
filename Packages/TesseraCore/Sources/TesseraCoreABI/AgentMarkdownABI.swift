@@ -46,3 +46,18 @@ public func tesseraAgentMarkdownParse(
         outputCapacity: outputCapacity
     )
 }
+
+/// The same, for a document shown in Artifacts: every link destination is
+/// kept as written, for the viewer to resolve against the document's host.
+@_cdecl("tessera_agent_markdown_parse_document")
+public func tesseraAgentMarkdownParseDocument(
+    inputBytes: UnsafePointer<UInt8>?, inputCount: Int,
+    outputBytes: UnsafeMutablePointer<UInt8>?, outputCapacity: Int
+) -> Int32 {
+    guard let input = agentMarkdownInput(bytes: inputBytes, count: inputCount) else { return -1 }
+    return agentMarkdownCopyOut(
+        AgentMarkdownDocument.parseDocument(input),
+        outputBytes: outputBytes,
+        outputCapacity: outputCapacity
+    )
+}

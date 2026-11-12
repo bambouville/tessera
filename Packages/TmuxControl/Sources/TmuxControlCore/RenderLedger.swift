@@ -2518,11 +2518,15 @@ public struct TmuxRenderLedger: Sendable {
                 effects.append(.diagnostic(
                     "render-ledger yield-debt-released surface=\(surfaceID) kind=\(rebuild ? "rebuild" : "deepen")"
                 ))
+                // A deepening that waited replaces a transcript live output
+                // has been scrolling into since its visible rows were painted,
+                // so it binds a fresh owner too: under the painted one the
+                // platform keeps those rows, and the history repeats them.
                 effects.append(contentsOf: requestRefresh(
                     surfaceID: surfaceID,
                     stage: rebuild ? .viewport : .deep,
                     reason: rebuild ? "authority-released" : "authority-released-deep",
-                    continuityBreak: rebuild
+                    continuityBreak: true
                 ))
             }
             // An unbound or untargeted surface takes the initial capture
@@ -2741,6 +2745,17 @@ public struct TmuxRenderLedger: Sendable {
                             $0 != metadata.paneInAltScreen
                         } == true) {
                     pending.stage = .viewport
+                    if pending.owner == surface.owner {
+                        // A rebuild now, not a repair. Bound again under the
+                        // owner already painted, the platform would keep its
+                        // scrollback and the deep capture that follows would
+                        // write the history on top of it (Settings and back
+                        // after Vim exited: 130 rows became 244).
+                        pending.owner = allocateOwner(
+                            windowID: pending.owner.windowID,
+                            paneID: metadata.paneId
+                        )
+                    }
                 }
                 pending.metadata = metadata
                 surface.pending = pending
@@ -3027,7 +3042,7 @@ public struct TmuxRenderLedger: Sendable {
         rows: Int
     ) -> [RenderEffect] {
         guard var surface = surfaces[surfaceID],
-              let pending = surface.pending,
+              var pending = surface.pending,
               case .awaitingSurfaceState(let expectedRequest) = pending.phase,
               request == expectedRequest,
               profile != nil
@@ -3191,6 +3206,22 @@ public struct TmuxRenderLedger: Sendable {
             && surface.owner?.windowID == pending.owner.windowID
             && surface.owner?.paneID == pending.owner.paneID
             && altScreen == metadata.paneInAltScreen
+        if !isMosh, !refreshesInPlace, pending.stage == .viewportOnly {
+            gridEffects.append(.diagnostic(
+                "render-ledger in-place-declined surface=\(surfaceID) reason=\(pending.reason)"
+                    + " painted=\(surface.owner?.description ?? "none") pending=\(pending.owner)"
+                    + " alt=\(altScreen)/\(metadata.paneInAltScreen)"
+            ))
+        }
+        if !isMosh, !refreshesInPlace, pending.stage == .viewportOnly, surface.owner == pending.owner,
+           surface.declaration.presentation == .single || pending.deepensAfterRebuild {
+            // Asked for in place under the owner already painted, it rebuilds
+            // after all (the screen changed modes since), and a deep capture
+            // follows. Bound again under that owner, the platform would keep
+            // its scrollback and the deep capture would replay the history on
+            // top of it: the history twice over.
+            pending.owner = allocateOwner(windowID: pending.owner.windowID, paneID: pending.owner.paneID)
+        }
         let bytes = TmuxRepaintAssembly.assemble(
             state: metadata,
             captureLines: captureLines,
@@ -3227,6 +3258,10 @@ public struct TmuxRenderLedger: Sendable {
             }
             effects.append(.bindSurface(surfaceID, owner: pending.owner))
         }
+        let chainsDeepRebuild = (surface.declaration.presentation == .single || pending.deepensAfterRebuild)
+            && (pending.stage == .viewport
+                || (pending.stage == .viewportOnly && !refreshesInPlace))
+        let deepensNow = !isMosh && chainsDeepRebuild && snapshot?.authority.isPeer != true
         // Foreground bytes belong immediately before the authoritative frame.
         // Preserve the pre-refresh cut exactly as the platform controller
         // historically did. An in-place repair needs no bind, while a newly
@@ -3236,7 +3271,14 @@ public struct TmuxRenderLedger: Sendable {
             let isProvisionalSingleSurfaceAttach = !isInitialRenderReady
                 && surface.owner == nil
                 && surface.declaration.presentation == .single
-            if !isProvisionalSingleSurfaceAttach,
+            if deepensNow {
+                // The deep capture chained below holds every row the replay
+                // would scroll into history. Fed first, under the rebuilt
+                // owner, they would sit in its scrollback under that
+                // capture's history: those rows twice. The frame restores
+                // the screen either way.
+                _ = takeCoalescedOutput(for: metadata.paneId)
+            } else if !isProvisionalSingleSurfaceAttach,
                let retained = takeCoalescedOutput(for: metadata.paneId),
                !retained.isEmpty,
                let replayReference = retain(
@@ -3445,9 +3487,6 @@ public struct TmuxRenderLedger: Sendable {
         }
         surfaces[surfaceID] = surface
 
-        let chainsDeepRebuild = (surface.declaration.presentation == .single || pending.deepensAfterRebuild)
-            && (pending.stage == .viewport
-                || (pending.stage == .viewportOnly && !refreshesInPlace))
         if !isMosh, chainsDeepRebuild, snapshot?.authority.isPeer == true {
             // P8: the visible rows are painted; the history deepening waits
             // until no peer holds the grid. During a take-back that is the
@@ -3456,7 +3495,7 @@ public struct TmuxRenderLedger: Sendable {
             surfaces[surfaceID]?.deepRebuildOwedSinceYield = true
             hasRepaintOwedSinceYield = true
             effects.append(contentsOf: finishForegroundIfPossible())
-        } else if !isMosh, chainsDeepRebuild {
+        } else if deepensNow {
             effects.append(contentsOf: requestRefresh(
                 surfaceID: surfaceID,
                 stage: .deep,

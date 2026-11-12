@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="data_hostname_required">主機名稱為必填項</string>
+    <string name="data_hostname_whitespace">主機名稱不能包含空白字元</string>
+    <string name="data_hostname_control_characters">主機名稱不能包含控制字元</string>
+    <string name="data_username_required">使用者名稱為必填項</string>
+    <string name="data_username_whitespace">使用者名稱不能包含空白字元</string>
+    <string name="data_username_control_characters">使用者名稱不能包含控制字元</string>
+    <string name="data_name_control_characters">名稱不能包含控制字元</string>
+    <string name="data_port_range">連接埠必須介於 1 和 65535 之間</string>
+    <string name="data_host_text_too_long">主機文字超過 64 KiB 或包含 NUL 字元</string>
+    <string name="data_invalid_tmux_mode">無效的 tmux 模式</string>
+    <string name="data_invalid_transport_kind">無效的傳輸類型</string>
+    <string name="data_tmux_target_required">需要指定固定 tmux 的目標</string>
+    <string name="data_tmux_target_too_long">tmux 目標過長</string>
+    <string name="data_tmux_target_characters">tmux 目標只能使用字母、數字、底線、連字號或句點</string>
+    <string name="data_host_jump_through_itself">主機不能以自身為跳板</string>
+    <string name="data_jump_route_cycle">跳板路由中存在環路</string>
+    <string name="data_route_host_unavailable">路由中的主機無法使用</string>
+    <string name="data_jump_host_unavailable">跳板主機無法使用</string>
+    <string name="data_identity_name_required">身分名稱為必填項</string>
+    <string name="data_identity_name_control_characters">身分名稱不能包含控制字元</string>
+    <plurals name="data_jump_route_too_long">
+        <item quantity="other">跳板路由超過 %1$d 台主機</item>
+    </plurals>
+</resources>

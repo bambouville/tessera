@@ -46,6 +46,10 @@ internal class RemoteFilesConnectionSlot<C : AutoCloseable>(
     private var closed = false
     private val retiring = mutableListOf<Job>()
 
+    /** Counts kept connections without taking the connection lock or checking usability. */
+    @Volatile var generation: Long = 0L
+        private set
+
     /** The open, usable connection, or null. Never dials. */
     val currentOrNull: C? get() = synchronized(lock) { current }?.takeIf(isUsable)
 
@@ -71,7 +75,10 @@ internal class RemoteFilesConnectionSlot<C : AutoCloseable>(
         }
         val opened = open()
         val kept = synchronized(lock) {
-            if (!closed) current = opened
+            if (!closed) {
+                current = opened
+                generation += 1
+            }
             !closed
         }
         if (!kept) {

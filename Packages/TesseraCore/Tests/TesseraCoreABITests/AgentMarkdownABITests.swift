@@ -30,6 +30,28 @@ final class AgentMarkdownABITests: XCTestCase {
         XCTAssertEqual(((document?["blocks"] as? [[String: Any]])?.first?["kind"] as? String), "heading")
     }
 
+    func testDocumentMarkdownABIKeepsRelativeLinks() throws {
+        let input = Array("[guide](docs/guide.md)".utf8)
+        func parse(_ entry: (UnsafePointer<UInt8>?, Int, UnsafeMutablePointer<UInt8>?, Int) -> Int32) throws -> [String: Any] {
+            let required = input.withUnsafeBytes { entry($0.bindMemory(to: UInt8.self).baseAddress, input.count, nil, 0) }
+            XCTAssertGreaterThan(required, 0)
+            var output = [UInt8](repeating: 0, count: Int(required))
+            let capacity = output.count
+            let written = input.withUnsafeBytes { raw in output.withUnsafeMutableBytes {
+                entry(raw.bindMemory(to: UInt8.self).baseAddress, input.count, $0.bindMemory(to: UInt8.self).baseAddress, capacity)
+            } }
+            XCTAssertEqual(written, required)
+            return try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(output)) as? [String: Any])
+        }
+        func destination(_ document: [String: Any]) -> String? {
+            let paragraph = (document["blocks"] as? [[String: Any]])?.first
+            return ((paragraph?["children"] as? [[String: Any]])?.first)?["destination"] as? String
+        }
+        XCTAssertEqual(destination(try parse(tesseraAgentMarkdownParseDocument)), "docs/guide.md")
+        XCTAssertNil(destination(try parse(tesseraAgentMarkdownParse)))
+        XCTAssertEqual(tesseraAgentMarkdownParseDocument(inputBytes: nil, inputCount: 1, outputBytes: nil, outputCapacity: 0), -1)
+    }
+
     func testMarkdownABIRejectsInvalidAndOversizedInputWithoutWritingShortOutput() {
         let invalidUTF8: [UInt8] = [0xC3, 0x28]
         XCTAssertEqual(invalidUTF8.withUnsafeBytes { raw in

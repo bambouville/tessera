@@ -543,6 +543,14 @@
     "zh-Hans": "返回标签栏 · 会话继续运行",
     "zh-Hant": "返回標籤列 · 工作階段繼續執行"
   },
+  "session keeps running": {
+    "de": "Sitzung läuft weiter",
+    "es": "la sesión sigue activa",
+    "fr": "la session continue",
+    "ja": "セッションは動き続けます",
+    "zh-Hans": "会话继续运行",
+    "zh-Hant": "工作階段繼續執行"
+  },
   "endpoint": {
     "de": "Endpunkt",
     "es": "endpoint",

@@ -2,7 +2,7 @@
 //
 // Grants an explicitly backgrounded, user-initiated SFTP upload the best
 // execution window the OS supports. iOS 26 continued-processing tasks expose
-// system progress UI and can be cancelled by the user there. iOS 17-25 use a
+// system progress UI and can be cancelled by the user there. iOS 18-25 use a
 // finite UIApplication background assertion; expiration cancels the bridge
 // task so TransferTask can remove (or journal) its remote staging file.
 

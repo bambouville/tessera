@@ -1,6 +1,19 @@
 import SwiftUI
+import TesseraArtifactsCore
 import UIKit
 import TmuxControl
+
+/// Laptop pose has no tab bar: the switcher carries its sections, laid out
+/// like the bar, and hangs from the title above the fold.
+struct CommandPaletteSections {
+    var sections: [CompactRootTab]
+    var current: CompactRootTab
+    /// The fold's top, in global coordinates.
+    var foldTop: CGFloat
+    /// The tab bar's badges, which no tab bar shows here.
+    var badges: [CompactRootTab: Int] = [:]
+    var onSelect: (CompactRootTab) -> Void
+}
 
 /// Quick-switch palette overlay. Top-anchored modal with a search
 /// input + active-sessions list. Arrow keys + Enter + Esc.
@@ -10,6 +23,8 @@ import TmuxControl
 struct CommandPaletteView: View {
     @Environment(AppearancePreferences.self) private var appearance
     @Bindable var palette: CommandPalette
+    /// Laptop pose only.
+    let sections: CommandPaletteSections?
 
     /// Called with the chosen session or agent when the user commits. The
     /// caller is responsible for actually switching to it (the palette
@@ -21,11 +36,13 @@ struct CommandPaletteView: View {
 
     init(
         palette: CommandPalette,
+        sections: CommandPaletteSections? = nil,
         onTmuxClose: @escaping (CommandPaletteTmuxClose) -> Void = { _ in },
         onTmuxMutation: @escaping (CommandPaletteTmuxMutation) -> Void = { _ in },
         onCommit: @escaping (CommandPaletteCommit) -> Void
     ) {
         self.palette = palette
+        self.sections = sections
         self.onTmuxClose = onTmuxClose
         self.onTmuxMutation = onTmuxMutation
         self.onCommit = onCommit
@@ -33,6 +50,7 @@ struct CommandPaletteView: View {
 
     @Environment(\.designTokens) private var T
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(ProgramStatusCenter.self) private var programStatusCenter
     @Environment(AgentCenterV2Coordinator.self) private var agentCenterV2
     @FocusState private var queryFocused: Bool
@@ -58,13 +76,7 @@ struct CommandPaletteView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .top) {
-            scrim
-            paletteCard
-                .padding(.top, isPhone ? 54 : 72)
-                .frame(maxWidth: .infinity)
-        }
-        .ignoresSafeArea()
+        placedCard
         .onAppear {
             // First-show focus. The focus-token onChange below can't
             // fire on initial mount (no prior value to compare), so this
@@ -145,6 +157,37 @@ struct CommandPaletteView: View {
         }
     }
 
+    @ViewBuilder
+    private var placedCard: some View {
+        if let sections {
+            // A menu hanging from the title, in the top half: neither the
+            // hinge nor the desk carries any of it. The scrim still covers
+            // the screen, and a tap anywhere outside closes it.
+            ZStack(alignment: .topLeading) {
+                scrim
+                GeometryReader { proxy in
+                    let top = proxy.frame(in: .global).minY + LaptopPaletteLayout.titleClearance
+                    paletteCard(sections: sections)
+                        .frame(width: LaptopPaletteLayout.width(container: proxy.size.width))
+                        .frame(maxHeight: LaptopPaletteLayout.maxHeight(top: top, foldTop: sections.foldTop),
+                               alignment: .top)
+                        .padding(.leading, LaptopPaletteLayout.margin)
+                        .padding(.top, LaptopPaletteLayout.titleClearance)
+                }
+            }
+        } else {
+            ZStack(alignment: .top) {
+                scrim
+                paletteCard(sections: nil)
+                    .padding(.top, verticalSizeClass == .compact ? 12 : (isPhone ? 54 : 72))
+                    .frame(maxWidth: .infinity)
+            }
+            // The scrim fills the display; the card's flexible result list still
+            // receives the keyboard safe area, including phone landscape.
+            .ignoresSafeArea(.container)
+        }
+    }
+
     private var scrim: some View {
         Rectangle()
             .fill(Color.black.opacity(0.55))
@@ -154,8 +197,12 @@ struct CommandPaletteView: View {
             .onTapGesture { palette.close() }
     }
 
-    private var paletteCard: some View {
+    private func paletteCard(sections: CommandPaletteSections?) -> some View {
         VStack(spacing: 0) {
+            if let sections {
+                sectionsRow(sections)
+                Divider().background(T.border)
+            }
             inputRow
             Divider().background(T.border)
             if let notice = palette.visibleNotice {
@@ -184,7 +231,7 @@ struct CommandPaletteView: View {
             Divider().background(T.border)
             footer
         }
-        .frame(maxWidth: 560)
+        .frame(maxWidth: sections == nil ? 560 : .infinity)
         .background(T.inputBg)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
@@ -192,7 +239,57 @@ struct CommandPaletteView: View {
                 .stroke(T.borderStrong, lineWidth: 1)
         )
         .shadow(color: Color.black.opacity(0.6), radius: 24, x: 0, y: 12)
-        .padding(.horizontal, 24)
+        .padding(.horizontal, sections == nil ? 24 : 0)
+    }
+
+    /// The tab bar's sections, in its order and with its symbols. A tap
+    /// switches as the tab would and closes the switcher.
+    private func sectionsRow(_ sections: CommandPaletteSections) -> some View {
+        HStack(spacing: 4) {
+            ForEach(sections.sections, id: \.self) { section in
+                let isCurrent = section == sections.current
+                let badge = sections.badges[section] ?? 0
+                Button {
+                    palette.close()
+                    sections.onSelect(section)
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: section.sectionSymbol)
+                            .font(.system(size: 17, weight: .medium))
+                            .frame(height: 21)
+                            .overlay(alignment: .topTrailing) {
+                                if badge > 0 {
+                                    Text(badge, format: .number)
+                                        .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 4)
+                                        .frame(minWidth: 16, minHeight: 16)
+                                        .background(T.red, in: Capsule())
+                                        .offset(x: 10, y: -6)
+                                }
+                            }
+                        Text(section.sectionTitle)
+                            .font(.system(size: 10, weight: .medium))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                    }
+                    .foregroundStyle(isCurrent ? T.fg : T.fgMuted)
+                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(isCurrent ? T.accentSoft : Color.clear)
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isCurrent ? .isSelected : [])
+                .accessibilityValue(badge > 0 ? Text(badge, format: .number) : Text(verbatim: ""))
+                .accessibilityIdentifier("command-palette-section-\(section.sectionIdentifier)")
+            }
+        }
+        .padding(6)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("command-palette-sections")
     }
 
     private func integrationNotice(_ notice: CommandPaletteNotice) -> some View {
@@ -355,6 +452,20 @@ struct CommandPaletteView: View {
                             .buttonStyle(.plain)
                             .id(CommandPaletteEntry.ID.session(live.id))
                         }
+                        if !palette.artifactResults.isEmpty {
+                            sectionHeader("artifacts")
+                        }
+                        ForEach(Array(palette.artifactResults.enumerated()), id: \.element.id) { offset, tab in
+                            let index = palette.homeResults.count + palette.tmuxResults.count + palette.results.count + offset
+                            Button {
+                                palette.selectedIndex = index
+                                commitCurrent()
+                            } label: {
+                                artifactRow(tab, isSelected: index == palette.selectedIndex)
+                            }
+                            .buttonStyle(.plain)
+                            .id(CommandPaletteEntry.ID.artifact(tab.id))
+                        }
                     }
                 }
                 .accessibilityIdentifier("command-palette-results")
@@ -439,6 +550,8 @@ struct CommandPaletteView: View {
     @ViewBuilder
     private func row(for entry: CommandPaletteEntry, isSelected: Bool) -> some View {
         switch entry {
+        case .artifact(let tab):
+            artifactRow(tab, isSelected: isSelected)
         case .home:
             homeRow(isSelected: isSelected)
         case .pane(let window, let pane):
@@ -642,7 +755,9 @@ struct CommandPaletteView: View {
         paletteNavigationRow(
             systemName: "house",
             title: String(localized: "hosts home"),
-            subtitle: String(localized: "back to the tab bar · session keeps running"),
+            subtitle: sections == nil
+                ? String(localized: "back to the tab bar · session keeps running")
+                : String(localized: "session keeps running"),
             indented: false,
             isCurrent: false,
             isSelected: isSelected
@@ -966,6 +1081,20 @@ struct CommandPaletteView: View {
         edgeScrollTarget = nil
     }
 
+    private func artifactRow(_ tab: ArtifactTab, isSelected: Bool) -> some View {
+        let glyph: String
+        switch tab.kind {
+        case .docs: glyph = "doc.text"
+        case .pages: glyph = "globe"
+        case .changes: glyph = "plus.forwardslash.minus"
+        case .files: glyph = "doc"
+        }
+        return paletteNavigationRow(systemName: glyph, title: tab.title, subtitle: tab.hostLabel,
+                                    indented: false, isCurrent: false, isSelected: isSelected)
+            .frame(minHeight: 44)
+            .accessibilityIdentifier("command-palette-artifact-\(tab.id)")
+    }
+
     private func sessionRow(for live: LiveSession, isSelected: Bool) -> some View {
         let title = live.displayLabel(in: palette.sessions)
         let pane = palette.paneTitles[live.id]
@@ -1112,7 +1241,7 @@ private struct TmuxPaletteReorderSurface: UIViewRepresentable {
         view.backgroundColor = .clear
         view.isAccessibilityElement = true
         view.accessibilityTraits = .allowsDirectInteraction
-        view.accessibilityLabel = "Reorder tmux window"
+        view.accessibilityLabel = String(localized: "Reorder tmux window")
         view.accessibilityIdentifier = accessibilityIdentifier
         let press = UILongPressGestureRecognizer(
             target: context.coordinator,

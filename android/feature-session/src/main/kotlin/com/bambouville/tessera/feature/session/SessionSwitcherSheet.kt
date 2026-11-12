@@ -235,8 +235,8 @@ internal fun SessionSwitcherSheet(
                     TesseraSearchField(
                         value = query,
                         onValueChange = { query = it },
-                        placeholder = "switch session, window or pane",
-                        clearContentDescription = "Clear switcher search",
+                        placeholder = stringResource(R.string.session_switcher_placeholder),
+                        clearContentDescription = stringResource(R.string.session_switcher_clear_search),
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                         inputTestTag = "session-switcher-query",
                     )
@@ -266,9 +266,9 @@ internal fun SessionSwitcherSheet(
                         if (results.isEmpty) {
                             Text(
                                 if (sessions.isEmpty() && windows.isEmpty()) {
-                                    "no active sessions"
+                                    stringResource(R.string.session_switcher_no_sessions)
                                 } else {
-                                    "no matches"
+                                    stringResource(R.string.session_switcher_no_matches)
                                 },
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -280,8 +280,8 @@ internal fun SessionSwitcherSheet(
                         results.home.forEach {
                             SwitcherRow(
                                 icon = TesseraIcons.Hosts,
-                                title = "hosts home",
-                                subtitle = "back to the tab bar · session keeps running",
+                                title = stringResource(R.string.session_switcher_hosts_home),
+                                subtitle = stringResource(R.string.session_switcher_home_subtitle),
                                 isCurrent = false,
                                 onClick = onHome,
                                 modifier = Modifier.testTag("session-switcher-home"),
@@ -289,7 +289,7 @@ internal fun SessionSwitcherSheet(
                             TesseraHairline(Modifier.padding(start = 44.dp))
                         }
                         if (results.tmux.isNotEmpty()) {
-                            SwitcherSectionHeader("windows · $currentSessionTitle")
+                            SwitcherSectionHeader(stringResource(R.string.session_switcher_windows_header, currentSessionTitle))
                         }
                         tmuxWindowGroups.forEach { group ->
                             val windowEntry = group.first() as SessionSwitcherEntry.Window
@@ -381,7 +381,7 @@ internal fun SessionSwitcherSheet(
                             }
                         }
                         if (results.sessions.isNotEmpty()) {
-                            SwitcherSectionHeader("sessions")
+                            SwitcherSectionHeader(stringResource(R.string.session_switcher_sessions_header))
                         }
                         results.sessions.forEachIndexed { index, session ->
                             if (index > 0) TesseraHairline(Modifier.padding(start = 35.dp))
@@ -427,7 +427,9 @@ internal fun SessionSwitcherSheet(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "${windows.size} windows · ${sessions.size} sessions",
+                            pluralStringResource(R.plurals.switcher_window_count, windows.size, windows.size) +
+                                " · " +
+                                pluralStringResource(R.plurals.switcher_session_count, sessions.size, sessions.size),
                             modifier = Modifier.weight(1f),
                             style = TesseraType.rowMicro,
                             color = tokens.fgDim,
@@ -442,19 +444,23 @@ internal fun SessionSwitcherSheet(
                                     .padding(horizontal = 10.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Text("tidy numbers", style = TesseraType.rowMicro, color = tokens.fgMuted)
+                                Text(
+                                    stringResource(R.string.session_switcher_tidy_numbers),
+                                    style = TesseraType.rowMicro,
+                                    color = tokens.fgMuted,
+                                )
                             }
                         }
                         if (allowsTmuxMutation && windows.isNotEmpty()) {
                             TesseraIconButton(
                                 icon = TesseraIcons.Plus,
-                                contentDescription = "New tmux window",
+                                contentDescription = stringResource(R.string.session_new_tmux_window),
                                 onClick = onNewWindow,
                             )
                         }
                         TesseraIconButton(
                             icon = TesseraIcons.Close,
-                            contentDescription = "Dismiss switcher",
+                            contentDescription = stringResource(R.string.session_switcher_dismiss),
                             onClick = onDismiss,
                         )
                     }
@@ -472,14 +478,14 @@ internal fun SessionSwitcherSheet(
     }
     closeWindow?.let { window ->
         TmuxCloseDialog(
-            title = "Close ${window.title}?",
+            title = stringResource(R.string.session_tmux_close_window_title, window.title),
             onDismiss = { closeWindow = null },
             onConfirm = { onCloseWindow(window.id); closeWindow = null },
         )
     }
     closePane?.let { paneId ->
         TmuxCloseDialog(
-            title = "Close pane %$paneId?",
+            title = stringResource(R.string.session_tmux_close_pane_title, "%$paneId"),
             onDismiss = { closePane = null },
             onConfirm = { onClosePane(paneId); closePane = null },
         )
@@ -525,7 +531,10 @@ private fun SwitcherNotice(
             .fillMaxWidth()
             .then(
                 if (onDetails == null) Modifier
-                else Modifier.clickable(onClickLabel = "Show details", onClick = onDetails)
+                else Modifier.clickable(
+                    onClickLabel = stringResource(R.string.session_switcher_show_details),
+                    onClick = onDetails,
+                )
             )
             .testTag("session-switcher-notice")
             .background(tokens.amber.copy(alpha = 0.06f))
@@ -610,8 +619,8 @@ private fun WindowRow(
     val detail = when {
         // A reporting split names its program instead of the hint: "2 panes · cargo · working · 42%".
         window.panes.size > 1 && status != null -> pluralStringResource(R.plurals.program_status_pane_count, window.panes.size, window.panes.size)
-        window.panes.size > 1 -> "${pluralStringResource(R.plurals.program_status_pane_count, window.panes.size, window.panes.size)} · each opens full-screen"
-        else -> window.panes.firstOrNull()?.let { it.command ?: it.title } ?: "tmux window"
+        window.panes.size > 1 -> pluralStringResource(R.plurals.session_switcher_panes_open_full_screen, window.panes.size, window.panes.size)
+        else -> window.panes.firstOrNull()?.let { it.command ?: it.title } ?: stringResource(R.string.session_switcher_tmux_window)
     }
     // A single pane already shows its command, so its words leave the app out.
     val statusText = status?.let { programStatusWordsLine(it.copy(app = null)) }
@@ -659,17 +668,17 @@ private fun WindowRow(
                 Spacer(Modifier.width(6.dp))
             }
             SwitcherRowMenu(
-                contentDescription = "Actions for ${window.title}",
+                contentDescription = stringResource(R.string.session_switcher_window_actions, window.title),
                 enabled = allowsTmuxMutation,
                 openRequest = menuRequested,
                 onDismiss = onMenuDismissed,
             ) { dismiss ->
                 DropdownMenuItem(
-                    text = { Text("switch to") },
+                    text = { Text(stringResource(R.string.session_switcher_switch_to)) },
                     onClick = { dismiss(); onClick() },
                 )
                 DropdownMenuItem(
-                    text = { Text("rename") },
+                    text = { Text(stringResource(R.string.session_tmux_rename)) },
                     onClick = { dismiss(); onRename() },
                 )
                 TmuxWindowMoveAction.entries.forEach { action ->
@@ -696,12 +705,19 @@ private fun WindowRow(
                 }
                 if (window.panes.size > 1) {
                     DropdownMenuItem(
-                        text = { Text(if (window.zoomed) "unzoom pane" else "zoom pane") },
+                        text = {
+                            Text(
+                                stringResource(
+                                    if (window.zoomed) R.string.session_tmux_unzoom_pane_menu
+                                    else R.string.session_tmux_zoom_pane_menu,
+                                ),
+                            )
+                        },
                         onClick = { dismiss(); onToggleZoom() },
                     )
                 }
                 DropdownMenuItem(
-                    text = { Text("close window", color = tokens.red) },
+                    text = { Text(stringResource(R.string.session_tmux_close_window_menu), color = tokens.red) },
                     onClick = { dismiss(); onClose() },
                 )
             }
@@ -739,24 +755,24 @@ private fun PaneRow(
                 Spacer(Modifier.width(6.dp))
             }
             SwitcherRowMenu(
-                contentDescription = "Actions for pane %${pane.id}",
+                contentDescription = stringResource(R.string.session_switcher_pane_actions, "%${pane.id}"),
                 enabled = allowsTmuxMutation,
             ) { dismiss ->
                 DropdownMenuItem(
-                    text = { Text("switch to") },
+                    text = { Text(stringResource(R.string.session_switcher_switch_to)) },
                     onClick = { dismiss(); onClick() },
                 )
                 DropdownMenuItem(
-                    text = { Text("split left / right") },
+                    text = { Text(stringResource(R.string.session_switcher_split_left_right)) },
                     onClick = { dismiss(); onSplit(false) },
                 )
                 DropdownMenuItem(
-                    text = { Text("split top / bottom") },
+                    text = { Text(stringResource(R.string.session_switcher_split_top_bottom)) },
                     onClick = { dismiss(); onSplit(true) },
                 )
                 if (window.panes.size > 1) {
                     DropdownMenuItem(
-                        text = { Text("close pane", color = tokens.red) },
+                        text = { Text(stringResource(R.string.session_switcher_close_pane_menu), color = tokens.red) },
                         onClick = { dismiss(); onClose() },
                     )
                 }
@@ -810,7 +826,7 @@ private fun SessionRow(session: SessionSwitcherSession, onClick: () -> Unit) {
                 maxLines = 1,
                 overflow = TextOverflow.MiddleEllipsis,
             )
-            if (summary != null && counts != null) {
+            if (counts != null) {
                 Text(programStatusCountLine(counts), style = TesseraType.rowMicro,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.testTag("session-switcher-program-attention"))

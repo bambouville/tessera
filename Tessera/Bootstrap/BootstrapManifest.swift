@@ -32,25 +32,25 @@ extension TesseraProtocolCore.BootstrapManifestError: @retroactive LocalizedErro
         case .tooManyKnownHosts(let count):
             return String(localized: "Bootstrap manifest contains too many known-host records (\(count)).")
         case .duplicateIdentityID(let id):
-            return String(localized: "Bootstrap manifest repeats identity \(id).")
+            return String(localized: "Bootstrap manifest repeats identity \(id.uuidString).")
         case .invalidIdentity(let id, let field):
-            return String(localized: "Bootstrap identity \(id) has an invalid \(field).")
+            return String(localized: "Bootstrap identity \(id.uuidString) has an invalid \(field).")
         case .duplicateHostID(let id):
-            return String(localized: "Bootstrap manifest repeats host \(id).")
+            return String(localized: "Bootstrap manifest repeats host \(id.uuidString).")
         case .invalidHost(let id, let field):
-            return String(localized: "Bootstrap host \(id) has an invalid \(field).")
+            return String(localized: "Bootstrap host \(id.uuidString) has an invalid \(field).")
         case .duplicateJumpLink(let id):
-            return String(localized: "Bootstrap manifest repeats the jump link for \(id).")
+            return String(localized: "Bootstrap manifest repeats the jump link for \(id.uuidString).")
         case .danglingJumpLink(let id):
-            return String(localized: "Bootstrap jump link references missing host \(id).")
+            return String(localized: "Bootstrap jump link references missing host \(id.uuidString).")
         case .cyclicJumpChain(let id):
-            return String(localized: "Bootstrap jump chain contains a cycle at \(id).")
+            return String(localized: "Bootstrap jump chain contains a cycle at \(id.uuidString).")
         case .jumpChainTooDeep(let id):
-            return String(localized: "Bootstrap jump chain for \(id) is too deep.")
+            return String(localized: "Bootstrap jump chain for \(id.uuidString) is too deep.")
         case .duplicateKnownHost(let id):
-            return String(localized: "Bootstrap manifest repeats the known-host record for \(id).")
+            return String(localized: "Bootstrap manifest repeats the known-host record for \(id.uuidString).")
         case .invalidKnownHost(let id, let field):
-            return String(localized: "Bootstrap known-host record \(id) has an invalid \(field).")
+            return String(localized: "Bootstrap known-host record \(id.uuidString) has an invalid \(field).")
         case .invalidAppearance(let field):
             return String(localized: "Bootstrap appearance field \(field) is invalid.")
         case .invalidSettings(let field):
@@ -124,13 +124,16 @@ public enum BootstrapSyncClassification {
         "smoothScrollingEnabled": .neverSyncs,
         "smoothScrollingSpeed": .neverSyncs,
         "sessionRestorePolicy": .neverSyncs,
-        "terminalThemeID": .syncable,
+        // Stored as the selection; the manifest still carries it as `terminalThemeID`.
+        "terminalThemeSelection": .syncable,
+        "observedColorScheme": .neverSyncs,
         "terminalBackgroundUsesImage": .neverSyncs,
         "terminalBackgroundImageID": .neverSyncs,
         "terminalBackgroundDim": .neverSyncs,
         "terminalBackgroundFillMode": .neverSyncs,
         "terminalBackgroundBlur": .neverSyncs,
         "naturalTextEditingEnabled": .neverSyncs,
+        "shortcutCheatSheetEnabled": .neverSyncs,
         "showAccessoryBar": .neverSyncs,
         "resizeTerminalWithKeyboard": .neverSyncs,
         "programStatusEnabled": .neverSyncs,
@@ -156,10 +159,13 @@ public enum BootstrapSyncClassification {
         "swipePadSize": .neverSyncs,
         "swipePadLastX": .neverSyncs,
         "swipePadLastY": .neverSyncs,
+        "duoBarEdge": .neverSyncs,
+        "duoBarOpenWhileTyping": .neverSyncs,
         "voiceDictationEnabled": .neverSyncs,
         "voiceCommitOnSilence": .neverSyncs,
         "voiceAppendReturn": .neverSyncs,
         "voiceWaveformOnPuck": .neverSyncs,
         "hasSeenWelcome": .neverSyncs,
+        "lastSeenWhatsNewVersion": .neverSyncs,
     ]
 }

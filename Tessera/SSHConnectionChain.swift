@@ -581,20 +581,24 @@ private func connectSSH(
     settings: SSHClientSettings,
     owner: PendingSSHChannelOwner
 ) async throws -> SSHClient {
-    let authenticationFuture = channel.eventLoop.submit {
+    let authentication = channel.eventLoop.makePromise(of: SSHClient.self)
+    channel.eventLoop.execute {
         do {
             let future = try SSHClient.startConnection(
                 on: channel,
                 settings: settings
             )
             try readGate.release(on: channel)
-            return future
+            // Both futures belong to this channel's loop; no Sendable client is needed.
+            future.whenComplete { result in
+                authentication.assumeIsolated().completeWith(result)
+            }
         } catch {
-            return channel.eventLoop.makeFailedFuture(error)
+            authentication.fail(error)
         }
-    }.flatMap { $0 }
+    }
     return try await awaitCancellableFuture(
-        authenticationFuture,
+        authentication.futureResult,
         owner: owner
     )
 }

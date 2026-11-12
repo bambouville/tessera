@@ -841,7 +841,7 @@ public final class MoshSession: ObservableObject, TerminalSession {
                         await connection.close()
                     }
                 }
-            ) {
+            ) { [self] in
                 // Resolve the endpoint here because MoshBootstrap is owned by
                 // the parallel transcript-redaction remediation. Its common
                 // auth resolver fails closed if this policy changes again.
@@ -850,20 +850,21 @@ public final class MoshSession: ObservableObject, TerminalSession {
                     requireBiometric: requireBiometric,
                     isSecureEnclave: isSecureEnclave
                 )
+                let launchHost = Self.launchHost(policy.host, keepingLaunchOf: fallbackHost)
                 if let recoveryRestorePolicy,
                    MoshServerLossRecovery.decide(
-                       launchMode: policy.host.launchMode,
-                       launchCommand: policy.host.launchCommand,
+                       launchMode: launchHost.launchMode,
+                       launchCommand: launchHost.launchCommand,
                        restorePolicy: recoveryRestorePolicy,
                        isAppLocked: false
                    ) != .rebuild {
                     throw MoshServerLossRecoveryRefusedError()
                 }
-                let visibleTmuxClientIgnoresSize = policy.host.launchMode == .autoTmux
-                    || policy.host.launchMode == .pinnedTmux
-                if policy.host.launchMode == .customCommand {
+                let visibleTmuxClientIgnoresSize = launchHost.launchMode == .autoTmux
+                    || launchHost.launchMode == .pinnedTmux
+                if launchHost.launchMode == .customCommand {
                     let connection = try await MoshBootstrap.bootstrapRetainingConnection(
-                        host: policy.host,
+                        host: launchHost,
                         requireBiometric: policy.requireBiometric,
                         isSecureEnclave: policy.isSecureEnclave,
                         hostKeyPrompt: { [weak self] challenge in
@@ -887,7 +888,7 @@ public final class MoshSession: ObservableObject, TerminalSession {
                     }
                 }
                 let result = try await MoshBootstrap.bootstrap(
-                    host: policy.host,
+                    host: launchHost,
                     requireBiometric: policy.requireBiometric,
                     isSecureEnclave: policy.isSecureEnclave,
                     hostKeyPrompt: { [weak self] challenge in
@@ -1025,6 +1026,19 @@ public final class MoshSession: ObservableObject, TerminalSession {
         agentReadCarrier.reset()
         agentBootstrapResult = nil
         agentBootstrapHost = nil
+    }
+
+    /// The stored host supplies credentials, endpoints and environment; how a
+    /// session launches is the session's own. A host edited to or from tmux
+    /// while this session was open or saved for restore otherwise started a
+    /// server this session's view reads in the other mode: tmux shown raw with
+    /// no Agent Center route, on every reconnect, until the tab was closed.
+    nonisolated static func launchHost(_ stored: Host, keepingLaunchOf session: Host) -> Host {
+        var host = stored
+        host.launchMode = session.launchMode
+        host.launchCommand = session.launchCommand
+        host.tmuxSessionName = session.tmuxSessionName
+        return host
     }
 
     /// A new route must reach the same account through the same verified
@@ -2285,7 +2299,7 @@ final class MoshTransportDriver {
     }
 
     func connect() {
-        queue.async {
+        queue.async { [self] in
             guard !self.hasStarted, !self.finished else { return }
             self.hasStarted = true
             MoshDiagnostics.log(
@@ -3101,7 +3115,7 @@ final class TmuxControlChannel {
             // detach in the cleanup epilogue (below) before the next run
             // re-attaches with the new client.
             if let portForwarderManager {
-                await portForwarderManager.attach(to: connectedClient, rules: portForwardRules)
+                portForwarderManager.attach(to: connectedClient, rules: portForwardRules)
             }
 
             var attempt = 1

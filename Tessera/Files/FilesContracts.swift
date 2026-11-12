@@ -115,6 +115,9 @@ enum FileBridgeError: Error, Equatable {
     case sftpUnavailable(String)
     /// Remote operation failed (permissions, missing path, non-empty dir…).
     case remoteOperationFailed(String)
+    /// An SFTP status reply, kept with its code so a reader can tell a
+    /// missing file (2) or a denied one (3) from other failures.
+    case remoteStatus(code: UInt32, message: String)
     case cancelled
 }
 
@@ -133,8 +136,10 @@ extension FileBridgeError: LocalizedError {
             return String(localized: "SFTP is unavailable on this host: \(detail)")
         case .remoteOperationFailed(let detail):
             return detail
+        case .remoteStatus(_, let message):
+            return message
         case .cancelled:
-            return "Cancelled."
+            return String(localized: "Cancelled.")
         }
     }
 }
@@ -153,8 +158,14 @@ typealias TransferProgressHandler = @MainActor @Sendable (_ transferredBytes: In
 protocol FileBridging: AnyObject, Observable {
     var key: FileBridgeKey { get }
     var state: FileBridgeState { get }
+    /// Changes when this bridge replaces or invalidates its connection.
+    /// Observable like `state`; reading it never connects or does remote work.
+    var connectionGeneration: Int { get }
     /// Absolute remote $HOME, resolved on connect via SFTP realpath(".").
     var homeDirectory: String? { get }
+    /// Page tabs borrow only this bridge's already-connected SSH client.
+    /// Reading this property never connects or opens a file channel.
+    var artifactForwarding: PortForwarderManager? { get }
 
     /// While true the bridge skips its idle-timeout teardown (set by the
     /// panel while it is open — a visible panel is ongoing use, and an
@@ -169,6 +180,8 @@ protocol FileBridging: AnyObject, Observable {
 
     // Directory / metadata. All throw FileBridgeError.
     func listDirectory(_ path: String) async throws -> [RemoteFileEntry]
+    /// File metadata from stat, following symbolic links.
+    func attributes(_ path: String) async throws -> RemoteFileEntry
     func realPath(_ path: String) async throws -> String
     func createDirectory(_ path: String) async throws
     /// Applies only the low 12 POSIX mode bits (rwx plus special bits).
@@ -188,6 +201,40 @@ protocol FileBridging: AnyObject, Observable {
     /// request (use for probes).
     @discardableResult
     func exec(_ command: String, inShell: Bool) async throws -> String
+}
+
+extension FileBridging {
+    /// Fixtures without in-place reconnects can keep a fixed identity.
+    var connectionGeneration: Int { 0 }
+    var artifactForwarding: PortForwarderManager? { nil }
+
+    func attributes(_ path: String) async throws -> RemoteFileEntry {
+        guard state == .connected else { throw FileBridgeError.notConnected }
+        if path == "/" {
+            return RemoteFileEntry(name: "/", path: "/", kind: .directory, size: nil, modified: nil, permissions: nil)
+        }
+        let parent = (path as NSString).deletingLastPathComponent
+        let name = (path as NSString).lastPathComponent
+        guard let entry = try await listDirectory(parent.isEmpty ? "/" : parent).first(where: { $0.name == name }) else {
+            throw FileBridgeError.remoteStatus(code: 2, message: String(localized: "this artifact file was not found"))
+        }
+        guard entry.kind == .symlink else { return entry }
+        let resolved = try await realPath(path)
+        guard resolved != path else {
+            throw FileBridgeError.remoteOperationFailed(String(localized: "this symbolic link could not be resolved"))
+        }
+        if resolved == "/" {
+            return RemoteFileEntry(name: entry.name, path: path, kind: .directory, size: nil, modified: nil, permissions: nil)
+        }
+        let targetParent = (resolved as NSString).deletingLastPathComponent
+        let targetName = (resolved as NSString).lastPathComponent
+        guard let target = try await listDirectory(targetParent.isEmpty ? "/" : targetParent)
+            .first(where: { $0.name == targetName }) else {
+            throw FileBridgeError.remoteStatus(code: 2, message: String(localized: "this artifact file was not found"))
+        }
+        return RemoteFileEntry(name: entry.name, path: path, kind: target.kind, size: target.size,
+                               modified: target.modified, permissions: target.permissions)
+    }
 }
 
 // MARK: - Transfer queue

@@ -19,6 +19,12 @@ public final class TerminalBuffer {
     private int mActiveTranscriptRows = 0;
     /** The index in the circular buffer where the visible screen starts. */
     private int mScreenFirstRow = 0;
+    /**
+     * The cursor's row after the last {@link #resize}, before the cursor was kept on the screen: a shorter screen
+     * can push the cursor's line into the transcript, and a narrower one rewrap it there, where the cursor goes to
+     * the screen's top row instead.
+     */
+    private int mResizedCursorRow = 0;
 
     /**
      * Create a transcript screen.
@@ -144,6 +150,11 @@ public final class TerminalBuffer {
         return text.substring(x1 + 1, x2);
     }
 
+    /** See {@link #mResizedCursorRow}. */
+    public int getResizedCursorRow() {
+        return mResizedCursorRow;
+    }
+
     public int getActiveTranscriptRows() {
         return mActiveTranscriptRows;
     }
@@ -241,6 +252,7 @@ public final class TerminalBuffer {
             final int oldScreenFirstRow = mScreenFirstRow;
             final int oldScreenRows = mScreenRows;
             final int oldTotalRows = mTotalRows;
+            final int oldColumns = mColumns;
             mTotalRows = newTotalRows;
             mScreenRows = newRows;
             mActiveTranscriptRows = mScreenFirstRow = 0;
@@ -259,6 +271,11 @@ public final class TerminalBuffer {
             // Blank lines should be skipped only if at end of transcript (just as is done in the "fast" resize), so we
             // keep track how many blank lines we have skipped if we later on find a non-blank line.
             int skippedBlankLines = 0;
+            // Whether a line wraps through every skipped row: they are its blanks, written back as such if the line
+            // goes on after them, or it would split there. A wrap flag can outlive the text that set it, so blank rows
+            // count as a line's only when the line has text after them.
+            boolean skippedLinesContinueLine = false;
+            boolean previousLineWraps = false;
             for (int externalOldRow = -oldActiveTranscriptRows; externalOldRow < oldScreenRows; externalOldRow++) {
                 // Do what externalToInternalRow() does but for the old state:
                 int internalOldRow = oldScreenFirstRow + externalOldRow;
@@ -266,14 +283,38 @@ public final class TerminalBuffer {
 
                 TerminalRow oldLine = oldLines[internalOldRow];
                 boolean cursorAtThisRow = externalOldRow == oldCursorRow;
+                boolean continuesLine = previousLineWraps;
+                previousLineWraps = oldLine != null && oldLine.mLineWrap;
                 // The cursor may only be on a non-null line, which we should not skip:
                 if (oldLine == null || (!(!newCursorPlaced && cursorAtThisRow)) && oldLine.isBlank()) {
+                    skippedLinesContinueLine = (skippedBlankLines == 0 || skippedLinesContinueLine) && continuesLine;
                     skippedBlankLines++;
                     continue;
+                } else if (skippedBlankLines > 0 && skippedLinesContinueLine && continuesLine) {
+                    for (int skippedRow = externalOldRow - skippedBlankLines; skippedRow < externalOldRow; skippedRow++) {
+                        int internalSkippedRow = oldScreenFirstRow + skippedRow;
+                        internalSkippedRow = (internalSkippedRow < 0) ? (oldTotalRows + internalSkippedRow) : (internalSkippedRow % oldTotalRows);
+                        TerminalRow skippedLine = oldLines[internalSkippedRow];
+                        for (int column = 0; column < oldColumns; column++) {
+                            if (currentOutputExternalColumn + 1 > mColumns) {
+                                setLineWrap(currentOutputExternalRow);
+                                if (currentOutputExternalRow == mScreenRows - 1) {
+                                    if (newCursorPlaced) newCursorRow--;
+                                    scrollDownOneLine(0, mScreenRows, currentStyle);
+                                } else {
+                                    currentOutputExternalRow++;
+                                }
+                                currentOutputExternalColumn = 0;
+                            }
+                            setChar(currentOutputExternalColumn++, currentOutputExternalRow, ' ', skippedLine.getStyle(column));
+                        }
+                    }
+                    skippedBlankLines = 0;
                 } else if (skippedBlankLines > 0) {
                     // After skipping some blank lines we encounter a non-blank line. Insert the skipped blank lines.
                     for (int i = 0; i < skippedBlankLines; i++) {
                         if (currentOutputExternalRow == mScreenRows - 1) {
+                            if (newCursorPlaced) newCursorRow--;
                             scrollDownOneLine(0, mScreenRows, currentStyle);
                         } else {
                             currentOutputExternalRow++;
@@ -285,10 +326,18 @@ public final class TerminalBuffer {
 
                 int lastNonSpaceIndex = 0;
                 boolean justToCursor = false;
+                // The cursor's row goes as far as the cursor or its text, whichever is further: text after a cursor
+                // moved back into a line is still the line's.
+                int cursorRowTextEnd = 0;
                 if (cursorAtThisRow || oldLine.mLineWrap) {
                     // Take the whole line, either because of cursor on it, or if line wrapping.
                     lastNonSpaceIndex = oldLine.getSpaceUsed();
-                    if (cursorAtThisRow) justToCursor = true;
+                    if (cursorAtThisRow) {
+                        justToCursor = true;
+                        if (oldLine.mLineWrap) cursorRowTextEnd = lastNonSpaceIndex;
+                        else for (int i = 0; i < lastNonSpaceIndex; i++)
+                            if (oldLine.mText[i] != ' ') cursorRowTextEnd = i + 1;
+                    }
                 } else {
                     for (int i = 0; i < oldLine.getSpaceUsed(); i++)
                         // NEWLY INTRODUCED BUG! Should not index oldLine.mStyle with char indices
@@ -323,14 +372,16 @@ public final class TerminalBuffer {
                     setChar(outputColumn, currentOutputExternalRow, codePoint, styleAtCol);
 
                     if (displayWidth > 0) {
-                        if (oldCursorRow == externalOldRow && oldCursorColumn == currentOldCol) {
+                        // A cursor on a wide character's second cell goes to its first.
+                        if (oldCursorRow == externalOldRow && oldCursorColumn >= currentOldCol
+                            && oldCursorColumn < currentOldCol + displayWidth) {
                             newCursorColumn = currentOutputExternalColumn;
                             newCursorRow = currentOutputExternalRow;
                             newCursorPlaced = true;
                         }
                         currentOldCol += displayWidth;
                         currentOutputExternalColumn += displayWidth;
-                        if (justToCursor && newCursorPlaced) break;
+                        if (justToCursor && newCursorPlaced && i + 1 >= cursorRowTextEnd) break;
                     }
                 }
                 // Old row has been copied. Check if we need to insert newline if old line was not wrapping:
@@ -349,6 +400,8 @@ public final class TerminalBuffer {
             cursor[1] = newCursorRow;
         }
 
+        // A cursor the reflow never placed has no line to keep.
+        mResizedCursorRow = cursor[0] < 0 ? 0 : cursor[1];
         // Handle cursor scrolling off screen:
         if (cursor[0] < 0 || cursor[1] < 0) cursor[0] = cursor[1] = 0;
     }
@@ -425,7 +478,10 @@ public final class TerminalBuffer {
         for (int y = 0; y < h; y++) {
             int y2 = copyingUp ? y : (h - (y + 1));
             TerminalRow sourceRow = allocateFullLineIfNecessary(externalToInternalRow(sy + y2));
-            allocateFullLineIfNecessary(externalToInternalRow(dy + y2)).copyInterval(sourceRow, sx, sx + w, dx);
+            TerminalRow destinationRow = allocateFullLineIfNecessary(externalToInternalRow(dy + y2));
+            destinationRow.copyInterval(sourceRow, sx, sx + w, dx);
+            // A whole row moves with whether it continues on the next.
+            if (sx == 0 && dx == 0 && w == mColumns) destinationRow.mLineWrap = sourceRow.mLineWrap;
         }
     }
 
@@ -439,9 +495,12 @@ public final class TerminalBuffer {
             throw new IllegalArgumentException(
                 "Illegal arguments! blockSet(" + sx + ", " + sy + ", " + w + ", " + h + ", " + val + ", " + mColumns + ", " + mScreenRows + ")");
         }
-        for (int y = 0; y < h; y++)
+        for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++)
                 setChar(sx + x, sy + y, val, style);
+            // A row filled whole no longer continues on the next.
+            if (sx == 0 && w == mColumns) clearLineWrap(sy + y);
+        }
     }
 
     public TerminalRow allocateFullLineIfNecessary(int row) {

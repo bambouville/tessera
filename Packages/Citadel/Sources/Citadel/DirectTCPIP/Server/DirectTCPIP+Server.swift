@@ -48,7 +48,7 @@ public struct DirectTCPIPForwardingDelegate: DirectTCPIPDelegate {
                     channel.pipeline.addHandler(ProxyChannelHandler { data, promise in
                         remote.writeAndFlush(data, promise: promise)
                     })
-                }.flatMap {
+                }.flatMap { [channel] in
                     remote.pipeline.addHandler(ProxyChannelHandler { [weak channel] data, promise in
                         guard let channel else {
                             promise?.fail(ChannelError.ioOnClosedChannel)

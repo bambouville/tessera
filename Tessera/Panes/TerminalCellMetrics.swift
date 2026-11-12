@@ -156,3 +156,66 @@ enum CompactTmuxClientSizing {
         )
     }
 }
+
+/// Holds a compact viewport's measured frames to the shared resize rule, as
+/// Android's compact viewport does. Closing a Duo measured ten grids in
+/// 2.7 s, some a millisecond apart as its rail came and went, and tmux
+/// reflowed the pane for each one it was sent. The first frame and a frame
+/// back on the grid already applied go through at once; any other only
+/// once it has held for the settle window.
+@MainActor
+final class CompactViewportSettle {
+    private var coalescer = TerminalResizeCoalescer()
+    private var task: Task<Void, Never>?
+    private let settleSeconds: TimeInterval
+
+    init(settleSeconds: TimeInterval = TerminalResizeCoalescer.settleSeconds) {
+        self.settleSeconds = settleSeconds
+    }
+
+    func note(_ viewport: (cols: Int, rows: Int), apply: @escaping @MainActor ((cols: Int, rows: Int)) -> Void) {
+        let size = TerminalResizeCoalescer.Size(cols: viewport.cols, rows: viewport.rows)
+        // A frame repeating the held grid keeps its wait; restarting it
+        // would let a stream of sub-cell frames hold the grid back.
+        if coalescer.pending == size, task != nil { return }
+        switch coalescer.note(size) {
+        case .send, .drop:
+            cancel()
+            apply(viewport)
+        case .wait:
+            task?.cancel()
+            let wait = settleSeconds
+            task = Task { @MainActor [weak self] in
+                do { try await Task.sleep(for: .seconds(wait)) } catch { return }
+                guard let self, self.coalescer.settle(size) else { return }
+                self.task = nil
+                apply(viewport)
+            }
+        }
+    }
+
+    /// The grid still waiting, taken now: the view that measured it is
+    /// gone (its session became active or hidden), so its delivery would
+    /// judge the grid by stale state. The caller applies it under the
+    /// current state instead.
+    func takePending() -> (cols: Int, rows: Int)? {
+        guard task != nil, let size = coalescer.pending else { return nil }
+        cancel()
+        _ = coalescer.settle(size)
+        return (size.cols, size.rows)
+    }
+
+    func cancel() {
+        task?.cancel()
+        task = nil
+    }
+
+    /// The presentation that measured these grids is gone: the view left
+    /// the screen, or compact gave way to the regular pane grid, which sizes
+    /// tmux itself. Nothing waiting is delivered, and the next grid measured
+    /// is a first one, sent at once.
+    func reset() {
+        cancel()
+        coalescer = TerminalResizeCoalescer()
+    }
+}

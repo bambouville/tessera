@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Typeface
 import android.os.SystemClock
 import android.util.Log
 import android.content.ClipData
@@ -13,9 +14,12 @@ import android.content.Intent
 import android.view.KeyEvent
 import android.view.View
 import android.view.MotionEvent
+import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import android.view.inputmethod.EditorInfo
 import com.termux.terminal.TerminalEmulator
 import com.termux.terminal.TextStyle
+import com.termux.view.TerminalView
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.core.content.res.ResourcesCompat
@@ -75,6 +79,170 @@ class TermuxTerminalSurfaceInstrumentedTest {
         surface.view.layout(0, 0, 600, 900)
         assertTrue("A canceled pulse must not reach the host", sizes.isEmpty())
         assertTrue(surface.snapshotText()!!.visibleText.contains("Ask Codex to do anything"))
+    }
+
+    @Test
+    fun accessibilityClickRaisesTheKeyboardLikeATap() = withSizedSurface { surface ->
+        val keyboardRequests = AtomicInteger()
+        surface.onSoftwareKeyboardRequested = { keyboardRequests.incrementAndGet() }
+        val node = surface.view.createAccessibilityNodeInfo()
+        assertTrue("TalkBack offers a double-tap only on a clickable node", node.isClickable)
+        assertTrue(node.actionList.contains(AccessibilityNodeInfo.AccessibilityAction.ACTION_CLICK))
+        assertFalse("a clickable view consumes touchscreen hover", surface.view.isClickable)
+        assertTrue(surface.view.performAccessibilityAction(AccessibilityNodeInfo.ACTION_CLICK, null))
+        assertEquals(1, keyboardRequests.get())
+        assertTrue(surface.view.hasFocus())
+    }
+
+    /**
+     * TalkBack had no way to page the terminal. Labelled Page up and Page
+     * down actions now page it as VoiceOver's page does on iOS: on the shell
+     * a page of history less a row, kept through output and offered only in
+     * a direction that can move; in a full-screen program its own keys, with
+     * the mouse on or off, leaving a selection, and none while the session
+     * refuses keys. The node offers no scroll action: TalkBack would perform
+     * one itself whenever a swipe reached the terminal's edge.
+     */
+    @Test
+    fun talkBackPagesHistoryAndSendsAFullScreenProgramItsPageKeys() = withSizedSurface { surface ->
+        val sent = ByteArrayOutputStream()
+        surface.onInput = { sent.write(it) }
+        repeat(100) { surface.feed("history-$it\r\n".encodeToByteArray()) }
+        val view = surface.view
+        val pageUp = R.id.terminal_accessibility_page_up
+        val pageDown = R.id.terminal_accessibility_page_down
+        val scrolls = listOf(
+            AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD,
+            AccessibilityNodeInfo.ACTION_SCROLL_FORWARD,
+            android.R.id.accessibilityActionPageUp,
+            android.R.id.accessibilityActionPageDown,
+        )
+        fun actions() = view.createAccessibilityNodeInfo().actionList.map { it.id }
+        fun perform(action: Int) = view.performAccessibilityAction(action, null)
+
+        assertFalse("a swipe at the terminal's edge must not scroll it", view.createAccessibilityNodeInfo().isScrollable)
+        assertTrue(actions().none { it in scrolls })
+        assertTrue(actions().contains(pageUp))
+        assertFalse("the live tail offers no newer page", actions().contains(pageDown))
+        assertTrue(view.createAccessibilityNodeInfo().actionList.first { it.id == pageUp }.label.isNotEmpty())
+        val page = view.mEmulator.mRows - 1
+
+        assertFalse("the live tail is an edge", perform(pageDown))
+        assertTrue(perform(pageUp))
+        assertEquals(-page, view.topRow)
+        assertTrue(actions().containsAll(listOf(pageUp, pageDown)))
+        assertTrue(perform(pageUp))
+        assertEquals(-2 * page, view.topRow)
+        assertTrue(perform(pageDown))
+        assertEquals(-page, view.topRow)
+        surface.feed("new line\r\n".encodeToByteArray())
+        assertEquals("output keeps the paged reader", -page - 1, view.topRow)
+        var pages = 0
+        while (perform(pageUp) && pages < 50) pages += 1
+        assertFalse("the oldest row offers no older page", actions().contains(pageUp))
+        assertEquals("a page of history sends nothing", 0, sent.size())
+
+        view.topRow = 0
+        surface.feed("\u001b[?1049h".encodeToByteArray())
+        assertTrue(actions().containsAll(listOf(pageUp, pageDown)))
+        assertTrue(actions().none { it in scrolls })
+        assertTrue(perform(pageUp))
+        assertTrue(perform(pageDown))
+        surface.feed("\u001b[?1000h\u001b[?1006h".encodeToByteArray())
+        val down = SystemClock.uptimeMillis()
+        val select = MotionEvent.obtain(down, down, MotionEvent.ACTION_DOWN, 20f, 20f, 0)
+        try { view.startTextSelectionMode(select) } finally { select.recycle() }
+        assertTrue(view.isSelectingText)
+        // Native selection ignores dismissals during its first 300 ms.
+        SystemClock.sleep(310)
+        assertTrue(perform(pageUp))
+        assertFalse("the key leaves the selection", view.isSelectingText)
+        assertEquals("\u001b[5~\u001b[6~\u001b[5~", sent.toByteArray().decodeToString())
+        assertEquals(0, view.topRow)
+
+        surface.inputAdmission = { false }
+        assertFalse("a refused key is no page", perform(pageDown))
+        assertEquals("\u001b[5~\u001b[6~\u001b[5~", sent.toByteArray().decodeToString())
+        surface.inputAdmission = null
+        assertTrue(perform(pageDown))
+    }
+
+    /**
+     * TalkBack keeps the node it fetched until it hears the node changed. A
+     * finger's scroll into history and a program taking the screen each tell
+     * it once they settle, with the rows then on screen and the pages that
+     * can move; a still terminal tells it nothing.
+     */
+    @Test
+    fun talkBackHearsTheTerminalChangeOnceAScrollOrRouteSettles() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = instrumentation.startActivitySync(
+            Intent.makeMainActivity(ComponentName(instrumentation.context, TerminalTestActivity::class.java))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        ) as TerminalTestActivity
+        lateinit var surface: TermuxTerminalSurface
+        val changes = AtomicInteger()
+        fun settledChanges(): Int {
+            Thread.sleep(600)
+            instrumentation.waitForIdleSync()
+            return changes.get()
+        }
+        try {
+            instrumentation.runOnMainSync {
+                surface = TermuxTerminalSurface(activity)
+                activity.setContentView(surface.view)
+                surface.view.setAccessibilityActiveForTesting(true)
+                surface.view.accessibilityDelegate = object : View.AccessibilityDelegate() {
+                    // Counted, never sent on: the emulator's accessibility can
+                    // be off, and the system throws on such an event then.
+                    override fun sendAccessibilityEventUnchecked(host: View, event: AccessibilityEvent) {
+                        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) changes.incrementAndGet()
+                        else super.sendAccessibilityEventUnchecked(host, event)
+                    }
+                }
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                surface.resize(60, 24)
+                repeat(100) { surface.feed("history-$it\r\n".encodeToByteArray()) }
+            }
+            val idle = settledChanges()
+            assertEquals("a still terminal tells TalkBack nothing", idle, settledChanges())
+
+            instrumentation.runOnMainSync { surface.view.topRow = -30 }
+            assertEquals("a scroll into history is told once it settles", idle + 1, settledChanges())
+            instrumentation.runOnMainSync {
+                val view = surface.view
+                val top = view.mEmulator.screen.getSelectedText(0, view.topRow, view.mEmulator.mColumns, view.topRow).trim()
+                val text = view.contentDescription?.toString().orEmpty()
+                assertTrue("the rows on screen: $top in $text", top.startsWith("history-") && text.startsWith(top))
+                assertTrue(
+                    "history offers a newer page",
+                    view.createAccessibilityNodeInfo().actionList.any { it.id == R.id.terminal_accessibility_page_down },
+                )
+            }
+
+            // TalkBack goes off while a scroll's refresh waits: the refresh
+            // sends nothing, as an event sent then would throw.
+            val beforeOff = changes.get()
+            instrumentation.runOnMainSync {
+                val view = surface.view
+                view.topRow = -10
+                view.draw(Canvas(Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)))
+                view.setAccessibilityActiveForTesting(false)
+            }
+            assertEquals("no event once accessibility is off", beforeOff, settledChanges())
+            instrumentation.runOnMainSync { surface.view.setAccessibilityActiveForTesting(true) }
+
+            instrumentation.runOnMainSync {
+                surface.feed("\u001b[?1000h".encodeToByteArray())
+                surface.view.setMouseReportingImpliesAltScreen(true)
+            }
+            assertTrue("a program taking the screen is told", settledChanges() > idle + 1)
+        } finally {
+            instrumentation.runOnMainSync { surface.close() }
+            activity.finish()
+        }
     }
 
     @Test
@@ -580,6 +748,60 @@ class TermuxTerminalSurfaceInstrumentedTest {
     }
 
     @Test
+    fun aBackgroundNotYetDecodedShowsTheThemeUntilTheWorkerHasIt() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = instrumentation.startActivitySync(
+            Intent.makeMainActivity(
+                ComponentName(instrumentation.context, TerminalTestActivity::class.java),
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        ) as TerminalTestActivity
+        instrumentation.waitForIdleSync()
+        val source = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888).apply {
+            eraseColor(Color.rgb(220, 35, 30))
+        }
+        val encoded = ByteArrayOutputStream().also { output ->
+            assertTrue(source.compress(Bitmap.CompressFormat.JPEG, 100, output))
+        }.toByteArray()
+        source.recycle()
+        val store = TerminalBackgroundImageStore(activity)
+        val imported = requireNotNull(store.importImage(encoded))
+        // Importing keeps the base picture in memory; no surface has asked for this blur yet.
+        val blurred = TerminalBackgroundImage(imageId = imported.imageId, dim = 0f, blurRadiusDp = 6f)
+        var surface: TermuxTerminalSurface? = null
+        var viewport: GeometryNeutralTerminalViewport? = null
+        try {
+            val atOnce = AtomicReference<List<Boolean>>()
+            instrumentation.runOnMainSync {
+                val mounted = TermuxTerminalSurface(activity, terminalBackgroundStore = store).also { surface = it }
+                mounted.resize(40, 20)
+                val around = GeometryNeutralTerminalViewport(activity, mounted).also { viewport = it }
+                activity.setContentView(around)
+                mounted.setBackgroundImage(blurred)
+                atOnce.set(listOf(mounted.view.background is TerminalBackgroundDrawable, around.background is TerminalBackgroundDrawable))
+            }
+            assertEquals("the main thread decodes nothing: the theme shows at first", listOf(false, false), atOnce.get())
+
+            val deadline = SystemClock.uptimeMillis() + 10_000
+            while (true) {
+                val shown = AtomicReference(false)
+                instrumentation.runOnMainSync {
+                    shown.set(surface?.view?.background is TerminalBackgroundDrawable && viewport?.background is TerminalBackgroundDrawable)
+                }
+                if (shown.get()) break
+                assertTrue("the worker's picture reaches the surface and its viewport", SystemClock.uptimeMillis() < deadline)
+                Thread.sleep(50)
+            }
+        } finally {
+            instrumentation.runOnMainSync {
+                viewport?.releaseTerminal()
+                surface?.close()
+            }
+            store.delete(imported.imageId)
+            activity.finish()
+        }
+    }
+
+    @Test
     fun themesAndCursorAppearanceAreIndependentPerSurface() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = instrumentation.startActivitySync(
@@ -738,6 +960,115 @@ class TermuxTerminalSurfaceInstrumentedTest {
                 assertTrue(bottomClearance.belowPixels < topClearance.belowPixels)
 
                 viewport.releaseTerminal()
+                surface.close()
+            } catch (error: Throwable) {
+                failure.set(error)
+            } finally {
+                activity.finish()
+            }
+        }
+        failure.get()?.let { throw it }
+    }
+
+    /**
+     * A font change used to resize the grid against the old cells' bounds at
+     * once, then back one settle delay after the viewport measured the new
+     * cells; each resize sent a reader in history back to the live tail.
+     */
+    @Test
+    fun aFontChangeKeepsTheCommittedPaneGridAndTheReadersRow() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = instrumentation.startActivitySync(
+            Intent.makeMainActivity(
+                ComponentName(instrumentation.context, TerminalTestActivity::class.java),
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        ) as TerminalTestActivity
+        instrumentation.waitForIdleSync()
+        val failure = AtomicReference<Throwable?>()
+        instrumentation.runOnMainSync {
+            try {
+                val surface = TermuxTerminalSurface(activity)
+                val viewport = GeometryNeutralTerminalViewport(activity, surface)
+                val pane = SharedTmuxCellRect(columns = 60, rows = 24)
+                viewport.setWindowGrid(window = pane, focus = pane)
+                surface.resize(60, 24)
+                activity.setContentView(viewport)
+                fun layOut() {
+                    viewport.measure(
+                        View.MeasureSpec.makeMeasureSpec(1_200, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY),
+                    )
+                    viewport.layout(0, 0, 1_200, 800)
+                }
+                layOut()
+                repeat(80) { surface.feed("HISTORY-$it\r\n".encodeToByteArray()) }
+                // Halfway into a row, as a glide leaves the reader.
+                TerminalView::class.java.getDeclaredMethod("setLocalScrollPosition", Float::class.javaPrimitiveType)
+                    .apply { isAccessible = true }
+                    .invoke(surface.view, -3.5f * surface.view.mRenderer.fontLineSpacing)
+                val sizes = mutableListOf<Pair<Int, Int>>()
+                surface.onResize = { columns, rows -> sizes += columns to rows }
+
+                surface.setFont(TerminalFont(sizeSp = 18, typeface = Typeface.MONOSPACE))
+                layOut()
+
+                assertEquals(Typeface.MONOSPACE, surface.view.typeface)
+                assertEquals("tmux owns the pane grid, not the font", emptyList<Pair<Int, Int>>(), sizes)
+                val state = surface.snapshotNonSecretState()
+                assertEquals(60, state.columns)
+                assertEquals(24, state.rows)
+                assertEquals(
+                    "the reader stays on the same row",
+                    -3.5f,
+                    surface.view.scrollPositionPixels / surface.view.mRenderer.fontLineSpacing,
+                    0.05f,
+                )
+
+                viewport.releaseTerminal()
+                surface.close()
+            } catch (error: Throwable) {
+                failure.set(error)
+            } finally {
+                activity.finish()
+            }
+        }
+        failure.get()?.let { throw it }
+    }
+
+    @Test
+    fun aFontChangeRefitsAGridThatFollowsTheViewsBounds() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = instrumentation.startActivitySync(
+            Intent.makeMainActivity(
+                ComponentName(instrumentation.context, TerminalTestActivity::class.java),
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        ) as TerminalTestActivity
+        instrumentation.waitForIdleSync()
+        val failure = AtomicReference<Throwable?>()
+        instrumentation.runOnMainSync {
+            try {
+                val surface = TermuxTerminalSurface(activity)
+                activity.setContentView(surface.view)
+                fun layOut() {
+                    surface.view.measure(
+                        View.MeasureSpec.makeMeasureSpec(900, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(600, View.MeasureSpec.EXACTLY),
+                    )
+                    surface.view.layout(0, 0, 900, 600)
+                }
+                layOut()
+                val before = surface.snapshotNonSecretState()
+                val sizes = mutableListOf<Pair<Int, Int>>()
+                surface.onResize = { columns, rows -> sizes += columns to rows }
+
+                surface.setFont(TerminalFont(sizeSp = 26))
+                assertEquals("the grid waits for layout", emptyList<Pair<Int, Int>>(), sizes)
+                layOut()
+
+                val after = surface.snapshotNonSecretState()
+                assertTrue(after.columns < before.columns)
+                assertTrue(after.rows < before.rows)
+                assertEquals(listOf(after.columns to after.rows), sizes)
                 surface.close()
             } catch (error: Throwable) {
                 failure.set(error)
@@ -922,6 +1253,45 @@ class TermuxTerminalSurfaceInstrumentedTest {
             )
             assertTrue("an honest completion repeats nothing: $honest", honest.contains("join=0"))
             assertTrue("a stale completion repeats its drift: $stale", stale.contains("join=1"))
+        }
+    }
+
+    @Test
+    fun theKeyboardRequestRaisesTheImeAndTheHideLowersIt() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = instrumentation.startActivitySync(
+            Intent.makeMainActivity(
+                ComponentName(instrumentation.context, TerminalTestActivity::class.java),
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        ) as TerminalTestActivity
+        lateinit var surface: TermuxTerminalSurface
+        instrumentation.runOnMainSync {
+            surface = TermuxTerminalSurface(activity)
+            activity.setContentView(surface.view)
+        }
+        instrumentation.waitForIdleSync()
+        fun imeShown(): Boolean {
+            var shown = false
+            instrumentation.runOnMainSync {
+                shown = surface.view.rootWindowInsets?.isVisible(android.view.WindowInsets.Type.ime()) == true
+            }
+            return shown
+        }
+        fun await(what: String, condition: () -> Boolean) {
+            val deadline = SystemClock.uptimeMillis() + 5_000
+            while (!condition()) {
+                assertTrue(what, SystemClock.uptimeMillis() < deadline)
+                Thread.sleep(50)
+            }
+        }
+        try {
+            assertFalse("the IME starts hidden", imeShown())
+            instrumentation.runOnMainSync { surface.requestSoftwareKeyboard() }
+            await("the keyboard request raises the IME") { imeShown() }
+            instrumentation.runOnMainSync { surface.view.hideSoftwareKeyboard() }
+            await("the hide lowers the IME") { !imeShown() }
+        } finally {
+            instrumentation.runOnMainSync { surface.close(); activity.finish() }
         }
     }
 

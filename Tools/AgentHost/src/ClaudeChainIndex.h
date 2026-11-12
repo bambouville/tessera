@@ -53,6 +53,8 @@ public:
 private:
     SourceValidation validation_;
     uint64_t validatedRevision_ = 0;
+    // A record read back contradicted the index: rebuild on the next refresh.
+    bool contradicted_ = false;
     struct Compact {
         uint64_t start = 0, end = 0, parent = UINT64_MAX, hash = 0;
         uint16_t flags = 0;
@@ -70,6 +72,9 @@ private:
         // ancestryMaximum(node), kept across metadata emissions and yields.
         bool thresholdKnown = false;
         uint64_t threshold = 0;
+        // Late nodes (no earlier in the file than their child) reached,
+        // counting node.
+        uint64_t late = 0;
     };
     // Sorted node identities of entries_; kept after a compact build so an
     // append resolves new links without rereading the published prefix.
@@ -106,10 +111,22 @@ private:
     size_t budget_ = 128 * 1024 * 1024;
     bool parentFields_ = false, dirty_ = false, lazy_ = false, pi_ = false;
     bool monotonePath_ = true;
+    // When it fit (lateKnown_): by the count of late nodes reached, the
+    // greatest start among the late nodes beyond them. A node's ancestry
+    // maximum is then its own start or this, without a walk.
+    std::vector<uint64_t> lateMax_;
+    bool lateKnown_ = false;
     unsigned piVersion_ = 0;
     std::optional<Entry> tail_;
     uint64_t pathMaximum_ = 0;
     LazyCursor cursor_;
+    // Where the walk stood at page boundaries it passed, by `remaining`: a
+    // page newer than the walk resumes at the nearest one above it instead
+    // of the tail. Spread evenly along the path; a rebuild clears it.
+    static constexpr size_t lazyCheckpointLimit = 256;
+    std::map<uint64_t, LazyCursor> lazyCheckpoints_;
+    static size_t checkpointLimit(size_t budget);
+    void thinCheckpoints(size_t keep);
     struct LinearBuild {
         unsigned phase = 0;
         uint64_t position = 0, physical = 0, selected = 0, stride = 1;
@@ -131,11 +148,39 @@ private:
     bool selectedLinear(const Entry& entry) const;
     Entry linearEntry(JsonlReader& reader, size_t ordinal, const std::function<bool()>& cancelled);
     void demote();
+    // Searches backward from position to floor, then, if rest is set, from
+    // position_ down to rest (the part of the file the first leg skipped).
+    // span: records per page read, doubling from a hint's first one.
+    // copies: first reads the UUID's later copies the fill met, newest
+    // first; copy counts those read.
     struct Lookup {
         std::string id;
         uint64_t position = 0;
         bool active = false;
+        uint64_t floor = 0, rest = UINT64_MAX;
+        size_t span = 100;
+        bool copies = false;
+        size_t copy = 0;
     } lookup_;
+    // Lazy only: Bloom filters over the node UUIDs in [0, idsEnd_), seen and
+    // seen again. A UUID never seen again has one copy at most, which is
+    // current wherever a lookup finds it, so the lookup starts near it.
+    std::vector<uint64_t> seenIds_, repeatedIds_;
+    uint64_t idsEnd_ = 0;
+    // Lazy only: (UUID hash, start) of each node the fill found the seen
+    // filter already holding. Every copy of a UUID after its first is here,
+    // so a lookup the repeated filter flags (often a false positive of a
+    // filter small for the file) reads these instead of searching back from
+    // the end. Over its share of the budget, dropped until the next fill.
+    std::vector<std::pair<uint64_t, uint64_t>> copies_;
+    bool copiesDropped_ = false, copiesSorted_ = true;
+    bool unrepeated(const std::string& id);
+    bool copiesKnown() const;
+    void keepCopy(const std::string& id, uint64_t start);
+    static size_t copyLimit(size_t budget);
+    // Bytes the copies and late nodes share.
+    static size_t spareBytes(size_t budget);
+    void dropIds();
     // Resumable lazy effective-parent resolution for one boundary: phase 1
     // resolves the logical parent, 4 looks for its revision before the
     // boundary (publication check only), 2 scans backward from position, 3
@@ -159,6 +204,9 @@ private:
         // changed a published boundary's effective parent.
         uint64_t minimum = UINT64_MAX, cut = UINT64_MAX, deferred = UINT64_MAX, metadataScan = 0, last = UINT64_MAX;
         bool crossed = false, revised = false;
+        // Starts of the late nodes passed, in walk order, while they fit.
+        std::vector<uint64_t> late;
+        bool lateDropped = false;
     } build_;
     // Start of the published path's stop node (see chain()), UINT64_MAX if the
     // path ends at a root; and of its first node (root or stop node).
@@ -170,7 +218,11 @@ private:
     uint64_t maximumValue_ = 0, maximumSteps_ = 0;
     Entry decode(const PositionedRecord& record, uint64_t previousStart = UINT64_MAX) const;
     Entry readEntry(JsonlReader& reader, uint64_t start, uint64_t end) const;
-    std::optional<Entry> latest(JsonlReader& reader, const std::string& id, const std::function<bool()>& cancelled);
+    // hint: where the copy probably ends (a node's own end, or a child's start
+    // for its parent). Without a hint, or for a UUID that may repeat, the
+    // search starts at position_.
+    std::optional<Entry> latest(JsonlReader& reader, const std::string& id, const std::function<bool()>& cancelled,
+        uint64_t hint = UINT64_MAX);
     std::optional<Entry> parent(JsonlReader& reader, const Entry& node, const std::function<bool()>& cancelled);
     // Display ancestry: parent() except across a Claude compaction boundary.
     // revised: set when an append since publishedEnd_ may have changed a
@@ -183,6 +235,8 @@ private:
     void rebuildLazy(JsonlReader& reader, const std::function<bool()>& cancelled);
     uint64_t ancestryMaximum(JsonlReader& reader, const std::optional<Entry>& node, const std::function<bool()>& cancelled);
     void resetCursor();
+    void resumeCursor(uint64_t end);
+    void keepCheckpoint();
     std::optional<CachedEntry> nextLazy(JsonlReader& reader, const std::function<bool()>& cancelled);
 
 };

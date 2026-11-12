@@ -12,6 +12,10 @@ import kotlinx.coroutines.flow.map
 
 private val Context.tesseraPreferences by preferencesDataStore(name = "tessera_preferences")
 
+const val AutomaticTerminalThemeId = "system"
+
+private val TerminalThemeIds = setOf(AutomaticTerminalThemeId, "void", "graphite", "amber", "paper", "dracula", "nord")
+
 data class AppPreferences(
     val terminalTextSizeSp: Int = 13,
     /**
@@ -25,8 +29,8 @@ data class AppPreferences(
     val terminalFontId: String = "jetbrains_mono",
     val scrollbackLines: Int = 10_000,
     val resizeTerminalWithKeyboard: Boolean = false,
-    /** Terminal palette; a separately stored background picture can sit behind it. */
-    val terminalThemeId: String = "void",
+    /** Terminal palette selection; a separately stored background picture can sit behind it. */
+    val terminalThemeId: String = AutomaticTerminalThemeId,
     val terminalCursorStyle: String = "block",
     val terminalCursorBlink: Boolean = true,
     val terminalBackgroundUsesImage: Boolean = false,
@@ -73,6 +77,9 @@ data class AppPreferences(
     val hideContentInAppSwitcher: Boolean = false,
     /** Explicit opt-in; Agent Center itself never implies OS notification permission. */
     val agentCenterNotificationsEnabled: Boolean = false,
+    /** Device-local onboarding receipts; deliberately absent from the pairing export allow-list. */
+    val hasSeenWelcome: Boolean = false,
+    val lastSeenWhatsNewVersion: String? = null,
 ) {
     /**
      * Effective app-switcher privacy, aligned with iOS `AppSwitcherPrivacyPolicy`.
@@ -114,6 +121,8 @@ class AndroidAppPreferences(private val context: Context) {
             // explicit choice made under the old Agent Center toggle is kept.
             hideContentInAppSwitcher = preferences[HideContentInAppSwitcher] ?: false,
             agentCenterNotificationsEnabled = preferences[AgentCenterNotificationsEnabled] ?: false,
+            hasSeenWelcome = preferences[HasSeenWelcome] ?: false,
+            lastSeenWhatsNewVersion = preferences[LastSeenWhatsNewVersion],
         )
     }
 
@@ -244,6 +253,22 @@ class AndroidAppPreferences(private val context: Context) {
         context.tesseraPreferences.edit { it[AgentCenterNotificationsEnabled] = enabled }
     }
 
+    suspend fun updateHasSeenWelcome(seen: Boolean) {
+        context.tesseraPreferences.edit { it[HasSeenWelcome] = seen }
+    }
+
+    suspend fun updateLastSeenWhatsNewVersion(version: String) {
+        context.tesseraPreferences.edit { it[LastSeenWhatsNewVersion] = version }
+    }
+
+    /** One durable receipt: a completed welcome must never trigger the update card next launch. */
+    suspend fun updateOnboardingSeen(version: String) {
+        context.tesseraPreferences.edit {
+            it[HasSeenWelcome] = true
+            it[LastSeenWhatsNewVersion] = version
+        }
+    }
+
     private companion object {
         val TerminalTextSize = intPreferencesKey("terminal_text_size_sp")
         val TerminalFontId = stringPreferencesKey("terminal_font_id")
@@ -272,7 +297,10 @@ class AndroidAppPreferences(private val context: Context) {
         val HideContentInAppSwitcher = booleanPreferencesKey("agent_center_capture_protection_enabled")
         val AgentCenterEnabled = booleanPreferencesKey("agent_center_enabled")
         val AgentCenterNotificationsEnabled = booleanPreferencesKey("agent_center_notifications_enabled")
-        val TerminalThemeIds = setOf("void", "graphite", "amber", "paper", "dracula", "nord")
+        // The entire DataStore is excluded from Android backup/device transfer;
+        // continuity exports only explicitly listed portable settings.
+        val HasSeenWelcome = booleanPreferencesKey("has_seen_welcome")
+        val LastSeenWhatsNewVersion = stringPreferencesKey("last_seen_whats_new_version")
         val TerminalCursorStyles = setOf("block", "bar", "underline")
         val BackgroundFillModes = setOf("fill", "fit")
         val ModifierBehaviors = setOf("oneShot", "sticky")
@@ -292,11 +320,17 @@ class AndroidAppPreferences(private val context: Context) {
         fun knownModifierNotation(value: String?): String =
             value?.takeIf { it in ModifierNotations } ?: "glyph"
 
-        fun knownTerminalTheme(value: String?): String =
-            value?.takeIf { it in TerminalThemeIds } ?: "void"
         fun knownTerminalCursorStyle(value: String?): String =
             value?.takeIf { it in TerminalCursorStyles } ?: "block"
         fun knownBackgroundFillMode(value: String?): String =
             value?.takeIf { it in BackgroundFillModes } ?: "fill"
     }
 }
+
+fun knownTerminalTheme(value: String?): String =
+    value?.takeIf { it in TerminalThemeIds } ?: AutomaticTerminalThemeId
+
+fun resolvedTerminalThemeId(selection: String, systemDark: Boolean): String =
+    if (selection == AutomaticTerminalThemeId) {
+        if (systemDark) "void" else "paper"
+    } else selection

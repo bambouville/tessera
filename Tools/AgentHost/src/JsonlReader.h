@@ -48,15 +48,16 @@ public:
     uint64_t bytesRead() const { return readBytes_; }
     std::string identity() const { return identity_; }
     const std::string& mutationStamp() const { return mutationStamp_; }
-    void setNormalizer(Normalizer normalizer) { normalizer_ = std::move(normalizer); }
+    // A normalizer named by a kind has its results remembered by a
+    // continuation under that kind, as the default normalizer's are.
+    void setNormalizer(Normalizer normalizer, std::string kind = {}) {
+        normalizer_ = std::move(normalizer); normalizerKind_ = std::move(kind);
+    }
     Normalizer normalizer() const { return normalizer_; }
-    // Full coverage is sliced and retained by the source's index owner. Once
-    // ready, this reader is pinned to the observed cut, never a moving EOF.
-    SourceValidation::Result validatePrefix(SourceValidation& state,
-        size_t byteSlice = SourceValidation::defaultSlice,
-        SourceValidation::Clock::time_point now = SourceValidation::Clock::now(), uint64_t minimumEnd = 0,
-        SourceValidation::WallClock::time_point wallNow = SourceValidation::WallClock::now());
-    void setValidationRefresh(bool refresh) { validationRefresh_ = refresh; }
+    const std::string& normalizerKind() const { return normalizerKind_; }
+    // The source's index owner retains the state. This reader is then pinned
+    // to the observed cut, never a moving EOF.
+    SourceValidation::Result validatePrefix(SourceValidation& state, uint64_t minimumEnd = 0);
     void validateSnapshot() { unchanged(); }
     uint64_t anchor(uint64_t position);
     PositionedRecord readRecord(uint64_t start, uint64_t end) {
@@ -68,12 +69,12 @@ private:
     void block(uint64_t position);
     uint64_t previousStart(uint64_t end);
     PositionedRecord record(uint64_t start, uint64_t end, bool locateEnd = false);
-    void unchanged();
+    // The file's current size; throws once the snapshot no longer describes it.
+    uint64_t unchanged();
     const JsonlContinuation::Source& continuationSource() const { return continuationSource_; }
     int descriptor_ = -1;
     std::string path_, provider_, identity_;
     std::string mutationStamp_;
-    int64_t mtimeNanoseconds_ = 0, ctimeNanoseconds_ = 0;
     uint64_t size_ = 0, sourceLimit_ = 0, snapshotFileSize_ = 0, device_ = 0, inode_ = 0, readBytes_ = 0, operationStart_ = 0;
     uint64_t cacheStart_ = 0;
     size_t cacheSize_ = 0;
@@ -84,10 +85,11 @@ private:
     uint64_t previousStart_ = 0;
     std::array<char, 65536>& cache() { return buffers_[cacheIndex_]; }
     simdjson::dom::parser parser_;
+    std::string lineBuffer_;
     std::function<bool()> cancelled_;
     Normalizer normalizer_;
+    std::string normalizerKind_;
     bool readingWitness_ = false;
-    bool validationRefresh_ = true;
     JsonlContinuation::Source continuationSource_;
 };
 }

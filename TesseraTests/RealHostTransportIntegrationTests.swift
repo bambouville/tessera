@@ -335,6 +335,41 @@ final class RealHostTransportIntegrationTests: XCTestCase {
         XCTAssertEqual(session.state, .connected)
     }
 
+    /// Raw SSH has no pane root: the read child scopes its snapshot to the
+    /// connection's server process above it, so it must find a process in
+    /// this terminal and none from another connection to the same account.
+    @MainActor
+    func test_liveRawSSHProcessSnapshotKeepsToItsOwnConnection() async throws {
+        let config = try Config.load()
+        let session = SSHSession(host: makeHost(config: config, transport: .ssh))
+        defer { session.disconnect() }
+        _ = try await connect(session: session, pendingRequest: { session.pendingHostKeyVerification }, timeout: 20)
+        let other = SSHSession(host: makeHost(config: config, transport: .ssh))
+        defer { other.disconnect() }
+        _ = try await connect(session: other, pendingRequest: { other.pendingHostKeyVerification }, timeout: 20)
+
+        func startSleep(in terminal: SSHSession, tag: String) async throws -> Int {
+            // The echoed command never spells `_END`; waiting for it, not for
+            // the tag, keeps a line split across reads from failing the match.
+            terminal.send(Array("sleep 600 & printf '%s_%s_%s\\n' \(tag) \"$!\" END\n".utf8))
+            let output = try await waitForOutput(terminal.outputStream, containing: "_END", timeout: 10)
+            let match = try XCTUnwrap(output.firstMatch(of: try Regex("\(tag)_([0-9]+)_END")), output)
+            return try XCTUnwrap(Int(String(match.output[1].substring ?? "")))
+        }
+        let mine = try await startSleep(in: session, tag: "RAWSNAPMINE")
+        let theirs = try await startSleep(in: other, tag: "RAWSNAPTHEIRS")
+        defer {
+            session.send(Array("kill \(mine)\n".utf8))
+            other.send(Array("kill \(theirs)\n".utf8))
+        }
+
+        let snapshotValue = await session.detectForegroundProcessSnapshotIfAvailable()
+        let snapshot = try XCTUnwrap(snapshotValue, "the read child must answer")
+        let attached = Set(snapshot.attachedProcesses.map(\.pid))
+        XCTAssertTrue(attached.contains(mine), "this terminal's process is missing: \(snapshot.attachedProcesses)")
+        XCTAssertFalse(attached.contains(theirs), "another connection's process leaked in: \(snapshot.attachedProcesses)")
+    }
+
     /// A host restart takes the detached `mosh-server` with it, and mosh's
     /// client has no timeout: the session must ask the host over SSH and act
     /// only when the host answers that the server is gone. A stopped server is
@@ -2744,6 +2779,170 @@ final class RealHostTransportIntegrationTests: XCTestCase {
         }
     }
 
+    /// §6.9 across a process death. A client owns the window at its grid,
+    /// then its process dies, leaving the window at that grid and its stamp
+    /// standing. A new process of the same device attaches, displayed but with
+    /// no gesture, at another viewport. Keeping nothing, it judged the window
+    /// another device's and veiled it (the Duo matrix's "continued
+    /// elsewhere"); with the kept record the window is ours: one owner resize,
+    /// no veil, no claim and no stamp write.
+    @MainActor
+    func test_liveSSHtmuxRelaunchOverAGridItOwnedIsNotAnotherDevice() async throws {
+        let config = try Config.load()
+        let defaults = UserDefaults.standard
+        let verboseKey = DiagnosticLogStore.verboseDiagnosticsDefaultsKey
+        let previousVerbose = defaults.object(forKey: verboseKey)
+        defaults.set(true, forKey: verboseKey)
+        defer {
+            if let previousVerbose { defaults.set(previousVerbose, forKey: verboseKey) } else { defaults.removeObject(forKey: verboseKey) }
+        }
+        let host = makeHost(config: config, transport: .ssh)
+        await resetConnectionState(endpoint: "\(host.address):\(host.port)")
+        let setup = SSHSession(host: host)
+        defer { setup.disconnect() }
+        _ = try await connect(session: setup, pendingRequest: { setup.pendingHostKeyVerification }, timeout: 20)
+        let token = UUID().uuidString.prefix(8).lowercased()
+        let sessionName = try runOwnedTmuxSessionName("relaunch", token: token)
+        let cleanup = "tmux kill-session -t '=\(sessionName)' >/dev/null 2>&1 || true"
+        let identity = TmuxController.GridAuthorityIdentity(id: "relaunch-\(token)", displayName: "Relaunch iPad")
+
+        final class Shelf {
+            var records: [String: [TmuxOwnedGeometryRecord]] = [:]
+        }
+        let shelf = Shelf()
+        let store = TmuxController.OwnedGeometryStore(
+            records: { session in shelf.records[session] ?? [] },
+            keep: { record, session in
+                shelf.records[session] = TmuxOwnedGeometryRecord.keeping(record, in: shelf.records[session] ?? [])
+            }
+        )
+
+        struct Client {
+            let session: SSHSession
+            let controller: TmuxController
+            let pump: Task<Void, Never>
+            @MainActor func end() { pump.cancel(); session.disconnect() }
+        }
+        /// Every client attached, so a failure ends the ones still running.
+        var clients: [Client] = []
+        /// One process's inline client of the run's session at `grid`.
+        /// `displayed` stands for a restored tab on screen: adopted, so its
+        /// read is judged, with no show gesture to claim with.
+        func attach(_ grid: TmuxGeometry, store: TmuxController.OwnedGeometryStore?, displayed: Bool,
+                    label: String) async throws -> Client {
+            let session = SSHSession(host: host)
+            let controller = TmuxController(controlPath: .inline, clientSizePolicy: .resizeTmux)
+            controller.feedTerminal = { _ in }
+            controller.gridAuthorityOwnedGeometryStore = store
+            controller.gridAuthorityIdentity = identity
+            if displayed { controller.gridAuthorityAdoptShown() }
+            session.resize(cols: grid.cols, rows: grid.rows)
+            controller.updateClientSize(cols: grid.cols, rows: grid.rows)
+            controller.sendBytes = { [weak session] bytes in session?.send(bytes) }
+            let pump = Task { @MainActor in
+                for await bytes in session.outputStream { await controller.ingestCooperatively(bytes) }
+            }
+            let client = Client(session: session, controller: controller, pump: pump)
+            clients.append(client)
+            do {
+                _ = try await connect(session: session, pendingRequest: { session.pendingHostKeyVerification }, timeout: 20)
+                session.send(Array("exec tmux -CC attach -t '=\(sessionName)'\n".utf8))
+                try await waitForTmuxHydration(controller, operation: "\(label) hydration")
+                try await waitForControlFence(controller, operation: "\(label) attach read")
+            } catch {
+                client.end()
+                throw error
+            }
+            return client
+        }
+        func readStamp() async throws -> TmuxGridAuthorityStamp? {
+            let output = try await setup.executeConnectedCommand(
+                "tmux show-options -qv -t '=\(sessionName):' \(TmuxController.gridAuthorityOption)")
+            return TmuxGridAuthorityStamp.parse(output.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        /// The process died: tmux has no client of the session left.
+        func waitForNoClients(_ operation: String) async throws {
+            let deadline = Date().addingTimeInterval(8)
+            while Date() < deadline {
+                let clients = try await setup.executeConnectedCommand(
+                    "tmux list-clients -t '=\(sessionName)' -F '#{client_name}' 2>/dev/null || true")
+                if clients.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return }
+                try await Task.sleep(nanoseconds: 100_000_000)
+            }
+            throw IntegrationError.timedOut(operation)
+        }
+
+        let owned = TmuxGeometry(cols: 100, rows: 30)
+        let relaunchGrid = TmuxGeometry(cols: 90, rows: 28)
+        var phase = "fixture"
+        do {
+            _ = try await setup.executeConnectedCommand(
+                "tmux new-session -d -s '\(sessionName)' -x 132 -y 44 && "
+                    + "tmux set-option -t '=\(sessionName):' status off && "
+                    + "tmux set-option -t '=\(sessionName):' window-size latest")
+
+            phase = "first process takes control"
+            let first = try await attach(owned, store: store, displayed: false, label: "first process")
+            try await showAndWaitForControl(first.controller, operation: "first process show")
+            try await waitForTmuxGeometry(owned, sessionName: sessionName, using: setup, operation: "first process grid")
+            let firstStamp = try await readStamp()
+            let stamp = try XCTUnwrap(firstStamp)
+            XCTAssertEqual(stamp.deviceID, identity.id)
+            try await waitUntil("first process keeps its owned grid", timeout: 3) {
+                shelf.records[sessionName]?.first.map { record in
+                    record.generation == stamp.generation
+                        && record.sizes.contains(TmuxGridSize(columns: owned.cols, rows: owned.rows))
+                } ?? false
+            }
+            phase = "first process dies"
+            first.end()
+            try await waitForNoClients("first process detaches")
+            let afterDeath = try await tmuxGeometry(sessionName: sessionName, using: setup)
+            XCTAssertEqual(afterDeath, owned, "no client left to resize the window")
+
+            phase = "relaunch keeping nothing"
+            let bare = try await attach(relaunchGrid, store: nil, displayed: true, label: "bare relaunch")
+            try await waitUntil("a relaunch keeping nothing veils, as before the fix", timeout: 5) {
+                bare.controller.gridAuthorityPresentation == .veiled(peerName: TmuxStamplessPeer.displayName)
+            }
+            let veiledGeometry = try await tmuxGeometry(sessionName: sessionName, using: setup)
+            XCTAssertEqual(veiledGeometry, owned, "a veiled relaunch sizes nothing")
+            bare.end()
+            try await waitForNoClients("bare relaunch detaches")
+
+            phase = "relaunch with the kept record"
+            let relaunched = try await attach(relaunchGrid, store: store, displayed: true, label: "relaunch")
+            try await waitUntil("the relaunch reads the window as its own", timeout: 5) {
+                relaunched.controller.gridAuthority == .mine
+                    && relaunched.controller.gridAuthorityPresentation == .none
+                    && !relaunched.controller.gridAuthorityReclaimInFlight
+            }
+            try await waitForTmuxGeometry(relaunchGrid, sessionName: sessionName, using: setup,
+                                          operation: "the relaunch's owner resize", timeout: 3)
+            let relaunchStamp = try await readStamp()
+            XCTAssertEqual(relaunchStamp, stamp, "no claim: the stamp still names the first process's generation")
+            XCTAssertFalse(relaunched.controller.gridAuthorityHasPendingIntent)
+            XCTAssertEqual(shelf.records[sessionName]?.first?.sizes.last,
+                           TmuxGridSize(columns: relaunchGrid.cols, rows: relaunchGrid.rows),
+                           "the relaunch's grid is kept for the next one")
+            XCTContext.runActivity(named: "TESSERA_IOS_RELAUNCH_OWNED_OK") { _ in }
+            phase = "cleanup"
+            relaunched.end()
+            _ = try await setup.executeConnectedCommand(cleanup)
+        } catch {
+            XCTFail("relaunch case failed during \(phase): \(error)")
+            for client in clients { client.end() }
+            if let data = DiagnosticLogStore.attachmentData() {
+                let evidence = XCTAttachment(data: data, uniformTypeIdentifier: "public.plain-text")
+                evidence.name = "relaunch-failure-diagnostics"
+                evidence.lifetime = .keepAlways
+                add(evidence)
+            }
+            _ = try? await setup.executeConnectedCommand(cleanup)
+            throw error
+        }
+    }
+
     /// Two live Mosh painters and control clients must complete the same
     /// authority fence that dismisses the production continuation veil.
     @MainActor
@@ -3475,7 +3674,7 @@ final class RealHostTransportIntegrationTests: XCTestCase {
     }
 
     @MainActor
-    private final class CodexMouseInputDelegate: TerminalViewDelegate {
+    private final class CodexMouseInputDelegate: @MainActor TerminalViewDelegate {
         let input: ([UInt8]) -> Void
         var sent: [UInt8] = []
         init(input: @escaping ([UInt8]) -> Void) { self.input = input }
@@ -4042,6 +4241,9 @@ final class RealHostTransportIntegrationTests: XCTestCase {
             },
             currentTransportOutputDeliveryID: {
                 mosh.latestOutputDeliveryID
+            },
+            transportIsReachable: {
+                mosh.transportState == .connected
             },
             onSaveWindowModes: { _, _ in }
         )
@@ -6243,6 +6445,7 @@ final class RealHostTransportIntegrationTests: XCTestCase {
                 onCancelTransportFullFrame: { [mosh] request in mosh.cancelFullRepaint(requestID: request) },
                 onRetireAllTransportFullFrames: { [mosh] in mosh.retireOutstandingFullRepaints() },
                 currentTransportOutputDeliveryID: { [mosh] in mosh.latestOutputDeliveryID },
+                transportIsReachable: { [mosh] in mosh.transportState == .connected },
                 onSaveWindowModes: { _, _ in }
             )
             controller.onGridAuthoritySideChannelRepaintRequired = { [weak self] _, generation in

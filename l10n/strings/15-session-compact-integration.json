@@ -39,14 +39,6 @@
     "zh-Hans": "%1$@，窗口 %2$lld",
     "zh-Hant": "%1$@，視窗 %2$lld"
   },
-  "%@, window %lld, agent active": {
-    "de": "%@, Fenster %lld, Agent aktiv",
-    "es": "%@, ventana %lld, agente activo",
-    "fr": "%@, fenêtre %lld, agent actif",
-    "ja": "%1$@、ウインドウ %2$lld、エージェント稼働中",
-    "zh-Hans": "%1$@，窗口 %2$lld，智能体运行中",
-    "zh-Hant": "%1$@，視窗 %2$lld，智慧體執行中"
-  },
   "Asks before closing every pane in this window": {
     "de": "Fragt nach, bevor alle Bereiche dieses Fensters geschlossen werden",
     "es": "Pregunta antes de cerrar todos los paneles de esta ventana",

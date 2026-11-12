@@ -18,4 +18,25 @@
     <string name="tmux_split_left">Split Left</string>
     <string name="tmux_split_down">Split Down</string>
     <string name="tmux_split_up">Split Up</string>
+
+    <!-- tmux window and pane verbs shared by the switcher, the window strip and their dialogs -->
+    <string name="session_new_tmux_window">New tmux window</string>
+    <string name="session_tmux_rename">rename</string>
+    <string name="session_tmux_zoom_pane_menu">zoom pane</string>
+    <string name="session_tmux_unzoom_pane_menu">unzoom pane</string>
+    <string name="session_tmux_close_window_menu">close window</string>
+    <string name="session_tmux_close_window_title">Close %1$s?</string>
+    <string name="session_tmux_close_pane_title">Close pane %1$s?</string>
+    <string name="session_tmux_close_body">The remote tmux process in this target will be terminated.</string>
+    <string name="session_tmux_rename_window_title">rename window</string>
+    <string name="session_tmux_rename_confirm">Rename</string>
+    <string name="session_tmux_window_name">Window name</string>
+    <string name="session_tmux_rename_window_description">Rename window</string>
+    <string name="session_tmux_split_left_right_description">Split pane left and right</string>
+    <string name="session_tmux_split_top_bottom_description">Split pane top and bottom</string>
+    <string name="session_tmux_zoom_pane_description">Zoom pane</string>
+    <string name="session_tmux_unzoom_pane_description">Unzoom pane</string>
+    <string name="session_tmux_panes_kicker">panes</string>
+    <string name="session_tmux_close_pane_description">Close pane</string>
+    <string name="session_tmux_close_window_description">Close window</string>
 </resources>

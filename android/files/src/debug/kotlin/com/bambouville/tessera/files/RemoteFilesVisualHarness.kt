@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.bambouville.tessera.design.DisplayText
 import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
@@ -120,7 +121,7 @@ private val harnessTransfers = listOf(
         phase = TransferPhase.FAILED,
         transferredBytes = 512,
         totalBytes = 1_204,
-        error = "The remote host closed the transfer channel before the file was complete.",
+        error = DisplayText.Verbatim("The remote host closed the transfer channel before the file was complete."),
     ),
 )
 
@@ -211,7 +212,7 @@ private class FakeRemoteFilesPresenter(scene: FilesHarnessScene) : RemoteFilesPr
                 currentPath = "/home/dev/projects",
                 homePath = "/home/dev",
                 entries = emptyList(),
-                error = "Permission denied reading /home/dev/projects.",
+                error = DisplayText.Verbatim("Permission denied reading /home/dev/projects."),
             )
         },
     )
@@ -273,6 +274,14 @@ private class FakeRemoteFilesPresenter(scene: FilesHarnessScene) : RemoteFilesPr
     override fun quickOpenSelectedFile(
         selection: String,
         terminalDirectory: String?,
+        onPresentationLaunched: () -> Unit,
+        onFailure: (String) -> Unit,
+    ) = onFailure("Terminal selection actions require a live Files connection.")
+    override fun openTranscriptSelectedPath(
+        selection: String,
+        paneDirectory: String?,
+        intent: SelectedPathIntent,
+        onRevealRequested: () -> Unit,
         onPresentationLaunched: () -> Unit,
         onFailure: (String) -> Unit,
     ) = onFailure("Terminal selection actions require a live Files connection.")

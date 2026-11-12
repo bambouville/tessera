@@ -193,19 +193,26 @@ public struct AgentIntegrationObservation: Codable, Equatable, Sendable {
     public let shellIntegrationActive: Bool?
     public let agentIntegrationActive: Bool
     public let agentRequiresLifecycleHook: Bool?
+    /// False where no lifecycle event can reach the app: plain mosh, whose
+    /// server forwards no lifecycle escape and which has no tmux pane option.
+    /// An agent there is shown by its process alone, never as unconfirmed.
+    /// `nil` (older callers) means it can.
+    public let agentLifecycleDeliverable: Bool?
 
     public init(
         installation: AgentIntegrationInstallationKind,
         foreground: AgentIntegrationForegroundKind,
         shellIntegrationActive: Bool?,
         agentIntegrationActive: Bool,
-        agentRequiresLifecycleHook: Bool? = nil
+        agentRequiresLifecycleHook: Bool? = nil,
+        agentLifecycleDeliverable: Bool? = nil
     ) {
         self.installation = installation
         self.foreground = foreground
         self.shellIntegrationActive = shellIntegrationActive
         self.agentIntegrationActive = agentIntegrationActive
         self.agentRequiresLifecycleHook = agentRequiresLifecycleHook
+        self.agentLifecycleDeliverable = agentLifecycleDeliverable
     }
 }
 
@@ -285,7 +292,7 @@ public struct AgentIntegrationDecision: Codable, Equatable, Sendable {
 public enum AgentIntegrationDecisionReducer {
     public static func resolve(_ observation: AgentIntegrationObservation) -> AgentIntegrationDecision {
         if observation.foreground == .agent {
-            if observation.agentRequiresLifecycleHook == false {
+            if observation.agentRequiresLifecycleHook == false || observation.agentLifecycleDeliverable == false {
                 switch observation.installation {
                 case .missing:
                     return .init(kind: .notInstalled, primaryAction: .installOnly)
@@ -311,22 +318,19 @@ public enum AgentIntegrationDecisionReducer {
             }
         }
 
+        // Enabling this terminal reports nothing where no lifecycle event can
+        // arrive (plain mosh); installing still serves the host's other sessions.
+        let applies = observation.foreground == .shell && observation.agentLifecycleDeliverable != false
         switch observation.installation {
         // Whatever runs in the foreground, nothing this app writes can help.
         case .requiresAppUpdate:
             return .init(kind: .appUpdateRequired)
         case .missing:
-            return .init(
-                kind: .notInstalled,
-                primaryAction: observation.foreground == .shell ? .installAndApply : .installOnly
-            )
+            return .init(kind: .notInstalled, primaryAction: applies ? .installAndApply : .installOnly)
         case .outdated:
-            return .init(
-                kind: .outdated,
-                primaryAction: observation.foreground == .shell ? .installAndApply : .installOnly
-            )
+            return .init(kind: .outdated, primaryAction: applies ? .installAndApply : .installOnly)
         case .current:
-            if observation.shellIntegrationActive == true {
+            if observation.shellIntegrationActive == true || observation.agentLifecycleDeliverable == false {
                 return .init(kind: .ready)
             }
             switch observation.foreground {

@@ -3,6 +3,7 @@ package com.bambouville.tessera.design
 import android.content.Context
 import android.graphics.Typeface
 import androidx.annotation.FontRes
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
@@ -55,7 +57,7 @@ data class TerminalFontOption(
      */
     val postScriptName: String?,
     /** One-line character note shown under the family name in the picker. */
-    val note: String,
+    @param:StringRes val note: Int,
 )
 
 object TerminalFontCatalog {
@@ -71,77 +73,77 @@ object TerminalFontCatalog {
             name = "JetBrains Mono",
             fontRes = R.font.jetbrains_mono,
             postScriptName = "JetBrainsMono-Regular",
-            note = "tall x-height, coding ligatures",
+            note = R.string.design_font_note_jetbrains_mono,
         ),
         TerminalFontOption(
             id = "fira_code",
             name = "Fira Code",
             fontRes = R.font.fira_code,
             postScriptName = "FiraCode-Regular",
-            note = "the widest ligature set",
+            note = R.string.design_font_note_fira_code,
         ),
         TerminalFontOption(
             id = "hack",
             name = "Hack",
             fontRes = R.font.hack,
             postScriptName = "Hack-Regular",
-            note = "wide, plain, built for small sizes",
+            note = R.string.design_font_note_hack,
         ),
         TerminalFontOption(
             id = "cascadia_mono",
             name = "Cascadia Mono",
             fontRes = R.font.cascadia_mono,
             postScriptName = "CascadiaMono-Regular",
-            note = "Windows Terminal's face, no ligatures",
+            note = R.string.design_font_note_cascadia_mono,
         ),
         TerminalFontOption(
             id = "source_code_pro",
             name = "Source Code Pro",
             fontRes = R.font.source_code_pro,
             postScriptName = "SourceCodePro-Regular",
-            note = "Adobe's classic, humanist shapes",
+            note = R.string.design_font_note_source_code_pro,
         ),
         TerminalFontOption(
             id = "ibm_plex_mono",
             name = "IBM Plex Mono",
             fontRes = R.font.ibm_plex_mono,
             postScriptName = "IBMPlexMono-Regular",
-            note = "warm and slightly narrow",
+            note = R.string.design_font_note_ibm_plex_mono,
         ),
         TerminalFontOption(
             id = "geist_mono",
             name = "Geist Mono",
             fontRes = R.font.geist_mono,
             postScriptName = "GeistMono-Regular",
-            note = "geometric, very open counters",
+            note = R.string.design_font_note_geist_mono,
         ),
         TerminalFontOption(
             id = "ubuntu_mono",
             name = "Ubuntu Mono",
             fontRes = R.font.ubuntu_mono,
             postScriptName = "UbuntuMono-Regular",
-            note = "narrow — fits the most columns",
+            note = R.string.design_font_note_ubuntu_mono,
         ),
         TerminalFontOption(
             id = "inconsolata",
             name = "Inconsolata",
             fontRes = R.font.inconsolata,
             postScriptName = "Inconsolata-Regular",
-            note = "light and compact",
+            note = R.string.design_font_note_inconsolata,
         ),
         TerminalFontOption(
             id = "dejavu_sans_mono",
             name = "DejaVu Sans Mono",
             fontRes = R.font.dejavu_sans_mono,
             postScriptName = "DejaVuSansMono",
-            note = "the broadest Unicode coverage",
+            note = R.string.design_font_note_dejavu_sans_mono,
         ),
         TerminalFontOption(
             id = "system",
             name = "System",
             fontRes = null,
             postScriptName = null,
-            note = "whatever monospace the OS ships",
+            note = R.string.design_font_note_system,
         ),
     )
 
@@ -237,7 +239,7 @@ fun TesseraTerminalFontPicker(
                         maxLines = 1,
                     )
                     Text(
-                        option.note,
+                        stringResource(option.note),
                         style = TesseraType.rowMicro,
                         color = tokens.fgDim,
                         textAlign = TextAlign.End,

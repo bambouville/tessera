@@ -83,7 +83,7 @@ final class SessionShowCoordinator {
     /// while the phone slept would otherwise still be pending on wake and
     /// swallow the hide + show. (`CLOCK_MONOTONIC` is a slewed clock with
     /// its own origin on Darwin, not `mach_continuous_time`.)
-    static func continuousSeconds() -> TimeInterval {
+    nonisolated static func continuousSeconds() -> TimeInterval {
         TimeInterval(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1_000_000_000
     }
 

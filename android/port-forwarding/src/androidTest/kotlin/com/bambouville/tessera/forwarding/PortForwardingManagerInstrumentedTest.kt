@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -21,6 +22,49 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class PortForwardingManagerInstrumentedTest {
+    @Test
+    fun removingAllRulesRetainsTheRuntimeAndClearsThePublishedRules() = runBlocking {
+        val runtime = FakeRuntime()
+        val original = localRule()
+        val added = localRule(port = 8102).copy(autoStart = false)
+        val manager = PortForwardingManager()
+        try {
+            manager.attach(runtime, listOf(original))
+
+            assertTrue(manager.reconcileIfAttached(emptyList()))
+            assertTrue(manager.states.value.isEmpty())
+            assertTrue(original.id in runtime.closedLeaseIds)
+            assertFalse(runtime.closed)
+
+            assertTrue(manager.reconcileIfAttached(listOf(added), asConnectedEdit = true))
+            assertTrue(manager.states.value.getValue(added.id).status is PortForwardingStatus.Listening)
+            assertEquals(listOf(original.id, added.id), runtime.started.map { it.id })
+        } finally {
+            manager.close()
+        }
+    }
+
+    @Test
+    fun attachmentRechecksPreserveManualStartAndStop() = runBlocking {
+        val runtime = FakeRuntime()
+        val rule = localRule().copy(autoStart = false)
+        val manager = PortForwardingManager()
+        try {
+            manager.attach(runtime, listOf(rule))
+            assertTrue(manager.reconcileIfAttached(listOf(rule)))
+            assertTrue(runtime.started.isEmpty())
+
+            manager.startIfAttached(rule.id)
+            assertTrue(manager.states.value.getValue(rule.id).status is PortForwardingStatus.Listening)
+            manager.stop(rule.id)
+            assertTrue(manager.reconcileIfAttached(listOf(rule)))
+            assertEquals(PortForwardingStatus.Idle, manager.states.value.getValue(rule.id).status)
+            assertEquals(1, runtime.started.size)
+        } finally {
+            manager.close()
+        }
+    }
+
     @Test
     fun attachStartsOnlyAutoStartRulesAndReconcileRestartsTransportChanges() = runBlocking {
         val runtime = FakeRuntime()

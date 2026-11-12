@@ -12,10 +12,10 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.media.ToneGenerator
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.core.content.ContextCompat
+import com.bambouville.tessera.feature.session.R
 import java.io.Closeable
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -108,8 +108,12 @@ private class AndroidBellNotificationPublisher(private val context: Context) : B
 
     init {
         notifications.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "Terminal bells", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                description = "Background terminal bell alerts"
+            NotificationChannel(
+                CHANNEL_ID,
+                context.getString(R.string.bell_channel_name),
+                NotificationManager.IMPORTANCE_DEFAULT,
+            ).apply {
+                description = context.getString(R.string.bell_channel_description)
                 setSound(null, null)
                 enableVibration(false)
             },
@@ -117,8 +121,7 @@ private class AndroidBellNotificationPublisher(private val context: Context) : B
     }
 
     override fun canPost(): Boolean = notifications.areNotificationsEnabled() &&
-        (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
     override fun post(event: BellEvent) {
         if (!canPost()) return
@@ -133,7 +136,7 @@ private class AndroidBellNotificationPublisher(private val context: Context) : B
         val notification = Notification.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_notify_more)
             .setContentTitle(title)
-            .setContentText("rang a bell that needs attention")
+            .setContentText(context.getString(R.string.bell_notification_body))
             .setCategory(Notification.CATEGORY_MESSAGE)
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)

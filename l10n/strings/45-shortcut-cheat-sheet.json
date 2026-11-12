@@ -1,0 +1,34 @@
+{
+  "untitled": {
+    "de": "unbenannt",
+    "es": "sin nombre",
+    "fr": "sans nom",
+    "ja": "名称未設定",
+    "zh-Hans": "未命名",
+    "zh-Hant": "未命名"
+  },
+  "release %@ to close": {
+    "de": "%@ loslassen zum Schließen",
+    "es": "suelta %@ para cerrar",
+    "fr": "relâcher %@ pour fermer",
+    "ja": "%@ を放すと閉じます",
+    "zh-Hans": "松开 %@ 以关闭",
+    "zh-Hant": "放開 %@ 以關閉"
+  },
+  "hold %@ for shortcuts": {
+    "de": "%@ für Kurzbefehle gedrückt halten",
+    "es": "mantén %@ para ver los atajos",
+    "fr": "maintenir %@ pour les raccourcis",
+    "ja": "%@ を長押ししてショートカットを表示",
+    "zh-Hans": "按住 %@ 查看快捷键",
+    "zh-Hant": "按住 %@ 查看快速鍵"
+  },
+  "with a hardware keyboard, hold %@ for a moment to see every shortcut — let go to hide it": {
+    "de": "auf einer Hardwaretastatur %@ kurz gedrückt halten, um alle Kurzbefehle zu sehen — zum Ausblenden loslassen",
+    "es": "con un teclado físico, mantén %@ un momento para ver todos los atajos — suelta para ocultarlos",
+    "fr": "avec un clavier physique, maintenir %@ un instant pour voir tous les raccourcis — relâcher pour les masquer",
+    "ja": "ハードウェアキーボードで %@ をしばらく押すとすべてのショートカットを表示します — 放すと非表示になります",
+    "zh-Hans": "使用硬件键盘时，按住 %@ 片刻即可查看所有快捷键 — 松开即可隐藏",
+    "zh-Hant": "使用硬體鍵盤時，按住 %@ 片刻即可查看所有快速鍵 — 放開即可隱藏"
+  }
+}

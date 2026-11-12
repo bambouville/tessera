@@ -479,6 +479,7 @@ final class ForegroundRestoreCohortTests: XCTestCase {
     /// The backstop must outlive the SSH handshake budget, or a wedged connect
     /// loses its cohort place before the watchdog can rule on it — which is
     /// exactly the drop this whole mechanism exists to prevent.
+    @MainActor
     func test_backstopOutlivesTheSSHHandshakeBudget() {
         XCTAssertGreaterThan(
             ContentView.foregroundRestoreWindowMaxSecondsForTesting,

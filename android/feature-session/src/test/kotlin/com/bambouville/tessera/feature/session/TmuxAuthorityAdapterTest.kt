@@ -6,6 +6,7 @@ import com.bambouville.tessera.agent.platform.AgentSemanticKey
 import com.bambouville.tessera.agent.platform.AgentSessionKey
 import com.bambouville.tessera.agent.platform.AgentTmuxControlAck
 import com.bambouville.tessera.agent.platform.AgentTmuxPlacement
+import com.bambouville.tessera.core.bridge.SharedTmuxOwnedGeometryRecord
 import com.bambouville.tessera.core.bridge.*
 import com.bambouville.tessera.core.bridge.SharedBackendCommand
 import com.bambouville.tessera.core.bridge.SharedTmuxAuthorityClaimPhase
@@ -610,6 +611,19 @@ class TmuxAuthorityAdapterTest {
         assertEquals(peer, c.field<Any>("lastProjectedTmuxAuthority"))
     }
 
+    @Test fun aTalkBackPageKeyNeedsALiveSessionAsWellAsTheTypingGate() {
+        val c = ready(); c.replyTo(c.lastQuery(), OWN_STAMP)
+        assertTrue(c.acceptsTerminalInput()); assertTrue(c.acceptsTerminalPageKeys())
+        val state = c.field<MutableStateFlow<SshSessionUiState>>("mutableState")
+        for (connecting in listOf(SshSessionUiState.Connecting, SshSessionUiState.Disconnected, SshSessionUiState.Failed("down"))) {
+            state.value = connecting
+            assertTrue(c.acceptsTerminalInput()); assertFalse("$connecting", c.acceptsTerminalPageKeys())
+        }
+        state.value = SshSessionUiState.Connected
+        c.shown(SharedTmuxAuthorityShowSource.SHOW)
+        assertFalse(c.acceptsTerminalInput()); assertFalse("the typing gate holds the key", c.acceptsTerminalPageKeys())
+    }
+
     @Test fun typingIsRefusedForTheWholeResumeButMutationsOnlyWhileAPeerHolds() {
         val c = ready(); c.replyTo(c.lastQuery(), OWN_STAMP); assertTrue(c.acceptsTerminalInput())
         c.shown(SharedTmuxAuthorityShowSource.SHOW)
@@ -1076,6 +1090,118 @@ class TmuxAuthorityAdapterTest {
         assertEquals(SharedTmuxGridAuthoritySnapshot.Peer("-", "another device", 0), c.native.state.authority)
         assertEquals(TmuxAuthorityPresentation.Veiled("another device"), c.presentation())
     }
+    /**
+     * §6.9: a relaunched process attaches with our stamp still standing over
+     * a grid this device owned before it died. The record kept for that
+     * stamp proves the grid ours, so the read replays our size instead of
+     * veiling the window as another device's; without it, it still veils.
+     */
+    @Test fun aRelaunchOverAGridOwnedBeforeTheProcessDiedIsOursNotAnotherDevices() {
+        for (kept in listOf(true, false)) {
+            val directory = kotlin.io.path.createTempDirectory("owned-geometry").toFile()
+            try {
+                val store = TmuxOwnedGeometryStore(java.io.File(directory, "owned.json"), writer = { it.run() })
+                val hostKey = TmuxOwnedGeometryStore.hostKey(inlineHost.username, inlineHost.hostname, inlineHost.port)
+                if (kept) store.keep(hostKey, "fixture", SharedTmuxOwnedGeometryRecord(generation = 2, sizes = listOf(peerGrid)))
+                val c = ready(snapshot = snapshot(peerGrid))
+                c.setField("ownedGeometryStore", store)
+                c.setField("initiallyRequestedTmuxRenderSurfaces", ConcurrentHashMap.newKeySet<String>())
+                c.setField("declaredTmuxRenderSurfaces", emptyList<SharedTmuxSurfaceDeclaration>())
+                assertTrue(c.startRenderTransport(c.field("tmuxConnection")))
+                c.policyReply(5, "latest"); c.replyTo(c.lastQuery(), OWN_STAMP)
+                if (kept) {
+                    assertEquals(SharedTmuxGridAuthoritySnapshot.Mine(2), c.native.state.authority)
+                    assertEquals(TmuxAuthorityPresentation.None, c.presentation())
+                    assertEquals("kept again, merged with the size the replay advertised",
+                        listOf(SharedTmuxOwnedGeometryRecord(generation = 2, sizes = listOf(peerGrid, viewport))),
+                        store.records(hostKey, "fixture"))
+                } else {
+                    assertEquals(SharedTmuxGridAuthoritySnapshot.Peer("-", "another device", 0), c.native.state.authority)
+                    assertEquals(TmuxAuthorityPresentation.Veiled("another device"), c.presentation())
+                    assertEquals(emptyList<SharedTmuxOwnedGeometryRecord>(), store.records(hostKey, "fixture"))
+                }
+            } finally {
+                directory.deleteRecursively()
+            }
+        }
+    }
+    /** An inline attach that learns its session's name from tmux restores then, before the read it re-sends can answer. */
+    @Test fun aSessionNamedOnlyAfterTheTransportStartsRestoresWhenTmuxNamesIt() {
+        val directory = kotlin.io.path.createTempDirectory("owned-geometry").toFile()
+        try {
+            val store = TmuxOwnedGeometryStore(java.io.File(directory, "owned.json"), writer = { it.run() })
+            val hostKey = TmuxOwnedGeometryStore.hostKey(inlineHost.username, inlineHost.hostname, inlineHost.port)
+            store.keep(hostKey, "fixture", SharedTmuxOwnedGeometryRecord(generation = 2, sizes = listOf(peerGrid)))
+            val c = ready(snapshot = snapshot(peerGrid).copy(sessionName = null))
+            c.setField("ownedGeometryStore", store)
+            c.setField("initiallyRequestedTmuxRenderSurfaces", ConcurrentHashMap.newKeySet<String>())
+            c.setField("declaredTmuxRenderSurfaces", emptyList<SharedTmuxSurfaceDeclaration>())
+            val tmux = c.field<SshTmuxConnection>("tmuxConnection")
+            assertTrue(c.startRenderTransport(tmux))
+            assertEquals("nothing to restore under before tmux names the session",
+                null, c.field<Pair<String, Long>?>("restoredOwnedGeometryScope"))
+            c.deliver(SharedTmuxEvent(snapshot(peerGrid).copy(sessionId = 3), emptyList(), emptyList(), emptyList()), tmux)
+            assertEquals("fixture", c.field<Pair<String, Long>?>("restoredOwnedGeometryScope")?.first)
+            c.policyReply(5, "latest"); c.replyTo(c.lastQuery(), OWN_STAMP)
+            assertEquals(SharedTmuxGridAuthoritySnapshot.Mine(2), c.native.state.authority)
+            assertEquals(TmuxAuthorityPresentation.None, c.presentation())
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test fun aRenamedSessionKeepsItsRecordUnderTheNewName() {
+        val directory = kotlin.io.path.createTempDirectory("owned-geometry").toFile()
+        try {
+            val store = TmuxOwnedGeometryStore(java.io.File(directory, "owned.json"), writer = { it.run() })
+            val hostKey = TmuxOwnedGeometryStore.hostKey(inlineHost.username, inlineHost.hostname, inlineHost.port)
+            val c = ready()
+            c.setField("ownedGeometryStore", store)
+            c.replyTo(c.lastQuery(), OWN_STAMP)
+            val kept = store.records(hostKey, "fixture")
+            assertEquals(2L, kept.single().generation)
+            c.deliver(SharedTmuxEvent(c.heldSnapshot().copy(sessionName = "renamed"), emptyList(), emptyList(), emptyList()),
+                c.field("tmuxConnection"))
+            assertEquals(kept, store.records(hostKey, "renamed"))
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    /**
+     * Mosh's stamp lives on the group owner, and a claim's commit may stand
+     * there before its reply settles it: from the commit on, the claim's
+     * grid is kept under the owner's name.
+     */
+    @Test fun aMoshClaimKeepsItsGridUnderTheOwnerOnceItsStampCanStand() = withMainOnTestScheduler {
+        val directory = kotlin.io.path.createTempDirectory("owned-geometry").toFile()
+        try {
+            val takeBack = confirmedMoshTakeBack()
+            val c = takeBack.controller
+            val store = TmuxOwnedGeometryStore(java.io.File(directory, "owned.json"), writer = { it.run() })
+            c.setField("ownedGeometryStore", store)
+            c.setField("tmuxAuthorityOwnerSessionName", "owner")
+            val host = c.field<SavedHost>("host")
+            val hostKey = TmuxOwnedGeometryStore.hostKey(host.username, host.hostname, host.port)
+            assertEquals(emptyList<SharedTmuxOwnedGeometryRecord>(), store.records(hostKey, "owner"))
+            val generation = takeBack.reducer.claim!!.generation
+            // Mosh's native frame completion begins the commit, whose
+            // pre-stamp read then lets the stamp write go.
+            c.javaClass.getDeclaredMethod("finishLedgerAuthorityRepaint").apply { isAccessible = true }.invoke(c)
+            assertEquals(SharedTmuxAuthorityClaimPhase.AWAITING_STAMP_COMMIT, takeBack.reducer.claim?.phase)
+            val read = takeBack.take().single()
+            assertTrue(read.purpose is TmuxResponsePurpose.AuthorityPaintGeometry)
+            takeBack.reply(read, lines = listOf("tessera-window-size\t@5\t80\t24"))
+            assertEquals(listOf(OWN_STAMP_WRITE), takeBack.take().map { it.command })
+            val kept = store.records(hostKey, "owner").single()
+            assertEquals(generation, kept.generation)
+            assertEquals(viewport, kept.sizes.last())
+            assertEquals(emptyList<SharedTmuxOwnedGeometryRecord>(), store.records(hostKey, "fixture"))
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
     @Test fun aReattachReadWaitsForTmuxToNameTheActiveWindow() {
         val c = ready(snapshot = snapshot(viewport).copy(isActiveWindowAuthoritative = false)); c.replyTo(c.lastQuery(), OWN_STAMP)
         assertEquals(SharedTmuxGridAuthoritySnapshot.Unknown, c.native.state.authority)
@@ -1705,7 +1831,7 @@ class TmuxAuthorityAdapterTest {
                     // gate is below that shared projection (which is JNI).
                     takeBack.controller.javaClass.getDeclaredMethod(
                         "publishTmuxClientSize", SharedTmuxGridSize::class.java, Boolean::class.javaPrimitiveType!!,
-                        Boolean::class.javaPrimitiveType!!, java.lang.Long::class.java,
+                        Boolean::class.javaPrimitiveType!!, Long::class.javaObjectType,
                     ).apply { isAccessible = true }.invoke(takeBack.controller, grid, false, true, null)
                 } else takeBack.controller.reconcile(forceAllWindows = true)
                 takeBack.controller.sendClaimFence(8) // pending-size/explicit fence entry is gated too
@@ -2625,6 +2751,108 @@ class TmuxAuthorityAdapterTest {
         } finally { mosh.close() }
     }
 
+    /**
+     * Item 9: the canvas surface reaches the mosh grid a layout pass after
+     * mosh resized, so a quiet pane painted at the old width stays blank.
+     * Catching up applies that grid and forces one frame, after any handoff
+     * still in flight, in compact and wide (pane grid) layouts alike.
+     */
+    @Test fun aCanvasSurfaceCatchingUpWithMoshForcesOneFrameAfterAnyHandoff() = runBlocking {
+        val client = FrameRecordingMoshClient()
+        // The pump never runs: only the controller's own driver calls reach the client.
+        val heldPump = object : kotlinx.coroutines.CoroutineDispatcher() {
+            override fun dispatch(context: kotlin.coroutines.CoroutineContext, block: Runnable) = Unit
+        }
+        val mosh = com.bambouville.tessera.networking.mosh.AndroidMoshTransport(
+            bootstrapper = com.bambouville.tessera.networking.mosh.MoshBootstrapper {
+                com.bambouville.tessera.networking.mosh.MoshBootstrapResult(
+                    "198.51.100.8", 60001, "AAECAwQFBgcICQoLDA0ODw".encodeToByteArray(), 34)
+            },
+            nativeFactory = com.bambouville.tessera.networking.mosh.MoshNativeClientFactory { _, _, _, _ -> client },
+            scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + heldPump),
+        )
+        try {
+            mosh.connect(com.bambouville.tessera.networking.mosh.MoshConnectRequest(
+                com.bambouville.tessera.networking.mosh.MoshBootstrapRequest(
+                    route = com.bambouville.tessera.networking.SshRouteRequest(listOf(
+                        com.bambouville.tessera.networking.SshRouteHop("host",
+                            com.bambouville.tessera.networking.SshEndpoint("fixture.invalid"), "fixture",
+                            com.bambouville.tessera.networking.SshAuthentication.Password))),
+                    udpHost = "198.51.100.8",
+                ),
+                columns = 60, rows = 40,
+            ))
+            for (presentation in listOf(SharedTmuxGridPresentation.SINGLE_PANE, SharedTmuxGridPresentation.PANE_GRID)) {
+                client.reset()
+                val c = controller(nativeAuthority())
+                c.setField("tmuxGridPresentation", presentation)
+                c.setField("moshTransport", mosh)
+                c.setField("moshCanvasResizeMutex", Mutex())
+                // A wide layout's surface asks for the canvas mosh already has.
+                c.setField("resizeCoalescer", TerminalResizeCoalescer().apply { offer(SharedTmuxGridSize(80, 40)) })
+                c.setField("mutableMoshCanvasSize", MutableStateFlow<SharedTmuxGridSize?>(SharedTmuxGridSize(80, 40)))
+                val resize = c.javaClass.getDeclaredMethod(
+                    "handleTerminalSurfaceResize", Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!,
+                ).apply { isAccessible = true }
+                val drain = c.javaClass.getDeclaredMethod("drainQueuedMoshRepaints").apply { isAccessible = true }
+                fun frames(): Int {
+                    // The frame resumes on the test dispatcher between its IO
+                    // hops: pump it until the count holds for 300 ms.
+                    var last = -1
+                    var stableSince = System.nanoTime()
+                    val deadline = stableSince + 5_000_000_000L
+                    while (System.nanoTime() < deadline) {
+                        scheduler.advanceUntilIdle()
+                        val now = client.forcedRepaints.get()
+                        if (now != last) {
+                            last = now
+                            stableSince = System.nanoTime()
+                        } else if (System.nanoTime() - stableSince > 300_000_000L) break
+                        Thread.sleep(5)
+                    }
+                    return last
+                }
+
+                if (presentation == SharedTmuxGridPresentation.SINGLE_PANE) {
+                    resize.invoke(c, 60, 40)
+                    assertEquals("the old width is not the mosh grid", 0, frames())
+                }
+                resize.invoke(c, 80, 40)
+                assertEquals("$presentation", 1, frames())
+                assertEquals("$presentation: drawn at the canvas grid", 80 to 40, client.lastResize)
+
+                val handoff = c.field<MoshPainterHandoff>("moshPainterHandoff")
+                handoff.begin(paintedOwner, naturalOutputFloor = 0, waitsForNaturalOutput = true)
+                resize.invoke(c, 80, 40)
+                assertEquals("$presentation: never beside a handoff", 1, frames())
+                handoff.reset()
+                drain.invoke(c)
+                assertEquals("$presentation: the handoff's end releases it", 2, frames())
+                drain.invoke(c)
+                assertEquals("$presentation: once", 2, frames())
+            }
+        } finally { mosh.close() }
+    }
+
+    private class FrameRecordingMoshClient : com.bambouville.tessera.networking.mosh.MoshNativeClient {
+        val forcedRepaints = java.util.concurrent.atomic.AtomicInteger()
+        @Volatile var lastResize: Pair<Int, Int>? = null
+        fun reset() { forcedRepaints.set(0); lastResize = null }
+        override fun start() = Unit
+        override fun tick(): Long = com.bambouville.tessera.networking.mosh.MoshNativeClient.NO_DEADLINE
+        override fun inject(bytes: ByteArray) = Unit
+        override fun resize(columns: Int, rows: Int) { lastResize = columns to rows }
+        override fun beginFullRepaintFence(): Long = 0
+        override fun fullRepaintFenceReady(token: Long): Boolean = false
+        override fun forceFullRepaint() { forcedRepaints.incrementAndGet() }
+        override val connected: Boolean get() = true
+        override val transportReachable: Boolean get() = true
+        override val serverContactAgeMilliseconds: Long get() = 0
+        override val replyAgeMilliseconds: Long get() = 0
+        override val shutdownComplete: Boolean get() = false
+        override fun close() = Unit
+    }
+
     @Test fun aShowAndATakeBackStartTheCompactCorrectionsOver() {
         val c = ready(); c.replyTo(c.lastQuery(), OWN_STAMP)
         val held = SharedTmuxCompactReprojectionMemo(5L, 9L)
@@ -3382,7 +3610,7 @@ class TmuxAuthorityAdapterTest {
         val threads = java.lang.management.ManagementFactory.getThreadMXBean()
         val deadline = System.nanoTime() + 5_000_000_000L
         while (true) {
-            val info = threads.getThreadInfo(thread.id)
+            val info = threads.getThreadInfo(thread.threadId())
             if (info?.threadState == Thread.State.BLOCKED && info.lockName == lockName) return
             check(thread.isAlive && System.nanoTime() < deadline) { "never blocked on the transport lock: ${info?.threadState}" }
             Thread.sleep(1)
@@ -4095,7 +4323,7 @@ class TmuxAuthorityAdapterTest {
         javaClass.getDeclaredMethod(
             "publishTmuxClientSize", SharedTmuxGridSize::class.java,
             Boolean::class.javaPrimitiveType!!, Boolean::class.javaPrimitiveType!!,
-            java.lang.Long::class.java,
+            Long::class.javaObjectType,
         ).apply { isAccessible = true }.invoke(this, size, claim, false, null)
     }
 

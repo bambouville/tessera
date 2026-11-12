@@ -6,10 +6,8 @@ import net.schmizz.sshj.sftp.FileAttributes
 import net.schmizz.sshj.sftp.FileMode
 import net.schmizz.sshj.sftp.PacketType
 import net.schmizz.sshj.sftp.Response
-import net.schmizz.sshj.sftp.SFTPException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertThrows
 import org.junit.Test
 
 /**
@@ -19,9 +17,13 @@ import org.junit.Test
  */
 class SftpReportedSizeTest {
     @Test
-    fun sshjRefusesASizePastLongMaxValueSoTheDownloadTreatsItAsUnknown() {
+    fun aSizePastLongMaxValueReadsAsUnknown() {
         for (wire in listOf(ULong.MAX_VALUE, 1uL shl 63)) {
-            assertThrows("size $wire", SFTPException::class.java) { attributesReply(wire).readFileAttributes() }
+            // sshj keeps the raw bits, so the rest of the attributes (a listing's
+            // directory entry) still read; the size is negative, so unknown.
+            val attributes = attributesReply(wire).readFileAttributes()
+            assertEquals("size $wire", wire.toLong(), attributes.size)
+            assertNull("size $wire", attributes.reportedSize())
             assertNull("size $wire", sizeAtOpen { attributesReply(wire).readFileAttributes() })
         }
         // The largest size a Long holds is still a size: read-ahead is

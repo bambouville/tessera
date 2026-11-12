@@ -53,6 +53,13 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
+# The aggregate Compose class includes the shared transcript rendering case.
+# Supply its canonical fixture so this gate exercises it instead of skipping.
+TESSERA_AGENT_TRANSCRIPT_FIXTURE_OUTPUT="$out_dir/core-transcript.json" \
+    swift test --package-path "$repo_root/Packages/TesseraCore" \
+    --filter AgentCodexTranscriptContentTests/testSharedSnapshotForBothNativeRenderers \
+    >"$out_dir/core-fixture.log" 2>&1
+
 (
     cd "$repo_root/android"
     JAVA_HOME="$java_root" SWIFT_ANDROID_SWIFT="$swift_bin" ./gradlew :feature-agent-center:assembleDebugAndroidTest
@@ -85,6 +92,8 @@ done
 [[ "$("$adb" -s "$serial" emu avd name | tr -d '\r' | head -n 1)" == "$avd_name" ]] \
     || die 'emulator serial does not belong to this run'
 "$adb" -s "$serial" install -r "$repo_root/android/feature-agent-center/build/outputs/apk/androidTest/debug/feature-agent-center-debug-androidTest.apk" >"$out_dir/install.log"
+"$adb" -s "$serial" push "$out_dir/core-transcript.json" /data/local/tmp/tessera-agent-transcript-fixture.json >"$out_dir/fixture-push.log"
+"$adb" -s "$serial" shell chmod 0644 /data/local/tmp/tessera-agent-transcript-fixture.json
 "$adb" -s "$serial" shell am instrument -w -r \
     -e class com.bambouville.tessera.feature.agentcenter.AgentCenterComposeTest \
     com.bambouville.tessera.feature.agentcenter.test/androidx.test.runner.AndroidJUnitRunner >"$out_dir/instrumentation.log" 2>&1
@@ -95,10 +104,10 @@ mkdir -p "$out_dir/tablet" "$out_dir/phone"
 # Exercise the same production surface at compact phone size on this owned AVD.
 "$adb" -s "$serial" shell wm size 1080x2400
 "$adb" -s "$serial" shell wm density 420
-history_tests='com.bambouville.tessera.feature.agentcenter.AgentCenterComposeTest#historyPrependPreservesTheVisibleMessageOffset,com.bambouville.tessera.feature.agentcenter.AgentCenterComposeTest#shortHistoryRetriesFailureAndStopsWhenExhausted,com.bambouville.tessera.feature.agentcenter.AgentCenterComposeTest#collapsedToolHeaderKeepsItsKeyWhenAnOlderRunMerges'
+history_tests='com.bambouville.tessera.feature.agentcenter.AgentCenterComposeTest#historyPrependPreservesTheVisibleMessageOffset,com.bambouville.tessera.feature.agentcenter.AgentCenterComposeTest#shortHistoryRetriesFailureAndStopsWhenExhausted,com.bambouville.tessera.feature.agentcenter.AgentCenterComposeTest#collapsedToolHeaderKeepsItsKeyWhenAnOlderRunMerges,com.bambouville.tessera.feature.agentcenter.AgentCenterComposeTest#observedSendShowsOnlyAsItsTranscriptRow'
 "$adb" -s "$serial" shell am instrument -w -r -e class "$history_tests" \
     com.bambouville.tessera.feature.agentcenter.test/androidx.test.runner.AndroidJUnitRunner >"$out_dir/phone-instrumentation.log" 2>&1
-rg -q 'OK \(3 tests\)' "$out_dir/phone-instrumentation.log"
+rg -q 'OK \(4 tests\)' "$out_dir/phone-instrumentation.log"
 "$adb" -s "$serial" pull /sdcard/Download/. "$out_dir/phone" >"$out_dir/phone-captures.log" 2>&1
 
 printf 'Host-free Android Agent Center history gate passed; evidence: %s\n' "$out_dir"

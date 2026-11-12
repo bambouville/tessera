@@ -1,5 +1,8 @@
 package com.bambouville.tessera.forwarding
 
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import java.util.UUID
 
 /**
@@ -34,12 +37,33 @@ data class ForwardingChromePresentation(
     /** Whether the glyph shows that something answers behind a tunnel. */
     val serving: Boolean get() = servingCount > 0
 
-    /** The glyph's content description: "2 active tunnels, 1 serving". */
+    /**
+     * The glyph's content description in English: "2 active tunnels, 1
+     * serving". The glyph itself reads [localizedAccessibilityLabel].
+     */
     val accessibilityLabel: String
         get() {
-            val base = if (activeCount > 0) "$activeCount active tunnels" else "Port forwarding"
+            val base = when (activeCount) {
+                0 -> "Port forwarding"
+                1 -> "1 active tunnel"
+                else -> "$activeCount active tunnels"
+            }
             return if (servingCount > 0) "$base, $servingCount serving" else base
         }
+
+    /** [accessibilityLabel] in the user's language. */
+    @Composable
+    fun localizedAccessibilityLabel(): String = when {
+        activeCount == 0 && servingCount == 0 -> stringResource(R.string.forwarding_chrome_label)
+        activeCount == 0 -> pluralStringResource(R.plurals.forwarding_chrome_label_serving, servingCount, servingCount)
+        servingCount == 0 -> pluralStringResource(R.plurals.forwarding_chrome_active_tunnels, activeCount, activeCount)
+        else -> pluralStringResource(
+            R.plurals.forwarding_chrome_active_tunnels_serving,
+            activeCount,
+            activeCount,
+            servingCount,
+        )
+    }
 
     companion object {
         /** A session with no forwarding rules and no open panel. */

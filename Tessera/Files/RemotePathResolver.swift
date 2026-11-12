@@ -88,6 +88,49 @@ enum RemotePathResolver {
 
     // MARK: - Resolution over the bridge
 
+    /// A selected path the menus could not resolve, worded for the user.
+    /// The terminal and Agent Center show `errorDescription` as-is.
+    struct SelectionMiss: LocalizedError, Equatable {
+        let message: String
+        var errorDescription: String? { message }
+    }
+
+    /// The selection menu's whole resolution, shared by the terminal
+    /// (`FilesPanelController.openTerminalPath`) and Agent Center's
+    /// transcript menu: both readings of the selection, `~`/`cwd`
+    /// expansion, then exact-before-tolerant resolution. The bridge must
+    /// already be connected. Throws `SelectionMiss` for a selection that
+    /// can't anchor to a path, `FileBridgeError` for a remote miss.
+    @MainActor
+    static func resolveSelection(
+        _ selection: String,
+        bridge: any FileBridging,
+        cwd: String?
+    ) async throws -> RemotePathResolution {
+        // Both readings of the selection: the strict token, then the
+        // whitespace-collapsed rejoin for a path an agent's wrapped TUI
+        // output broke across rows.
+        let candidates = pathCandidates(from: selection)
+        guard let candidate = candidates.first else {
+            throw SelectionMiss(message: String(localized: "Selection doesn't look like a path."))
+        }
+        let absolutes = candidates.compactMap {
+            expand($0, home: bridge.homeDirectory, cwd: cwd)
+        }
+        guard !absolutes.isEmpty else {
+            throw SelectionMiss(message: noDirectorySignalMessage(for: candidate))
+        }
+        return try await resolve(anyOf: absolutes, bridge: bridge)
+    }
+
+    /// The terminal's miss for a relative selection with no cwd to anchor it.
+    static func noDirectorySignalMessage(for candidate: String) -> String {
+        String(
+            localized: "Can't resolve \(candidate) — no directory signal for relative paths.",
+            comment: "A relative path could not be resolved; the argument is the text the user selected"
+        )
+    }
+
     /// Routes an absolute path: file → the entry (for staging/preview),
     /// directory → its path (for navigation). Symlinks route by what
     /// they point at (cheap listing probe). Throws `FileBridgeError`
@@ -102,7 +145,7 @@ enum RemotePathResolver {
         let name = (path as NSString).lastPathComponent
         let siblings = try await bridge.listDirectory(parent.isEmpty ? "/" : parent)
         guard let entry = siblings.first(where: { $0.name == name }) else {
-            throw FileBridgeError.remoteOperationFailed("Not found: \(path)")
+            throw FileBridgeError.remoteOperationFailed(String(localized: "Not found: \(path)"))
         }
         switch entry.kind {
         case .directory:
@@ -110,7 +153,7 @@ enum RemotePathResolver {
         case .file:
             return .file(entry)
         case .other:
-            throw FileBridgeError.remoteOperationFailed("Unsupported file type: \(path)")
+            throw FileBridgeError.remoteOperationFailed(String(localized: "Unsupported file type: \(path)"))
         case .symlink:
             // Directory-ness decides the route; only a listing can tell.
             if (try? await bridge.listDirectory(path)) != nil {
@@ -130,7 +173,7 @@ enum RemotePathResolver {
         bridge: any FileBridging
     ) async throws -> RemotePathResolution {
         guard let first = absolutes.first else {
-            throw FileBridgeError.remoteOperationFailed("Not found")
+            throw FileBridgeError.remoteOperationFailed(String(localized: "Not found"))
         }
         var firstFailure: Error?
         for absolute in absolutes {
@@ -147,7 +190,7 @@ enum RemotePathResolver {
                 return tolerant
             }
         }
-        throw firstFailure ?? FileBridgeError.remoteOperationFailed("Not found: \(first)")
+        throw firstFailure ?? FileBridgeError.remoteOperationFailed(String(localized: "Not found: \(first)"))
     }
 
     /// Whitespace-tolerant pass: matches each path segment against the
@@ -207,7 +250,7 @@ enum RemotePathResolver {
         let matches = RemotePathGrammar.entries(named: name, in: entries)
         if matches.count > 1 {
             throw FileBridgeError.remoteOperationFailed(
-                "Several files match \(path) — open it from the Files panel."
+                String(localized: "Several files match \(path) — open it from the Files panel.")
             )
         }
         return matches.first
@@ -226,7 +269,7 @@ enum RemotePathResolver {
         case .file:
             return .file(entry)
         case .other:
-            throw FileBridgeError.remoteOperationFailed("Unsupported file type: \(entry.path)")
+            throw FileBridgeError.remoteOperationFailed(String(localized: "Unsupported file type: \(entry.path)"))
         case .symlink:
             if (try? await bridge.listDirectory(entry.path)) != nil {
                 return .directory(entry.path)

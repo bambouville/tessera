@@ -4300,6 +4300,61 @@ final class TmuxControllerTests: XCTestCase {
         XCTAssertEqual(controller.renderedPaneId, PaneId(31))
     }
 
+    /// M3, closed Duo: Vim exited, then Settings and back doubled the history
+    /// (130 rows became 244). The pane left the alternate screen since its
+    /// last paint, so the foreground's in-place refresh rebuilds instead; it
+    /// must bind a fresh owner, which the platform answers by emptying its
+    /// scrollback before the deep capture writes the history again.
+    func test_foregroundAfterAnAlternateScreenExitRebuildsUnderAFreshOwner() async throws {
+        let (controller, _, sent) = makeController()
+        enterTmuxModeAndDrainAttachInit(controller)
+        seedInlineRenderedWindow(controller, windowId: 1, paneId: 31)
+        await flushSubscriptionRegistrations(controller)
+
+        var terminalAlt = false
+        controller.renderSurfaceState = { _ in (altScreen: terminalAlt, mouseMode: .off, columns: 80, rows: 24) }
+        var feeds: [(text: String, epoch: UInt64?)] = []
+        controller.feedTerminalWithContext = { slice, context in
+            feeds.append((String(decoding: slice, as: UTF8.self), context.renderOwnerEpoch))
+        }
+        var frame = 0
+        func answer(_ body: [String]) {
+            frame += 1
+            controller.ingest(responseFrame(frame, body: body, time: 1))
+        }
+        func foreground(paneAlt: Bool, screen: String) throws -> UInt64 {
+            feeds.removeAll()
+            sent.clear()
+            controller.refreshActiveWindowOnForeground()
+            expectSent(sent, renderedMetadataCommand(windowId: 1))
+            sent.clear()
+            answer([renderedPaneMetadataLine(paneId: 31, alternateOn: paneAlt, historySize: 100)])
+            XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).hasPrefix("capture-pane"))
+            sent.clear()
+            answer([screen])
+            return try XCTUnwrap(feeds.last { $0.text.contains(screen) }?.epoch, "the foreground painted its capture")
+        }
+
+        // Vim takes the alternate screen; the session leaves and comes back.
+        controller.ingest(Array("%output %31 \\033[?1049h\r\n".utf8))
+        terminalAlt = true
+        let overVim = try foreground(paneAlt: true, screen: "vim")
+        XCTAssertEqual(sent.bytes, [], "over Vim the foreground repaints in place and asks for no history")
+
+        // Vim exits; the session leaves and comes back again.
+        controller.ingest(Array("%output %31 \\033[?1049l\r\n".utf8))
+        terminalAlt = false
+        let rebuilt = try foreground(paneAlt: false, screen: "shell")
+        XCTAssertNotEqual(rebuilt, overVim, "a rebuild under the painted owner keeps the platform's scrollback")
+        expectSent(sent, renderedMetadataCommand(windowId: 1))
+        sent.clear()
+        answer([renderedPaneMetadataLine(paneId: 31, alternateOn: false, historySize: 100)])
+        XCTAssertTrue(String(decoding: sent.bytes, as: UTF8.self).contains("-S -"), "the rebuild's deep capture follows")
+        answer(["history", "shell"])
+        XCTAssertEqual(feeds.last { $0.text.contains("history") }?.epoch, rebuilt,
+                       "the deep capture lands under the rebuilt owner")
+    }
+
     func test_appInactivityCoalescesOutputBeforeForegroundRefreshAndPreservesScrollbackBytes() {
         let (controller, fed, sent) = makeController()
         enterTmuxModeAndDrainAttachInit(controller)

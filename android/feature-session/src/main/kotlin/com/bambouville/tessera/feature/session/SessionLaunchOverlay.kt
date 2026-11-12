@@ -33,6 +33,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -44,11 +45,16 @@ import com.bambouville.tessera.design.TesseraLogoMark
 import com.bambouville.tessera.design.TesseraType
 import kotlinx.coroutines.delay
 
-internal enum class SessionLaunchPhase(val caption: String) {
-    CONNECTING("connecting"),
-    STARTING_TMUX("starting tmux"),
-    ATTACHING_TMUX("attaching tmux"),
-    ATTACHING_PANE("attaching pane"),
+/**
+ * [caption] and [stalledMessage] are string resource ids. The stall banner is
+ * one whole sentence per phase rather than the caption spliced into a frame,
+ * so each language can word it naturally.
+ */
+internal enum class SessionLaunchPhase(val caption: Int, val stalledMessage: Int) {
+    CONNECTING(R.string.session_launch_connecting, R.string.session_launch_stalled_connecting),
+    STARTING_TMUX(R.string.session_launch_starting_tmux, R.string.session_launch_stalled_starting_tmux),
+    ATTACHING_TMUX(R.string.session_launch_attaching_tmux, R.string.session_launch_stalled_attaching_tmux),
+    ATTACHING_PANE(R.string.session_launch_attaching_pane, R.string.session_launch_stalled_attaching_pane),
 }
 
 /**
@@ -93,20 +99,20 @@ internal fun SessionLaunchOverlay(
                     strokeWidth = 2.dp,
                     modifier = Modifier.width(28.dp),
                 )
-                Text(phase.caption, style = TesseraType.code, color = tokens.fg)
+                Text(stringResource(phase.caption), style = TesseraType.code, color = tokens.fg)
                 subtitle?.takeIf(String::isNotBlank)?.let {
                     Text(it, style = TesseraType.rowMeta, color = tokens.fgMuted, maxLines = 1)
                 }
                 if (stalled) {
                     TesseraBanner(
-                        text = "Still ${phase.caption}. This stage has not completed; you can retry without force-closing Tessera.",
+                        text = stringResource(phase.stalledMessage),
                         modifier = Modifier.fillMaxWidth(),
                     )
                     RecoveryActions(onEditHost, onRetry, onBack)
                 }
             } else {
                 Text(
-                    "connection failed",
+                    stringResource(R.string.session_launch_connection_failed),
                     style = TesseraType.page,
                     color = tokens.fg,
                     textAlign = TextAlign.Center,
@@ -197,10 +203,12 @@ internal fun ContinuedElsewhereOverlay(
             TesseraLogoMark(size = 48.dp)
             Text(
                 when {
-                    awaitingConnection -> "takes control when reconnected"
-                    isReclaiming -> "taking back control…"
-                    peerDisplayName.isBlank() || peerDisplayName == "another device" -> "continued elsewhere"
-                    else -> "continued on $peerDisplayName"
+                    awaitingConnection -> stringResource(R.string.session_authority_takes_control_when_reconnected)
+                    isReclaiming -> stringResource(R.string.session_authority_taking_back)
+                    // "another device" is SharedTmuxPeerLabel's own fallback token, not copy.
+                    peerDisplayName.isBlank() || peerDisplayName == "another device" ->
+                        stringResource(R.string.session_authority_continued_elsewhere)
+                    else -> stringResource(R.string.session_authority_continued_on, peerDisplayName)
                 },
                 style = TesseraType.sheet,
                 color = tokens.fg,
@@ -210,20 +218,20 @@ internal fun ContinuedElsewhereOverlay(
             // while it runs, which is what made users tap take-back repeatedly.
             if (awaitingConnection) {
                 TesseraButton(
-                    "cancel",
+                    stringResource(R.string.session_authority_cancel_pending),
                     onClick = onCancelPending,
                     compact = true,
                     modifier = Modifier.testTag("tmux-authority-cancel-pending"),
                 )
             } else if (!isReclaiming) {
                 Text(
-                    "This session is being controlled from another device.",
+                    stringResource(R.string.session_authority_controlled_elsewhere),
                     style = TesseraType.rowMeta,
                     color = tokens.fgMuted,
                     textAlign = TextAlign.Center,
                 )
                 TesseraButton(
-                    "take back control",
+                    stringResource(R.string.session_authority_take_back),
                     onClick = onTakeBack,
                     style = TesseraButtonStyle.Primary,
                 )
@@ -267,13 +275,16 @@ internal fun TmuxResumingIndicator(
             )
         }
         Text(
-            if (awaitingConnection) "takes control when reconnected" else "Resuming…",
+            stringResource(
+                if (awaitingConnection) R.string.session_authority_takes_control_when_reconnected
+                else R.string.session_authority_resuming,
+            ),
             style = TesseraType.rowMeta,
             color = tokens.fg,
         )
         if (awaitingConnection) {
             TesseraButton(
-                "cancel",
+                stringResource(R.string.session_authority_cancel_pending),
                 onClick = onCancelPending,
                 compact = true,
                 modifier = Modifier.testTag("tmux-authority-cancel-pending"),
@@ -317,9 +328,14 @@ private fun RecoveryActions(
     onBack: () -> Unit,
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        TesseraButton("edit host", onClick = onEditHost, compact = true)
-        TesseraButton("retry", onClick = onRetry, compact = true, style = TesseraButtonStyle.Primary)
-        TesseraButton("back", onClick = onBack, compact = true)
+        TesseraButton(stringResource(R.string.session_launch_edit_host), onClick = onEditHost, compact = true)
+        TesseraButton(
+            stringResource(R.string.session_launch_retry),
+            onClick = onRetry,
+            compact = true,
+            style = TesseraButtonStyle.Primary,
+        )
+        TesseraButton(stringResource(R.string.session_launch_back), onClick = onBack, compact = true)
     }
 }
 

@@ -1,0 +1,20 @@
+{
+  "drop to paste · %lld lines": {
+    "en": { "one": "drop to paste · %lld line", "other": "drop to paste · %lld lines" },
+    "de": { "one": "zum Einfügen ablegen · %lld Zeile", "other": "zum Einfügen ablegen · %lld Zeilen" },
+    "es": { "one": "suelta para pegar · %lld línea", "other": "suelta para pegar · %lld líneas" },
+    "fr": { "one": "déposez pour coller · %lld ligne", "other": "déposez pour coller · %lld lignes" },
+    "ja": { "other": "ドロップしてペースト · %lld 行" },
+    "zh-Hans": { "other": "松开以粘贴 · %lld 行" },
+    "zh-Hant": { "other": "放開以貼上 · %lld 行" }
+  },
+  "%lld connected sources could not be fully searched": {
+    "en": { "one": "%lld connected source could not be fully searched", "other": "%lld connected sources could not be fully searched" },
+    "de": { "one": "%lld verbundene Quelle konnte nicht vollständig durchsucht werden", "other": "%lld verbundene Quellen konnten nicht vollständig durchsucht werden" },
+    "es": { "one": "no se pudo buscar por completo en %lld fuente conectada", "other": "no se pudo buscar por completo en %lld fuentes conectadas" },
+    "fr": { "one": "la recherche n'a pas pu couvrir entièrement %lld source connectée", "other": "la recherche n'a pas pu couvrir entièrement %lld sources connectées" },
+    "ja": { "other": "接続済みソース %lld 件を完全には検索できませんでした" },
+    "zh-Hans": { "other": "%lld 个已连接的来源未能完整搜索" },
+    "zh-Hant": { "other": "%lld 個已連線的來源未能完整搜尋" }
+  }
+}

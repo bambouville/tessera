@@ -18,14 +18,14 @@ password copy is wiped at the authentication boundary.
 | Component | Version | Reason |
 |---|---:|---|
 | JDK | 21 | Matches the repository's Kotlin conformance CI runtime |
-| Gradle wrapper | 9.7.1 | Current stable Gradle, compatible with AGP 9.3 and checksum-pinned |
-| Android Gradle Plugin | 9.3.2 | Current stable AGP patch with built-in Kotlin support |
+| Gradle wrapper | 9.8.2 | Current stable Gradle, compatible with AGP 9.5 and checksum-pinned |
+| Android Gradle Plugin | 9.5.1 | Current stable AGP with built-in Kotlin support |
 | Kotlin/Compose compiler plugin | 2.3.21 | Matches AGP's built-in Kotlin line |
 | Compile SDK | 37.0 | Current stable Android SDK surface for compatibility testing |
 | Target SDK | 37.0 | Starts new work on current Android behavior rather than compatibility mode |
 | Minimum SDK | 33 (Android 13) | Supported application floor; native libraries may target an older ABI |
 | Android NDK | 28.2.13676358 | AGP 9.x default and sufficient for the existing shared-core gate |
-| Compose BOM | 2026.08.00 | Stable, mutually tested Compose dependency set |
+| Compose BOM | 2026.09.00 | Stable, mutually tested Compose dependency set |
 
 The Gradle project uses AGP 9's built-in Kotlin support. Do not add the
 `org.jetbrains.kotlin.android` plugin. The Compose compiler plugin remains
@@ -93,6 +93,49 @@ The debug application ID is `com.bambouville.tessera.debug`; release uses
 `com.bambouville.tessera`. Release code and resource shrinking are enabled from
 the first milestone so native bridge keep rules cannot become a late surprise.
 
+## Remote Linux builds
+
+A faster x86_64 Linux machine with Docker can run the same Gradle tasks. The
+container in `scripts/android/remote/Dockerfile` pins this page's toolchain. From
+any checkout:
+
+```sh
+TESSERA_ANDROID_REMOTE_HOST=user@host \
+  scripts/android/remote-build.sh --no-build-cache testDebugUnitTest lint
+```
+
+The script copies the checkout to the host, including uncommitted and untracked
+files, submodules and the hydrated LFS files. It leaves `docs/` and `qa/` behind.
+It runs Gradle in a container capped at 32 CPUs and 32 GB
+(`TESSERA_ANDROID_REMOTE_CPUS`, `TESSERA_ANDROID_REMOTE_MEMORY`), with an 8 GB
+Gradle daemon heap (`TESSERA_ANDROID_REMOTE_HEAP`) so parallel dex merges fit, then copies
+reports, test results and outputs to `.build/android-remote/`. Everything on the
+host stays in `~/tessera-android-build`, plus the image. Release bundles,
+installs and emulator tests stay on the Mac.
+
+## Play release bundle
+
+`scripts/android/bundle-release.sh` builds the signed upload bundle
+(`app/build/outputs/bundle/release/app-release.aab`) and refuses it unless it
+is arm64-only with the core and Mosh libraries, contains no Google telemetry
+SDK (`datatransport`, ML Kit, Firebase: the privacy policy rules them out), and
+is signed entirely by the upload key. The key lives in
+`~/.android-keys/tessera-upload.jks` (override with
+`TESSERA_UPLOAD_STORE_FILE`), its password in the login Keychain:
+
+```sh
+security add-generic-password -a "$USER" -s tessera-android-upload -w
+```
+
+The bundle check also runs `scripts/android/check-huge-methods.sh`, which fails
+on any of our methods over ART's 10,000-code-unit compile limit; it takes any
+`.apk` or `.dex`, so it can check a debug build too.
+
+Settings → About shows `app/src/main/assets/ThirdPartyNotices.txt`. After a
+dependency change, `scripts/android/check-third-party-notices.sh` lists every
+release library missing from its Maven inventory (or listed but no longer
+shipped); add each one's license and any NOTICE file along with its line.
+
 ## Module boundaries
 
 The module names mirror section 7 of the architecture specification. Feature
@@ -128,6 +171,12 @@ Focused reruns can set `TESSERA_ANDROID_RUNTIME_FOCUS`, select a phone or tablet
 definition with `TESSERA_ANDROID_RUNTIME_DEVICE`, and pass a JUnit class or
 `Class#method` through `TESSERA_ANDROID_RUNTIME_TEST_FILTER`. Every variant uses
 the same run-scoped cleanup trap.
+
+`TESSERA_ANDROID_RUNTIME_FOCUS=forwarding` runs the host-free forwarding
+manager, panel recovery, and session chrome checks. Set
+`TESSERA_ANDROID_RUNTIME_DEVICE=pixel_6` for the phone variant and
+`TESSERA_ANDROID_RUNTIME_CAPTURE_DIR=/tmp/tessera-forwarding` to retain the
+failure/recovery screenshots before the disposable emulator is deleted.
 
 The Mosh gate builds the vendored C++/protobuf core with checksum-verified
 OpenSSL 3.5.7, verifies the Android ELF and every stable C ABI symbol, then

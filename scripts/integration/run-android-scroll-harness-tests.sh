@@ -16,7 +16,19 @@ out_dir="${1:-$repo_root/.build/android-scroll/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 mkdir -p "$out_dir"
 out_dir="$(cd "$out_dir" && pwd)"
 test_class="${TESSERA_TERMINAL_TEST_CLASS:-com.termux.view.TerminalPixelScrollInstrumentedTest,com.bambouville.tessera.terminal.TermuxTerminalSurfaceInstrumentedTest}"
-expected_tests=43
+# Every test in both classes must run; counted from source, so a new test
+# cannot leave a stale total that fails the gate or hides a skipped class.
+gate_sources=(
+    "$repo_root/android/terminal/src/androidTest/kotlin/com/termux/view/TerminalPixelScrollInstrumentedTest.kt"
+    "$repo_root/android/terminal/src/androidTest/kotlin/com/bambouville/tessera/terminal/TermuxTerminalSurfaceInstrumentedTest.kt"
+)
+for source in "${gate_sources[@]}"; do
+    [[ -f "$source" ]] || die "scroll gate class missing: $source"
+done
+# grep -c exits 1 on a zero count; under pipefail that would end the script
+# here, before the check below can say why.
+expected_tests="$(cat "${gate_sources[@]}" | grep -cE '^[[:space:]]*@Test([[:space:](]|$)' || true)"
+[[ "$expected_tests" -gt 0 ]] || die 'no instrumented tests found in the scroll gate classes'
 if [[ -n "${TESSERA_TERMINAL_TEST_CLASS:-}" ]]; then
     [[ "$test_class" =~ ^[A-Za-z0-9_.]+#[A-Za-z0-9_]+$ ]] || die 'TESSERA_TERMINAL_TEST_CLASS must name one class#method'
     expected_tests=1

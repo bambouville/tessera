@@ -6,8 +6,9 @@ import NIOSSH
 /// Configuration supported by upstream NIOSSH. Tessera leaves this at its
 /// default, preserving the upstream cipher set. Fork-only custom KEX/RSA
 /// registration and the unused legacy `.all` preset are intentionally absent.
-public struct SSHAlgorithms: Sendable {
-    public enum Modification<T: Sendable>: Sendable {
+/// Value storage contains only immutable metatypes, never transport-protection instances.
+public struct SSHAlgorithms: @unchecked Sendable {
+    public enum Modification<T> {
         case replace(with: [T])
         case add([T])
     }
@@ -32,6 +33,8 @@ public struct SSHAlgorithms: Sendable {
         }
     }
 }
+
+extension SSHAlgorithms.Modification: Sendable where T: Sendable {}
 
 /// Represents an SSH connection.
 public final class SSHClient {
@@ -104,10 +107,12 @@ public final class SSHClient {
             settings: settings
         ).get()
 
-        let sshHandler = try await channel.pipeline.handler(type: NIOSSHHandler.self).get()
+        let sshHandler = try await channel.eventLoop.submit {
+            try NIOLoopBound(channel.pipeline.syncOperations.handler(type: NIOSSHHandler.self), eventLoop: channel.eventLoop)
+        }.get()
         let handshakeHandler = try await channel.pipeline.handler(type: ClientHandshakeHandler.self).get()
         let session = try await handshakeHandler.authenticated.map {
-            SSHClientSession(channel: channel, inboundChannelHandler: inboundChannelHandler, sshHandler: sshHandler)
+            SSHClientSession(channel: channel, inboundChannelHandler: inboundChannelHandler, sshHandler: sshHandler.value)
         }.get()
 
         return SSHClient(
@@ -136,11 +141,12 @@ public final class SSHClient {
             inboundChannelHandler: inboundChannelHandler,
             settings: settings
         )
+        let boundSSHHandler = NIOLoopBound(sshHandler, eventLoop: channel.eventLoop)
         return handshakeHandler.authenticated.map {
             let session = SSHClientSession(
                 channel: channel,
                 inboundChannelHandler: inboundChannelHandler,
-                sshHandler: sshHandler
+                sshHandler: boundSSHHandler.value
             )
             return SSHClient(
                 session: session,
@@ -169,10 +175,12 @@ public final class SSHClient {
             )
         }
 
-        let sshHandler = try await channel.pipeline.handler(type: NIOSSHHandler.self).get()
+        let sshHandler = try await channel.eventLoop.submit {
+            try NIOLoopBound(channel.pipeline.syncOperations.handler(type: NIOSSHHandler.self), eventLoop: channel.eventLoop)
+        }.get()
         let handshakeHandler = try await channel.pipeline.handler(type: ClientHandshakeHandler.self).get()
         let session = try await handshakeHandler.authenticated.map {
-            SSHClientSession(channel: channel, inboundChannelHandler: inboundChannelHandler, sshHandler: sshHandler)
+            SSHClientSession(channel: channel, inboundChannelHandler: inboundChannelHandler, sshHandler: sshHandler.value)
         }.get()
 
         return SSHClient(
@@ -208,8 +216,10 @@ public final class SSHClient {
             protocolOptions: protocolOptions
         ).get()
 
-        let sshHandler = try await channel.pipeline.handler(type: NIOSSHHandler.self).get()
-        let session = SSHClientSession(channel: channel, inboundChannelHandler: inboundChannelHandler, sshHandler: sshHandler)
+        let session = try await channel.eventLoop.submit {
+            let sshHandler = try channel.pipeline.syncOperations.handler(type: NIOSSHHandler.self)
+            return SSHClientSession(channel: channel, inboundChannelHandler: inboundChannelHandler, sshHandler: sshHandler)
+        }.get()
 
         return SSHClient(
             session: session,

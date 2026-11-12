@@ -1,4 +1,5 @@
 #include "KimiHistoryIndex.h"
+#include "SourceDigest.h"
 #include "Catalog.h"
 #include "Json.h"
 #include <algorithm>
@@ -152,7 +153,7 @@ struct MetadataCursor {
         for (const auto& r : page.records) {
             const auto& v = r.value;
             result += r.receiptSourceIdentity.capacity() + v.json.capacity() + v.sourceType.capacity() + v.disposition.capacity() +
-                v.providerID.capacity() + v.parentID.capacity() + v.chainID.capacity() + v.chainParentID.capacity() +
+                v.providerID.capacity() + v.parentID.capacity() + v.turnID.capacity() + v.chainID.capacity() + v.chainParentID.capacity() +
                 v.legacyMatchText.capacity() + v.legacyMatchRole.capacity();
         }
         return result;
@@ -350,6 +351,19 @@ struct KimiHistoryIndex::Impl {
     std::vector<Candidate> window;
     size_t windowFirst = 0, requestedFirst = 0, requestedCount = 0, reverseOrdinal = 0;
     bool materializing = false;
+    // Where the newest-first replay stood at slice boundaries it passed, by
+    // ordinal: a page newer than the replay resumes at the nearest one above
+    // it instead of the newest record. Spread evenly over the history; a
+    // rebuild clears it.
+    struct ReplayCheckpoint {
+        ReverseUndo undo;
+        uint64_t sliceEnd = 0, linearFrom = 0, linearUntil = 0;
+        bool endSettles = false;
+    };
+    static constexpr size_t replayCheckpointLimit = 256;
+    std::map<size_t, ReplayCheckpoint> checkpoints;
+    // What the checkpoints hold, kept as they change: bytes() runs per row.
+    size_t checkpointBytes = 0;
     uint64_t sliceStart = 0, sliceEnd = 0, preparePosition = 0, candidateStart = 0;
     uint64_t linearFrom = 0, linearUntil = 0;
     size_t prepareCount = 0;
@@ -357,8 +371,47 @@ struct KimiHistoryIndex::Impl {
     bool haveCandidate = false, simpleSuffix = true, more = false;
 
     size_t bytes() const {
-        return sizeof(Impl) + generation.capacity() + version.capacity() + scan.bytes() +
+        return sizeof(Impl) + generation.capacity() + version.capacity() + scan.bytes() + checkpointBytes +
             undo.injectionOwner.capacity() + rows.capacity() * sizeof(Candidate) + window.capacity() * sizeof(Candidate);
+    }
+    static size_t checkpointCost(const ReplayCheckpoint& value) {
+        return sizeof(value) + 64 + value.undo.injectionOwner.capacity();
+    }
+    static size_t checkpointLimit(size_t budget) {
+        // A sixteenth of the budget at most, a few hundred bytes each.
+        return std::clamp<size_t>(budget / 16 / 256, 2, replayCheckpointLimit);
+    }
+    void thinCheckpoints(size_t keep) {
+        if (!keep || checkpoints.size() <= keep) return;
+        // Evenly spread survivors, as many as fit.
+        const auto stride = (checkpoints.size() + keep - 1) / keep;
+        size_t index = 0;
+        for (auto value = checkpoints.begin(); value != checkpoints.end(); ++index) {
+            if (index % stride) { checkpointBytes -= checkpointCost(value->second); value = checkpoints.erase(value); }
+            else ++value;
+        }
+    }
+    void keepCheckpoint() {
+        // Kept no closer than a full set spaced evenly: halving them as they
+        // arrived would leave the oldest part of a walk the sparsest.
+        const auto limit = checkpointLimit(budget), spacing = (count + limit - 2) / (limit - 1);
+        const auto next = checkpoints.lower_bound(reverseOrdinal);
+        if ((next != checkpoints.end() && next->first - reverseOrdinal < spacing) ||
+            (next != checkpoints.begin() && reverseOrdinal - std::prev(next)->first < spacing)) return;
+        thinCheckpoints(limit - 1);
+        const auto [kept, added] = checkpoints.try_emplace(reverseOrdinal);
+        if (!added) checkpointBytes -= checkpointCost(kept->second);
+        kept->second = {undo, sliceEnd, linearFrom, linearUntil, endSettles};
+        checkpointBytes += checkpointCost(kept->second);
+    }
+    // The replay from the nearest checkpoint at or above `end`, else from
+    // the newest record.
+    void resumeReplay(size_t end) {
+        const auto found = checkpoints.lower_bound(end);
+        if (found == checkpoints.end()) { reverseOrdinal = count; undo = {}; beginSlice(boundary); return; }
+        reverseOrdinal = found->first; undo = found->second.undo;
+        linearFrom = found->second.linearFrom; linearUntil = found->second.linearUntil;
+        beginSlice(found->second.sliceEnd, found->second.endSettles);
     }
     void resetScan() {
         scan = {}; scan.position = lazy ? sliceStart : 0; scan.end = lazy ? sliceEnd : boundary;
@@ -416,7 +469,10 @@ struct KimiHistoryIndex::Impl {
         if (lazy) {
             if (before && !(row < *before)) return;
             const auto capacity = batchCapacity();
-            if (rows.size() < capacity) {
+            // Once a pass has dropped a row, the next starts below the least
+            // row kept: growing then would keep a row below the dropped one
+            // and lose it for good.
+            if (!more && rows.size() < capacity) {
                 if (rows.capacity() < capacity) rows.reserve(capacity);
                 rows.push_back(row); std::push_heap(rows.begin(), rows.end(), std::greater<Candidate>());
             } else {
@@ -455,9 +511,7 @@ const std::string& KimiHistoryIndex::generation() const { return impl_->generati
 
 void KimiHistoryIndex::refresh(JsonlReader& reader, const std::function<bool()>& cancelled, size_t budget) {
     UseMetadata metadataMode(reader);
-    auto validation = reader.validatePrefix(impl_->validation, SourceValidation::defaultSlice,
-        SourceValidation::Clock::now(), impl_->boundary);
-    if (!validation.ready) throw std::runtime_error("readPending");
+    auto validation = reader.validatePrefix(impl_->validation, impl_->boundary);
     const auto header = reader.firstRecord();
     if (!header || header->value.sourceType != "metadata") throw std::runtime_error("kimiHeaderMissing");
     if (header->value.chainUnproven || header->value.disposition == "malformed" || header->value.disposition == "unsupported")
@@ -472,6 +526,8 @@ void KimiHistoryIndex::refresh(JsonlReader& reader, const std::function<bool()>&
     }
     auto& state = *impl_; state.budget = budget; state.version = version;
     if (state.complete && state.boundary == boundary) {
+        // A smaller budget keeps the checkpoints a full set at its size holds.
+        state.thinCheckpoints(Impl::checkpointLimit(budget));
         if (state.bytes() > budget) {
             // Pinned pages retain their copied content, not a right to keep a
             // full metadata accelerator when another provider needs the RAM.
@@ -492,6 +548,7 @@ void KimiHistoryIndex::refresh(JsonlReader& reader, const std::function<bool()>&
         std::vector<Candidate>().swap(state.rows); std::vector<Candidate>().swap(state.window);
         state.boundary = boundary; state.building = true; state.complete = false; state.count = 0;
         state.lazy = false; state.before.reset(); state.undo = {}; state.resetScan(); state.materializing = false;
+        state.checkpoints.clear(); state.checkpointBytes = 0;
     }
     if (state.bytes() > budget) {
         state.lazy = true; std::vector<Candidate>().swap(state.rows); std::vector<Candidate>().swap(state.window);
@@ -530,7 +587,8 @@ std::vector<KimiHistoryIndex::Materialized> KimiHistoryIndex::materialize(
     if (count > 100) throw std::runtime_error("windowItemCapacity");
     const std::vector<Candidate>* source = &state.rows; size_t offset = first;
     if (state.lazy) {
-        if (first < state.windowFirst || first + count > state.windowFirst + state.window.size()) {
+        // A window still being replayed holds only part of its request.
+        if (state.materializing || first < state.windowFirst || first + count > state.windowFirst + state.window.size()) {
             if (!state.materializing || state.requestedFirst != first || state.requestedCount != count) {
                 // Continue an adjacent older request at the existing replay
                 // checkpoint instead of reconstructing the newest prefix again.
@@ -538,9 +596,7 @@ std::vector<KimiHistoryIndex::Materialized> KimiHistoryIndex::materialize(
                     state.reverseOrdinal == state.windowFirst && !state.window.empty();
                 state.materializing = true; state.requestedFirst = first; state.requestedCount = count;
                 state.window.clear(); state.windowFirst = first;
-                if (!adjacent) {
-                    state.reverseOrdinal = state.count; state.undo = {}; state.beginSlice(state.boundary);
-                }
+                if (!adjacent) state.resumeReplay(first + count);
             }
             while (state.reverseOrdinal > first) {
                 state.batch(reader, cancelled);
@@ -554,6 +610,7 @@ std::vector<KimiHistoryIndex::Materialized> KimiHistoryIndex::materialize(
                 }
                 if (state.reverseOrdinal <= first) break;
                 if (!state.advanceLazy()) throw std::runtime_error("kimiIndexNoProgress");
+                if (!state.prepared) state.keepCheckpoint();
             }
             std::reverse(state.window.begin(), state.window.end()); state.materializing = false;
         }

@@ -1556,7 +1556,7 @@ private struct BootstrapAppearanceSnapshot {
         chromeMaterial = appearance.chromeMaterial
         cursorStyle = appearance.cursorStyle
         cursorBlink = appearance.cursorBlink
-        terminalThemeID = appearance.terminalThemeID
+        terminalThemeID = appearance.terminalThemeSelection
         scrollbackLines = appearance.scrollbackLines
         modifierBehavior = appearance.modifierBehavior
         bellSoundEnabled = appearance.bellSoundEnabled
@@ -1576,7 +1576,7 @@ private struct BootstrapAppearanceSnapshot {
         appearance.chromeMaterial = chromeMaterial
         appearance.cursorStyle = cursorStyle
         appearance.cursorBlink = cursorBlink
-        appearance.terminalThemeID = terminalThemeID
+        appearance.terminalThemeSelection = terminalThemeID
         appearance.scrollbackLines = scrollbackLines
         appearance.modifierBehavior = modifierBehavior
         appearance.bellSoundEnabled = bellSoundEnabled

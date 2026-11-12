@@ -28,8 +28,8 @@ final class StoreKitPurchaseTests: XCTestCase {
     private var suiteName: String!
     private var defaults: UserDefaults!
 
-    override func setUpWithError() throws {
-        try super.setUpWithError()
+    override func setUp() async throws {
+        try await super.setUp()
         session = try SKTestSession(configurationFileNamed: "Tessera")
         session.resetToDefaultState()
         session.clearTransactions()
@@ -39,6 +39,7 @@ final class StoreKitPurchaseTests: XCTestCase {
         session.locale = Locale(identifier: "en_US")
         suiteName = "StoreKitPurchaseTests.\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)!
+        try await skipIfSimulatorTestSessionIsBroken()
     }
 
     override func tearDown() {
@@ -355,6 +356,26 @@ final class StoreKitPurchaseTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    /// Simulator runtimes from iOS 26.3 through at least 27.1 break the local
+    /// StoreKit test environment itself: `AppTransaction` asks for an Apple
+    /// Account, and storefront changes and `clearTransactions()` do not apply
+    /// (developer.apple.com/forums/thread/826364). An `SKTestSession` app
+    /// transaction never needs an account, so that runtime's `noAccount` is
+    /// not the app. Any other error, or any error on an older runtime, fails
+    /// the setup. Older simulators and devices still run every test.
+    private func skipIfSimulatorTestSessionIsBroken() async throws {
+        #if targetEnvironment(simulator)
+        guard ProcessInfo.processInfo.isOperatingSystemAtLeast(
+            OperatingSystemVersion(majorVersion: 26, minorVersion: 3, patchVersion: 0)
+        ) else { return }
+        do {
+            _ = try await AppTransaction.shared
+        } catch where String(describing: error).contains("noAccount") {
+            throw XCTSkip("this simulator runtime's SKTestSession is broken: \(error)")
+        }
+        #endif
+    }
 
     /// Expected access states for this environment's legacy classification.
     /// `baseline` is where the store settles with no IAP entitlement (`.free`

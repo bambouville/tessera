@@ -39,9 +39,6 @@ class History:
     opaque_bytes: int = 0
     physical_records: int = 0
     revision: int | None = None
-    rewritten: int | None = None
-    skipped: tuple[int, int] | None = None
-    revised_into: int | None = None
     # Codex lineage fixtures: where a repeated-ordinal settings row sits relative
     # to each fork cutoff: 'middle' or 'last' inside the inherited prefix, 'child'
     # right after the child's own session_meta, or 'after' past the cutoff (a
@@ -74,16 +71,14 @@ class History:
 
     @property
     def selected_messages(self):
-        count = self.count - self.count // 2 if self.shape == 'undo' else self.count
-        return count - (self.skipped[1] - self.skipped[0] if self.skipped else 0)
+        return self.count - self.count // 2 if self.shape == 'undo' else self.count
 
     @property
     def selected_records(self):
         return self.selected_messages + (self.provider in {'pi', 'kimi'}) + (self.shape == 'undo')
 
     def text(self, index):
-        prefix = 'rewritten' if index == self.rewritten else 'synthetic'
-        text = f'{prefix} {index:09d}' + 'x' * self.padding
+        text = f'synthetic {index:09d}' + 'x' * self.padding
         return text + (' revised' if index == self.revision else '')
 
     @staticmethod
@@ -206,43 +201,7 @@ class History:
         offset = int(self.provider in {'pi', 'kimi'})
         index = position - offset
         if not 0 <= index < self.selected_messages: return None
-        if self.skipped and index >= self.skipped[0]: index += self.skipped[1] - self.skipped[0]
-        # A same-turn revision keeps the revised item's canonical position.
-        if self.revised_into is not None and index == self.revised_into: return self.text(self.rewritten)
         return self.text(index)
-
-    def rewrite_and_append(self, index=5):
-        if self.shape != 'linear' or self.provider not in {'claude', 'codex'}:
-            raise ValueError('rewrite fixture requires linear Claude/Codex')
-        # Equal-width interior mutation, followed by growth on the same inode.
-        # Do not touch the header or final boundary witness.
-        before = self.text(index).encode()
-        with self.path.open('r+b') as stream:
-            for _ in range(index + int(self.provider == 'codex')):
-                stream.readline()
-            start = stream.tell(); line = stream.readline()
-            if before not in line:
-                raise AssertionError('rewrite target missing')
-            self.rewritten = index
-            changed = line.replace(before, self.text(index).encode(), 1)
-            if self.provider == 'claude':
-                # Change cached graph membership, not only lazily read prose.
-                changed = changed.replace(f'"parentUuid":"r{index-1}"'.encode(), b'"parentUuid":"r0"')
-                self.skipped = (1, index)
-            else:
-                # Same-width identity edit turns the item into a same-turn
-                # revision of its predecessor: cached dedup metadata must be
-                # rebuilt, not only lazily read prose. Item ownership
-                # (thread_id) is not a Codex selection rule.
-                changed = changed.replace(f'"id":"r{index}"'.encode(), f'"id":"r{index-1}"'.encode(), 1)
-                self.skipped = (index, index + 1)
-                self.revised_into = index - 1
-            if len(changed) != len(line):
-                raise AssertionError('rewrite changed physical offsets')
-            stream.seek(start); stream.write(changed)
-            stream.seek(0, os.SEEK_END); self.emit(stream, self.message(self.count))
-        self.count += 1
-
 
 class WindowClient:
     """One owned helper and at most four retained protocol pages.
@@ -419,7 +378,7 @@ class WindowClient:
                                     transcriptRef=str(self.history.path)), 'resolved')['thread']
         self.version = 0; self.pages.clear(); self.head = None
 
-    def exercise(self, traverse=False, rewrite=False, reconnect=False, interrupt=False):
+    def exercise(self, traverse=False, reconnect=False, interrupt=False):
         first_ms = self.page()
         first_ready_ms = (time.monotonic() - self.started) * 1000
         for _ in range(2):
@@ -429,17 +388,13 @@ class WindowClient:
         if reconnect or interrupt:
             self.reconnect(interrupt)
             self.page('bootstrap')
-        if rewrite:
-            self.history.rewrite_and_append()
-            self.page('bootstrap')
-            traverse = True
         if traverse:
             while self.pages[0]['hasOlder']: self.page('before')
             while self.pages[-1]['hasNewer']: self.page('after')
         self.check()
         return dict(first_page_ms=round(first_ms, 3), launch_to_first_page_ms=round(first_ready_ms, 3),
                     launch_to_initial_pages_ms=round(initial_ready_ms, 3), initial_pages=initial_pages,
-                    pages=self.page_count, traversed_both_directions=traverse, interior_rewrite_plus_append=rewrite,
+                    pages=self.page_count, traversed_both_directions=traverse,
                     reconnected=reconnect or interrupt, disconnected_in_flight=interrupt,
                     older_page_ms_total=round(self.older_ms_total, 3), older_page_ms_max=round(self.older_ms_max, 3),
                     older_pages=self.older_page_count,

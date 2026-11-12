@@ -1,7 +1,8 @@
 // Tessera/Settings/ThemeSettingsView.swift
 // Wave 1 stub — Codex-B fills body. 2-column grid of theme preview cards
 // (Void / Graphite / Amber CRT / Paper / Dracula / Nord). Selection persists
-// to AppearancePreferences.terminalThemeID. SwiftTerm wiring deferred to W2.
+// to AppearancePreferences.terminalThemeSelection; an "automatic" card above
+// the grid follows the app appearance (Paper light, Void dark).
 import SwiftUI
 
 struct ThemeSettingsView: View {
@@ -18,6 +19,9 @@ struct ThemeSettingsView: View {
             SettingsH("themes")
 
             ScrollView {
+                automaticCard
+                    .padding(.bottom, 12)
+
                 LazyVGrid(columns: columns, spacing: 12) {
                     ForEach(TerminalTheme.all) { theme in
                         card(for: theme)
@@ -107,23 +111,56 @@ struct ThemeSettingsView: View {
         }
     }
 
-    private func card(for theme: TerminalTheme) -> some View {
-        let selected = appearance.terminalThemeID == theme.id
+    /// Follows the app's appearance: Paper while it is light, Void while dark.
+    private var automaticCard: some View {
+        let selected = appearance.terminalThemeSelection == TerminalTheme.automaticID
 
         return VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(verbatim: "$ ls -la")
-                    .foregroundStyle(theme.fg)
-                Text(verbatim: "drwxr-xr-x  projects/")
-                    .foregroundStyle(theme.accent)
-                Text(verbatim: "-rw-r--r--  readme.md")
-                    .foregroundStyle(theme.fg.opacity(0.6))
+            HStack(spacing: 0) {
+                preview(of: TerminalTheme.find(id: TerminalTheme.resolvedID(
+                    selection: TerminalTheme.automaticID, prefersLight: true)))
+                preview(of: TerminalTheme.find(id: TerminalTheme.resolvedID(
+                    selection: TerminalTheme.automaticID, prefersLight: false)))
             }
-            .font(Typography.tesseraMono(size: 11))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 14)
+
+            HStack(spacing: 8) {
+                Image(systemName: "circle.lefthalf.filled")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(T.fgMuted)
+
+                Text("automatic")
+                    .font(Typography.tesseraMono(size: 12))
+                    .foregroundStyle(T.fg)
+
+                Text("follows light and dark mode")
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.fgDim)
+                    .lineLimit(1)
+
+                Spacer(minLength: 8)
+
+                if selected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(T.accent)
+                }
+            }
+            .padding(.vertical, 8)
             .padding(.horizontal, 12)
-            .background(theme.bg)
+        }
+        .modifier(ThemeCardChrome(selected: selected, T: T))
+        .onTapGesture {
+            appearance.terminalThemeSelection = TerminalTheme.automaticID
+        }
+    }
+
+    private func card(for theme: TerminalTheme) -> some View {
+        // Only an explicit pick checks a theme; the automatic card owns the
+        // check while the appearance decides.
+        let selected = appearance.terminalThemeSelection == theme.id
+
+        return VStack(spacing: 0) {
+            preview(of: theme)
 
             HStack(spacing: 8) {
                 RoundedRectangle(cornerRadius: 2)
@@ -150,21 +187,47 @@ struct ThemeSettingsView: View {
             .padding(.vertical, 8)
             .padding(.horizontal, 12)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .background {
-            if selected {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(T.accentSoft)
-                    .padding(-4)
-            }
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(selected ? T.accent : T.border, lineWidth: selected ? 2 : 1)
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 8))
+        .modifier(ThemeCardChrome(selected: selected, T: T))
         .onTapGesture {
-            appearance.terminalThemeID = theme.id
+            appearance.terminalThemeSelection = theme.id
         }
+    }
+
+    private func preview(of theme: TerminalTheme) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(verbatim: "$ ls -la")
+                .foregroundStyle(theme.fg)
+            Text(verbatim: "drwxr-xr-x  projects/")
+                .foregroundStyle(theme.accent)
+            Text(verbatim: "-rw-r--r--  readme.md")
+                .foregroundStyle(theme.fg.opacity(0.6))
+        }
+        .font(Typography.tesseraMono(size: 11))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 14)
+        .padding(.horizontal, 12)
+        .background(theme.bg)
+    }
+}
+
+private struct ThemeCardChrome: ViewModifier {
+    let selected: Bool
+    let T: DesignTokens
+
+    func body(content: Content) -> some View {
+        content
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .background {
+                if selected {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(T.accentSoft)
+                        .padding(-4)
+                }
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(selected ? T.accent : T.border, lineWidth: selected ? 2 : 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8))
     }
 }

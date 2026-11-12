@@ -28,8 +28,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.edit
 import com.bambouville.tessera.design.LocalTesseraTokens
 import com.bambouville.tessera.design.TesseraButton
 import com.bambouville.tessera.design.TesseraButtonStyle
@@ -131,7 +134,7 @@ fun ShareUploadSheet(
     val confirmEnabled = selection != null
 
     TesseraDialog(
-        title = if (isTextShare) "share text" else "upload to host",
+        title = stringResource(if (isTextShare) R.string.files_share_text_title else R.string.files_upload_to_host_title),
         onDismissRequest = onCancel,
         // Dismissing by tapping away would silently drop the payload the user
         // just shared from another app; Cancel is the one exit.
@@ -139,13 +142,13 @@ fun ShareUploadSheet(
         modifier = modifier.testTag("share-upload-sheet"),
         actions = {
             TesseraButton(
-                text = "Cancel",
+                text = stringResource(R.string.files_cancel),
                 onClick = onCancel,
                 style = TesseraButtonStyle.Default,
                 compact = true,
             )
             TesseraButton(
-                text = ShareUploadPolicy.ctaTitle(selection, textMode),
+                text = stringResource(ShareUploadPolicy.ctaTitle(selection, textMode)),
                 onClick = {
                     val target = selection ?: return@TesseraButton
                     if (!pastingText) {
@@ -170,9 +173,12 @@ fun ShareUploadSheet(
         PayloadRow(fileNames = fileNames, totalBytes = totalBytes, sharedText = sharedText)
 
         if (isTextShare) {
-            SectionLabel("Text")
+            SectionLabel(stringResource(R.string.files_share_section_text))
             TesseraSegmented(
-                options = listOf("Paste into session", "Upload as file"),
+                options = listOf(
+                    stringResource(R.string.files_share_paste_into_session),
+                    stringResource(R.string.files_share_upload_as_file),
+                ),
                 selectedIndex = if (pastingText) 0 else 1,
                 onSelect = { index ->
                     textMode = if (index == 0) ShareTextMode.PasteIntoSession else ShareTextMode.UploadAsFile
@@ -181,10 +187,10 @@ fun ShareUploadSheet(
             )
         }
 
-        SectionLabel(if (rows.isEmpty()) "No saved hosts" else "Host")
+        SectionLabel(stringResource(if (rows.isEmpty()) R.string.files_share_no_saved_hosts else R.string.files_share_section_host))
         if (rows.isEmpty()) {
             Text(
-                "Add a host first — a share has nowhere to go until one exists.",
+                stringResource(R.string.files_share_add_host_first),
                 style = TesseraType.bodySmall,
                 color = tokens.fgMuted,
             )
@@ -201,19 +207,18 @@ fun ShareUploadSheet(
         // The button says "Connect & paste"; this says what that costs.
         if (pastingText && selection != null && !hasLiveSession) {
             Text(
-                "${selection.label} has no live session — it opens first, and " +
-                    "the text is typed once it connects.",
+                stringResource(R.string.files_share_opens_first, selection.label),
                 style = TesseraType.bodySmall,
                 color = tokens.fgMuted,
             )
         }
 
         if (!pastingText) {
-            SectionLabel("Destination")
+            SectionLabel(stringResource(R.string.files_share_section_destination))
             val cwd = selection?.sessionCwd
             DestinationRow(
-                title = cwd ?: "no session cwd",
-                detail = "session cwd",
+                title = cwd ?: stringResource(R.string.files_share_no_session_cwd),
+                detail = stringResource(R.string.files_share_session_cwd),
                 selected = destination is ShareUploadDestination.SessionCwd,
                 enabled = cwd != null,
                 testTag = "share-destination-cwd",
@@ -224,7 +229,11 @@ fun ShareUploadSheet(
             )
             DestinationRow(
                 title = "~/${RemoteFilesConstants.TEMP_DIRECTORY}/",
-                detail = if (reaperDays > 0) "temp · auto-cleans after $reaperDays d" else "temp",
+                detail = if (reaperDays > 0) {
+                    pluralStringResource(R.plurals.files_share_temp_auto_cleans, reaperDays, reaperDays)
+                } else {
+                    stringResource(R.string.files_share_temp)
+                },
                 selected = destination is ShareUploadDestination.Temp,
                 enabled = true,
                 testTag = "share-destination-temp",
@@ -238,15 +247,13 @@ fun ShareUploadSheet(
             )
 
             TesseraToggleRow(
-                title = "Paste path into session",
+                title = stringResource(R.string.files_share_paste_path),
                 subtitle = pasteSubtitle(selection),
                 checked = pastePath && canPaste,
                 onCheckedChange = { value ->
                     pastePath = value
                     selection?.let { target ->
-                        preferences.edit()
-                            .putBoolean(ShareUploadPolicy.rememberedPastePathKey(target.id), value)
-                            .apply()
+                        preferences.edit { putBoolean(ShareUploadPolicy.rememberedPastePathKey(target.id), value) }
                     }
                 },
                 enabled = canPaste,
@@ -257,12 +264,13 @@ fun ShareUploadSheet(
     }
 }
 
+@Composable
 private fun pasteSubtitle(target: ShareUploadTarget?): String = when {
-    target == null -> "select a host first"
-    target.isConnected -> "types the remote path into ${target.label} after upload"
+    target == null -> stringResource(R.string.files_share_select_host_first)
+    target.isConnected -> stringResource(R.string.files_share_types_path_after_upload, target.label)
     // Connecting, cold and failed all read the same: the path is typed when
     // that host's session is up, which the upload gesture itself brings about.
-    else -> "types the remote path into ${target.label} once its session connects"
+    else -> stringResource(R.string.files_share_types_path_once_connected, target.label)
 }
 
 @Composable
@@ -275,13 +283,15 @@ private fun PayloadRow(fileNames: List<String>, totalBytes: Long?, sharedText: S
     val tokens = LocalTesseraTokens.current
     val title = when {
         fileNames.size == 1 -> fileNames.first()
-        fileNames.size > 1 -> "${fileNames.size} items"
+        fileNames.size > 1 -> pluralStringResource(R.plurals.files_share_items, fileNames.size, fileNames.size)
         else -> sharedText.orEmpty()
     }
     val subtitle = when {
-        fileNames.isEmpty() -> "${sharedText.orEmpty().length} characters · from Share"
-        totalBytes != null -> "${formatBytes(totalBytes)} · from Share"
-        else -> "from Share"
+        fileNames.isEmpty() -> sharedText.orEmpty().length.let { count ->
+            pluralStringResource(R.plurals.files_share_characters_from_share, count, count)
+        }
+        totalBytes != null -> stringResource(R.string.files_share_size_from_share, formatBytes(totalBytes))
+        else -> stringResource(R.string.files_share_from_share)
     }
     Column(
         Modifier
@@ -348,7 +358,7 @@ private fun HostRow(
         }
         Spacer(Modifier.width(4.dp))
         Text(
-            ShareUploadPolicy.status(target, textMode),
+            stringResource(ShareUploadPolicy.status(target, textMode)),
             style = TesseraType.rowMicro,
             color = tokens.fgDim,
             maxLines = 1,

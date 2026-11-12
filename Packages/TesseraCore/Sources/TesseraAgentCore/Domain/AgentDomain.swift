@@ -242,8 +242,10 @@ public enum AgentRole: String, Codable, Sendable {
 public enum AgentBlock: Equatable, Codable, Sendable {
     case text(String)
     case thinking(String)
-    case toolCall(name: String, preview: String)
-    case toolResult(preview: String, truncated: Bool)
+    /// `callID` is the provider's tool-use ID, where its transcript has one.
+    case toolCall(name: String, preview: String, callID: String? = nil)
+    /// `callID` names the call it answers, where the projector kept one.
+    case toolResult(preview: String, truncated: Bool, callID: String? = nil)
     case edit(path: String?, diff: String?)
     case permission(title: String)
     case question(title: String)

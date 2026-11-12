@@ -113,6 +113,25 @@ struct TerminalTheme: Identifiable, Equatable {
         all.first { $0.id == id } ?? all[0]
     }
 
+    /// The selection that follows the app's light or dark appearance instead
+    /// of naming a theme: the default until the user picks one. Also its wire
+    /// value in the cross-device manifest, so the receiver follows its own
+    /// appearance; a receiver that predates it falls back to Void, the theme
+    /// it would have used anyway.
+    static let automaticID = "system"
+
+    static func resolvedID(selection: String, prefersLight: Bool) -> String {
+        guard selection == automaticID else { return selection }
+        return prefersLight ? "paper" : "void"
+    }
+
+    /// A manifest's theme as this device's selection. Older Android builds
+    /// send "default", and a newer build may name a theme this one lacks;
+    /// neither is a choice this device can show, so it follows the appearance.
+    static func importedSelection(_ id: String) -> String {
+        all.contains { $0.id == id } ? id : automaticID
+    }
+
     /// Whether the theme reads as a "light" theme — used to pick mode-
     /// appropriate semantic colors in chrome tokens. Standard sRGB luminance
     /// formula with a midpoint threshold.

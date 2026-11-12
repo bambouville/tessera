@@ -26,9 +26,10 @@ RUN=$(CDPATH= cd -- "$(mktemp -d /tmp/tessera-agent-prompt-tui.XXXXXX)" && pwd -
 STAMP=$(date +%Y%m%d-%H%M%S)
 DESTINATION=${1:-.build/agent-prompt-tui/$STAMP}
 SOCKET_PREFIX="tessera-prompt-tui-$$"
-# Every scenario runs in a desktop pane and in a phone's: the apps size the
-# tmux window to the device, and a narrow pane wraps the dialogs' rows.
-SIZES=${TESSERA_AGENT_PROMPT_TUI_SIZES:-110x40 56x48}
+# Every scenario runs in a desktop pane and in phones': the apps size the
+# tmux window to the device, and a narrow pane wraps the dialogs' rows. A
+# portrait iPhone's pane is about 49 columns.
+SIZES=${TESSERA_AGENT_PROMPT_TUI_SIZES:-110x40 56x48 49x48}
 
 cleanup() {
     status=$?

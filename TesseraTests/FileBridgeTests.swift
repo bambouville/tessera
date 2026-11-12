@@ -1,3 +1,4 @@
+import Citadel
 import NIOCore
 import NIOPosix
 import os
@@ -152,6 +153,72 @@ final class FileBridgeTests: XCTestCase {
             FileBridge.sortedEntries(entries).map(\.name),
             ["aardvark", "Beta", "alpha.txt", "Link", "zeta.txt"]
         )
+    }
+
+    @MainActor
+    func test_directoryEntries_mapsAndSortsOffTheMainThreadWithTheExistingOrder() async throws {
+        let processingThread = OSAllocatedUnfairLock<Bool?>(initialState: nil)
+        let components = [
+            component("zeta.txt", mode: 0o100644), component("Beta", mode: 0o040755),
+            component("alpha.txt", mode: 0o100644), component("aardvark", mode: 0o040755),
+            component("Link", mode: 0o120777), component("ALPHA.txt", mode: 0o100600)
+        ]
+        let entries = try await FileBridge.directoryEntries([components], absoluteDirectoryPath: "/work") { values in
+            processingThread.withLock { $0 = Thread.isMainThread }
+            return values
+        }
+        XCTAssertEqual(processingThread.withLock { $0 }, false)
+        XCTAssertEqual(entries.map(\.name), ["aardvark", "Beta", "ALPHA.txt", "alpha.txt", "Link", "zeta.txt"])
+        XCTAssertEqual(entries.map(\.path), entries.map { "/work/\($0.name)" })
+        XCTAssertEqual(entries.first?.kind, .directory)
+        XCTAssertNil(entries.first?.size)
+        XCTAssertEqual(entries.first { $0.name == "ALPHA.txt" }?.permissions, 0o600)
+    }
+
+    @MainActor
+    func test_directoryEntries_filtersDotAndDotDotButKeepsHiddenNames() async throws {
+        let components = [component(".", mode: 0o040755), component("..", mode: 0o040755),
+                          component(".env", mode: 0o100600)]
+        let entries = try await FileBridge.directoryEntries([components], absoluteDirectoryPath: "/") { $0 }
+        XCTAssertEqual(entries.map(\.name), [".env"])
+        XCTAssertEqual(entries.first?.path, "/.env")
+        XCTAssertEqual(entries.first?.isHidden, true)
+    }
+
+    @MainActor
+    func test_directoryEntries_checksCancellationBeforeMapping() async throws {
+        let task = Task { @MainActor in
+            try await FileBridge.directoryEntries([[SFTPPathComponent]()], absoluteDirectoryPath: "/work") { values in
+                XCTFail("a superseded listing must not map or sort")
+                return values
+            }
+        }
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("a superseded listing must throw cancellation")
+        } catch is CancellationError {}
+    }
+
+    @MainActor
+    func test_directoryEntries_checksCancellationAgainBeforeSorting() async throws {
+        let task = Task { @MainActor in
+            try await FileBridge.directoryEntries([[SFTPPathComponent]()], absoluteDirectoryPath: "/work") { values in
+                withUnsafeCurrentTask { $0?.cancel() }
+                return values
+            }
+        }
+        do {
+            _ = try await task.value
+            XCTFail("a listing superseded during mapping must throw cancellation")
+        } catch is CancellationError {}
+    }
+
+    private func component(_ name: String, mode: UInt32) -> SFTPPathComponent {
+        var attributes = SFTPFileAttributes()
+        attributes.permissions = mode
+        attributes.size = 42
+        return SFTPPathComponent(filename: name, longname: name, attributes: attributes)
     }
 
     @MainActor

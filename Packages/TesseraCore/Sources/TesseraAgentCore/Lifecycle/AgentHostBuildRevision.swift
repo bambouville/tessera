@@ -2,11 +2,11 @@
 // Include in lifecycle installation checksums so a native-only app update is
 // not mistaken for an already-current host installation.
 enum AgentHostBuildRevision {
-    static let sourceSHA256 = "41665a520740272537ce0c30023728e781cd90207ddfb938897f5dd0ab2e094a"
+    static let sourceSHA256 = "8f3b2935ebcafe3c58b76c63da71578bc4702692da8c0a2b9c9f7703c28842d6"
     static let artifacts = [
-        "darwin-arm64": "0c554366ebbd31844fc107be94829e70b38f80e765befe0aa32eb4e0206eea3f",
-        "darwin-x86_64": "42c3fb52fea8079ca2437c89e014cb551a8279ea733532ef733d7d6f37e78e0e",
-        "linux-aarch64": "750bd3cde1a00cfe465f7cb5c2517cb0f02af3dec7a2d057bf408ea36195122e",
-        "linux-x86_64": "01b96f9b6f2b433b85b07eae2470aa734af8422409e47842c9be7bd5f5c71753",
+        "darwin-arm64": "75abfa4c445e0fff05765f20125b3fdc53c26065b9b330f04c65546ff48b086b",
+        "darwin-x86_64": "aafd7f7662cf08942ea222758c276c62455e04938d58da11f84af5cb5b238311",
+        "linux-aarch64": "82d027e6ed3d2448689124b6f32168c39d24af8303401153313f91fc49db4289",
+        "linux-x86_64": "58e552d929b46483f12ee5e26a293b601e66960d23cf925fa2fc0963ac6fffbb",
     ]
 }

@@ -97,6 +97,20 @@ class OpenCodeReaderTests(unittest.TestCase):
             if found: break
         self.assertTrue(found)
 
+    def test_seek_is_refused_and_leaves_the_window(self):
+        # OpenCode orders count from wherever a read began; no seek lands.
+        client,thread=self.start()
+        _,_,end=self.window_page(client,thread,'bootstrap',0)
+        head=end['window']['segmentID']; ack=self.window_ack(client,thread,end,[head],head)
+        client.sendall(frame(dict(kind='window.read',id='seek',thread=thread,operation='seek',
+            windowVersion=ack['windowVersion'],cursor=ack['liveCursor'],order=(1<<52)-120,recordID='prt_0120',limit=40)))
+        refused=receive(client)
+        self.assertEqual((refused['kind'],refused['code']),('error','seekUnsupported'))
+        self.assertNotIn('status',refused)
+        self.append(250)
+        _,rows,_=self.window_page(client,thread,'head',ack['windowVersion'],ack['liveCursor'])
+        self.assertEqual(rows[-1]['recordID'],'prt_0250')
+
     def test_empty_session_can_receive_first_live_record(self):
         client,thread=self.start(0)
         _,rows,end=self.window_page(client,thread,'bootstrap',0)

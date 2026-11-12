@@ -5,10 +5,13 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Tessera's own trips out of its activity: system pickers, "Open with",
- * credential prompts for key use, the app-lock keyguard, the pairing camera
- * and permission sheets. While any is in progress an ON_STOP is not the app
- * leaving (`isRealBackgroundEdge`), so it is neither a hide for the show rule
- * nor a lock or restore edge.
+ * the pairing camera and permission sheets. While any is in progress an
+ * ON_STOP is not the app leaving (`isRealBackgroundEdge`), so it is neither
+ * a hide for the show rule nor a lock or restore edge.
+ *
+ * The owner prompt (`confirmDeviceOwner`) is not one: it is a system window
+ * over the activity, which stays started under it, so Home from the prompt
+ * is a real stop.
  *
  * A counter rather than one boolean, because excursions nest: a single flag
  * was cleared by the first one to finish while another was still up.

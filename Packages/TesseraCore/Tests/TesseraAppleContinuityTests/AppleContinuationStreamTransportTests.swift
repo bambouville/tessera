@@ -51,7 +51,7 @@ final class AppleContinuationStreamTransportTests: XCTestCase {
                 input: pair.firstInput,
                 output: pair.firstOutput
             )
-        weak var drainingSender = sender
+        weak let drainingSender = sender
         let receiver = AppleContinuationStreamTransport(
             input: pair.secondInput,
             output: pair.secondOutput

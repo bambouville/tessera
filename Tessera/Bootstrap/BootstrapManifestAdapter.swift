@@ -108,7 +108,7 @@ enum BootstrapImportRestrictionError: Error, Equatable, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .incompleteRoute(let hostID, let missingAncestorID):
-            return String(localized: "A restricted import of \(hostID) also requires jump host \(missingAncestorID).")
+            return String(localized: "A restricted import of \(hostID.uuidString) also requires jump host \(missingAncestorID.uuidString).")
         }
     }
 }
@@ -484,7 +484,7 @@ enum BootstrapManifestAdapter {
                 chromeMaterial: appearance.chromeMaterial.rawValue,
                 cursorStyle: appearance.cursorStyle.rawValue,
                 cursorBlink: appearance.cursorBlink,
-                terminalThemeID: appearance.terminalThemeID
+                terminalThemeID: appearance.terminalThemeSelection
             ),
             settings: BootstrapGeneralSettings(
                 scrollbackLines: appearance.scrollbackLines,
@@ -925,7 +925,7 @@ enum BootstrapManifestAdapter {
             appearance.cursorStyle = cursor
         }
         appearance.cursorBlink = portableAppearance.cursorBlink
-        appearance.terminalThemeID = portableAppearance.terminalThemeID
+        appearance.terminalThemeSelection = TerminalTheme.importedSelection(portableAppearance.terminalThemeID)
         appearance.scrollbackLines = settings.scrollbackLines
         appearance.modifierBehavior = settings.modifierBehavior
         // Enabling Agent Center performs one-time bell coordination. The

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="design_font_note_jetbrains_mono">大きなエックスハイト、コーディング合字</string>
+    <string name="design_font_note_fira_code">最も豊富な合字セット</string>
+    <string name="design_font_note_hack">幅広でクセがなく、小さいサイズ向け</string>
+    <string name="design_font_note_cascadia_mono">Windows Terminal のフォント、合字なし</string>
+    <string name="design_font_note_source_code_pro">Adobe の定番、ヒューマニスト系の字形</string>
+    <string name="design_font_note_ibm_plex_mono">温かみがあり、やや細身</string>
+    <string name="design_font_note_geist_mono">幾何学的で、字面の空きが広い</string>
+    <string name="design_font_note_ubuntu_mono">細身で、最も多くの桁が入る</string>
+    <string name="design_font_note_inconsolata">軽くコンパクト</string>
+    <string name="design_font_note_dejavu_sans_mono">最も広い Unicode カバレッジ</string>
+    <string name="design_font_note_system">OS 標準のもの</string>
+</resources>

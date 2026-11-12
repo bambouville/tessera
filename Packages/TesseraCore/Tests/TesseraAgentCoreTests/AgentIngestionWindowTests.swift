@@ -522,14 +522,22 @@ final class AgentIngestionWindowTests: XCTestCase {
         let bridged = window
 
         // A newer page that stops inside the bridge retains its first rows.
-        try window.navigate(segment(1000, count: 5, total: 1060), direction: .after, from: window.after!,
+        var partial = try segment(1000, count: 5, total: 1060)
+        XCTAssertThrowsError(try window.navigate(partial, direction: .after, from: window.after!,
+            expectedVersion: window.version, pinnedRecordID: nil), "history must not rewind the bridge's revised body")
+        XCTAssertEqual(window, bridged)
+        try partial.revise([patch.recordID: patch])
+        try window.navigate(partial, direction: .after, from: window.after!,
             expectedVersion: window.version, pinnedRecordID: nil)
         XCTAssertTrue(window.bridgesToHead)
         XCTAssertEqual(window.bridge.map(\.recordID), (1005..<1010).map { "r\($0)" })
         XCTAssertEqual(window.presentedRecords.map(\.recordID), (800..<1060).map { "r\($0)" })
+        XCTAssertEqual(window.presentedRecords.first { $0.recordID == patch.recordID }, patch)
         // One that reaches the head joins them again.
         window = bridged
-        try window.navigate(segment(1000, count: 30, total: 1060), direction: .after, from: window.after!,
+        var joined = try segment(1000, count: 30, total: 1060)
+        try joined.revise([patch.recordID: patch])
+        try window.navigate(joined, direction: .after, from: window.after!,
             expectedVersion: window.version, pinnedRecordID: nil)
         XCTAssertTrue(window.atLiveHead)
         XCTAssertFalse(window.bridgesToHead)
@@ -719,7 +727,7 @@ final class AgentIngestionWindowTests: XCTestCase {
     private func projection(_ segment: AgentIngestionSegment, lane: AgentIngestionWindowTransaction.Lane,
                             version: UInt64, from: String? = nil, live: String? = "live",
                             summary: AgentJSONValue? = nil, requestID: String? = nil) throws -> AgentProjectionPage {
-        let operation: AgentIngestionRange.Operation = lane == .bootstrap ? .bootstrap : (lane == .before || lane == .after) ? .history : .updates
+        let operation: AgentIngestionRange.Operation = lane == .bootstrap ? .bootstrap : [.before, .after, .seek].contains(lane) ? .history : .updates
         let window = try AgentIngestionWindowTransaction(lane: lane, version: version, segmentID: segment.id,
             before: segment.before, after: segment.after, hasOlder: segment.hasOlder, hasNewer: segment.hasNewer)
         return AgentProjectionPage(sourceIdentity: segment.source, from: from, records: segment.records,
@@ -727,6 +735,89 @@ final class AgentIngestionWindowTests: XCTestCase {
             hasMore: operation != .updates && segment.hasOlder, summary: summary,
             ingestion: .init(epoch: "epoch", requestID: requestID ?? "tx\(version)", operation: operation,
                 liveCursor: operation == .history ? nil : live, window: window)!)!
+    }
+
+    /// A match among loaded rows opens where its record is: it carries the
+    /// position and token of the copy the detail shows, the newest revision.
+    func testALoadedMatchCarriesThePositionOfTheCopyShown() async throws {
+        func placed(_ start: Int, count: Int = 100, suffix: String = "", revision: UInt64, tag: String) throws -> AgentIngestionSegment {
+            try .init(id: "s\(start)\(suffix)", source: "source", before: "b\(start)", after: "a\(start + count)",
+                hasOlder: start > 0, hasNewer: start + count < 1000,
+                records: (start..<(start + count)).map { .init(sequence: UInt64($0), recordID: "r\($0)",
+                    record: .object(["type": .string("assistant"), "text": .string("hello \($0)")]), sourceOffset: UInt64($0 * 10),
+                    revision: revision, seekToken: "0123456789abcdef:\(tag)-\($0)")! })
+        }
+        let runtime = AgentCenterRuntime()
+        let id = AgentThreadID(hostID: UUID(), providerID: .claude, providerSessionID: "loaded")!
+        await runtime.register(.init(id: id, providerName: "Claude", availability: .init(content: true,
+            status: true, actions: false, spawn: false, fork: false, search: false)))
+        let bootstrapped = await runtime.apply(page: try projection(placed(900, revision: 1, tag: "head"), lane: .bootstrap, version: 1), to: id)
+        XCTAssertTrue(bootstrapped.accepted)
+        var found = await runtime.loadedMatches(query: "hello 937").results
+        XCTAssertEqual(found.map(\.sequence), [937])
+        XCTAssertEqual(found.map(\.sourceOffset), [9_370])
+        XCTAssertEqual(found.map(\.seekToken), ["0123456789abcdef:head-937"])
+        // A match's page overlapping the head with a newer revision of the
+        // rows both hold: the newer copy is shown, and the match is its.
+        let newer = await runtime.apply(page: try projection(placed(850, suffix: "seek", revision: 2, tag: "newer"), lane: .seek,
+                                                              version: 2, from: "live"), to: id)
+        XCTAssertTrue(newer.accepted)
+        for (query, token) in [("hello 860", "newer-860"), ("hello 937", "newer-937"), ("hello 990", "head-990")] {
+            found = await runtime.loadedMatches(query: query).results
+            XCTAssertEqual(found.map(\.seekToken), ["0123456789abcdef:" + token], query)
+        }
+    }
+
+    /// A reader in history is read again where they stand, at the anchor row
+    /// they name, in the copy shown: in older pages read into the window
+    /// that still holds the head, in the newest page, or in a seek's window.
+    /// A reader following the newest page has no place to seek, nor does a
+    /// window opened again on another connection.
+    func testAReaderInHistoryHasAPlaceToSeekAndOneFollowingTheHeadHasNone() async throws {
+        func placed(_ start: Int, suffix: String = "", revision: UInt64, tag: String) throws -> AgentIngestionSegment {
+            try .init(id: "s\(start)\(suffix)", source: "source", before: "b\(start)", after: "a\(start + 100)",
+                hasOlder: start > 0, hasNewer: start + 100 < 1000,
+                records: (start..<(start + 100)).map { .init(sequence: UInt64($0), recordID: "r\($0)",
+                    record: .object(["type": .string("assistant"), "text": .string("hello \($0)")]), sourceOffset: UInt64($0 * 10),
+                    revision: revision, seekToken: "0123456789abcdef:\(tag)-\($0)")! })
+        }
+        let runtime = AgentCenterRuntime()
+        let id = AgentThreadID(hostID: UUID(), providerID: .claude, providerSessionID: "place")!
+        await runtime.register(.init(id: id, providerName: "Claude", availability: .init(content: true,
+            status: true, actions: false, spawn: false, fork: false, search: false)))
+        var applied = await runtime.apply(page: try projection(placed(900, revision: 1, tag: "head"), lane: .bootstrap, version: 1), to: id)
+        XCTAssertTrue(applied.accepted)
+        var place = await runtime.ingestionReaderPlace(for: id)
+        XCTAssertNil(place, "a reader following the newest page names no anchor")
+        applied = await runtime.apply(page: try projection(placed(800, revision: 1, tag: "head"), lane: .before, version: 2, from: "b900"), to: id)
+        XCTAssertTrue(applied.accepted)
+        let atHead = await runtime.ingestionWindowSnapshot(for: id)?.atLiveHead
+        XCTAssertEqual(atHead, true, "the older page joins the window that holds the head")
+        await runtime.setIngestionViewportAnchor("r850", for: id)
+        place = await runtime.ingestionReaderPlace(for: id)
+        XCTAssertEqual(place?.recordID, "r850", "older pages read up from the head are history too")
+        XCTAssertEqual(place?.seekToken, "0123456789abcdef:head-850")
+        await runtime.setIngestionViewportAnchor("r950", for: id)
+        place = await runtime.ingestionReaderPlace(for: id)
+        XCTAssertEqual(place?.recordID, "r950", "so is a row of the newest page the reader does not follow")
+        await runtime.setIngestionViewportAnchor(nil, for: id)
+        place = await runtime.ingestionReaderPlace(for: id)
+        XCTAssertNil(place, "following again")
+        applied = await runtime.apply(page: try projection(placed(400, suffix: "seek", revision: 2, tag: "seek"), lane: .seek,
+                                                            version: 3, from: "live"), to: id)
+        XCTAssertTrue(applied.accepted)
+        await runtime.setIngestionViewportAnchor("r437", for: id)
+        place = await runtime.ingestionReaderPlace(for: id)
+        XCTAssertEqual(place?.threadID, id)
+        XCTAssertEqual(place?.recordID, "r437")
+        XCTAssertEqual(place?.sequence, 437)
+        XCTAssertEqual(place?.sourceOffset, 4_370)
+        XCTAssertEqual(place?.seekToken, "0123456789abcdef:seek-437")
+        applied = await runtime.apply(page: try projection(placed(900, revision: 1, tag: "head"), lane: .bootstrap, version: 1,
+                                                            requestID: "reconnect"), to: id)
+        XCTAssertTrue(applied.accepted)
+        place = await runtime.ingestionReaderPlace(for: id)
+        XCTAssertNil(place, "a window opened again starts at the head")
     }
 
     func testRuntimeCommitsViewportSeparatelyFromHeadAndRejectsUncommittedCursorAdvance() async throws {
@@ -764,6 +855,90 @@ final class AgentIngestionWindowTests: XCTestCase {
         let unchanged = await runtime.snapshot(for: id)!
         XCTAssertEqual(unchanged.ingestionWindow, detached.ingestionWindow)
         XCTAssertEqual(unchanged.messages, detached.messages)
+    }
+
+    func testSeekReplacesTheViewportKeepsTheHeadAndPagesNewerToIt() throws {
+        var window = AgentIngestionWindow()
+        try window.bootstrap(segment(900))
+        try window.navigate(segment(800), direction: .before, from: window.before!, expectedVersion: window.version, pinnedRecordID: "r850")
+        let before = window
+        // Refused seeks leave the window as it was.
+        XCTAssertThrowsError(try window.seek(segment(300, suffix: "seek"), expectedVersion: window.version + 1))
+        XCTAssertThrowsError(try window.seek(segment(900), expectedVersion: window.version))
+        XCTAssertThrowsError(try window.seek(.init(id: "other", source: "other-source", before: "b300", after: "a400",
+            hasOlder: true, hasNewer: true, records: segment(300).records), expectedVersion: window.version))
+        let moved = try AgentIngestionSegment(id: "moved", source: "source", before: "b950", after: "a999", hasOlder: true, hasNewer: false,
+            records: [.init(sequence: 951, recordID: "r950", record: .object(["type": .string("assistant")]))!])
+        XCTAssertThrowsError(try window.seek(moved, expectedVersion: window.version))
+        XCTAssertEqual(window, before)
+
+        try window.seek(segment(300, suffix: "seek"), expectedVersion: window.version)
+        XCTAssertEqual(window.version, before.version + 1)
+        XCTAssertEqual(window.viewport.map(\.id), ["s300seek"])
+        XCTAssertEqual(window.head?.id, "s900")
+        XCTAssertEqual(window.retainedIDs, ["s300seek", "s900"])
+        XCTAssertFalse(window.atLiveHead)
+        XCTAssertTrue(window.hasOlder && window.hasNewer)
+        XCTAssertEqual(window.presentedRecords.map(\.recordID), (300..<400).map { "r\($0)" })
+        // Paging newer reaches the head, which then reads as one transcript.
+        for start in stride(from: 400, through: 900, by: 100) {
+            try window.navigate(segment(start, suffix: "newer"), direction: .after, from: window.after!,
+                expectedVersion: window.version, pinnedRecordID: nil)
+        }
+        XCTAssertTrue(window.atLiveHead)
+        XCTAssertEqual(window.records.last?.recordID, "r999")
+        XCTAssertEqual(window.head?.id, "s900")
+
+        // A seek into the head's own rows is at the live head at once.
+        var tail = AgentIngestionWindow()
+        try tail.bootstrap(segment(900))
+        try tail.seek(segment(950, count: 50, suffix: "seek"), expectedVersion: tail.version)
+        XCTAssertTrue(tail.atLiveHead)
+        XCTAssertEqual(tail.presentedRecords.last?.recordID, "r999")
+    }
+
+    func testSeekPageTravelsAsHistoryOnly() throws {
+        let window = try AgentIngestionWindowTransaction(lane: .seek, version: 2, segmentID: "s", before: "b", after: "a",
+            hasOlder: true, hasNewer: true)
+        XCTAssertNotNil(AgentIngestionRange(epoch: "epoch", requestID: "seek", operation: .history, liveCursor: nil, window: window))
+        XCTAssertNil(AgentIngestionRange(epoch: "epoch", requestID: "seek", operation: .updates, liveCursor: "live", window: window))
+        XCTAssertThrowsError(try AgentIngestionWindowTransaction(lane: .seek, version: 2))
+    }
+
+    func testRuntimeSeeksFromTheLiveCursorAndKeepsTheHeadApart() async throws {
+        let runtime = AgentCenterRuntime()
+        let id = AgentThreadID(hostID: UUID(), providerID: .claude, providerSessionID: "seek")!
+        await runtime.register(.init(id: id, providerName: "Claude", availability: .init(content: true,
+            status: true, actions: false, spawn: false, fork: false, search: false)))
+        _ = await runtime.apply(page: try projection(segment(900), lane: .bootstrap, version: 1), to: id)
+        await runtime.setIngestionViewportAnchor("r950", for: id)
+        // Read from anything but the live cursor, a seek is refused.
+        let foreign = await runtime.apply(page: try projection(segment(300, suffix: "seek"), lane: .seek, version: 2, from: "b900"), to: id)
+        XCTAssertFalse(foreign.accepted)
+        let result = await runtime.apply(page: try projection(segment(300, suffix: "seek"), lane: .seek, version: 2, from: "live"), to: id)
+        XCTAssertTrue(result.accepted)
+        let snapshot = await runtime.snapshot(for: id)!
+        XCTAssertEqual(snapshot.messages.first?.recordID, "r300")
+        // The transcript shows the match's page; the head stays apart for receipts.
+        XCTAssertEqual(snapshot.messages.map(\.recordID), (300..<400).map { "r\($0)" })
+        XCTAssertEqual(snapshot.ingestionWindow?.viewportSegmentIDs, ["s300seek"])
+        XCTAssertEqual(snapshot.ingestionWindow?.headSegmentID, "s900")
+        XCTAssertEqual(snapshot.ingestionWindow?.liveCursor, "live")
+        XCTAssertEqual(snapshot.ingestionWindow?.transition, .seek)
+        XCTAssertFalse(snapshot.ingestionWindow!.atLiveHead)
+        XCTAssertTrue(snapshot.ingestionWindow!.hasNewer)
+        // The reader lands on the match and keeps it while the head rolls.
+        await runtime.setIngestionViewportAnchor("r337", for: id)
+        let head = try projection(segment(1900, total: 2000), lane: .head, version: 3, from: "live", live: "live2")
+        let rolled = await runtime.apply(page: head, to: id)
+        XCTAssertTrue(rolled.accepted)
+        let kept = await runtime.snapshot(for: id)!
+        XCTAssertEqual(kept.ingestionWindow?.viewportSegmentIDs, ["s300seek"])
+        XCTAssertEqual(kept.ingestionWindow?.liveCursor, "live2")
+        let newer = await runtime.apply(page: try projection(segment(400), lane: .after, version: 4, from: "a400"), to: id)
+        XCTAssertTrue(newer.accepted)
+        let paged = await runtime.snapshot(for: id)!
+        XCTAssertEqual(paged.ingestionWindow?.viewportSegmentIDs, ["s300seek", "s400"])
     }
 
     func testChangedReplayCannotAcknowledgeOrReplaceCommittedWindow() async throws {

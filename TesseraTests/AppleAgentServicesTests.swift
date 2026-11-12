@@ -1,4 +1,5 @@
 import XCTest
+import os
 import TesseraCore
 import TmuxControl
 import SwiftTerm
@@ -648,6 +649,643 @@ final class AppleAgentServicesTests: XCTestCase {
         await coordinator.setExperimentEnabled(false)
     }
 
+    /// A search result opens at its match: a record not loaded is read
+    /// around from the live cursor, apart from the head; a refused seek, or
+    /// one already on screen, reads nothing more and keeps the newest page.
+    @MainActor
+    func testASearchResultOpensAtItsMatch() async throws {
+        let (coordinator, thread, _, handle) = try await makeInitialPrefetchFixture(transport: .sshTmux)
+        let presentation = coordinator.presentation
+        coordinator.requestNewerPage(thread, latest: true)
+        let opened = await waitForInitialPrefetch(attempts: 1_000) {
+            coordinator.projectionTasks[thread] == nil && presentation.threadSnapshots[thread]?.messages.map(\.recordID) == ["message-10"]
+        }
+        XCTAssertTrue(opened)
+
+        // Already loaded: the detail lands without a read.
+        coordinator.openSearchResult(.init(threadID: thread, recordID: "message-10", excerpt: "Page 10", sequence: 10, sourceOffset: nil))
+        XCTAssertEqual(presentation.searchLanding?.recordID, "message-10")
+        try await Task.sleep(for: .milliseconds(100))
+        var seeks = await handle.seekRequests
+        XCTAssertTrue(seeks.isEmpty)
+        XCTAssertEqual(presentation.searchLanding?.recordID, "message-10", "the landing waits for the detail to reach its row")
+
+        // Refused (the record moved): no read status, the newest page stays.
+        await handle.refuseSeeks("seekRecordMoved")
+        coordinator.openSearchResult(.init(threadID: thread, recordID: "message-3", excerpt: "Page 3", sequence: 3, sourceOffset: nil))
+        let abandoned = await waitForInitialPrefetch(attempts: 1_000) { presentation.searchLanding == nil && coordinator.projectionTasks[thread] == nil }
+        XCTAssertTrue(abandoned)
+        seeks = await handle.seekRequests
+        XCTAssertEqual(seeks.count, 1)
+        XCTAssertNil(presentation.ingestionReadStatuses[thread])
+        XCTAssertFalse(coordinator.ingestionManualReadThreads.contains(thread))
+        XCTAssertEqual(presentation.threadSnapshots[thread]?.ingestionWindow?.atLiveHead, true)
+        XCTAssertEqual(presentation.threadSnapshots[thread]?.messages.map(\.recordID), ["message-10"])
+
+        // Read around the match from the live cursor; the landing waits for
+        // the detail to reach its row.
+        await handle.refuseSeeks(nil)
+        let before = try XCTUnwrap(presentation.threadSnapshots[thread]?.ingestionWindow)
+        coordinator.openSearchResult(.init(threadID: thread, recordID: "message-3", excerpt: "Page 3", sequence: 3, sourceOffset: 4096,
+                                           seekToken: "0123456789abcdef:u-3"))
+        let landed = await waitForInitialPrefetch(attempts: 1_000) {
+            coordinator.projectionTasks[thread] == nil && presentation.threadSnapshots[thread]?.messages.map(\.recordID) == ["message-3"]
+        }
+        XCTAssertTrue(landed)
+        seeks = await handle.seekRequests
+        XCTAssertEqual(seeks.count, 2)
+        let seek = try XCTUnwrap(seeks.last)
+        XCTAssertEqual(seek["cursor"]?.stringValue, "live-1")
+        XCTAssertEqual(seek["order"]?.numberValue, 3)
+        XCTAssertEqual(seek["recordID"]?.stringValue, "message-3")
+        XCTAssertEqual(seek["sourceOffset"]?.numberValue, 4096)
+        XCTAssertEqual(seek["seekToken"]?.stringValue, "0123456789abcdef:u-3")
+        XCTAssertEqual(seek["windowVersion"]?.numberValue, Decimal(before.version))
+        let window = try XCTUnwrap(presentation.threadSnapshots[thread]?.ingestionWindow)
+        XCTAssertEqual(window.transition, .seek)
+        XCTAssertFalse(window.atLiveHead)
+        XCTAssertEqual(window.liveCursor, "live-1", "the head stays apart")
+        let acknowledged = await handle.acknowledgedVersions
+        XCTAssertEqual(acknowledged.last, Int(window.version))
+        XCTAssertEqual(presentation.searchLanding?.recordID, "message-3")
+
+        presentation.finishSearchLanding(try XCTUnwrap(presentation.searchLanding))
+        XCTAssertNil(presentation.searchLanding)
+
+        // An index the host rebuilt since the search names the match anew:
+        // the landing follows the record at the match's order.
+        coordinator.openSearchResult(.init(threadID: thread, recordID: "rebuilt:7", excerpt: "Page 7", sequence: 7, sourceOffset: 4096))
+        let retargeted = await waitForInitialPrefetch(attempts: 1_000) {
+            coordinator.projectionTasks[thread] == nil && presentation.threadSnapshots[thread]?.messages.map(\.recordID) == ["message-7"]
+        }
+        XCTAssertTrue(retargeted)
+        seeks = await handle.seekRequests
+        XCTAssertEqual(seeks.last?["recordID"]?.stringValue, "rebuilt:7")
+        XCTAssertNil(seeks.last?["seekToken"], "a result without a token sends none")
+        XCTAssertEqual(presentation.searchLanding?.recordID, "message-7")
+        presentation.finishSearchLanding(try XCTUnwrap(presentation.searchLanding))
+
+        // Refused from another match's page: the thread opens at its newest page.
+        await handle.refuseSeeks("seekRecordMoved")
+        coordinator.openSearchResult(.init(threadID: thread, recordID: "moved:2", excerpt: "Page 2", sequence: 2, sourceOffset: nil))
+        let returned = await waitForInitialPrefetch(attempts: 1_000) {
+            coordinator.projectionTasks[thread] == nil && presentation.searchLanding == nil &&
+                presentation.threadSnapshots[thread]?.ingestionWindow?.atLiveHead == true
+        }
+        XCTAssertTrue(returned)
+        seeks = await handle.seekRequests
+        XCTAssertEqual(seeks.last?["recordID"]?.stringValue, "moved:2")
+        XCTAssertEqual(presentation.threadSnapshots[thread]?.messages.map(\.recordID), ["message-10"])
+        await handle.refuseSeeks(nil)
+
+        // Another thread's selection drops a landing still waiting.
+        coordinator.openSearchResult(.init(threadID: thread, recordID: "elsewhere", excerpt: "x", sequence: 5, sourceOffset: nil))
+        presentation.select(AgentThreadID(hostID: thread.hostID, providerID: .claude, providerSessionID: "other")!)
+        XCTAssertNil(presentation.searchLanding)
+        await coordinator.setExperimentEnabled(false)
+    }
+
+    /// A host from before seeks reads no page around a match: the result
+    /// opens at the newest page without reopening the thread for a seek.
+    @MainActor
+    func testASearchResultOnAHostThatCannotSeekOpensAtTheNewestPage() async throws {
+        let (coordinator, thread, _, handle) = try await makeInitialPrefetchFixture(transport: .sshTmux, seeks: false)
+        let presentation = coordinator.presentation
+        coordinator.requestNewerPage(thread, latest: true)
+        let opened = await waitForInitialPrefetch(attempts: 1_000) {
+            coordinator.projectionTasks[thread] == nil && presentation.threadSnapshots[thread]?.messages.map(\.recordID) == ["message-10"]
+        }
+        XCTAssertTrue(opened)
+        let operations = await handle.operations, unsubscribes = await handle.unsubscribes
+        coordinator.openSearchResult(.init(threadID: thread, recordID: "message-3", excerpt: "Page 3", sequence: 3, sourceOffset: 4096,
+                                           seekToken: "0123456789abcdef:u-3"))
+        let abandoned = await waitForInitialPrefetch(attempts: 1_000) { presentation.searchLanding == nil && coordinator.projectionTasks[thread] == nil }
+        XCTAssertTrue(abandoned)
+        let seeks = await handle.seekRequests, after = await handle.operations, unsubscribed = await handle.unsubscribes
+        XCTAssertTrue(seeks.isEmpty)
+        XCTAssertEqual(after.dropFirst(operations.count).filter { $0 != "before" }, [], "no read for the match (older-page prefetch aside)")
+        XCTAssertEqual(unsubscribed, unsubscribes, "the open thread is not reopened")
+        XCTAssertEqual(presentation.threadSnapshots[thread]?.ingestionWindow?.atLiveHead, true)
+        XCTAssertEqual(presentation.threadSnapshots[thread]?.messages.map(\.recordID), ["message-10"])
+        XCTAssertNil(presentation.ingestionReadStatuses[thread])
+        await coordinator.setExperimentEnabled(false)
+    }
+
+    /// A reader in history keeps their place across a new connection (the
+    /// app came back, the connection dropped): the read seeks their row
+    /// rather than leaving them at the newest page, lands there unmarked, and
+    /// the detail shows none of the newest page read on the way. Older pages
+    /// read into the window that holds the head are history too. A seek cut
+    /// off with its connection keeps the place, and the rows before, for the
+    /// next connection. A refused place opens at the newest page and pages
+    /// older from it; a reader following the newest page reads only it.
+    @MainActor
+    func testAReaderInHistoryKeepsTheirPlaceAcrossANewConnection() async throws {
+        let (coordinator, thread, _, handle) = try await makeInitialPrefetchFixture(transport: .sshTmux)
+        let presentation = coordinator.presentation
+        let token = { (number: Int) in String(format: "%016lx:u-%ld", number, number) }
+        let messages = { presentation.threadSnapshots[thread]?.messages.map(\.recordID) }
+        coordinator.requestNewerPage(thread, latest: true)
+        let firstOlder = await waitForInitialPrefetch(attempts: 1_000) { await handle.heldHistoryCount == 1 }
+        XCTAssertTrue(firstOlder)
+        try await handle.releaseHistory()
+        let secondOlder = await waitForInitialPrefetch(attempts: 1_000) { await handle.historyRequests == 2 }
+        XCTAssertTrue(secondOlder)
+        try await handle.releaseHistory()
+        let paged = await waitForInitialPrefetch(attempts: 1_000) {
+            coordinator.initialPrefetchTasks[thread] == nil && messages() == ["message-8", "message-9", "message-10"]
+        }
+        XCTAssertTrue(paged)
+        XCTAssertEqual(presentation.threadSnapshots[thread]?.ingestionWindow?.atLiveHead, true, "older pages join the head's window")
+        // The detail reports the row its viewport starts at.
+        await coordinator.runtime.setIngestionViewportAnchor("message-9", for: thread)
+
+        // The connection is gone; the next one opens the thread at the reader's row.
+        let second = try AppleInitialPrefetchTestHandle(epoch: "second-epoch")
+        await handle.reconnect(to: second)
+        await second.hold("seek")
+        coordinator.closeIngestionHosts()
+        coordinator.refreshVisibleTranscript(thread)
+        let seeking = await waitForInitialPrefetch(attempts: 1_000) { await second.heldCount("seek") == 1 }
+        XCTAssertTrue(seeking)
+        var operations = await second.operations
+        XCTAssertEqual(operations, ["bootstrap"], "the seek is held")
+        XCTAssertEqual(messages(), ["message-8", "message-9", "message-10"], "the newest page read on the way is not shown")
+        XCTAssertEqual(presentation.searchLanding?.recordID, "message-9")
+        XCTAssertEqual(presentation.searchLanding?.marked, false, "the reader's own place is not marked")
+        XCTAssertTrue(presentation.loadingTranscriptThreads.contains(thread))
+        XCTAssertEqual(coordinator.readerPlaces[thread]?.recordID, "message-9")
+
+        // That connection drops too, before the seek lands: the place and the
+        // rows before wait for the next one, with no landing left behind.
+        coordinator.closeIngestionHosts()
+        let cut = await waitForInitialPrefetch(attempts: 1_000) { coordinator.projectionTasks[thread] == nil }
+        XCTAssertTrue(cut)
+        XCTAssertEqual(messages(), ["message-8", "message-9", "message-10"])
+        XCTAssertNil(presentation.searchLanding)
+        XCTAssertFalse(presentation.loadingTranscriptThreads.contains(thread))
+        XCTAssertTrue(coordinator.presentationHolds.isEmpty)
+        XCTAssertEqual(coordinator.readerPlaces[thread]?.seekToken, token(9))
+
+        // Core's window holds the newest page by now; the kept place opens.
+        let third = try AppleInitialPrefetchTestHandle(epoch: "third-epoch")
+        await second.reconnect(to: third)
+        coordinator.refreshVisibleTranscript(thread)
+        let restored = await waitForInitialPrefetch(attempts: 1_000) {
+            coordinator.projectionTasks[thread] == nil && presentation.threadSnapshots[thread]?.ingestionWindow?.transition == .seek
+        }
+        XCTAssertTrue(restored)
+        let seeks = await third.seekRequests
+        XCTAssertEqual(seeks.count, 1)
+        let seek = try XCTUnwrap(seeks.last)
+        XCTAssertEqual(seek["cursor"]?.stringValue, "live-1")
+        XCTAssertEqual(seek["order"]?.numberValue, 9)
+        XCTAssertEqual(seek["recordID"]?.stringValue, "message-9")
+        XCTAssertEqual(seek["seekToken"]?.stringValue, token(9))
+        XCTAssertEqual(messages(), ["message-9"])
+        XCTAssertEqual(presentation.threadSnapshots[thread]?.ingestionWindow?.atLiveHead, false)
+        XCTAssertEqual(presentation.searchLanding?.recordID, "message-9", "the landing waits for the detail to reach its row")
+        XCTAssertEqual(presentation.searchLanding?.marked, false)
+        XCTAssertTrue(coordinator.presentationHolds.isEmpty)
+        XCTAssertNil(coordinator.readerPlaces[thread], "the place landed")
+        try await Task.sleep(for: .milliseconds(100))
+        operations = await third.operations
+        XCTAssertEqual(operations, ["bootstrap", "seek"], "no older-page prefetch from the reader's place")
+        presentation.finishSearchLanding(try XCTUnwrap(presentation.searchLanding))
+
+        // Refused (the record moved): the newest page, which pages older as
+        // any newly opened thread does.
+        let fourth = try AppleInitialPrefetchTestHandle(epoch: "fourth-epoch")
+        await third.reconnect(to: fourth)
+        await fourth.refuseSeeks("seekRecordMoved")
+        coordinator.closeIngestionHosts()
+        coordinator.refreshVisibleTranscript(thread)
+        let refused = await waitForInitialPrefetch(attempts: 1_000) {
+            coordinator.projectionTasks[thread] == nil && presentation.searchLanding == nil &&
+                presentation.threadSnapshots[thread]?.ingestionWindow?.atLiveHead == true
+        }
+        XCTAssertTrue(refused)
+        XCTAssertEqual(messages(), ["message-10"])
+        XCTAssertTrue(coordinator.presentationHolds.isEmpty)
+        XCTAssertNil(coordinator.readerPlaces[thread])
+        let prefetching = await waitForInitialPrefetch(attempts: 1_000) { await fourth.heldHistoryCount == 1 }
+        XCTAssertTrue(prefetching, "the refused place's newest page pages older")
+        operations = await fourth.operations
+        XCTAssertEqual(operations, ["bootstrap", "seek", "before"])
+
+        // A reader following the newest page reads only it.
+        let fifth = try AppleInitialPrefetchTestHandle(epoch: "fifth-epoch")
+        await fourth.reconnect(to: fifth)
+        // The dropped connection ends the older-page read it was answering.
+        coordinator.closeIngestionHosts()
+        let dropped = await waitForInitialPrefetch(attempts: 1_000) { coordinator.initialPrefetchTasks[thread] == nil }
+        XCTAssertTrue(dropped)
+        coordinator.refreshVisibleTranscript(thread)
+        let latest = await waitForInitialPrefetch(attempts: 1_000) { await fifth.operations.first == "bootstrap" && coordinator.projectionTasks[thread] == nil }
+        XCTAssertTrue(latest)
+        operations = await fifth.operations
+        XCTAssertFalse(operations.contains("seek"))
+        XCTAssertNil(presentation.searchLanding)
+        await coordinator.setExperimentEnabled(false)
+    }
+
+    /// A notification opens its conversation at the newest reply rather than
+    /// wait on a read of the reader's place. A place still shown on a live
+    /// connection stays; one being read gives way to the newest page that
+    /// read started from; one no read has reached yet is never read, even
+    /// when the detail reports its old row again. The next opening read ends
+    /// that: a place the reader takes later is read as before.
+    @MainActor
+    func testANotificationOpensTheNewestReplyRatherThanReadTheReadersPlace() async throws {
+        let (coordinator, thread, _, handle) = try await makeInitialPrefetchFixture(transport: .sshTmux)
+        let presentation = coordinator.presentation
+        let messages = { presentation.threadSnapshots[thread]?.messages.map(\.recordID) }
+        coordinator.requestNewerPage(thread, latest: true)
+        let firstOlder = await waitForInitialPrefetch(attempts: 1_000) { await handle.heldHistoryCount == 1 }
+        XCTAssertTrue(firstOlder)
+        try await handle.releaseHistory()
+        let paged = await waitForInitialPrefetch(attempts: 1_000) { await handle.historyRequests == 2 && messages() == ["message-9", "message-10"] }
+        XCTAssertTrue(paged)
+        await coordinator.runtime.setIngestionViewportAnchor("message-9", for: thread)
+
+        // Still shown on a live connection: the place stays, unread.
+        let shown = await handle.operations
+        await coordinator.openNotificationThread(thread)
+        try await Task.sleep(for: .milliseconds(100))
+        var operations = await handle.operations
+        XCTAssertEqual(operations, shown)
+        let kept = await coordinator.runtime.ingestionReaderPlace(for: thread)
+        XCTAssertEqual(kept?.recordID, "message-9")
+        XCTAssertNil(presentation.latestOpening)
+
+        // Opened while the new connection reads the place: the newest page it
+        // read first shows at once, and the seek's reply is dropped.
+        let second = try AppleInitialPrefetchTestHandle(epoch: "second-epoch")
+        await handle.reconnect(to: second)
+        await second.hold("seek")
+        coordinator.closeIngestionHosts()
+        let closed = await waitForInitialPrefetch(attempts: 1_000) { coordinator.initialPrefetchTasks[thread] == nil }
+        XCTAssertTrue(closed)
+        coordinator.refreshVisibleTranscript(thread)
+        let seeking = await waitForInitialPrefetch(attempts: 1_000) { await second.heldCount("seek") == 1 }
+        XCTAssertTrue(seeking)
+        XCTAssertEqual(messages(), ["message-9", "message-10"], "the read holds the rows before")
+        await coordinator.openNotificationThread(thread)
+        XCTAssertEqual(messages(), ["message-10"], "the newest page, not the place")
+        XCTAssertEqual(presentation.latestOpening, thread, "the detail follows the newest page")
+        XCTAssertFalse(presentation.loadingTranscriptThreads.contains(thread), "the dropped seek is not waited on")
+        XCTAssertNil(presentation.searchLanding)
+        XCTAssertNil(coordinator.readerPlaces[thread])
+        XCTAssertTrue(coordinator.presentationHolds.isEmpty)
+        try await second.release("seek")
+        let dropped = await waitForInitialPrefetch(attempts: 1_000) { coordinator.projectionTasks[thread] == nil }
+        XCTAssertTrue(dropped)
+        XCTAssertEqual(messages(), ["message-10"])
+        XCTAssertEqual(presentation.threadSnapshots[thread]?.ingestionWindow?.atLiveHead, true)
+        XCTAssertNil(presentation.searchLanding)
+        XCTAssertNil(coordinator.readerPlaces[thread])
+
+        // Opened before the new connection reads anything: only the newest
+        // page is read.
+        await coordinator.runtime.setIngestionViewportAnchor("message-10", for: thread)
+        let place = await coordinator.runtime.ingestionReaderPlace(for: thread)
+        XCTAssertEqual(place?.recordID, "message-10", "a place the next connection would read")
+        let third = try AppleInitialPrefetchTestHandle(epoch: "third-epoch")
+        await second.reconnect(to: third)
+        coordinator.closeIngestionHosts()
+        let ended = await waitForInitialPrefetch(attempts: 1_000) { coordinator.initialPrefetchTasks[thread] == nil }
+        XCTAssertTrue(ended)
+        await coordinator.openNotificationThread(thread)
+        XCTAssertEqual(presentation.latestOpening, thread)
+        // A detail mounting with its kept state reports the old row again.
+        presentation.onAction?(.viewportAnchor(threadID: thread, recordID: "message-10"))
+        let reported = await waitForInitialPrefetch(attempts: 1_000) {
+            await coordinator.runtime.ingestionReaderPlace(for: thread)?.recordID == "message-10"
+        }
+        XCTAssertTrue(reported)
+        coordinator.refreshVisibleTranscript(thread)
+        let latest = await waitForInitialPrefetch(attempts: 1_000) { await third.operations.first == "bootstrap" && coordinator.projectionTasks[thread] == nil }
+        XCTAssertTrue(latest)
+        operations = await third.operations
+        XCTAssertFalse(operations.contains("seek"))
+        XCTAssertNil(presentation.searchLanding)
+        XCTAssertTrue(coordinator.readerPlacesGivenUp.isEmpty, "the opening read ended the give-up")
+
+        // A place the reader takes later is read as before.
+        await coordinator.runtime.setIngestionViewportAnchor("message-10", for: thread)
+        let fourth = try AppleInitialPrefetchTestHandle(epoch: "fourth-epoch")
+        await third.reconnect(to: fourth)
+        coordinator.closeIngestionHosts()
+        let gone = await waitForInitialPrefetch(attempts: 1_000) { coordinator.initialPrefetchTasks[thread] == nil }
+        XCTAssertTrue(gone)
+        coordinator.refreshVisibleTranscript(thread)
+        let sought = await waitForInitialPrefetch(attempts: 1_000) { await fourth.operations.contains("seek") }
+        XCTAssertTrue(sought)
+        let reread = await waitForInitialPrefetch(attempts: 1_000) { coordinator.projectionTasks[thread] == nil }
+        XCTAssertTrue(reread)
+        await coordinator.setExperimentEnabled(false)
+    }
+
+    /// A match opened while a read is in flight waits for that read, which
+    /// may move the window, and is checked again when it ends. A reader who
+    /// leaves the match (another thread, the newest page) or a reset ends it.
+    @MainActor
+    func testASearchResultWaitsForTheReadInFlightAndYieldsToTheReader() async throws {
+        let match = { (thread: AgentThreadID, record: String, sequence: UInt64?) in
+            AgentSearchResult(threadID: thread, recordID: record, excerpt: "x", sequence: sequence, sourceOffset: nil)
+        }
+        let settled = { (coordinator: AgentCenterV2Coordinator, thread: AgentThreadID) in
+            await self.waitForInitialPrefetch(attempts: 1_000) {
+                coordinator.projectionTasks[thread] == nil && coordinator.pendingSeekRequests[thread] == nil
+            }
+        }
+
+        // Behind a read, a match it does not load is read around.
+        do {
+            let (coordinator, thread, _, handle) = try await makeInitialPrefetchFixture(transport: .sshTmux)
+            let presentation = coordinator.presentation
+            coordinator.requestNewerPage(thread, latest: true)
+            let opened = await settled(coordinator, thread)
+            XCTAssertTrue(opened)
+            coordinator.requestNewerPage(thread, latest: true)
+            coordinator.openSearchResult(match(thread, "message-3", 3))
+            XCTAssertEqual(coordinator.pendingSeekRequests[thread]?.recordID, "message-3")
+            let seeksWhileReading = await handle.seekRequests
+            XCTAssertTrue(seeksWhileReading.isEmpty)
+            let landed = await settled(coordinator, thread)
+            XCTAssertTrue(landed)
+            XCTAssertEqual(presentation.threadSnapshots[thread]?.messages.map(\.recordID), ["message-3"])
+            let seeks = await handle.seekRequests
+            XCTAssertEqual(seeks.count, 1)
+            XCTAssertEqual(presentation.searchLanding?.recordID, "message-3")
+
+            // A reset ends a landing still waiting.
+            await coordinator.setExperimentEnabled(false)
+            XCTAssertNil(presentation.searchLanding)
+        }
+
+        // A loaded match still waits for the read in flight, then needs none.
+        do {
+            let (coordinator, thread, _, handle) = try await makeInitialPrefetchFixture(transport: .moshTmux)
+            let presentation = coordinator.presentation
+            coordinator.requestNewerPage(thread, latest: true)
+            let opened = await settled(coordinator, thread)
+            XCTAssertTrue(opened)
+            coordinator.requestNewerPage(thread, latest: true)
+            coordinator.openSearchResult(match(thread, "message-10", 10))
+            XCTAssertEqual(coordinator.pendingSeekRequests[thread]?.recordID, "message-10")
+            XCTAssertTrue(presentation.loadingTranscriptThreads.contains(thread), "the detail waits for the read in flight")
+            let ended = await settled(coordinator, thread)
+            XCTAssertTrue(ended)
+            XCTAssertFalse(presentation.loadingTranscriptThreads.contains(thread))
+            let seeks = await handle.seekRequests
+            XCTAssertTrue(seeks.isEmpty)
+            XCTAssertEqual(presentation.searchLanding?.recordID, "message-10")
+
+            // The newest page, chosen over a match still waiting, ends it.
+            coordinator.requestNewerPage(thread, latest: true)
+            coordinator.openSearchResult(match(thread, "message-3", 3))
+            presentation.onAction?(.returnToLatest(thread))
+            let returned = await waitForInitialPrefetch(attempts: 1_000) {
+                presentation.searchLanding == nil && coordinator.projectionTasks[thread] == nil
+                    && coordinator.pendingSeekRequests[thread] == nil && coordinator.pendingLatestRequests.isEmpty
+            }
+            XCTAssertTrue(returned)
+            let seeksAfterReturn = await handle.seekRequests
+            XCTAssertTrue(seeksAfterReturn.isEmpty)
+            XCTAssertEqual(presentation.threadSnapshots[thread]?.ingestionWindow?.atLiveHead, true)
+            await coordinator.setExperimentEnabled(false)
+        }
+
+        // Another thread's selection drops a match queued behind a read.
+        do {
+            let (coordinator, thread, _, handle) = try await makeInitialPrefetchFixture(transport: .ssh)
+            let presentation = coordinator.presentation
+            coordinator.requestNewerPage(thread, latest: true)
+            coordinator.openSearchResult(match(thread, "message-3", 3))
+            presentation.select(AgentThreadID(hostID: thread.hostID, providerID: .claude, providerSessionID: "other")!)
+            XCTAssertNil(presentation.searchLanding)
+            let ended = await settled(coordinator, thread)
+            XCTAssertTrue(ended)
+            let seeks = await handle.seekRequests
+            XCTAssertTrue(seeks.isEmpty)
+            await coordinator.setExperimentEnabled(false)
+        }
+
+        // A match that cannot be sought opens an empty thread at its newest
+        // page, which holds it or not.
+        for (record, lands) in [("message-10", true), ("message-3", false)] {
+            let (coordinator, thread, _, handle) = try await makeInitialPrefetchFixture(transport: .mosh)
+            let presentation = coordinator.presentation
+            // A search result's thread is listed, though nothing of it is read.
+            let unread = await coordinator.runtime.snapshot(for: thread)
+            presentation.apply(thread: try XCTUnwrap(unread, record))
+            XCTAssertEqual(presentation.threadSnapshots[thread]?.messages.isEmpty, true, record)
+            coordinator.openSearchResult(match(thread, record, nil))
+            XCTAssertNotNil(coordinator.projectionTasks[thread], record)
+            let ended = await settled(coordinator, thread)
+            XCTAssertTrue(ended, record)
+            XCTAssertEqual(presentation.threadSnapshots[thread]?.messages.map(\.recordID), ["message-10"], record)
+            XCTAssertEqual(presentation.searchLanding?.recordID, lands ? record : nil, record)
+            let seeks = await handle.seekRequests
+            XCTAssertTrue(seeks.isEmpty, record)
+            await coordinator.setExperimentEnabled(false)
+        }
+    }
+
+    /// A match among rows no host holds open is read again; a match the
+    /// reader leaves mid-read keeps the window they chose; navigation queued
+    /// after a match that needs no read still runs; and a match queued
+    /// behind a receipt gets the read it never had.
+    @MainActor
+    func testASearchResultReadsPastStaleRowsAndYieldsMidRead() async throws {
+        let match = { (thread: AgentThreadID, record: String, sequence: UInt64?) in
+            AgentSearchResult(threadID: thread, recordID: record, excerpt: "x", sequence: sequence, sourceOffset: nil)
+        }
+        let settled = { (coordinator: AgentCenterV2Coordinator, thread: AgentThreadID) in
+            await self.waitForInitialPrefetch(attempts: 1_000) {
+                coordinator.projectionTasks[thread] == nil && coordinator.pendingSeekRequests[thread] == nil
+                    && coordinator.pendingLatestRequests.isEmpty && coordinator.pendingHistoryRequests.isEmpty
+            }
+        }
+        let other = { (thread: AgentThreadID) in AgentThreadID(hostID: thread.hostID, providerID: .claude, providerSessionID: "other")! }
+
+        // Rows from a window the host closed: the match is read again.
+        do {
+            let (coordinator, thread, _, handle) = try await makeInitialPrefetchFixture(transport: .sshTmux)
+            let presentation = coordinator.presentation
+            coordinator.requestNewerPage(thread, latest: true)
+            let opened = await settled(coordinator, thread)
+            XCTAssertTrue(opened)
+            for host in coordinator.ingestionHosts.values { host.bootstrapped.remove(thread) }
+            let earlier = await handle.operations.count
+            coordinator.openSearchResult(match(thread, "message-10", 10))
+            XCTAssertNotNil(coordinator.projectionTasks[thread])
+            XCTAssertTrue(presentation.loadingTranscriptThreads.contains(thread), "the detail cannot land on the stale row")
+            let landed = await settled(coordinator, thread)
+            XCTAssertTrue(landed)
+            let operations = await handle.operations
+            // This host refuses a seek to its newest record, so the newest
+            // page holds the match, and pages older as any newest page does.
+            XCTAssertEqual(operations.dropFirst(earlier).filter { $0 != "before" }, ["bootstrap", "seek"], "older-page prefetch aside")
+            XCTAssertEqual(presentation.searchLanding?.recordID, "message-10")
+            await coordinator.setExperimentEnabled(false)
+        }
+
+        // A refresh reading a closed window again shows no spinner; a loaded
+        // match there waits for it, then needs no read.
+        do {
+            let (coordinator, thread, _, handle) = try await makeInitialPrefetchFixture(transport: .mosh)
+            let presentation = coordinator.presentation
+            coordinator.requestNewerPage(thread, latest: true)
+            let opened = await settled(coordinator, thread)
+            XCTAssertTrue(opened)
+            coordinator.cancelInitialPrefetch(thread)
+            for host in coordinator.ingestionHosts.values { host.bootstrapped.remove(thread) }
+            coordinator.refreshVisibleTranscript(thread)
+            XCTAssertNotNil(coordinator.projectionTasks[thread])
+            XCTAssertFalse(presentation.loadingTranscriptThreads.contains(thread))
+            coordinator.openSearchResult(match(thread, "message-10", 10))
+            XCTAssertTrue(presentation.loadingTranscriptThreads.contains(thread), "the detail waits for the read in flight")
+            let landed = await settled(coordinator, thread)
+            XCTAssertTrue(landed)
+            let seeks = await handle.seekRequests
+            XCTAssertTrue(seeks.isEmpty)
+            XCTAssertFalse(presentation.loadingTranscriptThreads.contains(thread))
+            XCTAssertEqual(presentation.searchLanding?.recordID, "message-10")
+            await coordinator.setExperimentEnabled(false)
+        }
+
+        // A tap that cancels the older-page prefetch while its unsubscribe
+        // is unanswered keeps the connection, and the match is read.
+        do {
+            let (coordinator, thread, _, handle) = try await makeInitialPrefetchFixture(transport: .sshTmux)
+            let presentation = coordinator.presentation
+            await handle.hold("unsubscribe", skipping: 1)
+            coordinator.requestNewerPage(thread, latest: true)
+            let prefetching = await waitForInitialPrefetch(attempts: 1_000) {
+                await handle.heldCount("unsubscribe") == 1 && coordinator.projectionTasks[thread] == nil
+            }
+            XCTAssertTrue(prefetching)
+            XCTAssertNotNil(coordinator.initialPrefetchTasks[thread])
+            let connection = try XCTUnwrap(coordinator.ingestionHosts.values.first?.connection)
+            coordinator.openSearchResult(match(thread, "message-3", 3))
+            try await handle.release("unsubscribe")
+            let landed = await settled(coordinator, thread)
+            XCTAssertTrue(landed)
+            XCTAssertFalse(connection.isClosed)
+            XCTAssertTrue(coordinator.ingestionHosts.values.contains { $0.connection === connection })
+            XCTAssertEqual(presentation.threadSnapshots[thread]?.messages.map(\.recordID), ["message-3"])
+            let seeks = await handle.seekRequests
+            XCTAssertEqual(seeks.count, 1)
+            await coordinator.setExperimentEnabled(false)
+        }
+
+        // The newest page, chosen while the match is read, keeps the head.
+        do {
+            let (coordinator, thread, _, handle) = try await makeInitialPrefetchFixture(transport: .moshTmux)
+            let presentation = coordinator.presentation
+            coordinator.requestNewerPage(thread, latest: true)
+            let opened = await settled(coordinator, thread)
+            XCTAssertTrue(opened)
+            await handle.hold("seek")
+            coordinator.openSearchResult(match(thread, "message-3", 3))
+            let reading = await waitForInitialPrefetch(attempts: 1_000) { await handle.heldCount("seek") == 1 }
+            XCTAssertTrue(reading)
+            presentation.onAction?(.returnToLatest(thread))
+            let left = await waitForInitialPrefetch(attempts: 1_000) { presentation.searchLanding == nil }
+            XCTAssertTrue(left)
+            try await handle.release("seek")
+            let returned = await settled(coordinator, thread)
+            XCTAssertTrue(returned)
+            let cancels = await handle.windowCancels
+            let seek = await handle.seekRequests.last?["id"]?.stringValue
+            XCTAssertTrue(cancels.contains(try XCTUnwrap(seek)), "the match's page is given back unapplied")
+            let window = try XCTUnwrap(presentation.threadSnapshots[thread]?.ingestionWindow)
+            XCTAssertNotEqual(window.transition, .seek)
+            XCTAssertTrue(window.atLiveHead)
+            XCTAssertEqual(presentation.threadSnapshots[thread]?.messages.map(\.recordID), ["message-10"])
+            await coordinator.setExperimentEnabled(false)
+        }
+
+        // Another thread, chosen while the match is read: returning finds
+        // the window where it was.
+        do {
+            let (coordinator, thread, _, handle) = try await makeInitialPrefetchFixture(transport: .ssh)
+            let presentation = coordinator.presentation
+            coordinator.requestNewerPage(thread, latest: true)
+            let opened = await settled(coordinator, thread)
+            XCTAssertTrue(opened)
+            await handle.hold("seek")
+            coordinator.openSearchResult(match(thread, "message-3", 3))
+            let reading = await waitForInitialPrefetch(attempts: 1_000) { await handle.heldCount("seek") == 1 }
+            XCTAssertTrue(reading)
+            presentation.select(other(thread))
+            XCTAssertNil(presentation.searchLanding)
+            try await handle.release("seek")
+            let ended = await settled(coordinator, thread)
+            XCTAssertTrue(ended)
+            let cancels = await handle.windowCancels
+            let seek = await handle.seekRequests.last?["id"]?.stringValue
+            XCTAssertTrue(cancels.contains(try XCTUnwrap(seek)))
+            XCTAssertNotEqual(presentation.threadSnapshots[thread]?.ingestionWindow?.transition, .seek)
+            XCTAssertEqual(presentation.threadSnapshots[thread]?.messages.map(\.recordID), ["message-10"])
+            await coordinator.setExperimentEnabled(false)
+        }
+
+        // Older paging asked for after a loaded match still runs.
+        do {
+            let (coordinator, thread, _, handle) = try await makeInitialPrefetchFixture(transport: .mosh)
+            let presentation = coordinator.presentation
+            coordinator.requestNewerPage(thread, latest: true)
+            let opened = await settled(coordinator, thread)
+            XCTAssertTrue(opened)
+            // The opening's older-page prefetch would read history too.
+            coordinator.cancelInitialPrefetch(thread)
+            let quiet = await waitForInitialPrefetch(attempts: 1_000) { coordinator.initialPrefetchTasks[thread] == nil }
+            XCTAssertTrue(quiet)
+            let base = await handle.historyRequests
+            coordinator.requestNewerPage(thread, latest: true)
+            coordinator.openSearchResult(match(thread, "message-10", 10))
+            coordinator.requestOlderPage(thread)
+            XCTAssertTrue(coordinator.pendingHistoryRequests.contains(thread))
+            let paging = await waitForInitialPrefetch(attempts: 1_000) { await handle.historyRequests == base + 1 }
+            XCTAssertTrue(paging, "the older page queued after the match is read")
+            while await handle.heldHistoryCount > 0 { try await handle.releaseHistory() }
+            let ended = await settled(coordinator, thread)
+            XCTAssertTrue(ended)
+            let seeks = await handle.seekRequests
+            XCTAssertTrue(seeks.isEmpty)
+            XCTAssertEqual(presentation.searchLanding?.recordID, "message-10")
+            await coordinator.setExperimentEnabled(false)
+        }
+
+        // A match that cannot be sought, queued behind a receipt, opens the
+        // empty thread at its newest page once the receipt ends.
+        do {
+            let (coordinator, thread, binding, handle) = try await makeInitialPrefetchFixture(transport: .sshTmux)
+            let presentation = coordinator.presentation
+            let unread = await coordinator.runtime.snapshot(for: thread)
+            presentation.apply(thread: try XCTUnwrap(unread))
+            await handle.hold("receipt.frontier")
+            let request = AgentTextSendRequest(threadID: thread, binding: binding, text: "send before the match", queueWhenWorking: false)!
+            let lease = try await coordinator.runtime.acquireLease(threadID: thread, action: .send, binding: binding, textRequest: request)
+            let receipt = Task { @MainActor in try await coordinator.prepareOutgoingReceipt(lease) }
+            let waiting = await waitForInitialPrefetch(attempts: 1_000) { await handle.heldCount("receipt.frontier") == 1 }
+            XCTAssertTrue(waiting)
+            coordinator.openSearchResult(match(thread, "message-10", nil))
+            XCTAssertEqual(coordinator.pendingSeekRequests[thread]?.recordID, "message-10")
+            try await handle.release("receipt.frontier")
+            try await receipt.value
+            let landed = await settled(coordinator, thread)
+            XCTAssertTrue(landed)
+            XCTAssertEqual(presentation.threadSnapshots[thread]?.messages.map(\.recordID), ["message-10"])
+            XCTAssertEqual(presentation.searchLanding?.recordID, "message-10")
+            await coordinator.runtime.releaseLease(lease, result: .verified)
+            await coordinator.setExperimentEnabled(false)
+        }
+    }
+
     @MainActor
     private func waitForInitialPrefetch(attempts: Int = 200, _ predicate: @MainActor () async -> Bool) async -> Bool {
         for _ in 0..<attempts {
@@ -659,7 +1297,8 @@ final class AppleAgentServicesTests: XCTestCase {
 
     @MainActor
     private func makeInitialPrefetchFixture(transport: AgentTransportKind, initialResolveFailures: Int? = nil,
-                                            resolveFailure: (code: String, state: String, recovery: String) = ("sourceMissing", "failed", "manual")) async throws
+                                            resolveFailure: (code: String, state: String, recovery: String) = ("sourceMissing", "failed", "manual"),
+                                            seeks: Bool = true) async throws
         -> (AgentCenterV2Coordinator, AgentThreadID, AgentTerminalBinding, AppleInitialPrefetchTestHandle) {
         let metadata = AppleAgentMetadataRepository(fileURL: FileManager.default.temporaryDirectory
             .appendingPathComponent("agent-initial-prefetch-\(UUID()).json"))
@@ -669,11 +1308,11 @@ final class AppleAgentServicesTests: XCTestCase {
         let binding = AgentTerminalBinding(liveSessionID: UUID(), carrierGeneration: 4,
             incarnation: AgentIncarnationToken("initial-prefetch")!, transport: transport, agentPID: 42, capabilities: [.observe, .send])
         let thread = AgentThreadID(hostID: UUID(), providerID: .claude, providerSessionID: "initial-prefetch")!
-        let handle = try AppleInitialPrefetchTestHandle(resolveFailures: initialResolveFailures ?? 0, resolveFailure: resolveFailure)
+        let handle = try AppleInitialPrefetchTestHandle(resolveFailures: initialResolveFailures ?? 0, resolveFailure: resolveFailure, seeks: seeks)
         let source = AgentSessionSource(registrationID: UUID(), sessionID: binding.liveSessionID,
             discover: { .success([]) }, observe: { _ in nil }, inspect: { _ in nil },
             send: { _, _ in false }, jump: { _ in },
-            projectorExecAvailability: { _, _ in .available(.init { _ in handle }) }, readCarrier: { binding })
+            projectorExecAvailability: { _, _ in .available(.init { _ in await handle.opened() }) }, readCarrier: { binding })
         coordinator.sessionRoutes[binding.liveSessionID] = .init(hostID: thread.hostID, hostDisplayLabel: "fixture",
             source: source, profiles: { [] }, carrierGeneration: 4)
         let route = AppleAgentProjectionRoute(transcriptRef: "fixture", providerID: .claude, binding: binding, source: source)
@@ -811,6 +1450,91 @@ final class AppleAgentServicesTests: XCTestCase {
         }
     }
 
+    /// G-02: a thread's Files open at the agent's cwd, which the launch
+    /// refresh reads from its pane. A refresh asked for inside the refresh's
+    /// throttle still runs once it may, though nothing publishes again.
+    @MainActor
+    func testALaunchDirectoryRefreshAskedForInsideTheThrottleStillRuns() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("agent-directories-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let coordinator = AgentCenterV2Coordinator(metadata: AppleAgentMetadataRepository(fileURL: directory.appendingPathComponent("metadata.json")))
+        await coordinator.setExperimentEnabled(true)
+        let hostID = UUID(), registrationID = UUID()
+        let binding = AgentTerminalBinding(liveSessionID: UUID(), carrierGeneration: 1,
+            incarnation: AgentIncarnationToken("directory-fixture")!, transport: .sshTmux,
+            tmuxSession: "rig", windowID: "1", paneID: "2", agentPID: 42, capabilities: [.observe, .send, .tmux])
+        let threadID = AgentThreadID(hostID: hostID, providerID: .codex, providerSessionID: "directory-fixture")!
+        let location = AgentLocation(sessionID: binding.liveSessionID, hostName: "fixture", transportLabel: "ssh+tmux",
+            tmuxSessionName: "rig", windowID: 1, windowName: "rig", paneID: 2)
+        var reads = 0
+        let source = AgentSessionSource(registrationID: registrationID, sessionID: binding.liveSessionID,
+            discover: { .success([]) }, observe: { _ in nil }, inspect: { _ in nil },
+            send: { _, _ in false }, jump: { _ in },
+            validatedRemoteDirectories: { _ in reads += 1; return ["/srv/agent"] },
+            supportsTmuxLaunch: { true }, launchAgent: { _ in throw AgentActionError.unavailable })
+        coordinator.sessionRoutes[binding.liveSessionID] = AppleAgentSessionRoute(hostID: hostID, hostDisplayLabel: "fixture",
+            source: source, profiles: { [.builtInCodexCLI] }, carrierGeneration: 1)
+        // The first refresh finds no thread in the pane and starts the throttle.
+        await coordinator.synchronizePresentation()
+        coordinator.threadRoutes[threadID] = AppleAgentThreadRoute(registrationID: registrationID, location: location,
+            profile: .builtInCodexCLI, binding: binding, sourceIdentity: "fixture")
+        await coordinator.synchronizePresentation()
+        XCTAssertEqual(reads, 0)
+        XCTAssertNil(coordinator.presentation.threadFilesDirectories[threadID])
+        let deadline = Date().addingTimeInterval(AgentCenterV2Coordinator.launchTargetsRefreshInterval + 5)
+        while coordinator.presentation.threadFilesDirectories[threadID] == nil, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertEqual(coordinator.presentation.threadFilesDirectories[threadID]?.path, "/srv/agent")
+        XCTAssertEqual(reads, 1)
+        await coordinator.setExperimentEnabled(false)
+    }
+
+    /// A directory probe still out when Agent Center is disabled publishes
+    /// nothing once it returns, and the refresh it owed never runs.
+    @MainActor
+    func testALaunchDirectoryProbeOutAtDisablePublishesNothing() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("agent-directories-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let coordinator = AgentCenterV2Coordinator(metadata: AppleAgentMetadataRepository(fileURL: directory.appendingPathComponent("metadata.json")))
+        await coordinator.setExperimentEnabled(true)
+        let hostID = UUID(), registrationID = UUID()
+        let binding = AgentTerminalBinding(liveSessionID: UUID(), carrierGeneration: 1,
+            incarnation: AgentIncarnationToken("directory-fixture")!, transport: .sshTmux,
+            tmuxSession: "rig", windowID: "1", paneID: "2", agentPID: 42, capabilities: [.observe, .send, .tmux])
+        let threadID = AgentThreadID(hostID: hostID, providerID: .codex, providerSessionID: "directory-fixture")!
+        let location = AgentLocation(sessionID: binding.liveSessionID, hostName: "fixture", transportLabel: "ssh+tmux",
+            tmuxSessionName: "rig", windowID: 1, windowName: "rig", paneID: 2)
+        final class HeldProbe { var release: CheckedContinuation<[String], Never>? }
+        let held = HeldProbe()
+        var reads = 0
+        let source = AgentSessionSource(registrationID: registrationID, sessionID: binding.liveSessionID,
+            discover: { .success([]) }, observe: { _ in nil }, inspect: { _ in nil },
+            send: { _, _ in false }, jump: { _ in },
+            validatedRemoteDirectories: { _ in
+                reads += 1
+                return await withCheckedContinuation { held.release = $0 }
+            },
+            supportsTmuxLaunch: { true }, launchAgent: { _ in throw AgentActionError.unavailable })
+        coordinator.sessionRoutes[binding.liveSessionID] = AppleAgentSessionRoute(hostID: hostID, hostDisplayLabel: "fixture",
+            source: source, profiles: { [.builtInCodexCLI] }, carrierGeneration: 1)
+        coordinator.threadRoutes[threadID] = AppleAgentThreadRoute(registrationID: registrationID, location: location,
+            profile: .builtInCodexCLI, binding: binding, sourceIdentity: "fixture")
+        let refresh = Task { await coordinator.synchronizePresentation() }
+        let deadline = Date().addingTimeInterval(5)
+        while held.release == nil, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        let probe = try XCTUnwrap(held.release, "the refresh probes the pane")
+        // Asked for while the probe is out: owed for later.
+        await coordinator.synchronizePresentation()
+        await coordinator.setExperimentEnabled(false)
+        probe.resume(returning: ["/srv/agent"])
+        await refresh.value
+        try await Task.sleep(for: .seconds(AgentCenterV2Coordinator.launchTargetsRefreshInterval + 0.5))
+        XCTAssertNil(coordinator.presentation.threadFilesDirectories[threadID], "a probe returning after disable publishes nothing")
+        XCTAssertEqual(coordinator.presentation.launchTargets, [])
+        XCTAssertEqual(reads, 1, "the owed refresh died with the experiment")
+    }
+
     @MainActor
     func testNativeInventoryResumesImmediatelyAfterForegroundAndSurfaceReturnAcrossTransports() async throws {
         for transport: AgentTransportKind in [.ssh, .sshTmux, .mosh, .moshTmux] {
@@ -844,6 +1568,372 @@ final class AppleAgentServicesTests: XCTestCase {
             await coordinator.setExperimentEnabled(false)
             XCTAssertTrue(coordinator.inventoryRetryTasks.isEmpty)
         }
+    }
+
+    // Every hook of a working agent asked for another pass, so the host's whole
+    // catalog was walked and resent every 10 s while any agent worked.
+    @MainActor
+    func testOnlyAConversationTheInventoryHasNotListedAsksForAnotherPass() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("agent-inventory-trigger-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let coordinator = AgentCenterV2Coordinator(metadata: AppleAgentMetadataRepository(fileURL: directory.appendingPathComponent("metadata.json")))
+        await coordinator.setExperimentEnabled(true)
+        await coordinator.setApplicationActive(true)
+        coordinator.setSurfaceDemand(true)
+        let sessionID = UUID(), hostID = UUID()
+        let carrier = AgentTerminalBinding(liveSessionID: sessionID, carrierGeneration: 4,
+            incarnation: AgentIncarnationToken("inventory-trigger")!, transport: .ssh, capabilities: [.observe])
+        let location = AgentLocation(sessionID: sessionID, hostName: "fixture", transportLabel: "ssh",
+            tmuxSessionName: nil, windowID: nil, windowName: nil, paneID: nil)
+        let target = AgentProbeTarget(location: location, processNames: ["codex"], processIDs: [42],
+            visibleText: "completed", lifecycleEvent: nil, bracketedPasteEnabled: false)
+        let factory = AppleInventoryRecoveryTestFactory()
+        let source = AgentSessionSource(registrationID: UUID(), sessionID: sessionID,
+            discover: { .success([target]) }, observe: { _ in nil }, inspect: { _ in target },
+            automaticallyProbeLifecycleIntegration: false, send: { _, _ in false }, jump: { _ in },
+            projectorExecAvailability: { _, _ in .available(.init { try await factory.open($0) }) }, readCarrier: { carrier })
+        coordinator.registerSessionSource(source, hostID: hostID, profiles: { [.builtInCodexCLI] })
+        let key = "\(sessionID.uuidString):native"
+        func lifecycle(_ turn: String, _ timestamp: UInt64, session: String = "session", event: String = "Stop",
+                       state: Tessera.AgentStatus = .idle) -> AgentLifecycleEvent {
+            .init(version: 9, provider: "codex", event: event, state: state, reason: "turn-stopped",
+                timestampNanoseconds: timestamp, providerSessionID: session, turnID: turn, notificationType: "",
+                permissionMode: "", agentPID: 42,
+                transcriptRef: Data(session.utf8).base64EncodedString().replacingOccurrences(of: "=", with: ""))
+        }
+        func settle(requests: Int, _ step: String) async throws {
+            let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+            while ContinuousClock.now < deadline {
+                if await factory.inventoryRequests >= requests, coordinator.inventoryTasks.isEmpty,
+                   coordinator.sessionRefreshIsIdle(sessionID) { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            try await Task.sleep(for: .milliseconds(300))
+            let sent = await factory.inventoryRequests
+            XCTAssertEqual(sent, requests, step)
+        }
+        // Registration lists the host once.
+        try await settle(requests: 1, "registration")
+        // A conversation the inventory has not listed may be a new transcript.
+        let threadID = AgentThreadID(hostID: hostID, providerID: .codex, providerSessionID: "session")!
+        coordinator.inventoryRetryAfter[key] = .distantPast
+        coordinator.scheduleSessionRefresh(sessionID: sessionID, lifecycle: lifecycle("first", 100))
+        try await settle(requests: 2, "unlisted conversation")
+        XCTAssertNotNil(coordinator.threadRoutes[threadID])
+        // Once listed, its hooks ask for nothing.
+        coordinator.historicalRoutes[threadID] = AppleAgentProjectionRoute(transcriptRef: "c2Vzc2lvbg",
+            providerID: .codex, binding: carrier, source: source)
+        coordinator.inventoryRetryAfter[key] = .distantPast
+        coordinator.scheduleSessionRefresh(sessionID: sessionID, lifecycle: lifecycle("second", 200))
+        try await settle(requests: 2, "listed conversation")
+        XCTAssertNil(coordinator.inventoryRetryTasks[sessionID])
+        // `/clear` retires the live conversation, which the bind unlisted:
+        // only a pass lists it as history. Its successor is listed already.
+        await factory.catalog.add("session")
+        let successor = AgentThreadID(hostID: hostID, providerID: .codex, providerSessionID: "successor")!
+        coordinator.historicalRoutes[successor] = AppleAgentProjectionRoute(transcriptRef: "c3VjY2Vzc29y",
+            providerID: .codex, binding: carrier, source: source)
+        coordinator.inventoryRetryAfter[key] = .distantPast
+        coordinator.scheduleSessionRefresh(sessionID: sessionID,
+            lifecycle: lifecycle("end", 300, event: "SessionEnd", state: .unavailable))
+        try await settle(requests: 2, "ended conversation")
+        coordinator.scheduleSessionRefresh(sessionID: sessionID,
+            lifecycle: lifecycle("start", 301, session: "successor", event: "SessionStart"))
+        try await settle(requests: 3, "replaced conversation")
+        XCTAssertNil(coordinator.threadRoutes[threadID])
+        XCTAssertNotNil(coordinator.threadRoutes[successor])
+        XCTAssertEqual(coordinator.historicalRoutes[threadID]?.transcriptRef, "L2ZpeHR1cmUvc2Vzc2lvbg",
+                       "the retired conversation is listed as readable history")
+        // Within a pass's interval a request waits for it, once.
+        coordinator.inventoryRetryAfter[key] = Date().addingTimeInterval(2)
+        coordinator.scheduleSessionRefresh(sessionID: sessionID,
+            lifecycle: lifecycle("start", 400, session: "fresh", event: "SessionStart"))
+        let waitingBy = ContinuousClock.now.advanced(by: .seconds(2))
+        while coordinator.inventoryRetryTasks[sessionID] == nil, ContinuousClock.now < waitingBy {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertNotNil(coordinator.inventoryRetryTasks[sessionID])
+        let early = await factory.inventoryRequests
+        XCTAssertEqual(early, 3, "inside the interval")
+        try await settle(requests: 4, "after the interval")
+        // A request while a pass runs may come after the pass listed past
+        // it, so one more pass follows.
+        await factory.catalog.hold()
+        coordinator.inventoryRetryAfter[key] = .distantPast
+        coordinator.scheduleSessionRefresh(sessionID: sessionID,
+            lifecycle: lifecycle("start", 500, session: "held", event: "SessionStart"))
+        let parkedBy = ContinuousClock.now.advanced(by: .seconds(5))
+        while await !factory.catalog.isParked, ContinuousClock.now < parkedBy { try await Task.sleep(for: .milliseconds(10)) }
+        let parked = await factory.catalog.isParked
+        XCTAssertTrue(parked, "a pass is running")
+        coordinator.scheduleSessionRefresh(sessionID: sessionID,
+            lifecycle: lifecycle("start", 501, session: "late", event: "SessionStart"))
+        // Every ask the hook makes lands while the pass is parked.
+        let askedBy = ContinuousClock.now.advanced(by: .seconds(5))
+        while !coordinator.inventoryRerunRequests.contains(sessionID) || !coordinator.sessionRefreshIsIdle(sessionID),
+              ContinuousClock.now < askedBy {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(coordinator.inventoryRerunRequests.contains(sessionID))
+        XCTAssertTrue(coordinator.sessionRefreshIsIdle(sessionID))
+        let duringPass = await factory.inventoryRequests
+        XCTAssertEqual(duringPass, 5, "the parked pass is the only one")
+        coordinator.inventoryRetryAfter[key] = .distantPast
+        await factory.catalog.release()
+        try await settle(requests: 6, "a request during a pass")
+        await coordinator.setExperimentEnabled(false)
+    }
+
+    // A hook Core cannot take (here an event it does not know) leaves its
+    // conversation unlisted and repeats with every tool call, each asking for
+    // a pass. It asks once, and once more at its first Stop.
+    @MainActor
+    func testAnUnlistedConversationAsksAtItsFirstHookAndItsFirstStop() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("agent-inventory-ask-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let coordinator = AgentCenterV2Coordinator(metadata: AppleAgentMetadataRepository(fileURL: directory.appendingPathComponent("metadata.json")))
+        await coordinator.setExperimentEnabled(true)
+        await coordinator.setApplicationActive(true)
+        coordinator.setSurfaceDemand(true)
+        let sessionID = UUID()
+        let carrier = AgentTerminalBinding(liveSessionID: sessionID, carrierGeneration: 4,
+            incarnation: AgentIncarnationToken("inventory-ask")!, transport: .ssh, capabilities: [.observe])
+        let location = AgentLocation(sessionID: sessionID, hostName: "fixture", transportLabel: "ssh",
+            tmuxSessionName: nil, windowID: nil, windowName: nil, paneID: nil)
+        let target = AgentProbeTarget(location: location, processNames: ["codex"], processIDs: [42],
+            visibleText: "completed", lifecycleEvent: nil, bracketedPasteEnabled: false)
+        let factory = AppleInventoryRecoveryTestFactory()
+        let source = AgentSessionSource(registrationID: UUID(), sessionID: sessionID,
+            discover: { .success([target]) }, observe: { _ in nil }, inspect: { _ in target },
+            automaticallyProbeLifecycleIntegration: false, send: { _, _ in false }, jump: { _ in },
+            projectorExecAvailability: { _, _ in .available(.init { try await factory.open($0) }) }, readCarrier: { carrier })
+        let hostID = UUID()
+        coordinator.registerSessionSource(source, hostID: hostID, profiles: { [.builtInCodexCLI] })
+        let key = "\(sessionID.uuidString):native"
+        func settle(requests: Int, _ step: String) async throws {
+            let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+            while ContinuousClock.now < deadline {
+                if await factory.inventoryRequests >= requests, coordinator.inventoryTasks.isEmpty,
+                   coordinator.sessionRefreshIsIdle(sessionID) { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            try await Task.sleep(for: .milliseconds(300))
+            let sent = await factory.inventoryRequests
+            XCTAssertEqual(sent, requests, step)
+        }
+        try await settle(requests: 1, "registration")
+        // A conversation listed as history asks for nothing; any end of its
+        // first turn asks once more.
+        let listed = AgentThreadID(hostID: hostID, providerID: .codex, providerSessionID: "listed")!
+        coordinator.historicalRoutes[listed] = AppleAgentProjectionRoute(transcriptRef: "bGlzdGVk",
+            providerID: .codex, binding: carrier, source: source)
+        // A second conversation bound on this pane would retire the first,
+        // which asks too: one conversation binds, last.
+        let steps = [("quiet", "FixtureEvent", 2), ("quiet", "FixtureEvent", 2), ("listed", "FixtureEvent", 2),
+                     ("quiet", "StopFailure", 3), ("quiet", "Stop", 3)]
+        for (index, (session, event, passes)) in steps.enumerated() {
+            coordinator.inventoryRetryAfter[key] = .distantPast
+            coordinator.scheduleSessionRefresh(sessionID: sessionID, lifecycle: .init(version: 9, provider: "codex",
+                event: event, state: .idle, reason: "", timestampNanoseconds: 100 + UInt64(index),
+                providerSessionID: session, turnID: "turn-\(index)", notificationType: "", permissionMode: "", agentPID: 42,
+                transcriptRef: Data(session.utf8).base64EncodedString().replacingOccurrences(of: "=", with: "")))
+            try await settle(requests: passes, "\(session) \(event) \(index)")
+        }
+        await coordinator.setExperimentEnabled(false)
+    }
+
+    // The host skips a transcript still being written and says so. A pass
+    // that ended there asked nothing more, so the conversation stayed
+    // missing until an agent on the host hooked. One the host can never read
+    // while its agent keeps writing ends every pass incomplete: one retry.
+    @MainActor
+    func testAnIncompleteInventoryListsOnceMore() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("agent-inventory-incomplete-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let coordinator = AgentCenterV2Coordinator(metadata: AppleAgentMetadataRepository(fileURL: directory.appendingPathComponent("metadata.json")))
+        await coordinator.setExperimentEnabled(true)
+        await coordinator.setApplicationActive(true)
+        coordinator.setSurfaceDemand(true)
+        let carrier = AgentTerminalBinding(liveSessionID: UUID(), carrierGeneration: 4,
+            incarnation: AgentIncarnationToken("inventory-incomplete")!, transport: .ssh, capabilities: [.observe])
+        let factory = AppleInventoryRecoveryTestFactory()
+        await factory.catalog.add("session")
+        await factory.catalog.reportIncomplete(100)
+        await factory.catalog.hold()
+        let source = AgentSessionSource(registrationID: UUID(), sessionID: carrier.liveSessionID,
+            discover: { .success([]) }, observe: { _ in nil }, inspect: { _ in nil },
+            automaticallyProbeLifecycleIntegration: false, send: { _, _ in false }, jump: { _ in },
+            projectorExecAvailability: { _, _ in .available(.init { try await factory.open($0) }) }, readCarrier: { carrier })
+        coordinator.registerSessionSource(source, hostID: UUID(), profiles: { [.builtInCodexCLI] })
+        let parkedBy = ContinuousClock.now.advanced(by: .seconds(5))
+        while await !factory.catalog.isParked, ContinuousClock.now < parkedBy { try await Task.sleep(for: .milliseconds(10)) }
+        let parked = await factory.catalog.isParked
+        XCTAssertTrue(parked, "the first pass is running")
+        // The retry keeps a pass's interval; shorten it to the test's.
+        coordinator.inventoryRetryAfter["\(carrier.liveSessionID.uuidString):native"] = Date().addingTimeInterval(0.3)
+        await factory.catalog.release()
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while await factory.inventoryRequests < 2 || !coordinator.inventoryTasks.isEmpty, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try await Task.sleep(for: .milliseconds(500))
+        let passes = await factory.inventoryRequests
+        XCTAssertEqual(passes, 2, "one more pass, and a complete one asks nothing")
+        XCTAssertNil(coordinator.inventoryRetryTasks[carrier.liveSessionID])
+        await coordinator.setExperimentEnabled(false)
+    }
+
+    // A session ID no thread can carry (a control character in a file name),
+    // or a second row for one thread, failed the whole page: nothing past it
+    // was listed, and the pass retried every interval for good.
+    @MainActor
+    func testAnInventoryRowNoThreadCanCarryListsTheRest() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("agent-inventory-invalid-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let coordinator = AgentCenterV2Coordinator(metadata: AppleAgentMetadataRepository(fileURL: directory.appendingPathComponent("metadata.json")))
+        await coordinator.setExperimentEnabled(true)
+        await coordinator.setApplicationActive(true)
+        coordinator.setSurfaceDemand(true)
+        let hostID = UUID()
+        let carrier = AgentTerminalBinding(liveSessionID: UUID(), carrierGeneration: 4,
+            incarnation: AgentIncarnationToken("inventory-invalid")!, transport: .ssh, capabilities: [.observe])
+        let factory = AppleInventoryRecoveryTestFactory()
+        for session in ["before", "bad\u{7}", " before", "after"] { await factory.catalog.add(session) }
+        let source = AgentSessionSource(registrationID: UUID(), sessionID: carrier.liveSessionID,
+            discover: { .success([]) }, observe: { _ in nil }, inspect: { _ in nil },
+            automaticallyProbeLifecycleIntegration: false, send: { _, _ in false }, jump: { _ in },
+            projectorExecAvailability: { _, _ in .available(.init { try await factory.open($0) }) }, readCarrier: { carrier })
+        coordinator.registerSessionSource(source, hostID: hostID, profiles: { [.builtInCodexCLI] })
+        let after = AgentThreadID(hostID: hostID, providerID: .codex, providerSessionID: "after")!
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while coordinator.historicalRoutes[after] == nil || !coordinator.inventoryTasks.isEmpty, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertNotNil(coordinator.historicalRoutes[AgentThreadID(hostID: hostID, providerID: .codex, providerSessionID: "before")!])
+        XCTAssertNotNil(coordinator.historicalRoutes[after], "the row past it is listed")
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertNil(coordinator.inventoryRetryTasks[carrier.liveSessionID], "the pass completed")
+        let passes = await factory.inventoryRequests
+        XCTAssertEqual(passes, 1)
+        await coordinator.setExperimentEnabled(false)
+    }
+
+    // Any one session's pass lists its whole host. Opening the surface ran
+    // one for every session on it. A session that never finished a pass
+    // still runs its own, which proves its Tier-C providers, and a lister
+    // whose carrier dropped hands the host to a session that works.
+    @MainActor
+    func testOpeningTheSurfaceListsEachHostOnce() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("agent-inventory-surface-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let coordinator = AgentCenterV2Coordinator(metadata: AppleAgentMetadataRepository(fileURL: directory.appendingPathComponent("metadata.json")))
+        await coordinator.setExperimentEnabled(true)
+        await coordinator.setApplicationActive(true)
+        let hostID = UUID()
+        var factories: [AppleInventoryRecoveryTestFactory] = []
+        var sessionIDs: [UUID] = []
+        for _ in 0..<2 {
+            let carrier = AgentTerminalBinding(liveSessionID: UUID(), carrierGeneration: 4,
+                incarnation: AgentIncarnationToken("inventory-surface")!, transport: .ssh, capabilities: [.observe])
+            let factory = AppleInventoryRecoveryTestFactory()
+            let source = AgentSessionSource(registrationID: UUID(), sessionID: carrier.liveSessionID,
+                discover: { .success([]) }, observe: { _ in nil }, inspect: { _ in nil },
+                automaticallyProbeLifecycleIntegration: false, send: { _, _ in false }, jump: { _ in },
+                projectorExecAvailability: { _, _ in .available(.init { try await factory.open($0) }) }, readCarrier: { carrier })
+            coordinator.registerSessionSource(source, hostID: hostID, profiles: { [.builtInCodexCLI] })
+            factories.append(factory)
+            sessionIDs.append(carrier.liveSessionID)
+        }
+        func passes() async -> Int {
+            var count = 0
+            for factory in factories { count += await factory.inventoryRequests }
+            return count
+        }
+        func settle(_ expected: Int) async throws {
+            let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+            while await passes() < expected || !coordinator.inventoryTasks.isEmpty, ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        func reopen() { coordinator.setSurfaceDemand(false); coordinator.setSurfaceDemand(true) }
+        // Registered with the surface closed: each runs its first pass.
+        coordinator.setSurfaceDemand(true)
+        try await settle(2)
+        let first = await passes()
+        XCTAssertEqual(first, 2, "each session's first pass")
+        reopen()
+        try await settle(3)
+        let opened = await passes()
+        XCTAssertEqual(opened, 3, "one session lists the host")
+        let lister = sessionIDs.sorted { $0.uuidString < $1.uuidString }[0]
+        let listerIndex = sessionIDs.firstIndex(of: lister)!, otherIndex = 1 - listerIndex
+        await factories[listerIndex].catalog.fail(1)
+        reopen()
+        try await settle(4)
+        XCTAssertEqual(coordinator.nativeInventoryWorked[lister], false, "the lister's pass failed")
+        let listerPasses = await factories[listerIndex].inventoryRequests
+        let otherPasses = await factories[otherIndex].inventoryRequests
+        reopen()
+        try await settle(5)
+        let listerAfter = await factories[listerIndex].inventoryRequests
+        let otherAfter = await factories[otherIndex].inventoryRequests
+        XCTAssertEqual(listerAfter, listerPasses, "a failing session is not the lister")
+        XCTAssertEqual(otherAfter, otherPasses + 1, "the session that works lists the host")
+        await coordinator.setExperimentEnabled(false)
+    }
+
+    // A closed tab's listings read through it. Every other tab on the host
+    // listed the whole host again; one is enough.
+    @MainActor
+    func testClosingASessionListsItsHostAgainThroughOneOtherSession() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("agent-inventory-unregister-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let coordinator = AgentCenterV2Coordinator(metadata: AppleAgentMetadataRepository(fileURL: directory.appendingPathComponent("metadata.json")))
+        await coordinator.setExperimentEnabled(true)
+        await coordinator.setApplicationActive(true)
+        coordinator.setSurfaceDemand(true)
+        let hostID = UUID()
+        var sessions: [(source: AgentSessionSource, factory: AppleInventoryRecoveryTestFactory)] = []
+        for _ in 0..<3 {
+            let carrier = AgentTerminalBinding(liveSessionID: UUID(), carrierGeneration: 4,
+                incarnation: AgentIncarnationToken("inventory-unregister")!, transport: .ssh, capabilities: [.observe])
+            let factory = AppleInventoryRecoveryTestFactory()
+            let source = AgentSessionSource(registrationID: UUID(), sessionID: carrier.liveSessionID,
+                discover: { .success([]) }, observe: { _ in nil }, inspect: { _ in nil },
+                automaticallyProbeLifecycleIntegration: false, send: { _, _ in false }, jump: { _ in },
+                projectorExecAvailability: { _, _ in .available(.init { try await factory.open($0) }) }, readCarrier: { carrier })
+            coordinator.registerSessionSource(source, hostID: hostID, profiles: { [.builtInCodexCLI] })
+            sessions.append((source, factory))
+        }
+        func passes() async -> Int {
+            var count = 0
+            for session in sessions.dropFirst() { count += await session.factory.inventoryRequests }
+            return count
+        }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while await passes() < 2 || !coordinator.inventoryTasks.isEmpty, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let registered = await passes()
+        XCTAssertEqual(registered, 2, "each registration lists the host")
+        // The first of the rest has a dropped carrier: its last pass failed.
+        let rest = sessions.dropFirst().sorted { $0.source.sessionID.uuidString < $1.source.sessionID.uuidString }
+        coordinator.nativeInventoryWorked[rest[0].source.sessionID] = false
+        let failingBefore = await rest[0].factory.inventoryRequests
+        coordinator.inventoryRetryAfter.removeAll()
+        coordinator.unregisterSessionSource(sessionID: sessions[0].source.sessionID,
+            registrationID: sessions[0].source.registrationID)
+        let relisted = ContinuousClock.now.advanced(by: .seconds(5))
+        while await passes() < 3 || !coordinator.inventoryTasks.isEmpty, ContinuousClock.now < relisted {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try await Task.sleep(for: .milliseconds(500))
+        let after = await passes()
+        XCTAssertEqual(after, 3, "one other session lists the host again")
+        let failingAfter = await rest[0].factory.inventoryRequests
+        XCTAssertEqual(failingAfter, failingBefore, "a session whose pass works lists it")
+        await coordinator.setExperimentEnabled(false)
     }
 
     @MainActor
@@ -909,6 +1999,75 @@ final class AppleAgentServicesTests: XCTestCase {
             let closed = await handle.isClosed
             XCTAssertTrue(closed, "a factory that returns after ownership ends must not leak its SSH exec")
         }
+    }
+
+    /// Polls for up to two seconds.
+    @MainActor
+    private func pollUntil(_ condition: @MainActor () async -> Bool) async -> Bool {
+        for _ in 0..<200 {
+            if await condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return await condition()
+    }
+
+    @MainActor
+    func testSearchRowsShowAsTheHostFindsThemAndANewQueryClearsThem() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("agent-progressive-search-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let coordinator = AgentCenterV2Coordinator(metadata: AppleAgentMetadataRepository(fileURL: directory.appendingPathComponent("metadata.json")))
+        await coordinator.setExperimentEnabled(true)
+        coordinator.setSurfaceDemand(true)
+        let carrier = makeBinding()
+        let gate = AppleSearchTestGate()
+        let handle = try AppleWindowTestHandle(search: true, searchSecondReplyGate: gate)
+        let source = AgentSessionSource(registrationID: UUID(), sessionID: carrier.liveSessionID,
+            discover: { .success([]) }, observe: { _ in nil }, inspect: { _ in nil },
+            automaticallyProbeLifecycleIntegration: false, send: { _, _ in false }, jump: { _ in },
+            projectorExecAvailability: { _, _ in .available(.init { _ in handle }) }, readCarrier: { carrier })
+        let hostID = UUID()
+        coordinator.sessionRoutes[source.sessionID] = .init(hostID: hostID, hostDisplayLabel: "fixture",
+            source: source, profiles: { [] }, carrierGeneration: 4)
+        let thread = AgentThreadID(hostID: hostID, providerID: .claude, providerSessionID: "progressive")!
+        await coordinator.register(summary: .init(id: thread, providerName: "Claude",
+            availability: .init(content: true, status: false, actions: false, spawn: false, fork: false, search: true)), binding: nil)
+        let (host, _) = try await coordinator.nativeHost(source: source)
+        host.threads[thread] = "t1"
+        coordinator.historicalRoutes[thread] = .init(transcriptRef: "/fixture/session.jsonl", providerID: .claude,
+            binding: carrier, source: source)
+        let presentation = coordinator.presentation
+
+        coordinator.scheduleSearch(query: "needle")
+        XCTAssertTrue(presentation.isSearching)
+        let interim = await pollUntil { presentation.searchSnapshot.results.map(\.recordID) == ["jsonl:1:2:0"] }
+        XCTAssertTrue(interim, "the first reply's row shows while the host reads on")
+        XCTAssertTrue(presentation.isSearching, "the spinner stays until the search ends")
+        let held = await gate.isWaiting
+        XCTAssertTrue(held, "precondition: the second reply is still held")
+        await gate.release()
+        let ended = await pollUntil { !presentation.isSearching }
+        XCTAssertTrue(ended)
+        XCTAssertEqual(presentation.searchSnapshot.results.map(\.recordID), ["jsonl:1:2:0", "jsonl:1:2:9"],
+                       "the end keeps the shown row first")
+        XCTAssertEqual(presentation.searchSnapshot.results.map(\.excerpt), ["first needle", "second needle"])
+
+        // The same query again keeps its rows while it runs.
+        coordinator.scheduleSearch(query: "needle ")
+        let rerunHeld = await pollUntil { await gate.isWaiting }
+        XCTAssertTrue(rerunHeld)
+        XCTAssertEqual(presentation.searchSnapshot.results.count, 2, "a rerun never blanks what it showed")
+        await gate.release()
+        _ = await pollUntil { !presentation.isSearching }
+
+        // A new query shows none of the last one's rows, even before hosts answer.
+        coordinator.scheduleSearch(query: "zzz-unmatched")
+        let cleared = await pollUntil { presentation.searchSnapshot.results.isEmpty }
+        XCTAssertTrue(cleared, "a new query replaces the last one's rows at once")
+        XCTAssertTrue(presentation.isSearching)
+        let newHeld = await pollUntil { await gate.isWaiting }
+        XCTAssertTrue(newHeld)
+        await gate.release()
+        await coordinator.setExperimentEnabled(false)
     }
 
     @MainActor
@@ -1159,6 +2318,19 @@ final class AppleAgentServicesTests: XCTestCase {
         let styled = cells.map { $0.map { "\u{1B}[38;5;246m\($0)" }.joined() + "\u{1B}[39m" }.joined(separator: "\n")
         XCTAssertGreaterThan(styled.utf8.count, 16_384)
         XCTAssertEqual(AppleAgentPromptCapture.bottomWholeRows(styled), cells.joined(separator: "\n"))
+
+        // A local grid brings its own styled text; a tmux capture's is its text.
+        let location = AgentLocation(sessionID: UUID(), hostName: "rig", transportLabel: "SSH", tmuxSessionName: nil,
+                                     windowID: nil, windowName: nil, paneID: nil)
+        let grid = "← \u{1B}[0;48;5;153m ☐ Database \u{1B}[0m ☐ Features  ✔ Submit  →"
+        let local = AgentProbeTarget(location: location, processNames: ["claude"], visibleText: "←  ☐ Database  ☐ Features  ✔ Submit  →",
+                                     currentInputLine: "é" + String(repeating: "x", count: 3_000), promptText: grid, bracketedPasteEnabled: false)
+        XCTAssertEqual(AppleAgentPromptCapture.request(.claude, local)?.visibleText, grid)
+        XCTAssertEqual(AppleAgentPromptCapture.request(.claude, local)?.currentCursorLine?.utf8.count, 2_048)
+        let tmux = AgentProbeTarget(location: location, processNames: ["claude"], visibleText: styled, bracketedPasteEnabled: false)
+        XCTAssertEqual(AppleAgentPromptCapture.request(.claude, tmux)?.visibleText, cells.joined(separator: "\n"))
+        XCTAssertNil(AppleAgentPromptCapture.request(.claude, AgentProbeTarget(location: location, processNames: [],
+            visibleText: nil, promptText: grid, bracketedPasteEnabled: false)), "no screen, no request")
     }
 
     /// Interrupt and open need only the pane's identity; a capture that raced
@@ -1283,7 +2455,9 @@ final class AppleAgentServicesTests: XCTestCase {
         }
         let first = try XCTUnwrap(AgentThreadID(hostID: session.hostID, providerID: .claude, providerSessionID: "first"))
         let second = try XCTUnwrap(AgentThreadID(hostID: session.hostID, providerID: .claude, providerSessionID: "second"))
-        for invalid in [[row("first"), [:]], [row("first"), row("first")], Array(repeating: row("first"), count: 501)] {
+        // A second row for one thread is skipped, not invalid
+        // (testAnInventoryRowNoThreadCanCarryListsTheRest).
+        for invalid in [[row("first"), [:]], Array(repeating: row("first"), count: 501)] {
             do {
                 _ = try await coordinator.applyNativeInventoryPage(invalid, host: host, session: session, isCurrent: { true })
                 XCTFail("invalid page accepted")
@@ -1821,11 +2995,18 @@ final class AppleAgentServicesTests: XCTestCase {
         let listed = try XCTUnwrap(AgentSessionSourceFactory.parseOccupancyPanes(["%75 100", "%76 200"]))
         XCTAssertEqual(listed.roots, [75: 100, 76: 200])
         XCTAssertTrue(listed.complete)
-        for count in [AgentSessionSourceFactory.occupancyPaneLimit, AgentSessionSourceFactory.occupancyPaneLimit + 1] {
-            let capped = try XCTUnwrap(AgentSessionSourceFactory.parseOccupancyPanes((0..<count).map { "%\($0) \(100 + $0)" }))
-            XCTAssertFalse(capped.complete)
-            XCTAssertEqual(capped.roots.count, AgentSessionSourceFactory.occupancyPaneLimit)
-        }
+        // A view session grouped with its owner lists every shared pane again.
+        let grouped = try XCTUnwrap(AgentSessionSourceFactory.parseOccupancyPanes(["%75 100", "%76 200", "%75 100", "%76 200"]))
+        XCTAssertEqual(grouped.roots, [75: 100, 76: 200])
+        XCTAssertTrue(grouped.complete)
+        let limit = AgentSessionSourceFactory.occupancyPaneLimit
+        let full = try XCTUnwrap(AgentSessionSourceFactory.parseOccupancyPanes(
+            (0..<limit).map { "%\($0) \(100 + $0)" } + (0..<limit).map { "%\($0) \(100 + $0)" }))
+        XCTAssertTrue(full.complete)
+        XCTAssertEqual(full.roots.count, limit)
+        let capped = try XCTUnwrap(AgentSessionSourceFactory.parseOccupancyPanes((0...limit).map { "%\($0) \(100 + $0)" }))
+        XCTAssertFalse(capped.complete)
+        XCTAssertEqual(capped.roots.count, limit)
         for lines in [[], ["%75 100", "partial"], ["%75 100", "%75 200"], ["75 100"], ["%75 0"]] {
             XCTAssertNil(AgentSessionSourceFactory.parseOccupancyPanes(lines))
         }
@@ -1983,6 +3164,209 @@ final class AppleAgentServicesTests: XCTestCase {
         XCTAssertEqual(alternate.cursorVisible, false)
     }
 
+    /// Claude marks its current question tab only by its background. The
+    /// local grid's text loses it; the prompt text an action inspection
+    /// reads keeps it, as a tmux capture's SGR does, so a terminal moving to
+    /// an alike question's tab shows another prompt.
+    @MainActor
+    func testTheLocalGridsPromptTextKeepsClaudesHighlightedTab() throws {
+        let rule = String(repeating: "─", count: 60)
+        func dialog(_ bar: String) -> String {
+            [rule, bar, "", "Which database should the service use?", "", "❯ 1. Postgres", "     Transactional.",
+             "  2. SQLite", "     Embedded.", "  3. Type something.", rule, "  4. Chat about this", "",
+             "Enter to select · Tab/Arrow keys to navigate · Esc to cancel"].joined(separator: "\r\n")
+        }
+        func capture(_ bar: String) throws -> AgentSessionSourceFactory.PaneCapture {
+            let terminal = Terminal(delegate: AgentComposerTerminalDelegate(), options: TerminalOptions(cols: 60, rows: 14, scrollback: 10))
+            terminal.feed(text: "\u{1b}[2J\u{1b}[H" + dialog(bar))
+            XCTAssertNil(try XCTUnwrap(AgentSessionSourceFactory.terminalCapture(terminal)).promptText, "only actions read it")
+            return try XCTUnwrap(AgentSessionSourceFactory.terminalCapture(terminal, styled: true))
+        }
+        func observe(_ text: String) throws -> AgentPromptObservationResult {
+            try XCTUnwrap(AgentPromptGrammar.observe(try XCTUnwrap(
+                AgentPromptObservationRequest(providerID: .claude, visibleText: text, currentCursorLine: nil))))
+        }
+        let shown = try capture("← \u{1b}[38;5;16m\u{1b}[48;5;153m ☐ Database \u{1b}[39m\u{1b}[49m ☐ Features  ✔ Submit  →")
+        let moved = try capture("←  ☐ Database \u{1b}[38;5;16m\u{1b}[48;5;153m ☐ Features \u{1b}[39m\u{1b}[49m ✔ Submit  →")
+        XCTAssertEqual(shown.text, moved.text, "the plain grid reads both alike")
+        let first = try observe(try XCTUnwrap(shown.promptText)), second = try observe(try XCTUnwrap(moved.promptText))
+        XCTAssertEqual(first.identity, try observe(shown.text).identity, "the styled text reads the same rows")
+        XCTAssertEqual(first.signature, try observe(shown.text).signature)
+        XCTAssertTrue(first.isSameQuestion(identity: first.identity, placement: first.placement))
+        XCTAssertFalse(second.isSameQuestion(identity: first.identity, placement: first.placement),
+                       "another terminal moved to the alike question's tab")
+        XCTAssertTrue(try XCTUnwrap(first.placement).contains("tab=1"))
+        XCTAssertTrue(try XCTUnwrap(second.placement).contains("tab=2"))
+
+        let terminal = Terminal(delegate: AgentComposerTerminalDelegate(), options: TerminalOptions(cols: 20, rows: 2, scrollback: 10))
+        terminal.feed(text: "\u{1b}[41ma\u{1b}[101mb\u{1b}[48;2;1;2;3mc\u{1b}[7md\u{1b}[0me\r\n\u{1b}[48;5;200m界x")
+        XCTAssertEqual(try XCTUnwrap(AgentSessionSourceFactory.terminalCapture(terminal, styled: true)).promptText,
+                       "\u{1b}[0;41ma\u{1b}[0;101mb\u{1b}[0;48;2;1;2;3mc\u{1b}[0;7;48;2;1;2;3md\u{1b}[0me"
+                       + String(repeating: " ", count: 15) + "\n\u{1b}[0;48;5;200m界x\u{1b}[0m" + String(repeating: " ", count: 17),
+                       "16 colours as written; a wide glyph's continuation holds no cell")
+
+        // A grid whose backgrounds change at every cell keeps its bottom
+        // whole rows within the 16 KiB bound.
+        let busy = Terminal(delegate: AgentComposerTerminalDelegate(), options: TerminalOptions(cols: 200, rows: 50, scrollback: 10))
+        let letters = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        busy.feed(text: (0..<50).map { row in
+            (0..<200).map { "\u{1b}[\($0 % 2 == 0 ? 41 : 42)m\($0 == 0 ? letters[row % 26] : "x")" }.joined()
+        }.joined(separator: "\r\n"))
+        let bounded = try XCTUnwrap(AgentSessionSourceFactory.terminalCapture(busy, styled: true)?.promptText)
+        let kept = bounded.components(separatedBy: "\n")
+        XCTAssertEqual(kept.count, 10, "each row takes 1,604 bytes")
+        XCTAssertEqual(bounded.utf8.count, 10 * 1_604 + 9)
+        XCTAssertTrue(kept.first?.hasPrefix("\u{1b}[0;41mO\u{1b}[0;42mx") == true, "row 40 is the oldest kept")
+        XCTAssertTrue(kept.last?.hasPrefix("\u{1b}[0;41mX") == true)
+        XCTAssertTrue(kept.allSatisfy { $0.hasSuffix("\u{1b}[0;42mx\u{1b}[0m") })
+    }
+
+    /// A source reads a local grid's backgrounds for its prompt inspection
+    /// only, raw and in inline tmux's rendered pane, and the endpoint asks
+    /// for that one only for Claude, the one provider that reads them.
+    @MainActor
+    func testOnlyClaudesPromptInspectionReadsTheLocalGridsBackgrounds() async throws {
+        let rule = String(repeating: "─", count: 60)
+        let dialog = [rule, "← \u{1b}[48;5;153m ☐ Database \u{1b}[49m ☐ Features  ✔ Submit  →", "",
+            "Which database should the service use?", "", "❯ 1. Postgres", "     Transactional.", "  2. SQLite",
+            "     Embedded.", "  3. Type something.", rule, "  4. Chat about this", "",
+            "Enter to select · Tab/Arrow keys to navigate · Esc to cancel"].joined(separator: "\r\n")
+        let profile = SwipePadProfile(id: UUID(), name: "Claude", matchProcess: "claude", bindings: [:], isBuiltIn: false)
+        let session = SSHSession(host: Host(name: "fixture", address: "192.0.2.1", port: 22, user: "fixture")) // never connected
+        for inline in [false, true] {
+            let view = TesseraResponderAwareTerminalView(frame: CGRect(x: 0, y: 0, width: 1_200, height: 800))
+            let box = TerminalBox(traceLabel: "prompt-grid")
+            box.view = view
+            let terminal = view.getTerminal()
+            XCTAssertGreaterThanOrEqual(terminal.cols, 60)
+            terminal.feed(text: "\u{1b}[2J\u{1b}[\(terminal.rows - 13);1H" + dialog)
+            let tmux = TmuxController(controlPath: inline ? .inline : .sideChannel)
+            var wire: [String] = []
+            if inline {
+                tmux.feedTerminal = { _ in }
+                tmux.sendBytes = { wire.append(String(decoding: $0, as: UTF8.self)) }
+                var replies = 1
+                // Answer, empty, each reply the controller owes.
+                func answerOwed() {
+                    for _ in 0..<20 where tmux._debugPendingCommandCount > 0 {
+                        replies += 1
+                        tmux.ingest(Array("%begin 0 \(replies) 1\r\n%end 0 \(replies) 1\r\n".utf8))
+                    }
+                }
+                tmux.ingest(Array("\u{1B}P1000p%begin 0 1 0\r\n%end 0 1 0\r\n".utf8))
+                answerOwed()
+                tmux.ingest(Array("%window-add @1\r\n".utf8))
+                answerOwed()
+                tmux.ingest(Array("%output %10 boot\r\n".utf8))
+                // The rendered pane subscribes to its metadata on a later
+                // turn; answer that too, so the inspection's query is the
+                // next one answered.
+                for _ in 0..<500 where !tmux._debugPendingCommands.contains(where: { $0.hasPrefix("refresh-client -B") }) {
+                    await Task.yield()
+                }
+                XCTAssertTrue(tmux._debugPendingCommands.contains { $0.hasPrefix("refresh-client -B") }, "\(wire)")
+                answerOwed()
+                XCTAssertEqual(tmux._debugPendingCommands, [])
+                XCTAssertEqual(tmux.renderedPaneId, PaneId(10))
+            }
+            let id = UUID()
+            let source = AgentSessionSourceFactory.make(sessionID: id, hostName: "fixture", baseTransportLabel: "ssh",
+                tmux: tmux, terminalBox: box, tmuxSessionName: { inline ? "rig" : nil }, profiles: { [profile] },
+                rawProcessProvider: { .init(processNames: ["claude"], processIDs: [42]) },
+                sessionCommands: AppleSessionCommandFacade(session: session, tmux: tmux), rawSend: { _ in })
+            let location = AgentLocation(sessionID: id, hostName: "fixture", transportLabel: "ssh",
+                tmuxSessionName: inline ? "rig" : nil, windowID: inline ? 1 : nil, windowName: nil, paneID: inline ? 10 : nil)
+            func inspect(_ provider: AgentProviderID) async throws -> AgentProbeTarget {
+                let sent = wire.count
+                let task = Task { @MainActor in await AppleAgentPromptCapture.inspection(provider, source)(location, nil) }
+                if inline {
+                    for _ in 0..<500 where !wire.dropFirst(sent).contains(where: { $0.hasPrefix("display-message") }) {
+                        await Task.yield()
+                    }
+                    XCTAssertEqual(wire.dropFirst(sent).filter { $0.hasPrefix("display-message") }.count, 1, "\(wire)")
+                    XCTAssertEqual(tmux._debugPendingCommands.map { $0.hasPrefix("display-message") }, [true], "\(wire)")
+                    tmux.ingest(Array("%begin 0 \(60 + sent) 1\r\n@1\t100\tclaude\t\tmain\r\n%end 0 \(60 + sent) 1\r\n".utf8))
+                }
+                let target = await task.value
+                return try XCTUnwrap(target, "inline=\(inline) \(provider)")
+            }
+            let claude = try await inspect(.claude), codex = try await inspect(.codex)
+            XCTAssertNil(codex.promptText, "inline=\(inline)")
+            XCTAssertFalse(try XCTUnwrap(claude.visibleText).contains("\u{1b}"))
+            let request = try XCTUnwrap(AppleAgentPromptCapture.request(.claude, claude))
+            XCTAssertTrue(request.visibleText.contains("← \u{1b}[0;48;5;153m ☐ Database \u{1b}[0m ☐ Features"), "inline=\(inline)")
+            let observed = try XCTUnwrap(AgentPromptGrammar.observe(request), "inline=\(inline)")
+            XCTAssertTrue(try XCTUnwrap(observed.placement).contains("tab=1"), "inline=\(inline)")
+            withExtendedLifetime(view) {}
+        }
+    }
+
+    /// The endpoint reads a Claude thread's screen through its source's
+    /// prompt inspection, for an action and for the live watch alike, and
+    /// another provider's through the plain one.
+    @MainActor
+    func testTheEndpointReadsOnlyClaudesScreensThroughThePromptInspection() async throws {
+        let rule = String(repeating: "─", count: 60)
+        func dialog(_ bar: String) -> String {
+            [rule, bar, "", "Which database should the service use?", "", "❯ 1. Postgres", "     Transactional.",
+             "  2. SQLite", "     Embedded.", "  3. Type something.", rule, "  4. Chat about this", "",
+             "Enter to select · Tab/Arrow keys to navigate · Esc to cancel"].joined(separator: "\n")
+        }
+        let plain = dialog("←  ☐ Database  ☐ Features  ✔ Submit  →")
+        let styled = dialog("← \u{1b}[0;48;5;153m ☐ Database \u{1b}[0m ☐ Features  ✔ Submit  →")
+        for (provider, profile, process) in [(AgentProviderID.claude, SwipePadProfile.builtInClaudeCode, "claude"),
+                                             (.codex, .builtInCodexCLI, "codex")] {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("agent-prompt-inspection-\(UUID())")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let coordinator = AgentCenterV2Coordinator(runtime: AgentCenterRuntime(),
+                metadata: AppleAgentMetadataRepository(fileURL: directory.appendingPathComponent("metadata.json")))
+            await coordinator.setExperimentEnabled(true)
+            let hostID = UUID(), registrationID = UUID()
+            let binding = AgentTerminalBinding(liveSessionID: UUID(), carrierGeneration: 1,
+                incarnation: AgentIncarnationToken("inspection-fixture")!, transport: .ssh,
+                tmuxSession: nil, windowID: nil, paneID: nil, agentPID: 42, capabilities: [.observe, .promptAnswer])
+            let threadID = AgentThreadID(hostID: hostID, providerID: provider, providerSessionID: "inspection-fixture")!
+            let location = AgentLocation(sessionID: binding.liveSessionID, hostName: "fixture", transportLabel: "ssh",
+                tmuxSessionName: nil, windowID: nil, windowName: nil, paneID: nil)
+            var reads: [String] = []
+            func target(_ promptText: String?) -> AgentProbeTarget {
+                AgentProbeTarget(location: location, processNames: [process], processIDs: [42], visibleText: plain,
+                    promptText: promptText, bracketedPasteEnabled: false)
+            }
+            let source = AgentSessionSource(registrationID: registrationID, sessionID: binding.liveSessionID,
+                discover: { .success([]) }, observe: { _ in nil }, inspect: { _ in nil },
+                inspectInputTarget: { _, _ in reads.append("plain"); return target(nil) },
+                inspectPromptTarget: { _, _ in reads.append("styled"); return target(styled) },
+                send: { _, _ in false }, jump: { _ in })
+            let session = AppleAgentSessionRoute(hostID: hostID, hostDisplayLabel: "fixture", source: source,
+                profiles: { [profile] }, carrierGeneration: 1)
+            let thread = AppleAgentThreadRoute(registrationID: registrationID, location: location,
+                profile: profile, binding: binding, sourceIdentity: "fixture")
+            coordinator.sessionRoutes[binding.liveSessionID] = session
+            coordinator.threadRoutes[threadID] = thread
+            let expected = provider == .claude ? "styled" : "plain"
+
+            let adapter = coordinator.makeTerminalAdapter(threadID: threadID, session: session, thread: thread)
+            let inspection = try await adapter.inspect(binding: binding)
+            XCTAssertEqual(Set(reads), [expected], "\(provider)")
+            let visible = try XCTUnwrap(inspection.promptRequest?.visibleText, "\(provider)")
+            XCTAssertEqual(visible.contains("\u{1b}[0;48;5;153m ☐ Database \u{1b}[0m"), provider == .claude, "\(provider)")
+            if provider == .claude {
+                XCTAssertTrue(try XCTUnwrap(inspection.promptScreen?.placement).contains("tab=1"))
+            }
+
+            reads = []
+            coordinator.livePromptLifecycleSequences[threadID] = 1
+            coordinator.livePromptFrameTimes[threadID] = .now
+            coordinator.startLivePromptWatch(threadID)
+            for _ in 0..<200 where reads.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+            coordinator.cancelLivePromptWatch(threadID)
+            XCTAssertFalse(reads.isEmpty, "the watch read the screen")
+            XCTAssertEqual(Set(reads), [expected], "\(provider)'s watch")
+            await coordinator.setExperimentEnabled(false)
+        }
+    }
+
     @MainActor
     func testMultilineSendWaitsForPhysicalCursorThroughEveryTransport() async throws {
         for transport in [AgentTransportKind.ssh, .sshTmux, .mosh, .moshTmux] {
@@ -2122,20 +3506,21 @@ final class AppleAgentServicesTests: XCTestCase {
                 let thread = AgentThreadID(hostID: UUID(), providerID: .codex, providerSessionID: "queue-test")!
                 let request = AgentTextSendRequest(threadID: thread, binding: binding, text: "hello world", queueWhenWorking: queue)!
                 var inserted = false
-                var submissionPhase = false
+                let submissionPhase = OSAllocatedUnfairLock(initialState: false)
                 var keys: [AppleAgentTerminalKey] = []
                 let adapter = AppleAgentTerminalAdapter(binding: binding, operations: .init(
                     inspect: { _ in
                         let draft = !inserted ? "" : "hello world"
-                        let footer = submissionPhase && scenario == "became-idle" ? "gpt-5.6 low · /repo" : "tab to queue message 97% context left"
-                        return .init(observation: .init(binding: binding, liveTail: "› \(draft)\n\n\(footer)"), composerText: "› \(draft)", queueSupported: true, composerRow: 0, composerCursorVisible: !(submissionPhase && scenario == "menu-opened"))
+                        let submitting = submissionPhase.withLock { $0 }
+                        let footer = submitting && scenario == "became-idle" ? "gpt-5.6 low · /repo" : "tab to queue message 97% context left"
+                        return .init(observation: .init(binding: binding, liveTail: "› \(draft)\n\n\(footer)"), composerText: "› \(draft)", queueSupported: true, composerRow: 0, composerCursorVisible: !(submitting && scenario == "menu-opened"))
                     },
                     sendText: { _, _, _, _ in inserted = true; return true },
                     sendKey: { key, _, _ in keys.append(key); return true },
                     verifySubmission: { _, _, _ in true }, openExactBinding: { _ in .staleBinding }
                 ), readinessWindow: .milliseconds(200), readinessInterval: .milliseconds(20))
                 try await adapter.sendText(request)
-                submissionPhase = true
+                submissionPhase.withLock { $0 = true }
                 if scenario == "menu-opened" {
                     do { try await adapter.sendReturn(binding: binding); XCTFail("menu received submit key") }
                     catch { XCTAssertEqual(error as? AgentActionError, .verificationFailed) }
@@ -2287,13 +3672,13 @@ final class AppleAgentServicesTests: XCTestCase {
             tmuxSession: "rig", windowID: "@1", paneID: "%2", agentPID: 42, capabilities: [.observe, .send])
         let thread = AgentThreadID(hostID: UUID(), providerID: .claude, providerSessionID: "fence-test")!
         let request = AgentTextSendRequest(threadID: thread, binding: binding, text: "hello", queueWhenWorking: false)!
-        var writes = 0
+        let writes = OSAllocatedUnfairLock(initialState: 0)
         let adapter = AppleAgentTerminalAdapter(binding: binding, operations: .init(
             inspect: { _ in
                 let visible = "❯ \n────\nctx:6%  Fable 5.1"
                 return .init(observation: .init(binding: binding, liveTail: visible), composerText: "❯ ",
                     composerRow: 0, composerColumn: 2, composerVisibleText: visible, composerCursorVisible: true)
-            }, sendText: { _, _, _, _ in writes += 1; return true },
+            }, sendText: { _, _, _, _ in writes.withLock { $0 += 1 }; return true },
             sendKey: { _, _, _ in true }, verifySubmission: { _, _, _ in true },
             openExactBinding: { _ in .staleBinding }
         ), readinessWindow: .milliseconds(300), readinessInterval: .milliseconds(50))
@@ -2305,7 +3690,7 @@ final class AppleAgentServicesTests: XCTestCase {
             XCTAssertEqual(refusal.reason, "fence")
             XCTAssertEqual(refusal.error, .staleBinding, "a replaced terminal reads as changed, not as unable to take input")
         }
-        XCTAssertEqual(writes, 0)
+        XCTAssertEqual(writes.withLock { $0 }, 0)
     }
 
     @MainActor
@@ -2399,6 +3784,76 @@ final class AppleAgentServicesTests: XCTestCase {
         } }
     }
 
+    /// An answer's permit is committed inside the endpoint's own send, its
+    /// last step before the bytes go: one Core revoked since the answer's
+    /// check stops them there, and a current one lets the same step write.
+    @MainActor
+    func testEndpointCommitsAnAnswersPermitBeforeItsBytes() async throws {
+        let dialog = #"""
+        ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+         ☐ Database
+
+        Which database should the service use for the new ledger?
+
+        ❯ 1. Postgres (Recommended)
+             Mature, transactional, already deployed.
+          2. SQLite
+             Embedded file, zero operations.
+          3. DynamoDB
+             Managed key-value store.
+          4. Type something.
+        ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+          5. Chat about this
+
+        Enter to select · ↑/↓ to navigate · Esc to cancel
+        """#
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("agent-answer-permit-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let coordinator = AgentCenterV2Coordinator(runtime: AgentCenterRuntime(),
+            metadata: AppleAgentMetadataRepository(fileURL: directory.appendingPathComponent("metadata.json")))
+        await coordinator.setExperimentEnabled(true)
+        let hostID = UUID(), registrationID = UUID()
+        let binding = AgentTerminalBinding(liveSessionID: UUID(), carrierGeneration: 1,
+            incarnation: AgentIncarnationToken("permit-fixture")!, transport: .ssh,
+            tmuxSession: nil, windowID: nil, paneID: nil, agentPID: 42, capabilities: [.observe, .promptAnswer])
+        let threadID = AgentThreadID(hostID: hostID, providerID: .claude, providerSessionID: "permit-fixture")!
+        let location = AgentLocation(sessionID: binding.liveSessionID, hostName: "fixture", transportLabel: "ssh",
+            tmuxSessionName: nil, windowID: nil, windowName: nil, paneID: nil)
+        var writes: [String] = []
+        let source = AgentSessionSource(registrationID: registrationID, sessionID: binding.liveSessionID,
+            discover: { .success([]) }, observe: { _ in nil }, inspect: { _ in
+                // The digit answers at once: the dialog is gone after it.
+                AgentProbeTarget(location: location, processNames: ["claude"], processIDs: [42],
+                    visibleText: writes.isEmpty ? dialog : "❯ ", bracketedPasteEnabled: false)
+            }, send: { _, bytes in writes.append(String(decoding: bytes, as: UTF8.self)); return true },
+            sendRefusal: { _, _ in nil }, sendKey: { _, _ in true }, jump: { _ in },
+            validatedRemoteDirectories: { _ in [] }, supportsTmuxLaunch: { false }, launchAgent: { _ in throw AgentActionError.unavailable })
+        let session = AppleAgentSessionRoute(hostID: hostID, hostDisplayLabel: "fixture", source: source,
+            profiles: { [.builtInClaudeCode] }, carrierGeneration: 1)
+        let thread = AppleAgentThreadRoute(registrationID: registrationID, location: location,
+            profile: .builtInClaudeCode, binding: binding, sourceIdentity: "fixture")
+        coordinator.sessionRoutes[binding.liveSessionID] = session
+        coordinator.threadRoutes[threadID] = thread
+        let adapter = coordinator.makeTerminalAdapter(threadID: threadID, session: session, thread: thread)
+        let screen = try XCTUnwrap(AgentPromptGrammar.observe(
+            try XCTUnwrap(AgentPromptObservationRequest(providerID: .claude, visibleText: dialog, currentCursorLine: nil))))
+        let request = try XCTUnwrap(AgentPromptAnswerRequest(threadID: threadID, binding: binding,
+            actionToken: AgentPromptGrammar.actionToken(for: screen.signature), expectedSignature: screen.signature, optionID: "2"))
+        let fresh = AgentTerminalObservation(binding: binding, liveTail: "Question")
+        do {
+            try await adapter.answer(request, freshObservation: fresh, screen: { $0.promptScreen }, commitWrite: { false })
+            XCTFail("a revoked permit wrote")
+        } catch {
+            let refusal = try XCTUnwrap(error as? AppleAgentSendNotWritten, "\(error)")
+            XCTAssertEqual(refusal.error, .stalePrompt)
+            XCTAssertEqual(refusal.reason, "prompt-changed")
+        }
+        XCTAssertEqual(writes, [])
+        try await adapter.answer(request, freshObservation: fresh, screen: { $0.promptScreen }, commitWrite: { true })
+        XCTAssertEqual(writes, ["2"])
+        await coordinator.setExperimentEnabled(false)
+    }
+
     /// A source that refuses before its first byte (tmux left control mode)
     /// is not an unacknowledged write; open re-captures past a raced frame.
     @MainActor
@@ -2422,7 +3877,7 @@ final class AppleAgentServicesTests: XCTestCase {
             var writes = 0, captures = 0, jumps = 0
             var unsettled: Set<Int> = []
             var mismatchedSecondInspection = false
-            var refusal: String? = tmux ? "not-in-tmux" : transport == .mosh ? "empty" : "tmux-location-mismatch"
+            let refusal: String? = tmux ? "not-in-tmux" : transport == .mosh ? "empty" : "tmux-location-mismatch"
             let source = AgentSessionSource(registrationID: registrationID, sessionID: binding.liveSessionID,
                 discover: { .success([]) }, observe: { _ in nil }, inspect: { _ in
                     captures += 1
@@ -2484,14 +3939,14 @@ final class AppleAgentServicesTests: XCTestCase {
             incarnation: AgentIncarnationToken("withdraw")!, transport: .moshTmux,
             tmuxSession: "rig", windowID: "@1", paneID: "%2", agentPID: 42, capabilities: [.observe, .send])
         await core.register(.init(id: thread, providerName: "Claude", availability: .init(content: true, status: true, actions: true, spawn: false, fork: false, search: true)), binding: binding)
-        var hidden = true
+        let hidden = OSAllocatedUnfairLock(initialState: true)
         var writes = 0
         var notSent: [AgentActionError] = []
         let adapter = AppleAgentTerminalAdapter(binding: binding, operations: .init(
             inspect: { _ in
                 let line = "❯ " + (writes > 0 ? "second try" : "")
                 return .init(observation: .init(binding: binding, liveTail: line + "\n────\nctx:6%  Fable 5.1"), composerText: line,
-                    composerRow: 0, composerCursorVisible: !hidden)
+                    composerRow: 0, composerCursorVisible: !hidden.withLock { $0 })
             }, sendText: { _, _, _, _ in writes += 1; return true }, sendKey: { _, _, _ in true },
             verifySubmission: { _, _, _ in true },
             openExactBinding: { _ in .staleBinding }
@@ -2506,7 +3961,7 @@ final class AppleAgentServicesTests: XCTestCase {
         XCTAssertEqual(notSent, [.inputNotReady])
         XCTAssertEqual(bridge.threadSnapshots[thread]?.outgoingMessages ?? [], [], "no receipt-unconfirmed bubble for an unsent message")
         // The lease is free again and the next send goes through normally.
-        hidden = false
+        hidden.withLock { $0 = false }
         let second = AgentTextSendRequest(threadID: thread, binding: binding, text: "second try", queueWhenWorking: false)!
         let accepted = await bridge.submit(second, terminal: adapter, prepareReceipt: arm, onNotSent: { notSent.append($0.error) })
         if case .failure(let error) = accepted { XCTFail("retry failed: \(error)") }
@@ -3061,6 +4516,30 @@ final class AppleAgentServicesTests: XCTestCase {
             } catch { }
             await connection.close()
         }
+    }
+
+    @MainActor
+    func testHostSearchReplyCarriesEveryFrameAndOnlyForAHostThatSearches() async throws {
+        let handle = try AppleWindowTestHandle(search: true)
+        let connection = try await AppleAgentIngestionConnection.open(factory: .init { _ in handle }, binding: makeBinding())
+        XCTAssertTrue(connection.supportsSearch)
+        let reply = try await AppleAgentIngestionConnection.withSearchDeadline(.seconds(2)) {
+            try await connection.request(["kind": .string("search"), "query": .string("needle"),
+                                          "threads": .array([.string("t1"), .string("t2")]), "limit": .number(100)])
+        }
+        XCTAssertEqual(reply.search.compactMap { $0["kind"]?.stringValue }, ["search.begin", "search.record", "search.skipped", "search.end"])
+        let epoch = try XCTUnwrap(connection.epoch), id = try XCTUnwrap(reply.object["id"]?.stringValue)
+        let parsed = try AgentHostSearchReply(frames: reply.search, epoch: epoch, requestID: id)
+        let thread = try XCTUnwrap(AgentThreadID(hostID: UUID(), providerID: .claude, providerSessionID: "s1"))
+        XCTAssertEqual(parsed.matches(threads: ["t1": thread], query: "needle").map(\.recordID), ["jsonl:1:2:0"])
+        XCTAssertEqual(parsed.skipped.map(\.code), ["searchUnsupported"])
+        XCTAssertEqual(parsed.cursor, "next_1")
+        XCTAssertFalse(connection.isClosed)
+        await connection.close()
+
+        let plain = try await AppleAgentIngestionConnection.open(factory: .init { _ in try AppleWindowTestHandle() }, binding: makeBinding())
+        XCTAssertFalse(plain.supportsSearch)
+        await plain.close()
     }
 
     @MainActor
@@ -3760,20 +5239,60 @@ private actor AppleContextTestFactory {
     }
 }
 
+/// The Codex conversations a test host lists, read at each inventory
+/// request; a held catalog parks the pass that reads it.
+private actor AppleInventoryTestCatalog {
+    private(set) var sessions: [String] = []
+    private var holding = false
+    private var incompletePasses = 0
+    private var parked: CheckedContinuation<Void, Never>?
+    var isParked: Bool { parked != nil }
+    func add(_ session: String) { sessions.append(session) }
+    func hold() { holding = true }
+    func release() { holding = false; parked?.resume(); parked = nil }
+    func reportIncomplete(_ passes: Int) { incompletePasses = passes }
+    private var failures = 0
+    func fail(_ passes: Int) { failures = passes }
+    /// Whether this pass fails, as one on a dropped carrier does.
+    func takeFailure() -> Bool {
+        guard failures > 0 else { return false }
+        failures -= 1
+        return true
+    }
+    /// Whether this pass ends reporting a source skipped mid-write.
+    func takeIncomplete() -> Bool {
+        guard incompletePasses > 0 else { return false }
+        incompletePasses -= 1
+        return true
+    }
+    func listed() async -> [String] {
+        if holding { await withCheckedContinuation { parked = $0 } }
+        return sessions
+    }
+}
+
 private actor AppleInventoryRecoveryTestFactory {
     private var failures: Int
     private var handles: [AppleWindowTestHandle] = []
     private(set) var attempts = 0
+    let catalog = AppleInventoryTestCatalog()
     init(failures: Int = 0) { self.failures = failures }
     func open(_ request: AgentExecRequest) async throws -> any AppleAgentStreamingExecHandle {
         attempts += 1
         if failures > 0 { failures -= 1; throw AgentIngestionError.remote("disconnected") }
-        let handle = try AppleWindowTestHandle()
+        let handle = try AppleWindowTestHandle(catalog: catalog)
         handles.append(handle)
         return handle
     }
     var inventoryDelivered: Bool {
         get async { guard let handle = handles.last else { return false }; return await handle.sentKinds.contains("inventory") }
+    }
+    var inventoryRequests: Int {
+        get async {
+            var count = 0
+            for handle in handles { count += await handle.sentKinds.filter { $0 == "inventory" }.count }
+            return count
+        }
     }
 }
 
@@ -3798,6 +5317,9 @@ private actor AppleWindowTestHandle: AppleAgentStreamingExecHandle {
     private let heldRequestKinds: Set<String>
     private let requestRejections: [String: String]
     private let windowAckGate: AppleSearchTestGate?
+    /// Answers a search in two replies, the second only once released.
+    private let searchSecondReplyGate: AppleSearchTestGate?
+    private let catalog: AppleInventoryTestCatalog?
     private let autoBootstrap: Bool
     private(set) var summaryRequestID: AgentJSONValue?
     private var frames: [AgentExecFrame]
@@ -3814,12 +5336,13 @@ private actor AppleWindowTestHandle: AppleAgentStreamingExecHandle {
 
     var isClosed: Bool { closed }
 
-    init(version: Int = 3, partitions: Bool = true, piSessions: Bool = false, openCodeSessions: Bool = false, kimiSessions: Bool = false, readProgress: Bool = false, epoch: String = "fixture", contextScope: String = "",
+    init(version: Int = 3, partitions: Bool = true, piSessions: Bool = false, openCodeSessions: Bool = false, kimiSessions: Bool = false, readProgress: Bool = false, search: Bool = false, epoch: String = "fixture", contextScope: String = "",
          inventoryRows: Int = 0, inventoryPadding: Int = 0, inventoryBegins: Int = 1,
          inventoryEndKind: String = "inventory.end", holdSummaries: Bool = false,
-         windowAckGate: AppleSearchTestGate? = nil, autoBootstrap: Bool = false,
+         windowAckGate: AppleSearchTestGate? = nil, searchSecondReplyGate: AppleSearchTestGate? = nil, autoBootstrap: Bool = false,
          holdSubscribeAcknowledgments: Bool = false, holdWindowReleases: Bool = false,
-         heldRequestKinds: Set<String> = [], requestRejections: [String: String] = [:]) throws {
+         heldRequestKinds: Set<String> = [], requestRejections: [String: String] = [:],
+         catalog: AppleInventoryTestCatalog? = nil) throws {
         self.epoch = epoch
         self.inventoryRows = inventoryRows
         self.inventoryPadding = inventoryPadding
@@ -3831,6 +5354,8 @@ private actor AppleWindowTestHandle: AppleAgentStreamingExecHandle {
         self.heldRequestKinds = heldRequestKinds
         self.requestRejections = requestRejections
         self.windowAckGate = windowAckGate
+        self.searchSecondReplyGate = searchSecondReplyGate
+        self.catalog = catalog
         self.autoBootstrap = autoBootstrap
         let hello = try AgentIngestionFramer.encode(.object(["kind": .string("hello"), "id": .string("hello"),
             "serviceEpoch": .string(epoch), "contextScope": .string(contextScope), "v": .number(Decimal(version)), "capabilities": .array(
@@ -3838,7 +5363,7 @@ private actor AppleWindowTestHandle: AppleAgentStreamingExecHandle {
                 (piSessions ? [.string("pi.sessions.v1-v3")] : []) +
                 (openCodeSessions ? [.string("opencode.sqlite.v1-v2")] : []) +
                 (kimiSessions ? [.string("kimi.wire.v1.4-v1.5")] : []) +
-                (readProgress ? [.string("read.progress.v1")] : []))]))
+                (readProgress ? [.string("read.progress.v1")] : []) + (search ? [.string("search.v1")] : []))]))
         frames = [AgentExecFrame(carrierGeneration: 4, kind: .stdout(hello))!]
     }
 
@@ -3872,13 +5397,55 @@ private actor AppleWindowTestHandle: AppleAgentStreamingExecHandle {
             try inject(["kind": .string("error"), "code": .string("busy"), "id": value["id"]!])
             return
         }
+        if kind == "search", let gate = searchSecondReplyGate {
+            let id = value["id"]!
+            let first = value["cursor"] == nil
+            if !first { await gate.wait() }
+            try inject(["kind": .string("search.begin"), "id": id])
+            try inject(["kind": .string("search.record"), "id": id, "thread": .string("t1"),
+                "recordID": .string(first ? "jsonl:1:2:0" : "jsonl:1:2:9"), "sourceIdentity": .string("jsonl:1:2"),
+                "order": .number(first ? 0 : 9), "revision": .number(1),
+                "record": .object(["type": .string("message"), "role": .string("user"),
+                    "blocks": .array([.object(["type": .string("text"), "text": .string(first ? "first needle" : "second needle")])])])])
+            var end: [String: AgentJSONValue] = ["kind": .string("search.end"), "id": id, "records": .number(1),
+                                                 "threadsLeft": .number(first ? 1 : 0)]
+            if first { end["cursor"] = .string("next_1") }
+            try inject(end)
+            return
+        }
+        if kind == "search" {
+            // One candidate, one skipped thread, and a cursor to continue.
+            let id = value["id"]!
+            try inject(["kind": .string("search.begin"), "id": id])
+            try inject(["kind": .string("search.record"), "id": id, "thread": .string("t1"), "recordID": .string("jsonl:1:2:0"),
+                "sourceIdentity": .string("jsonl:1:2"), "order": .number(0), "revision": .number(1),
+                "record": .object(["type": .string("message"), "role": .string("user"),
+                    "blocks": .array([.object(["type": .string("text"), "text": .string("found needle")])])])])
+            try inject(["kind": .string("search.skipped"), "id": id, "thread": .string("t2"), "code": .string("searchUnsupported")])
+            try inject(["kind": .string("search.end"), "id": id, "records": .number(1), "threadsLeft": .number(1), "cursor": .string("next_1")])
+            return
+        }
         if kind == "inventory" {
             for _ in 0..<inventoryBegins { try inject(["kind": .string("inventory.begin"), "id": value["id"]!]) }
             for index in 0..<inventoryRows {
                 try inject(["kind": .string("inventory.thread"), "id": value["id"]!,
                     "thread": .string("inventory_\(index)"), "padding": .string(String(repeating: "x", count: inventoryPadding))])
             }
-            try inject(["kind": .string(inventoryEndKind), "id": value["id"]!, "hasMore": .bool(false)])
+            if await catalog?.takeFailure() == true {
+                try inject(["kind": .string("error"), "code": .string("unavailable"), "id": value["id"]!])
+                return
+            }
+            for session in await catalog?.listed() ?? [] {
+                // A host's handles are identifiers whatever the session ID.
+                let handle = "handle_" + session.unicodeScalars.map {
+                    CharacterSet.alphanumerics.contains($0) && $0.isASCII ? String($0) : "x" }.joined()
+                try inject(["kind": .string("inventory.thread"), "id": value["id"]!, "provider": .string("codex"),
+                    "sessionID": .string(session), "thread": .string(handle),
+                    "transcriptRef": .string("/fixture/\(session)"), "modified": .number(1)])
+            }
+            var end: [String: AgentJSONValue] = ["kind": .string(inventoryEndKind), "id": value["id"]!, "hasMore": .bool(false)]
+            if await catalog?.takeIncomplete() == true { end["incomplete"] = .bool(true) }
+            try inject(end)
             return
         }
         if kind == "window.read" {
@@ -4007,18 +5574,48 @@ private actor AppleInitialPrefetchTestHandle: AppleAgentStreamingExecHandle {
     private(set) var resolveRequests = 0
     private(set) var operations: [String] = []
     private(set) var acknowledgedVersions: [Int] = []
+    private(set) var unsubscribes = 0
+    /// Each `window.read` seek, as sent.
+    private(set) var seekRequests: [[String: AgentJSONValue]] = []
+    /// A seek the host refuses with this status-less code.
+    private var seekRefusal: String?
+    func refuseSeeks(_ code: String?) { seekRefusal = code }
+    /// Requests (by read operation or kind) held unanswered until released,
+    /// after the first `skipping` of them pass.
+    private var holding: [String: Int] = [:]
+    private var held: [[String: AgentJSONValue]] = []
+    private(set) var windowCancels: [String] = []
+    func hold(_ kind: String, skipping: Int = 0) { holding[kind] = skipping }
+    func heldCount(_ kind: String) -> Int { held.filter { ($0["operation"] ?? $0["kind"])?.stringValue == kind }.count }
+    func release(_ kind: String) throws {
+        holding.removeValue(forKey: kind)
+        let requests = held.filter { ($0["operation"] ?? $0["kind"])?.stringValue == kind }
+        held.removeAll { ($0["operation"] ?? $0["kind"])?.stringValue == kind }
+        for request in requests { try send(try AgentIngestionFramer.encode(.object(request))) }
+    }
     var historyRequests: Int { operations.filter { $0 == "before" }.count }
     var heldHistoryCount: Int { heldHistory.count }
 
     private let resolveFailure: (code: String, state: String, recovery: String)
+    private let epoch: String
+    /// The handle the next connection opens: this one, until a test hands
+    /// the fixture another (a reconnect).
+    private var successor: AppleInitialPrefetchTestHandle?
+    func reconnect(to next: AppleInitialPrefetchTestHandle) { successor = next }
+    func opened() async -> AppleInitialPrefetchTestHandle {
+        guard let successor else { return self }
+        return await successor.opened()
+    }
 
     init(resolveFailures: Int = 0,
-         resolveFailure: (code: String, state: String, recovery: String) = ("sourceMissing", "failed", "manual")) throws {
+         resolveFailure: (code: String, state: String, recovery: String) = ("sourceMissing", "failed", "manual"),
+         seeks: Bool = true, epoch: String = "initial-epoch") throws {
         self.resolveFailures = resolveFailures
         self.resolveFailure = resolveFailure
+        self.epoch = epoch
         let hello = try AgentIngestionFramer.encode(.object(["kind": .string("hello"), "id": .string("hello"),
-            "serviceEpoch": .string("initial-epoch"), "contextScope": .string("0000000000000001"), "v": .number(3),
-            "capabilities": .array([.string("bounded.windows"), .string("window.partitions")])]))
+            "serviceEpoch": .string(epoch), "contextScope": .string("0000000000000001"), "v": .number(3),
+            "capabilities": .array([.string("bounded.windows"), .string("window.partitions")] + (seeks ? [.string("window.seek.v1")] : []))]))
         frames.append(AgentExecFrame(carrierGeneration: 4, kind: .stdout(hello))!)
     }
 
@@ -4030,6 +5627,12 @@ private actor AppleInitialPrefetchTestHandle: AppleAgentStreamingExecHandle {
 
     func send(_ bytes: Data) throws {
         let value = try JSONDecoder().decode(AgentJSONValue.self, from: bytes.dropFirst(4)).objectValue!
+        if let kind = (value["operation"] ?? value["kind"])?.stringValue, let skipping = holding[kind] {
+            if skipping > 0 { holding[kind] = skipping - 1 } else {
+                held.append(value)
+                return
+            }
+        }
         switch value["kind"]?.stringValue {
         case "resolve":
             resolveRequests += 1
@@ -4044,18 +5647,29 @@ private actor AppleInitialPrefetchTestHandle: AppleAgentStreamingExecHandle {
             }
         case "receipt.frontier":
             try inject(["kind": .string("receipt.frontier"), "id": value["id"]!, "frontier": .object([
-                "version": .number(1), "actionID": value["actionID"]!, "serviceEpoch": .string("initial-epoch"),
+                "version": .number(1), "actionID": value["actionID"]!, "serviceEpoch": .string(epoch),
                 "provider": .string("claude"), "providerSessionID": .string("initial-prefetch"),
                 "sourceIdentity": .string("jsonl:1:2"), "sourceEnd": .string("123"), "consistency": .string("observedPrefix")])])
         case "window.read":
             let operation = value["operation"]!.stringValue!
             operations.append(operation)
+            if operation == "seek" {
+                seekRequests.append(value)
+                if let seekRefusal {
+                    try inject(["kind": .string("error"), "id": value["id"]!, "thread": .string("thread"), "code": .string(seekRefusal)])
+                    return
+                }
+            }
             if operation == "before" { heldHistory.append(value) }
             else { try page(value) }
         case "window.ack":
             acknowledgedVersions.append(NSDecimalNumber(decimal: value["windowVersion"]!.numberValue!).intValue)
         case "window.cancel":
+            windowCancels.append(value["transaction"]!.stringValue!)
             historyCancellations[value["transaction"]!.stringValue!] = value["id"]!
+        case "unsubscribe":
+            unsubscribes += 1
+            try inject(["kind": .string("ack"), "id": value["id"]!])
         default:
             try inject(["kind": .string("ack"), "id": value["id"]!])
         }
@@ -4084,14 +5698,17 @@ private actor AppleInitialPrefetchTestHandle: AppleAgentStreamingExecHandle {
                 "window": .object(["lane": .string("revisions"), "version": .number(version)])])
             return
         }
-        let number = operation == "bootstrap" ? 10 : Int(request["cursor"]!.stringValue!.dropFirst(7))! - 1
+        let number = operation == "bootstrap" ? 10
+            : operation == "seek" ? NSDecimalNumber(decimal: request["order"]!.numberValue!).intValue
+            : Int(request["cursor"]!.stringValue!.dropFirst(7))! - 1
         try inject(["kind": .string("page.record"), "id": request["id"]!, "thread": .string("thread"),
             "recordID": .string("message-\(number)"), "order": .number(Decimal(number)), "revision": .number(1),
+            "seekToken": .string(String(format: "%016lx:u-%ld", number, number)),
             "record": .object(["type": .string("message"), "role": .string("assistant"),
                 "blocks": .array([.object(["type": .string("text"), "text": .string("Page \(number)")])])])])
         var end: [String: AgentJSONValue] = ["kind": .string("page.end"), "id": request["id"]!, "thread": .string("thread"),
             "records": .number(1), "historyCursor": .string("before-\(number)"), "hasOlder": .bool(true),
-            "window": .object(["lane": .string(operation == "bootstrap" ? "bootstrap" : "before"), "version": .number(version),
+            "window": .object(["lane": .string(operation == "bootstrap" ? "bootstrap" : operation == "seek" ? "seek" : "before"), "version": .number(version),
                 "segmentID": .string("segment-\(number)"), "before": .string("before-\(number)"), "after": .string("after-\(number)"),
                 "hasOlder": .bool(true), "hasNewer": .bool(operation != "bootstrap")])]
         if operation == "bootstrap" { end["hasNewer"] = .bool(false); end["liveCursor"] = .string("live-1") }
@@ -4099,7 +5716,7 @@ private actor AppleInitialPrefetchTestHandle: AppleAgentStreamingExecHandle {
     }
 
     private func inject(_ fields: [String: AgentJSONValue]) throws {
-        var value = fields; value["serviceEpoch"] = .string("initial-epoch")
+        var value = fields; value["serviceEpoch"] = .string(epoch)
         let frame = AgentExecFrame(carrierGeneration: 4, kind: .stdout(try AgentIngestionFramer.encode(.object(value))))!
         if let pending = waiter { waiter = nil; pending.resume(returning: frame) } else { frames.append(frame) }
     }

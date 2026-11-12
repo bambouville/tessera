@@ -23,14 +23,6 @@
     "zh-Hans": "%lld",
     "zh-Hant": "%lld"
   },
-  "%lld connected source%@ unavailable": {
-    "de": "%lld verbundene Quelle%@ nicht verfügbar",
-    "es": "%lld fuente%@ conectada no disponible",
-    "fr": "%lld source%@ connectée indisponible",
-    "ja": "接続済みソース %lld 件%@を利用できません",
-    "zh-Hans": "%lld 个已连接的来源%@不可用",
-    "zh-Hant": "%lld 個已連線的來源%@無法使用"
-  },
   "%lld queued": {
     "de": "%lld eingereiht",
     "es": "%lld en cola",
@@ -863,13 +855,13 @@
     "zh-Hans": "部分主机仍需处理。",
     "zh-Hant": "部分主機仍需處理。"
   },
-  "Terminal actions require a current, PID-proven agent binding.": {
-    "de": "Terminalaktionen erfordern eine aktuelle, per PID verifizierte Agenten-Zuordnung.",
-    "es": "Las acciones del terminal requieren un vínculo vigente con el agente, verificado por PID.",
-    "fr": "Les actions du terminal nécessitent une liaison actuelle avec l'agent, vérifiée par PID.",
-    "ja": "ターミナル操作には、PID で検証された現在有効なエージェントとの紐付けが必要です。",
-    "zh-Hans": "终端操作需要当前有效且经 PID 验证的智能体绑定。",
-    "zh-Hant": "終端機操作需要目前有效且經 PID 驗證的智慧體繫結。"
+  "Replies need this agent running in a connected terminal.": {
+    "de": "Antworten erfordern, dass dieser Agent in einem verbundenen Terminal läuft.",
+    "es": "Para responder, este agente debe estar ejecutándose en un terminal conectado.",
+    "fr": "Pour répondre, cet agent doit être en cours d'exécution dans un terminal connecté.",
+    "ja": "返信するには、このエージェントが接続中のターミナルで実行されている必要があります。",
+    "zh-Hans": "回复需要此智能体在已连接的终端中运行。",
+    "zh-Hant": "回覆需要此智慧體在已連線的終端機中執行。"
   },
   "Tessera": {
     "de": "Tessera",
@@ -1167,6 +1159,14 @@
     "zh-Hans": "回答 %@",
     "zh-Hant": "回答 %@"
   },
+  "agent": {
+    "de": "Agent",
+    "es": "agente",
+    "fr": "agent",
+    "ja": "エージェント",
+    "zh-Hans": "智能体",
+    "zh-Hant": "智慧體"
+  },
   "approve transfer": {
     "de": "Übertragung genehmigen",
     "es": "aprobar transferencia",
@@ -1295,6 +1295,14 @@
     "zh-Hans": "差异",
     "zh-Hant": "差異"
   },
+  "directory · validated remote locations": {
+    "de": "Verzeichnis · geprüfte entfernte Pfade",
+    "es": "directorio · ubicaciones remotas validadas",
+    "fr": "répertoire · emplacements distants validés",
+    "ja": "ディレクトリ · 検証済みのリモートパス",
+    "zh-Hans": "目录 · 已验证的远程位置",
+    "zh-Hant": "目錄 · 已驗證的遠端位置"
+  },
   "dismissed": {
     "de": "geschlossen",
     "es": "cerrado",
@@ -1350,6 +1358,14 @@
     "ja": "スレッドをグループ化",
     "zh-Hans": "分组对话",
     "zh-Hant": "將對話分組"
+  },
+  "host · live sessions only": {
+    "de": "Host · nur aktive Sitzungen",
+    "es": "host · solo sesiones activas",
+    "fr": "hôte · sessions actives uniquement",
+    "ja": "ホスト · 接続中のセッションのみ",
+    "zh-Hans": "主机 · 仅活动会话",
+    "zh-Hant": "主機 · 僅限活動工作階段"
   },
   "import paired setup": {
     "de": "gekoppelte Einrichtung importieren",
@@ -1470,6 +1486,14 @@
     "ja": "新規",
     "zh-Hans": "新建",
     "zh-Hant": "新增"
+  },
+  "name · optional": {
+    "de": "Name · optional",
+    "es": "nombre · opcional",
+    "fr": "nom · facultatif",
+    "ja": "名前 · 省略可能",
+    "zh-Hans": "名称 · 可选",
+    "zh-Hant": "名稱 · 選用"
   },
   "new agent": {
     "de": "neuer Agent",

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="forwarding_title">port forwarding</string>
+    <string name="forwarding_intro">Local and dynamic listeners stay on this device. Remote binds are server-side.</string>
+    <string name="forwarding_add">add</string>
+    <string name="forwarding_no_rules">No forwarding rules.</string>
+    <string name="forwarding_enabled">enabled</string>
+    <string name="forwarding_open">↗ open</string>
+    <string name="forwarding_edit">edit</string>
+    <string name="forwarding_delete">delete</string>
+    <string name="forwarding_stop">stop</string>
+    <string name="forwarding_start">start</string>
+    <string name="forwarding_summary_remote">%1$s → device %2$s</string>
+    <string name="forwarding_rule_title">forwarding rule</string>
+    <string name="forwarding_edit_title">edit %1$s</string>
+    <string name="forwarding_cancel" tools:ignore="ButtonCase">cancel</string>
+    <string name="forwarding_save">save</string>
+    <string name="forwarding_label">label</string>
+    <string name="forwarding_optional">optional</string>
+    <string name="forwarding_bind_address">bind address</string>
+    <string name="forwarding_loopback_only">loopback only</string>
+    <string name="forwarding_bind_port">bind port</string>
+    <string name="forwarding_bind_port_zero_allowed">bind port · 0 allowed</string>
+    <string name="forwarding_remote_host">remote host</string>
+    <string name="forwarding_device_host">device host</string>
+    <string name="forwarding_target_port">target port</string>
+    <string name="forwarding_ports_whole_numbers">Ports must be whole numbers.</string>
+    <string name="forwarding_direction_local">Local</string>
+    <string name="forwarding_direction_remote">Remote</string>
+    <string name="forwarding_direction_dynamic">Dynamic</string>
+    <string name="forwarding_status_stopped">Stopped</string>
+    <string name="forwarding_status_starting">Starting</string>
+    <string name="forwarding_status_serving">serving · 0 active</string>
+    <string name="forwarding_status_nothing_serving">listening · nothing serving on remote port %1$s</string>
+    <string name="forwarding_status_checking">listening · checking…</string>
+    <string name="forwarding_status_listening">listening · 0 active</string>
+    <string name="forwarding_invalid_bind_address">A bind address is required.</string>
+    <string name="forwarding_invalid_bind_port">Bind port must be valid.</string>
+    <string name="forwarding_non_loopback_local_bind">Local and dynamic forwarding must bind to loopback.</string>
+    <string name="forwarding_missing_target">A target is required.</string>
+    <string name="forwarding_invalid_target_address">A target host is required.</string>
+    <string name="forwarding_invalid_target_port">Target port must be valid.</string>
+    <string name="forwarding_dynamic_cannot_have_target">Dynamic forwarding chooses a target per SOCKS request.</string>
+    <string name="forwarding_bind_collision">Another local listener uses this port.</string>
+    <string name="forwarding_runtime_unavailable">SSH forwarding runtime is unavailable</string>
+    <string name="forwarding_listener_stopped">Forwarding listener stopped unexpectedly</string>
+    <string name="forwarding_mosh_without_side_channel">Mosh has no authenticated SSH side channel</string>
+    <string name="forwarding_transport_unsupported_local">This transport does not support LOCAL</string>
+    <string name="forwarding_transport_unsupported_remote">This transport does not support REMOTE</string>
+    <string name="forwarding_transport_unsupported_dynamic">This transport does not support DYNAMIC</string>
+    <string name="forwarding_chrome_label">Port forwarding</string>
+    <plurals name="forwarding_chrome_label_serving">
+        <item quantity="one">Port forwarding, %1$d serving</item>
+        <item quantity="other">Port forwarding, %1$d serving</item>
+    </plurals>
+    <string name="forwarding_browser_back">back</string>
+    <string name="forwarding_browser_forward">forward</string>
+    <string name="forwarding_browser_stop">stop</string>
+    <string name="forwarding_browser_reload">reload</string>
+    <string name="forwarding_browser_done">done</string>
+    <string name="forwarding_browser_no_answer">this tunnel did not answer</string>
+    <string name="forwarding_browser_check_rule">check that the rule is listening and that the remote service is up.</string>
+    <string name="forwarding_browser_retry">retry</string>
+    <string name="forwarding_browser_connection_failed">the connection failed</string>
+    <plurals name="forwarding_status_active_connections">
+        <item quantity="one">%1$d active connection</item>
+        <item quantity="other">%1$d active connections</item>
+    </plurals>
+    <plurals name="forwarding_chrome_active_tunnels">
+        <item quantity="one">%1$d active tunnel</item>
+        <item quantity="other">%1$d active tunnels</item>
+    </plurals>
+    <plurals name="forwarding_chrome_active_tunnels_serving">
+        <item quantity="one">%1$d active tunnel, %2$d serving</item>
+        <item quantity="other">%1$d active tunnels, %2$d serving</item>
+    </plurals>
+</resources>

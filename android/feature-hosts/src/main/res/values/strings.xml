@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="hosts_title">Hosts</string>
-    <string name="hosts_empty_title">No hosts yet</string>
+    <string name="hosts_title">hosts</string>
+    <string name="hosts_empty_title">no hosts yet</string>
     <string name="hosts_empty_body">Add a host to begin setting up an SSH connection.</string>
     <string name="host_add">Add host</string>
     <string name="host_add_compact">new host</string>
@@ -10,7 +10,7 @@
     <string name="host_export">Export host</string>
     <string name="host_export_title">Export Tessera host</string>
     <string name="host_search">Search hosts</string>
-    <string name="hosts_no_results">No matching hosts</string>
+    <string name="hosts_no_results">no matching hosts</string>
     <string name="hosts_no_results_body">Try a different name, address, or username.</string>
     <string name="host_add_symbol" translatable="false">+</string>
     <string name="host_edit">Edit host</string>
@@ -32,7 +32,7 @@
     <string name="host_jump_via">Via %1$s</string>
     <string name="host_auth_password">Password for each connection</string>
     <string name="host_auth_label">Authentication</string>
-    <string name="identities_title">Keys</string>
+    <string name="identities_title">keys</string>
     <string name="identities_empty_title">no keys yet</string>
     <string name="identities_empty_body">Generate a device-bound key to connect without entering a password.</string>
     <string name="identity_new">new key</string>
@@ -42,7 +42,7 @@
     <string name="identity_owner_auth">Require device authentication</string>
     <string name="identity_generate">Generate P-256 key</string>
     <string name="identity_delete">Delete</string>
-    <string name="identity_details">Details</string>
+    <string name="identity_details">details</string>
     <string name="identity_loading">Loading key details…</string>
     <string name="identity_unavailable">This Android Keystore key is unavailable or was invalidated. Generate a replacement, then assign it to the affected hosts.</string>
     <string name="identity_needs_replacement">unavailable · replacement required</string>
@@ -59,8 +59,8 @@
     <string name="host_tmux_off">Plain login shell, no tmux.</string>
     <string name="host_tmux_label">Session mode</string>
     <string name="host_transport_label">Transport</string>
-    <string name="host_transport_ssh_short">ssh</string>
-    <string name="host_transport_mosh_short">mosh</string>
+    <string name="host_transport_ssh_short" translatable="false">ssh</string>
+    <string name="host_transport_mosh_short" translatable="false">mosh</string>
     <string name="host_transport_ssh">single SSH connection; tmux tabs stay on the main session.</string>
     <string name="host_transport_mosh">mosh terminal over UDP; tmux tabs use a second SSH side channel.</string>
     <string name="host_tmux_automatic">tmux automatic</string>
@@ -72,7 +72,7 @@
     <string name="host_search_clear">Clear search</string>
     <string name="host_actions">Actions for %1$s</string>
     <string name="host_tmux_off_short">off</string>
-    <string name="host_tmux_automatic_short">tmux</string>
+    <string name="host_tmux_automatic_short" translatable="false">tmux</string>
     <string name="host_tmux_pinned_short">pinned</string>
     <string name="identity_owner_auth_body">Ask for the device credential each time this key signs.</string>
     <string name="identity_fingerprint">fingerprint</string>
@@ -90,4 +90,94 @@
     <string name="identity_host_key_reverted">This host returned a previously trusted key. Verify the server before restoring it.</string>
     <string name="identity_host_endpoint">endpoint</string>
     <string name="identity_previous_fingerprint">previously trusted</string>
+    <string name="hosts_import_file_unavailable">The selected host file is unavailable</string>
+    <string name="hosts_import_failed_fallback">The host could not be imported</string>
+    <string name="hosts_import_too_large">host import is too large</string>
+    <string name="hosts_import_unsupported_format">unsupported host import format</string>
+    <string name="hosts_import_too_many_forwards">too many port forwards</string>
+    <string name="hosts_import_invalid_forward">invalid port forward</string>
+    <string name="hosts_forwarding_title">%1$s · forwarding</string>
+    <string name="hosts_back_to_hosts">Back to hosts</string>
+    <string name="hosts_port_forwarding">port forwarding</string>
+    <string name="hosts_port_not_number">port must be a number</string>
+    <string name="hosts_optional_data_title">Optional host data</string>
+    <string name="hosts_optional_data_body">Stored only on this device unless explicitly selected during pairing. Shell fields run on connect; review imported commands before connecting.</string>
+    <string name="hosts_notes">notes</string>
+    <string name="hosts_env_vars">environment variables (KEY=value)</string>
+    <string name="hosts_startup_snippet">startup snippet</string>
+    <string name="hosts_launch_command">custom command (when tmux is off)</string>
+    <string name="hosts_back_to_settings">back to settings</string>
+    <string name="hosts_security_level_software">software</string>
+    <string name="hosts_security_level_trusted_environment">trusted environment</string>
+    <string name="hosts_security_level_strongbox" translatable="false">strongbox</string>
+    <string name="hosts_security_level_unknown_secure">unknown secure</string>
+    <string name="hosts_security_level_unknown">unknown</string>
+    <string name="hosts_public_key_clip_label">SSH public key</string>
+    <string name="hosts_unlock_key_title">Unlock Tessera key</string>
+    <string name="hosts_unlock_key_body">Use %1$s@%2$s key</string>
+    <string name="hosts_install_not_confirmed">The host did not confirm the public-key installation</string>
+    <string name="hosts_known_title">known hosts</string>
+    <string name="hosts_known_back">Back</string>
+    <string name="hosts_known_import">Import known hosts</string>
+    <string name="hosts_known_export">Export known hosts</string>
+    <string name="hosts_known_export_title">Export Tessera known hosts</string>
+    <string name="hosts_known_empty_title">no trusted hosts</string>
+    <string name="hosts_known_empty_body">Host keys accepted during a connection are recorded here so a later change can be detected.</string>
+    <string name="hosts_known_replaced">replaced</string>
+    <string name="hosts_known_import_failed">import failed</string>
+    <string name="hosts_known_import_result_title">import</string>
+    <string name="hosts_known_file_unavailable">The selected known-hosts file is unavailable</string>
+    <string name="hosts_known_import_too_large">Known-hosts import is too large</string>
+    <string name="hosts_known_import_no_keys">That file contained no host keys.</string>
+    <string name="hosts_known_import_failed_fallback">Known hosts could not be imported</string>
+    <string name="hosts_known_review_title">review import</string>
+    <string name="hosts_known_import_confirm">Import</string>
+    <string name="hosts_known_replace_warning">Replacing a pinned key rotates it. The key you replace is kept so a later revert is still reported.</string>
+    <string name="hosts_known_not_imported">not imported</string>
+    <string name="hosts_known_rejection_line">line %1$d: %2$s</string>
+    <string name="hosts_known_reject_missing_fields">not a host, key type and key</string>
+    <string name="hosts_known_reject_unsupported_marker">%1$s lines are not host pins</string>
+    <string name="hosts_known_reject_invalid_key">unreadable public key</string>
+    <string name="hosts_known_reject_empty_host">empty host in the host list</string>
+    <string name="hosts_known_reject_hashed">hashed hosts cannot be mapped back to an endpoint</string>
+    <string name="hosts_known_reject_pattern">patterns and negations are not exact pins</string>
+    <string name="hosts_known_reject_bracketed">malformed [host]:port</string>
+    <string name="hosts_known_reject_out_of_range">host or port out of range</string>
+    <string name="hosts_known_reject_ambiguous">two different keys for the same endpoint</string>
+    <string name="hosts_known_reject_unnormalizable">host name has no usable form</string>
+    <string name="hosts_known_reject_unusable">unusable host field</string>
+    <string name="hosts_known_import_summary">%1$s %2$s</string>
+    <string name="hosts_known_forget">Forget</string>
+    <string name="hosts_known_last_verified">Last verified %1$s</string>
+    <string name="hosts_known_previous_retained">A previous key is retained so a reverted key is still detected as a change.</string>
+    <string name="hosts_known_copy_fingerprint">Copy fingerprint</string>
+    <string name="hosts_known_fingerprint_clip_label">SSH host fingerprint</string>
+    <plurals name="hosts_known_plan_add">
+        <item quantity="one">%d to add</item>
+        <item quantity="other">%d to add</item>
+    </plurals>
+    <plurals name="hosts_known_plan_replace">
+        <item quantity="one">%d to replace</item>
+        <item quantity="other">%d to replace</item>
+    </plurals>
+    <plurals name="hosts_known_plan_unchanged">
+        <item quantity="one">%d already pinned</item>
+        <item quantity="other">%d already pinned</item>
+    </plurals>
+    <plurals name="hosts_known_rejections_more">
+        <item quantity="one">and %d more</item>
+        <item quantity="other">and %d more</item>
+    </plurals>
+    <plurals name="hosts_known_duplicates_ignored">
+        <item quantity="one">%d duplicate line ignored.</item>
+        <item quantity="other">%d duplicate lines ignored.</item>
+    </plurals>
+    <plurals name="hosts_known_import_pinned">
+        <item quantity="one">Pinned %d host key.</item>
+        <item quantity="other">Pinned %d host keys.</item>
+    </plurals>
+    <plurals name="hosts_known_import_skipped">
+        <item quantity="one">%d was skipped because the stored key changed since the plan was built.</item>
+        <item quantity="other">%d were skipped because the stored key changed since the plan was built.</item>
+    </plurals>
 </resources>

@@ -31,14 +31,14 @@ class AgentContextMeterTest {
         for (status in listOf("working", "idle", "finished")) {
             val tokens = row.copy(status = status, contextUsedTokens = "84320", linesAdded = "14", linesRemoved = "3")
             assertEquals("84k", tokens.compactContextTokens())
-            assertEquals("84k tokens", tokens.summaryMeter("84k tokens"))
+            assertEquals("84k tokens", tokens.summaryMeter("84k tokens", EnglishAgentRowWords))
             val percent = tokens.copy(contextPercent = "15.0")
             assertNull(percent.compactContextTokens())
-            assertEquals("15% context", percent.summaryMeter(null))
-            assertEquals("+14 −3 changes", tokens.copy(contextUsedTokens = null).summaryMeter(null))
+            assertEquals("15% context", percent.summaryMeter(null, EnglishAgentRowWords))
+            assertEquals("+14 −3 changes", tokens.copy(contextUsedTokens = null).summaryMeter(null, EnglishAgentRowWords))
         }
-        assertEquals("84k tokens · $1.20", row.copy(contextUsedTokens = "84320", totalCost = "1.20").summaryMeter("84k tokens"))
-        assertNull(row.summaryMeter(null))
+        assertEquals("84k tokens · $1.20", row.copy(contextUsedTokens = "84320", totalCost = "1.20").summaryMeter("84k tokens", EnglishAgentRowWords))
+        assertNull(row.summaryMeter(null, EnglishAgentRowWords))
     }
 
     @Test fun absentZeroNegativeAndInvalidTokensHideTheFallback() {

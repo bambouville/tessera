@@ -250,6 +250,7 @@ struct TesseraApp: App {
 
     /// Seed the dev key + a few demo hosts on first launch. DEBUG-only.
     init() {
+        DeviceStackGuard.install()
         BrokenPipeGuard.install()
         LiteralTextInputPolicy.install()
         UNUserNotificationCenter.current().delegate = TesseraNotificationDelegate.shared
@@ -310,6 +311,7 @@ struct TesseraApp: App {
                 inMemory: bootstrapNetworkHarness != nil
                     || usesCompactNavigationHarness
                     || usesHostAccessHarness
+                    || ArtifactsBrowserHarnessView.isEnabled
             )
             #else
             modelContainer = try TesseraModelContainer.make()
@@ -541,10 +543,19 @@ struct RootView: View {
     var body: some View {
         ZStack {
             #if DEBUG
-            if ProcessInfo.processInfo.environment["TESSERA_SETUP_FLOW_HARNESS"] == "1" {
+            if ArtifactsBrowserHarnessView.isEnabled {
+                ArtifactsBrowserHarnessView()
+                    .accessibilityIdentifier("artifacts-page")
+                    // As ContentView: the iPad shell never shows the status bar.
+                    .statusBarHidden(UIDevice.current.userInterfaceIdiom == .pad)
+            } else if ProcessInfo.processInfo.environment["TESSERA_SETUP_FLOW_HARNESS"] == "1" {
                 SetupFlowPresentationHarness()
             } else if ProcessInfo.processInfo.environment["TESSERA_COMPACT_NAVIGATION_HARNESS"] == "1" {
                 CompactNavigationTransitionHarnessView()
+            } else if ProcessInfo.processInfo.environment["TESSERA_DUO_WORKSPACE_HARNESS"] == "1" {
+                DuoWorkspaceHarness()
+            } else if ProcessInfo.processInfo.environment["TESSERA_DUO_RAIL_HARNESS"] == "1" {
+                DuoRailHarness()
             } else if ProcessInfo.processInfo.environment["TESSERA_IPHONE_KEYBOARD_HARNESS"] == "1" {
                 IPhoneKeyboardHarnessView()
             } else if ProcessInfo.processInfo.environment["TESSERA_ACCESSORY_EDITOR_HARNESS"] == "1" {
@@ -606,6 +617,18 @@ struct RootView: View {
             mainContent
             #endif
         }
+        .background {
+            ShortcutCheatSheetAnchor(
+                appearance: appearance,
+                shortcutStore: shortcutStore,
+                tokens: appearance.tokens(systemColorScheme: systemScheme),
+                isEnabled: appearance.shortcutCheatSheetEnabled && !appLockController.isLocked
+            )
+            .frame(width: 0, height: 0)
+        }
+        // Seeds the accessory bar's inset before any session lays out, so
+        // the first session's terminal is never sized against a zero inset.
+        .background { WindowBottomSafeAreaProbe() }
         .environment(appearance)
         .environment(appLockController)
         .environment(\.terminalInputAllowed, { !appLockController.isLocked })
@@ -626,6 +649,8 @@ struct RootView: View {
         .environment(hostAccessStore)
         .environment(\.designTokens, appearance.tokens(systemColorScheme: systemScheme))
         .preferredColorScheme(swiftUIScheme(for: appearance.mode))
+        // The automatic terminal theme follows the appearance this root renders.
+        .onChange(of: systemScheme, initial: true) { _, scheme in appearance.noteColorScheme(scheme) }
         .task { prewarmTerminalBackgrounds() }
         .onChange(of: appearance.requireFaceIDToUnlock) { _, _ in
             appLockController.reconcileRequirement(enforceNewlyEnabled: true)
@@ -815,7 +840,15 @@ struct RootView: View {
 /// through the session command facade to the shared reducer.
 @MainActor
 private struct GridAuthorityEventHarnessView: View {
-    @State private var tmux = TmuxController(controlPath: .sideChannel)
+    // Nothing answers this harness's authority reads, so the production
+    // clock is no measure of it: under UI-test load a tap has found a read
+    // past its 5 s overdue mark and the veil, correctly for a stuck channel,
+    // said "takes control when reconnected"; and a slow poll can miss the
+    // claim's 3 s progress presentation altogether.
+    @State private var tmux = TmuxController(
+        controlPath: .sideChannel,
+        authorityConfiguration: .init(queryOverdueMillis: 600_000, claimPresentationMillis: 600_000)
+    )
     @State private var session = GridAuthorityHarnessSession()
     @State private var facade: AppleSessionCommandFacade?
 
@@ -946,8 +979,8 @@ private struct AccessoryEditorHarnessView: View {
 #if DEBUG
 /// Host-free interaction harness for prompt overflow when all four trained
 /// directions are live. It proves the non-directional puck tap opens More
-/// while a down drag still sends the configured down macro; no terminal or
-/// provider connection is created.
+/// while a down drag still answers with the configured down macro; no
+/// terminal or provider connection is created.
 struct SwipePadOverflowHarnessView: View {
     @Environment(AppearancePreferences.self) private var appearance
     @Environment(SpeechDictationController.self) private var dictation
@@ -964,7 +997,10 @@ struct SwipePadOverflowHarnessView: View {
     private static let sessionID = UUID(
         uuidString: "F17E0000-0000-0000-0000-000000000005"
     )!
-    private static let puckCenter = CGPoint(x: 640, y: 420)
+
+    private var usesDefaultPosition: Bool {
+        ProcessInfo.processInfo.environment["TESSERA_SWIPEPAD_USE_DEFAULT_POSITION"] == "1"
+    }
 
     var body: some View {
         ZStack {
@@ -996,6 +1032,14 @@ struct SwipePadOverflowHarnessView: View {
         }
         .preferredColorScheme(.dark)
         .onAppear(perform: configure)
+        // A fixed point was the middle of an iPad but a corner of a landscape
+        // iPhone, where the radial opens as a fan with no straight-down petal.
+        // The canvas center fits the full cross on every device.
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+            guard !usesDefaultPosition else { return }
+            appearance.swipePadLastX = Double(size.width / 2)
+            appearance.swipePadLastY = Double(size.height / 2)
+        }
         .onDisappear {
             profileStore.remove(profileWithID: Self.profileID)
         }
@@ -1004,15 +1048,10 @@ struct SwipePadOverflowHarnessView: View {
     private func configure() {
         appearance.swipePadEnabled = true
         appearance.voiceDictationEnabled = true
-        if ProcessInfo.processInfo.environment[
-            "TESSERA_SWIPEPAD_USE_DEFAULT_POSITION"
-        ] == "1" {
+        if usesDefaultPosition {
             appearance.swipePadCorner = "bottomRight"
             appearance.swipePadLastX = -1
             appearance.swipePadLastY = -1
-        } else {
-            appearance.swipePadLastX = Double(Self.puckCenter.x)
-            appearance.swipePadLastY = Double(Self.puckCenter.y)
         }
 
         let profile = SwipePadProfile(
@@ -1028,6 +1067,15 @@ struct SwipePadOverflowHarnessView: View {
             isBuiltIn: false
         )
         profileStore.upsert(profile)
+
+        // A live prompt's petals answer through the context, as Agent Center
+        // does, rather than writing the macro to the terminal; record the
+        // answered option's bytes so the outcome line grades that route.
+        agentContext.onAnswer = { _, option in
+            lastSentBytes = MacroEncoder.encode(option.responseMacro)
+                .map { String(format: "%02x", $0) }
+                .joined(separator: " ")
+        }
 
         let prompt = AgentPrompt(
             signature: "overflow-harness-prompt",
@@ -2511,6 +2559,11 @@ struct LiveScrollVisualHarnessView: View {
             .onChange(of: scenePhase, initial: true) { _, phase in
                 showEdges?.setAppForeground(phase != .background)
             }
+            // Reported as ContentView reports it, so Agent Center reads
+            // nothing and ends a match still opening while the app is away.
+            .onChange(of: scenePhase == .active) { _, active in
+                Task { await agentCenterV2.setApplicationActive(active) }
+            }
             .onAppear { showEdges?.setSelectedSlot(liveSessionID) }
             .overlay {
                 if ProcessInfo.processInfo.environment["TESSERA_AGENT_CENTER_LIVE_VERIFY"] == "1",
@@ -2593,7 +2646,7 @@ struct LiveScrollVisualHarnessView: View {
             sessionRegistry.requestTmuxFocus(sessionID: sessionID, windowID: windowID)
         case .pane(let sessionID, let windowID, let paneID):
             sessionRegistry.requestTmuxFocus(sessionID: sessionID, windowID: windowID, paneID: paneID)
-        case .home, .session:
+        case .home, .session, .artifact:
             break
         }
     }
@@ -2872,8 +2925,9 @@ private enum LiveScrollTerminalExposure {
             .split(separator: "\n", omittingEmptySubsequences: false)
         // Rows whose centre is on screen. The viewport is rarely a whole
         // number of rows, so a partial top row must not push the bottom row
-        // (the live tail's cursor line) out of the readout.
-        let first = max(0, Int((view.contentOffset.y / cell.height - 0.5).rounded(.up)))
+        // (the live tail's cursor line) out of the readout, and the live tail
+        // draws no row above its grid.
+        let first = view.firstDrawnRow(from: max(0, Int((view.contentOffset.y / cell.height - 0.5).rounded(.up))))
         let last = Int(((view.contentOffset.y + view.bounds.height) / cell.height - 0.5).rounded(.down))
         let visible = lines.dropFirst(first).prefix(max(1, last - first + 1))
         var numbers: [Int] = []

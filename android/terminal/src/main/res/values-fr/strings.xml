@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="paste_text">Coller</string>
+  <string name="copy_text">Copier</string>
+  <string name="text_selection_more">Plus…</string>
+  <string name="quick_open_selected_path">Ouvrir dans Artefacts</string>
+  <string name="reveal_selected_path">Afficher dans Fichiers</string>
+  <string name="terminal_page_up">Page précédente</string>
+  <string name="terminal_page_down">Page suivante</string>
+</resources>

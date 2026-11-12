@@ -148,17 +148,24 @@ struct QuickLookPresenter: View {
     let displayTitle: String?
     let onDismiss: (() -> Void)?
     let prepareImages: (@MainActor () async throws -> Void)?
+    let imageGeneration: Int
 
     @AppStorage(QuickLookPresentationMode.storageKey)
     private var mode: QuickLookPresentationMode = QuickLookPresentationMode.fallback
 
     @Environment(\.dismiss) private var dismiss
 
-    init(fileURL: URL, displayTitle: String? = nil, prepareImages: (@MainActor () async throws -> Void)? = nil, onDismiss: (() -> Void)? = nil) {
+    init(fileURL: URL, displayTitle: String? = nil, prepareImages: (@MainActor () async throws -> Void)? = nil,
+         imageGeneration: Int = 0, onDismiss: (() -> Void)? = nil) {
         self.fileURL = fileURL
         self.displayTitle = displayTitle
         self.onDismiss = onDismiss
         self.prepareImages = prepareImages
+        self.imageGeneration = imageGeneration
+    }
+
+    var markdownTaskIdentity: MarkdownPreviewTaskIdentity {
+        MarkdownPreviewTaskIdentity(fileURL: fileURL, imageGeneration: imageGeneration)
     }
 
     private var presentsMarkdown: Bool {
@@ -170,6 +177,7 @@ struct QuickLookPresenter: View {
         if presentsMarkdown {
             MarkdownPreview(
                 prepareImages: prepareImages,
+                taskIdentity: markdownTaskIdentity,
                 fileURL: fileURL,
                 displayTitle: displayTitle,
                 mode: mode,
@@ -207,7 +215,7 @@ struct QuickLookPresenter: View {
 enum MarkdownPreviewSupport {
     private static let extensions: Set<String> = [
         "md", "markdown", "mdown", "mkdn", "mkd", "mdwn",
-        "mdtext", "mdtxt", "rmd", "qmd",
+        "mdtext", "mdtxt", "rmd", "qmd", "mdx",
     ]
 
     static func isMarkdown(fileURL: URL, displayTitle: String?) -> Bool {
@@ -258,6 +266,19 @@ enum MarkdownImageStaging {
     static let maxTotalBytes: Int64 = 32 * 1024 * 1024
     static let maxImages = 32
 
+    private struct Image: Codable {
+        var name: String
+        var remotePath: String
+        var size: UInt64?
+        var modified: Date?
+        var bytes: Int64
+        var pixels: Int
+    }
+
+    private struct Manifest: Codable {
+        var images: [String: Image]
+    }
+
     static func manifestURL(for document: URL) -> URL {
         document.appendingPathExtension("images.json")
     }
@@ -273,27 +294,51 @@ enum MarkdownImageStaging {
     }
 
     static func images(for document: URL) -> [String: URL] {
-        guard let data = try? Data(contentsOf: manifestURL(for: document)),
-              let names = try? JSONDecoder().decode([String: String].self, from: data) else { return [:] }
+        guard let data = try? Data(contentsOf: manifestURL(for: document)) else { return [:] }
+        let names = (try? JSONDecoder().decode(Manifest.self, from: data))?.images.mapValues(\.name)
+            ?? (try? JSONDecoder().decode([String: String].self, from: data)) ?? [:]
         return names.compactMapValues { name in
-            guard name == (name as NSString).lastPathComponent, name.hasPrefix("image-"),
-                  name.hasSuffix(".png") else { return nil }
-            return document.deletingLastPathComponent().appendingPathComponent(name)
+            imageURL(name, document: document)
         }
     }
 
+    static func documentReplaced(at document: URL) {
+        // New manifests retain the stat identity needed to reuse thumbnails.
+        // Legacy sidecars have no remote identity and must be restaged.
+        if let data = try? Data(contentsOf: manifestURL(for: document)),
+           (try? JSONDecoder().decode(Manifest.self, from: data)) != nil { return }
+        let sidecars = Set(images(for: document).values).union([manifestURL(for: document)])
+        for file in sidecars where file.standardizedFileURL != document.standardizedFileURL {
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+
+    private static func imageURL(_ name: String, document: URL) -> URL? {
+        guard name == (name as NSString).lastPathComponent, name.hasPrefix("image-"),
+              name.hasSuffix(".png") else { return nil }
+        let url = document.deletingLastPathComponent().appendingPathComponent(name)
+        return url.standardizedFileURL == document.standardizedFileURL ? nil : url
+    }
+
+    /// Returns false after a transient download failure, so the caller can retry.
+    /// A forced refresh keeps that image's last copy and stays pending.
+    @discardableResult
     @MainActor
-    static func stage(document: URL, remotePath: String, bridge: any FileBridging) async throws {
-        if FileManager.default.fileExists(atPath: manifestURL(for: document).path) { return }
+    static func stage(document: URL, remotePath: String, bridge: any FileBridging, force: Bool = false) async throws -> Bool {
+        guard bridge.state == .connected else { throw FileBridgeError.notConnected }
         let destinations = try await Task.detached(priority: .userInitiated) {
             try Self.destinations(source: String(contentsOf: document, encoding: .utf8))
         }.value
-        var names: [String: String] = [:]
-        var paths: [String: String] = [:]
+        let previous = (try? Data(contentsOf: manifestURL(for: document)))
+            .flatMap { try? JSONDecoder().decode(Manifest.self, from: $0) }?.images ?? [:]
+        let oldImages = Set(images(for: document).values)
+        var staged: [String: Image] = [:]
+        var paths: [String: Image] = [:]
         var remaining = maxTotalBytes
         var remainingPixels = 16 * 1024 * 1024
         var created: [URL] = []
         var completed = false
+        var downloadsCompleted = true
         defer {
             if !completed { for url in created { try? FileManager.default.removeItem(at: url) } }
         }
@@ -301,10 +346,28 @@ enum MarkdownImageStaging {
             try Task.checkCancellation()
             guard remaining > 0, remainingPixels > 0,
                   let path = MarkdownLocalImage.remotePath(destination, documentPath: remotePath) else { continue }
-            if let name = paths[path] { names[destination] = name; continue }
-            let download = document.deletingLastPathComponent().appendingPathComponent(UUID().uuidString)
-            defer { try? FileManager.default.removeItem(at: download) }
+            if let image = paths[path] { staged[destination] = image; continue }
+            guard bridge.state == .connected else { throw FileBridgeError.notConnected }
+            let entry = try? await bridge.attributes(path)
+            try Task.checkCancellation()
             let limit = min(maxImageBytes, remaining)
+            let cached = previous.values.first(where: { $0.remotePath.utf8.elementsEqual(path.utf8) }).flatMap { image -> Image? in
+                guard image.bytes >= 0, image.bytes <= limit, image.pixels > 0, image.pixels <= remainingPixels,
+                      let url = imageURL(image.name, document: document), FileManager.default.fileExists(atPath: url.path)
+                else { return nil }
+                return image
+            }
+            if !force, let entry, let size = entry.size, let modified = entry.modified, let image = cached,
+               image.size == size, image.modified == modified {
+                remaining -= image.bytes
+                remainingPixels -= image.pixels
+                staged[destination] = image
+                paths[path] = image
+                continue
+            }
+            let download = document.deletingLastPathComponent().appendingPathComponent(UUID().uuidString)
+            var retainedBytes: Int64 = 0
+            defer { try? FileManager.default.removeItem(at: download) }
             // Cancellation bounds downloads even when the remote file grows
             // after stat or does not report a size. This child owns its cancel.
             let task = Task {
@@ -319,6 +382,8 @@ enum MarkdownImageStaging {
                 try await withTaskCancellationHandler {
                     try await task.value
                 } onCancel: { task.cancel() }
+                let bytes = Int64((try? download.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+                guard bytes <= limit else { remaining -= bytes; continue }
                 let name = "image-\(UUID().uuidString).png"
                 let target = document.deletingLastPathComponent().appendingPathComponent(name)
                 created.append(target)
@@ -328,19 +393,55 @@ enum MarkdownImageStaging {
                 }.value
                 if pixels > 0 {
                     remainingPixels -= pixels
-                    names[destination] = name
-                    paths[path] = name
+                    let image = Image(name: name, remotePath: path, size: entry?.size, modified: entry?.modified,
+                                      bytes: bytes, pixels: pixels)
+                    staged[destination] = image
+                    paths[path] = image
                 } else { try? FileManager.default.removeItem(at: target) }
             } catch {
                 try Task.checkCancellation()
+                // A missing or oversized image is a definitive answer; only a
+                // transient failure leaves the refresh pending, or one broken
+                // link would force every later load to re-download everything.
+                // The child cancels itself on oversize, whatever the bridge
+                // rethrows that as.
+                if !task.isCancelled, isTransient(error) {
+                    downloadsCompleted = false
+                    if force, let image = cached {
+                        staged[destination] = image
+                        paths[path] = image
+                        retainedBytes = image.bytes
+                        remainingPixels -= image.pixels
+                    }
+                }
                 // An unavailable image must not prevent reading the document.
             }
             let bytes = (try? download.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            remaining -= Int64(bytes)
+            remaining -= max(Int64(bytes), retainedBytes)
         }
         try Task.checkCancellation()
-        try JSONEncoder().encode(names).write(to: manifestURL(for: document), options: .atomic)
+        try JSONEncoder().encode(Manifest(images: staged)).write(to: manifestURL(for: document), options: .atomic)
         completed = true
+        let retained = Set(staged.values.compactMap { imageURL($0.name, document: document) })
+        for url in oldImages.subtracting(retained) { try? FileManager.default.removeItem(at: url) }
+        return downloadsCompleted
+    }
+
+    private static func isTransient(_ error: Error) -> Bool {
+        switch error {
+        case FileBridgeError.network, FileBridgeError.notConnected, FileBridgeError.remoteOperationFailed:
+            return true
+        case FileBridgeError.remoteStatus(let code, _): return ![2, 3, 8, 10].contains(code)
+        default:
+            let error = error as NSError
+            if error.domain == NSCocoaErrorDomain {
+                return ![NSFileNoSuchFileError, NSFileReadNoSuchFileError, NSFileReadNoPermissionError].contains(error.code)
+            }
+            if error.domain == NSPOSIXErrorDomain {
+                return ![POSIXErrorCode.ENOENT, .EACCES, .EPERM].contains { Int($0.rawValue) == error.code }
+            }
+            return true
+        }
     }
 
     /// Decode off the UI thread and bound decoded pixels as well as wire bytes.
@@ -779,6 +880,11 @@ enum MarkdownRenderSeams {
     #endif
 }
 
+struct MarkdownPreviewTaskIdentity: Equatable {
+    let fileURL: URL
+    let imageGeneration: Int
+}
+
 private struct MarkdownPreview: View {
     private enum LoadState {
         case loading
@@ -787,6 +893,7 @@ private struct MarkdownPreview: View {
     }
 
     let prepareImages: (@MainActor () async throws -> Void)?
+    let taskIdentity: MarkdownPreviewTaskIdentity
     let fileURL: URL
     let displayTitle: String?
     let mode: QuickLookPresentationMode
@@ -795,14 +902,17 @@ private struct MarkdownPreview: View {
 
     @State private var loadState: LoadState = .loading
     @State private var shareVisible = false
+    /// Inside an artifacts tab: the tab owns the chrome, and a replaced
+    /// cached copy must be read again even if its modification date held.
+    @Environment(\.artifactDocumentEmbedded) private var artifactEmbedded
 
     private var title: String {
         displayTitle ?? fileURL.lastPathComponent
     }
 
     var body: some View {
-        if MarkdownRenderSeams.lean {
-            content.task(id: fileURL) { await load() }
+        if artifactEmbedded || MarkdownRenderSeams.lean {
+            content.task(id: taskIdentity) { await load() }
         } else {
             chrome
         }
@@ -843,13 +953,14 @@ private struct MarkdownPreview: View {
                 .allowsHitTesting(false)
                 .systemShareSheet(isPresented: $shareVisible) { [fileURL] }
         }
-        .task(id: fileURL) { await load() }
+        .task(id: taskIdentity) { await load() }
     }
 
     private func load() async {
         do {
             var document: MarkdownDocument
-            if let cached = MarkdownDocumentCache.document(for: fileURL) {
+            if !artifactEmbedded,
+               let cached = MarkdownDocumentCache.document(for: fileURL) {
                 document = cached
             } else {
                 document = try await Task.detached(priority: .userInitiated) {

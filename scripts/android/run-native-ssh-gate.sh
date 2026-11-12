@@ -211,7 +211,7 @@ REMOTE
       "rm -f '$agent_fixture_home/.config/tessera/agent-codex-recover.sh'" \
       >/dev/null 2>&1 || cleanup_status=1
     control_ssh "$TESSERA_FIXTURE_STABLE_HOST" \
-      "rm -f '$agent_setup_path' '$agent_rc_state_path'; rm -rf '$agent_fixture_root' '$agent_fixture_home/.claude/projects/tessera-native-$token' '$agent_fixture_home/.config/tessera/active-shells' '$agent_fixture_home/.config/tessera/active-subagents' '$agent_fixture_home/.config/tessera/agent-host' '$agent_fixture_home/.config/tessera/agent-host-staging' '$agent_fixture_home/.config/tessera/agent-host-versions'; rm -f '$agent_fixture_home/.config/tessera/agent-host-install.lock' '$agent_fixture_home/.config/tessera/tessera-agent-host' '$agent_fixture_home/.config/tessera/agent-uninstall.sh' '$agent_fixture_home/.config/tessera/agent-lifecycle-hook.sh' '$agent_fixture_home/.config/tessera/agent-launch.sh' '$agent_fixture_home/.config/tessera/tessera-agent-project' '$agent_fixture_home/.config/tessera/tessera-agent-launch' '$agent_fixture_home/.config/tessera/tessera-agent-prove' '$agent_fixture_home/.config/tessera/agent-codex-readiness.sh' '$agent_fixture_home/.config/tessera/agent-lifecycle.sh' '$agent_fixture_home/.config/tessera/claude-agent-hooks.json' '$agent_fixture_home/.config/tessera/agent-lifecycle-diagnostics.log' '$agent_fixture_home/.config/tessera/codex-readiness-diagnostics.log' '$agent_fixture_home/.config/tessera/bin/claude' '$agent_fixture_home/.config/tessera/bin/codex' '$agent_fixture_home/.claude/settings.json' '$agent_fixture_home/.codex/hooks.json' '$agent_fixture_home/.kimi-code/config.toml'; rmdir '$agent_fixture_home/.config/tessera/bin' '$agent_fixture_home/.config/tessera' '$agent_fixture_home/.config' '$agent_fixture_home/.claude/projects' '$agent_fixture_home/.claude' '$agent_fixture_home/.codex' '$agent_fixture_home/.kimi-code' 2>/dev/null || true" \
+      "rm -f '$agent_setup_path' '$agent_rc_state_path'; rm -rf '$agent_fixture_root' '$agent_fixture_home/.claude/projects/tessera-native-$token' '$agent_fixture_home/.config/tessera/active-shells' '$agent_fixture_home/.config/tessera/active-subagents' '$agent_fixture_home/.config/tessera/agent-host' '$agent_fixture_home/.config/tessera/agent-host-staging' '$agent_fixture_home/.config/tessera/agent-host-versions'; rm -f '$agent_fixture_home/.config/tessera/agent-host-install.lock' '$agent_fixture_home/.config/tessera/active-shells.pruned' '$agent_fixture_home/.config/tessera/tessera-agent-host' '$agent_fixture_home/.config/tessera/agent-uninstall.sh' '$agent_fixture_home/.config/tessera/agent-lifecycle-hook.sh' '$agent_fixture_home/.config/tessera/agent-launch.sh' '$agent_fixture_home/.config/tessera/tessera-agent-project' '$agent_fixture_home/.config/tessera/tessera-agent-launch' '$agent_fixture_home/.config/tessera/tessera-agent-prove' '$agent_fixture_home/.config/tessera/agent-codex-readiness.sh' '$agent_fixture_home/.config/tessera/agent-lifecycle.sh' '$agent_fixture_home/.config/tessera/claude-agent-hooks.json' '$agent_fixture_home/.config/tessera/agent-lifecycle-diagnostics.log' '$agent_fixture_home/.config/tessera/codex-readiness-diagnostics.log' '$agent_fixture_home/.config/tessera/bin/claude' '$agent_fixture_home/.config/tessera/bin/codex' '$agent_fixture_home/.claude/settings.json' '$agent_fixture_home/.codex/hooks.json' '$agent_fixture_home/.kimi-code/config.toml'; rmdir '$agent_fixture_home/.config/tessera/bin' '$agent_fixture_home/.config/tessera' '$agent_fixture_home/.config' '$agent_fixture_home/.claude/projects' '$agent_fixture_home/.claude' '$agent_fixture_home/.codex' '$agent_fixture_home/.kimi-code' 2>/dev/null || true" \
       >/dev/null 2>&1 || cleanup_status=1
   fi
   if [[ -n "$serial" ]]; then
@@ -376,8 +376,31 @@ done
     :networking:connectedDebugAndroidTest \
     :terminal:connectedDebugAndroidTest \
     :feature-session:connectedDebugAndroidTest
+    # sshj's exec channels against a real sshd: these JVM cases run on this
+    # host, against the same disposable fixture, and skip without it. They
+    # verify its host key, which only fixture_ssh records (on first contact).
+    fixture_ssh "$TESSERA_FIXTURE_STABLE_HOST" true
+    TESSERA_EXEC_NETWORK_TEST=1 \
+    TESSERA_EXEC_TEST_HOST="$TESSERA_FIXTURE_STABLE_HOST" \
+    TESSERA_EXEC_TEST_PORT="$TESSERA_FIXTURE_APP_PORT" \
+    TESSERA_EXEC_TEST_USER="$TESSERA_FIXTURE_USER" \
+    TESSERA_EXEC_TEST_PASSWORD_FILE="$FIXTURE_STATE/password" \
+    TESSERA_EXEC_TEST_KNOWN_HOSTS="$TESSERA_FIXTURE_APP_KNOWN_HOSTS" \
+    JAVA_HOME="$java_home" SWIFT_ANDROID_SWIFT="$swift_bin" ./gradlew "${gradle_args[@]}" \
+      :networking:testDebugUnitTest --tests 'com.bambouville.tessera.networking.SshExecStreamNetworkTest' --rerun
   fi
 )
+
+if [[ "$ordering_only" == 0 && "$program_status_only" == 0 ]]; then
+  exec_report="$repo_root/android/networking/build/test-results/testDebugUnitTest/TEST-com.bambouville.tessera.networking.SshExecStreamNetworkTest.xml"
+  # A skipped assumption is a green task with nothing proved.
+  exec_suite="$(grep -m1 '<testsuite ' "$exec_report" 2>/dev/null || true)"
+  [[ "$exec_suite" =~ tests=\"([0-9]+)\" ]] && (( BASH_REMATCH[1] > 0 )) \
+    && [[ "$exec_suite" == *'skipped="0"'* && "$exec_suite" == *'failures="0"'* && "$exec_suite" == *'errors="0"'* ]] || {
+    echo "SshExecStreamNetworkTest did not run every case against the fixture: ${exec_suite:-no report}" >&2
+    exit 1
+  }
+fi
 
 log_output="$("$adb" -s "$serial" logcat -d -s TesseraNativeSsh:I '*:S')"
 if [[ "$ordering_only" == 1 ]]; then

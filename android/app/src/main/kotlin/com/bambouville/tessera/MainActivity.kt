@@ -2,8 +2,6 @@ package com.bambouville.tessera
 
 import android.Manifest
 import android.content.Intent
-import android.app.Activity
-import android.app.KeyguardManager
 import android.content.Context
 import android.net.Uri
 import android.os.Build
@@ -15,10 +13,12 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -32,6 +32,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -56,6 +57,7 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -95,6 +97,7 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.pluralStringResource
@@ -105,6 +108,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.IntentCompat
 import androidx.core.content.FileProvider
+import androidx.core.content.edit
 import com.bambouville.tessera.core.bridge.CoreBridge
 import com.bambouville.tessera.core.bridge.CoreBridgeState
 import com.bambouville.tessera.core.bridge.SharedInputEncoding
@@ -114,9 +118,11 @@ import com.bambouville.tessera.agent.platform.LiveAgentSessionRegistry
 import com.bambouville.tessera.data.AndroidHostRepository
 import com.bambouville.tessera.data.AndroidAppPreferences
 import com.bambouville.tessera.data.AppPreferences
+import com.bambouville.tessera.data.AutomaticTerminalThemeId
 import com.bambouville.tessera.data.AccessoryBarKey
 import com.bambouville.tessera.data.accessoryBarDefaults
 import com.bambouville.tessera.data.persistedAccessoryBarIds
+import com.bambouville.tessera.data.resolvedTerminalThemeId
 import com.bambouville.tessera.data.AndroidKnownHostsRepository
 import com.bambouville.tessera.data.AndroidIdentityRepository
 import com.bambouville.tessera.data.AndroidSessionRestoreRepository
@@ -144,6 +150,13 @@ import com.bambouville.tessera.data.continuity.normalizedRestoreTransportKind
 import com.bambouville.tessera.feature.hosts.HostListScreen
 import com.bambouville.tessera.feature.hosts.IdentityListScreen
 import com.bambouville.tessera.feature.hosts.KnownHostsScreen
+import com.bambouville.tessera.feature.artifacts.ArtifactsRootScreen
+import com.bambouville.tessera.feature.artifacts.viewers.deleteArtifactProfile
+import com.bambouville.tessera.feature.artifacts.viewers.reconcileArtifactProfiles
+import com.bambouville.tessera.feature.artifacts.ArtifactsStore
+import com.bambouville.tessera.feature.artifacts.LocalArtifactsStore
+import com.bambouville.tessera.design.LocalArtifactOpener
+import com.bambouville.tessera.core.bridge.SharedArtifactsQuickOpenHost
 import com.bambouville.tessera.feature.session.ExternalUiExcursions
 import com.bambouville.tessera.feature.session.LiveSessionStore
 import com.bambouville.tessera.feature.session.SessionSwitcherSession
@@ -159,10 +172,18 @@ import com.bambouville.tessera.feature.session.programStatusCountSummary
 import com.bambouville.tessera.feature.session.SessionSwitcherStatus
 import com.bambouville.tessera.feature.session.SshSessionScreen
 import com.bambouville.tessera.feature.session.SshSessionUiState
+import com.bambouville.tessera.feature.session.TranscriptSelectionPathOutcome
+import com.bambouville.tessera.feature.session.TranscriptSelectionPathRequest
 import com.bambouville.tessera.feature.pairing.PairingScreen
 import com.bambouville.tessera.feature.pairing.CrossDevicePairingCoordinator
+import com.bambouville.tessera.feature.pairing.PairingUiState
+import com.bambouville.tessera.onboarding.OnboardingHost
+import com.bambouville.tessera.onboarding.OnboardingTarget
+import com.bambouville.tessera.onboarding.onboardingAnchor
+import com.bambouville.tessera.onboarding.rememberOnboardingController
 import com.bambouville.tessera.files.PendingShareUpload
 import com.bambouville.tessera.files.RemoteFilesConstants
+import com.bambouville.tessera.files.SelectedPathIntent
 import com.bambouville.tessera.files.ShareTextMode
 import com.bambouville.tessera.files.ShareUploadDestination
 import com.bambouville.tessera.files.ShareUploadPolicy
@@ -195,6 +216,8 @@ import com.bambouville.tessera.design.TesseraTheme
 import com.bambouville.tessera.design.TesseraToggleRow
 import com.bambouville.tessera.design.TesseraType
 import com.bambouville.tessera.security.AndroidKeystoreCredentialStore
+import com.bambouville.tessera.security.canConfirmDeviceOwner
+import com.bambouville.tessera.security.confirmDeviceOwner
 import com.bambouville.tessera.lifecycle.DiagnosticLogStore
 import com.bambouville.tessera.feature.session.bell.AndroidBellController
 import com.bambouville.tessera.feature.session.bell.BellEvent
@@ -206,6 +229,7 @@ import com.bambouville.tessera.terminal.TerminalBackgroundImageStore
 import com.bambouville.tessera.terminal.TerminalTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -213,6 +237,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import androidx.lifecycle.lifecycleScope
@@ -228,6 +253,9 @@ import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import com.bambouville.tessera.feature.agentcenter.AgentCenterPresenter
 import com.bambouville.tessera.feature.agentcenter.AgentCenterScreen
+import com.bambouville.tessera.feature.agentcenter.AgentSelectionPathAction
+import com.bambouville.tessera.feature.agentcenter.AgentThreadDetail
+import com.bambouville.tessera.feature.agentcenter.boundTmuxPaneID
 import com.bambouville.tessera.feature.agentcenter.targetsLiveSession
 import com.bambouville.tessera.feature.agentcenter.navigateToExistingAgentTerminal
 import com.bambouville.tessera.feature.agentcenter.AgentNotificationContract
@@ -246,7 +274,18 @@ private object AgentRuntimeStore : ViewModelStoreOwner {
     override val viewModelStore = ViewModelStore()
 }
 
+private object ArtifactsRuntimeStore {
+    private var instance: ArtifactsStore? = null
+    @Synchronized fun get(context: Context, diagnostics: DiagnosticLogStore): ArtifactsStore = instance
+        ?: ArtifactsStore(context.applicationContext, diagnostics::record).also { store ->
+            store.onHostsLoaded = ::reconcileArtifactProfiles
+            store.onHostsRemoved = { ids -> ids.forEach(::deleteArtifactProfile) }
+            instance = store
+        }
+}
+
 class MainActivity : ComponentActivity() {
+    private val artifactsStore: ArtifactsStore by lazy { ArtifactsRuntimeStore.get(applicationContext, diagnostics) }
     private val agentRuntime: AgentSessionViewModel by lazy {
         ViewModelProvider(
             AgentRuntimeStore,
@@ -271,6 +310,7 @@ class MainActivity : ComponentActivity() {
         LiveSessionStore.get().activityStarted()
         super.onStart()
         agentRuntime.presenter.setApplicationForeground(true)
+        artifactsStore.setForeground(true)
     }
 
     // Start fail-closed until the persisted policy is loaded; this prevents protected host data
@@ -281,19 +321,13 @@ class MainActivity : ComponentActivity() {
     private lateinit var diagnostics: DiagnosticLogStore
     @Volatile private var appLockEnabled = false
     /**
-     * Tessera's own trips out of the activity, counted: they nest (a picker
-     * over a credential prompt), and one boolean was cleared by whichever
-     * finished first while another was still up.
+     * Tessera's own trips out of the activity, counted: they nest, and one
+     * boolean was cleared by whichever finished first while another was
+     * still up.
      */
     private val externalUi = ExternalUiExcursions()
-    private val unlockExcursion = externalUi.slot()
     @Volatile private var pairingCoordinator: CrossDevicePairingCoordinator? = null
-    private val unlockLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { result ->
-        unlockExcursion(false)
-        if (result.resultCode == Activity.RESULT_OK) locked.value = false
-    }
+    private var unlockPrompt: Job? = null
 
     private fun isRealBackgroundEdge(): Boolean = !isChangingConfigurations && !externalUi.active
 
@@ -337,42 +371,50 @@ class MainActivity : ComponentActivity() {
         setContent {
             TesseraTheme {
                 val notificationTarget by agentRuntime.notificationTarget.collectAsState()
-                FoundationScreen(
-                    pendingShare = pendingShare.collectAsState().value,
-                    pendingShareTargetId = pendingShareTargetId.collectAsState().value,
-                    onShareRouted = { routed ->
-                        routedShare.value = routed
-                        pendingShare.value = null
-                        pendingShareTargetId.value = null
-                    },
-                    onShareDiscarded = {
-                        pendingShare.value = null
-                        pendingShareTargetId.value = null
-                    },
-                    routedShare = routedShare.collectAsState().value,
-                    onRoutedShareConsumed = { routedShare.value = null },
-                    preferences = preferences,
-                    locked = locked.collectAsState().value,
-                    appLockError = appLockError.collectAsState().value,
-                    onUnlock = ::requestUnlock,
-                    onAppLockChanged = ::setAppLockEnabled,
-                    externalUi = externalUi,
-                    isRealBackgroundEdge = ::isRealBackgroundEdge,
-                    onPairingCoordinatorChanged = { pairingCoordinator = it },
-                    diagnostics = diagnostics,
-                    onUploadDiagnosticLog = ::uploadDiagnosticLog,
-                    agentSessions = agentRuntime.sessions,
-                    agentIntegration = agentRuntime.integration,
-                    agentPresenter = agentRuntime.presenter,
-                    notificationThreadKey = notificationTarget?.threadKey,
-                    notificationPrearmedAnswer = notificationTarget?.prearmedAnswer ?: false,
-                    onNotificationThreadConsumed = agentRuntime::consumeNotificationTarget,
-                )
+                CompositionLocalProvider(
+                    LocalArtifactOpener provides artifactsStore,
+                    LocalArtifactsStore provides artifactsStore,
+                ) {
+                    FoundationScreen(
+                        pendingShare = pendingShare.collectAsState().value,
+                        pendingShareTargetId = pendingShareTargetId.collectAsState().value,
+                        onShareRouted = { routed ->
+                            routedShare.value = routed
+                            pendingShare.value = null
+                            pendingShareTargetId.value = null
+                        },
+                        onShareDiscarded = {
+                            pendingShare.value = null
+                            pendingShareTargetId.value = null
+                        },
+                        routedShare = routedShare.collectAsState().value,
+                        onRoutedShareConsumed = { routedShare.value = null },
+                        preferences = preferences,
+                        locked = locked.collectAsState().value,
+                        appLockError = appLockError.collectAsState().value,
+                        onUnlock = ::requestUnlock,
+                        onAppLockChanged = ::setAppLockEnabled,
+                        externalUi = externalUi,
+                        isRealBackgroundEdge = ::isRealBackgroundEdge,
+                        onPairingCoordinatorChanged = { pairingCoordinator = it },
+                        diagnostics = diagnostics,
+                        onUploadDiagnosticLog = ::uploadDiagnosticLog,
+                        agentSessions = agentRuntime.sessions,
+                        agentIntegration = agentRuntime.integration,
+                        agentPresenter = agentRuntime.presenter,
+                        notificationThreadKey = notificationTarget?.threadKey,
+                        notificationPrearmedAnswer = notificationTarget?.prearmedAnswer ?: false,
+                        onNotificationThreadConsumed = agentRuntime::consumeNotificationTarget,
+                        artifactsStore = artifactsStore,
+                    )
+                }
             }
         }
     }
 
     override fun onStop() {
+        artifactsStore.setForeground(false)
+        artifactsStore.flush()
         // §6.9: only a real background edge can hide a session. Reported here,
         // before ON_STOP is dispatched, because the composition's frame clock
         // pauses at the stop and never sees it as a value.
@@ -512,21 +554,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestUnlock() {
-        val keyguard = getSystemService(KeyguardManager::class.java)
-        val intent = keyguard.createConfirmDeviceCredentialIntent(
-            getString(R.string.app_lock_title),
-            getString(R.string.app_lock_body),
-        )
-        if (intent != null) {
-            unlockExcursion(true)
-            unlockLauncher.launch(intent)
+        if (unlockPrompt?.isActive == true || !canConfirmDeviceOwner(this)) return
+        unlockPrompt = lifecycleScope.launch {
+            if (confirmDeviceOwner(this@MainActivity, getString(R.string.app_lock_title), getString(R.string.app_lock_body))) {
+                locked.value = false
+            }
         }
     }
 
     private fun setAppLockEnabled(enabled: Boolean) {
-        val keyguard = getSystemService(KeyguardManager::class.java)
-        if (enabled && !keyguard.isDeviceSecure) {
-            appLockError.value = "Set a device PIN, pattern, password, or biometric before enabling app lock."
+        if (enabled && !canConfirmDeviceOwner(this)) {
+            appLockError.value = getString(R.string.app_lock_requires_credential)
             return
         }
         appLockError.value = null
@@ -577,7 +615,7 @@ private fun FoundationScreen(
     /**
      * Whether an ON_STOP is the app actually leaving, as opposed to a
      * configuration change or a screen the app itself put up — a file picker,
-     * the camera, a permission sheet, the keyguard. `MainActivity.onStop`
+     * the camera, a permission sheet. `MainActivity.onStop`
      * already refuses to treat those as leaving; restore used to, which closed
      * the window mid-wake and reopened a fresh sixty-second one over sessions
      * that never died.
@@ -592,12 +630,13 @@ private fun FoundationScreen(
     notificationThreadKey: String?,
     notificationPrearmedAnswer: Boolean,
     onNotificationThreadConsumed: () -> Unit,
+    artifactsStore: ArtifactsStore,
 ) {
     val context = LocalContext.current
     val compositionScope = rememberCoroutineScope()
-    // One slot per consumer: Keys' credential prompts, and Settings' pickers,
-    // pairing camera and permission sheets (one destination at a time).
-    val keysExcursion = remember(externalUi) { externalUi.slot() }
+    val testBellPaneTitle = stringResource(R.string.app_test_bell_pane)
+    // Settings' pickers, pairing camera and permission sheets share one slot
+    // (one destination at a time).
     val settingsExcursion = remember(externalUi) { externalUi.slot() }
     val hostRepository = remember(context) {
         AndroidHostRepository(context.applicationContext)
@@ -624,6 +663,7 @@ private fun FoundationScreen(
     DisposableEffect(bellController) { onDispose(bellController::close) }
     val bellUnread by bellController.unread.state.collectAsState()
     val appPreferences by preferences.values.collectAsState(initial = AppPreferences())
+    val onboardingController = rememberOnboardingController(preferences)
     var bellPermissionRefresh by remember { mutableIntStateOf(0) }
     val bellPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -656,6 +696,10 @@ private fun FoundationScreen(
     val collectedProgramStatusSessions by programStatusCenter.sessions.collectAsState()
     val programStatusSessions = if (appPreferences.programStatusEnabled) collectedProgramStatusSessions else emptyMap()
     val programStatusFocusRequests = remember { mutableStateMapOf<String, ProgramStatusFocusRequest>() }
+    /** A transcript path per session, until that session takes it. */
+    val transcriptSelectionRequests = remember { mutableStateMapOf<String, TranscriptSelectionPathRequest>() }
+    /** The thread behind each session's latest transcript path, for the reveal that may follow. */
+    val transcriptSelectionThreads = remember { mutableMapOf<String, Pair<Long, AgentThreadDetail>>() }
     val agentState by agentPresenter.state.collectAsState()
     val paneAgentProviders by agentPresenter.paneAgentProviders.collectAsState()
     val liveSessionIds = sessionStore.sessionIds
@@ -689,6 +733,47 @@ private fun FoundationScreen(
     // the tab the user was looking at rather than to the session list.
     var presentedHostId by sessionStore.presentedHost
     var selectedTab by remember { mutableStateOf(CompactRootTab.Hosts) }
+    var settingsDestination by remember { mutableStateOf<SettingsDestination?>(null) }
+    var settingsReturnTab by remember { mutableStateOf(CompactRootTab.Hosts) }
+
+    fun selectRootTab(tab: CompactRootTab, destination: SettingsDestination? = null) {
+        if (tab == CompactRootTab.Settings && selectedTab != CompactRootTab.Settings) {
+            settingsReturnTab = selectedTab
+        }
+        settingsDestination = destination
+        selectedTab = tab
+    }
+    LaunchedEffect(artifactsStore) {
+        artifactsStore.opened.collect {
+            presentedHostId = null
+            selectRootTab(CompactRootTab.Artifacts)
+        }
+    }
+    LaunchedEffect(liveSessionCwds.toMap()) {
+        artifactsStore.updateDirectories(liveSessionCwds.toMap())
+    }
+    LaunchedEffect(artifactsStore, agentPresenter) {
+        val observed = mutableMapOf<String, com.bambouville.tessera.feature.agentcenter.AgentThreadDetail>()
+        val editKinds = setOf("edit", "change", "diff")
+        agentPresenter.state.collect { current ->
+            val details = (current.projectedDetails.values + listOfNotNull(current.detail)).distinctBy { it.row.key }
+            observed.keys.retainAll(details.map { it.row.key }.toSet())
+            for (detail in details) {
+                if (observed.put(detail.row.key, detail) === detail) continue
+                val cwd = detail.provenDirectories.singleOrNull()?.takeIf { it.startsWith('/') }
+                // Block equality hashes the full diff; the store already deduplicates edits.
+                val emitted = java.util.IdentityHashMap<com.bambouville.tessera.feature.agentcenter.AgentBlock, Unit>()
+                for (blocks in listOf(detail.live, detail.activity, detail.changes)) for (block in blocks) {
+                    if (emitted.put(block, Unit) != null) continue
+                    val path = block.path ?: continue
+                    val diff = block.diff ?: continue
+                    if (block.kind.length !in 4..6 || block.kind.lowercase() !in editKinds) continue
+                    artifactsStore.agentEditObserved(detail.row.hostID, path, diff,
+                        "${detail.row.key}:${block.recordID.orEmpty()}", cwd, block.displayTimeMillis)
+                }
+            }
+        }
+    }
     /**
      * Restore's state lives for the process, not for this Activity.
      *
@@ -740,6 +825,11 @@ private fun FoundationScreen(
         hostRepository.observeHosts().collect { value = it }
     }
     val hosts = loadedHosts.orEmpty()
+    LaunchedEffect(loadedHosts, coreState) {
+        if (loadedHosts != null && coreState is CoreBridgeState.Ready) {
+            artifactsStore.updateHosts(hosts.map { SharedArtifactsQuickOpenHost(it.id, it.displayName) }, hosts.associate { it.id to it.port })
+        }
+    }
     val continuityState by produceState<ContinuityLaunchState?>(initialValue = null, foregroundRestoreStore) {
         combine(
             foregroundRestoreStore.restorePolicy,
@@ -784,6 +874,28 @@ private fun FoundationScreen(
         // before landing on an arbitrary last one.
         if (presents) presentedHostId = host.id
         if (presents && explicitOpen) sessionStore.requestExplicitOpen(host.id)
+    }
+
+    /** The live tab an agent thread is bound to, only while its transport is connected. */
+    fun connectedAgentSessionHost(detail: AgentThreadDetail): SavedHost? =
+        liveSessions.firstOrNull { detail.targetsLiveSession(it.id, liveSessionIds[it.id]) }?.takeIf {
+            liveSessionStates[it.id] == SshSessionUiState.Connected && liveSessionTransportReachable[it.id] != false
+        }
+
+    /** Agent Center's "open terminal": reveal the thread's existing carrier and focus its pane. */
+    fun openAgentTerminal(detail: AgentThreadDetail) {
+        compositionScope.launch {
+            val host = liveSessions.firstOrNull { detail.targetsLiveSession(it.id, liveSessionIds[it.id]) }
+            navigateToExistingAgentTerminal(
+                isCurrentCarrier = { host != null && detail.targetsLiveSession(host.id, liveSessionIds[host.id]) &&
+                    agentPresenter.isTerminalCarrierCurrent(detail) },
+                focus = { agentPresenter.focusExact(detail) { presentedHostId == host?.id } },
+                reveal = { openHost(checkNotNull(host), explicitOpen = true) },
+                isCurrentTarget = { agentPresenter.isTerminalBindingCurrent(detail) },
+                isStillPresented = { presentedHostId == host?.id },
+                onOutcome = { agentPresenter.reportTerminalNavigationOutcome(it) },
+            )
+        }
     }
 
     /**
@@ -832,7 +944,7 @@ private fun FoundationScreen(
                 snapshot.sessionId == selectedSessionId
             }?.first?.id ?: restorable.firstOrNull()?.first?.id
             presentedHostId = selectedHostId
-            if (selectedHostId == null) selectedTab = CompactRootTab.Sessions
+            if (selectedHostId == null) selectRootTab(CompactRootTab.Sessions)
         } else {
             // Mid-wake the user may be looking at a session already. Only claim
             // the screen when nothing holds it, and then only for the session
@@ -884,6 +996,7 @@ private fun FoundationScreen(
             pairingCoordinator.close()
         }
     }
+    val pairingState by pairingCoordinator.state.collectAsState()
     LaunchedEffect(appPreferences.appLockEnabled) {
         pairingCoordinator.securityPolicyChanged()
     }
@@ -1487,7 +1600,7 @@ private fun FoundationScreen(
         agentPresenter.setEnabled(appPreferences.agentCenterEnabled)
         agentIntegration.setEnabled(appPreferences.agentCenterEnabled)
         if (!appPreferences.agentCenterEnabled && selectedTab == CompactRootTab.Agents) {
-            selectedTab = CompactRootTab.Hosts
+            selectRootTab(CompactRootTab.Hosts)
         }
     }
     LaunchedEffect(notificationThreadKey, notificationPrearmedAnswer) {
@@ -1496,9 +1609,9 @@ private fun FoundationScreen(
             onNotificationThreadConsumed()
             return@LaunchedEffect
         }
-        selectedTab = CompactRootTab.Agents
+        selectRootTab(CompactRootTab.Agents)
         agentPresenter.activate()
-        agentPresenter.select(notificationThreadKey)
+        agentPresenter.openNotificationThread(notificationThreadKey)
         if (notificationPrearmedAnswer) agentPresenter.prearmPromptReview(notificationThreadKey)
         onNotificationThreadConsumed()
     }
@@ -1541,7 +1654,37 @@ private fun FoundationScreen(
                 .takeIf { it.total > 0 },
         )
     }
-    Box(Modifier.fillMaxSize()) {
+    // Settings destinations can own key-install trust prompts as well as pairing/setup sheets.
+    val onboardingBlocked = locked || coreState !is CoreBridgeState.Ready || loadedHosts == null ||
+        restorePrompt != null || pairingRecoveryPrompt || pendingShare != null ||
+        pendingPairingContinuationHostId != null || settingsDestination != null ||
+        pairingState != PairingUiState.Idle || liveSessionStates.values.any {
+            it is SshSessionUiState.AwaitingHostKey || it is SshSessionUiState.AwaitingCredential ||
+                it is SshSessionUiState.AwaitingOwnerAuthorization
+        }
+    BackHandler(enabled = presentedHostId == null && selectedTab == CompactRootTab.Settings && !locked) {
+        val returnTab = settingsReturnTab.takeIf { it != CompactRootTab.Agents || appPreferences.agentCenterEnabled }
+            ?: CompactRootTab.Hosts
+        selectRootTab(returnTab)
+    }
+    OnboardingHost(
+        controller = onboardingController,
+        hostCount = hosts.size,
+        blocked = onboardingBlocked,
+        onNavigate = { target ->
+            presentedHostId = null
+            selectRootTab(
+                when (target) {
+                    OnboardingTarget.AddHost, OnboardingTarget.Hosts -> CompactRootTab.Hosts
+                    OnboardingTarget.Sessions -> CompactRootTab.Sessions
+                    OnboardingTarget.Agents -> if (appPreferences.agentCenterEnabled) CompactRootTab.Agents else CompactRootTab.Hosts
+                    OnboardingTarget.Artifacts -> CompactRootTab.Artifacts
+                    OnboardingTarget.Settings -> CompactRootTab.Settings
+                },
+            )
+        },
+        modifier = Modifier.fillMaxSize(),
+    ) {
         when (val state = coreState) {
             is CoreBridgeState.Ready -> {
                 liveSessions.forEach { sessionHost ->
@@ -1564,10 +1707,28 @@ private fun FoundationScreen(
                             programStatusEnabled = appPreferences.programStatusEnabled,
                             programStatusAgents = programStatusAgents,
                             programStatusFocusRequest = programStatusFocusRequests[sessionHost.id],
+                            transcriptSelectionRequest = transcriptSelectionRequests[sessionHost.id],
+                            onTranscriptSelectionConsumed = { request ->
+                                if (transcriptSelectionRequests[sessionHost.id]?.token == request.token) {
+                                    transcriptSelectionRequests.remove(sessionHost.id)
+                                }
+                            },
+                            onTranscriptSelectionOutcome = { request, outcome ->
+                                val thread = transcriptSelectionThreads[sessionHost.id]
+                                    ?.takeIf { it.first == request.token }?.second
+                                transcriptSelectionThreads.remove(sessionHost.id)
+                                when (outcome) {
+                                    is TranscriptSelectionPathOutcome.Missed -> agentPresenter.reportSelectionMiss(outcome.message)
+                                    // Files is open on the session; show it the way "open
+                                    // terminal" does, unless the user already left Agents.
+                                    TranscriptSelectionPathOutcome.Revealed -> if (thread != null &&
+                                        presentedHostId == null && selectedTab == CompactRootTab.Agents) openAgentTerminal(thread)
+                                }
+                            },
                             onOpenAgentCenter = if (appPreferences.agentCenterEnabled) {
                                 {
                                     presentedHostId = null
-                                    selectedTab = CompactRootTab.Agents
+                                    selectRootTab(CompactRootTab.Agents)
                                 }
                             } else null,
                             sessions = sessionStore,
@@ -1577,7 +1738,7 @@ private fun FoundationScreen(
                             terminalFontId = appPreferences.terminalFontId,
                             scrollbackLines = appPreferences.scrollbackLines,
                             resizeTerminalWithKeyboard = appPreferences.resizeTerminalWithKeyboard,
-                            terminalThemeId = appPreferences.terminalThemeId,
+                            terminalThemeId = resolvedTerminalThemeId(appPreferences.terminalThemeId, isSystemInDarkTheme()),
                             terminalCursorStyle = appPreferences.terminalCursorStyle,
                             terminalCursorBlink = appPreferences.terminalCursorBlink,
                             accessoryBarKeys = appPreferences.accessoryBarKeys,
@@ -1607,16 +1768,16 @@ private fun FoundationScreen(
                             externalUi = externalUi,
                             onOpenKeys = {
                                 presentedHostId = null
-                                selectedTab = CompactRootTab.Keys
+                                selectRootTab(CompactRootTab.Settings, SettingsDestination.Keys)
                             },
                             onEditHost = {
                                 presentedHostId = null
-                                selectedTab = CompactRootTab.Hosts
+                                selectRootTab(CompactRootTab.Hosts)
                             },
                             onContinueOnAnotherDevice = {
                                 pendingPairingContinuationHostId = sessionHost.id
                                 presentedHostId = null
-                                selectedTab = CompactRootTab.Settings
+                                selectRootTab(CompactRootTab.Settings, SettingsDestination.Pairing)
                             },
                             switcherSessions = switcherSessions,
                             onSelectSession = { hostId -> presentedHostId = hostId },
@@ -1682,7 +1843,7 @@ private fun FoundationScreen(
                 selectedTab = selectedTab,
                 agentCenterEnabled = appPreferences.agentCenterEnabled,
                 programAttention = programAttentionCounts,
-                onSelect = { selectedTab = it },
+                onSelect = { selectRootTab(it) },
                 modifier = Modifier.fillMaxSize().zIndex(1f),
             ) { padding ->
                 when (selectedTab) {
@@ -1690,6 +1851,7 @@ private fun FoundationScreen(
                         repository = hostRepository,
                         identities = identityRepository,
                         connectedHostIds = connectedHostIds,
+                        addHostButtonModifier = Modifier.onboardingAnchor(OnboardingTarget.AddHost),
                                 onOpenHost = { host ->
                                     openHost(host, connectOnPresent = true, explicitOpen = true)
                                 },
@@ -1764,17 +1926,26 @@ private fun FoundationScreen(
                     CompactRootTab.Agents -> AgentCenterScreen(
                         presenter = agentPresenter,
                         captureProtectionEnabled = appPreferences.hidesContentInAppSwitcher,
-                        onOpenTerminal = { detail ->
-                            compositionScope.launch {
-                                val host = liveSessions.firstOrNull { detail.targetsLiveSession(it.id, liveSessionIds[it.id]) }
-                                navigateToExistingAgentTerminal(
-                                    isCurrentCarrier = { host != null && detail.targetsLiveSession(host.id, liveSessionIds[host.id]) &&
-                                        agentPresenter.isTerminalCarrierCurrent(detail) },
-                                    focus = { agentPresenter.focusExact(detail) { presentedHostId == host?.id } },
-                                    reveal = { openHost(checkNotNull(host), explicitOpen = true) },
-                                    isCurrentTarget = { agentPresenter.isTerminalBindingCurrent(detail) },
-                                    isStillPresented = { presentedHostId == host?.id },
-                                    onOutcome = { agentPresenter.reportTerminalNavigationOutcome(it) },
+                        onOpenTerminal = ::openAgentTerminal,
+                        isBoundSessionConnected = { detail -> connectedAgentSessionHost(detail) != null },
+                        onSelectionPathAction = { detail, action, selection ->
+                            // Only a connected tab takes the path; nothing here dials one.
+                            val host = connectedAgentSessionHost(detail)
+                            if (host == null) agentPresenter.reportTerminalUnavailable()
+                            else {
+                                val token = System.nanoTime()
+                                transcriptSelectionThreads[host.id] = token to detail
+                                transcriptSelectionRequests[host.id] = TranscriptSelectionPathRequest(
+                                    intent = when (action) {
+                                        AgentSelectionPathAction.OpenInArtifacts -> SelectedPathIntent.OPEN_IN_ARTIFACTS
+                                        AgentSelectionPathAction.RevealInFiles -> SelectedPathIntent.REVEAL_IN_FILES
+                                    },
+                                    selection = selection,
+                                    // A binding from an earlier carrier names a pane
+                                    // that may now be another one: no anchor then.
+                                    tmuxPaneId = detail.boundTmuxPaneID()
+                                        ?.takeIf { agentPresenter.isTerminalCarrierCurrent(detail) },
+                                    token = token,
                                 )
                             }
                         },
@@ -1794,20 +1965,10 @@ private fun FoundationScreen(
                         },
                         modifier = Modifier.fillMaxSize().agentCenterContentPadding(padding),
                     )
-                    CompactRootTab.Keys -> {
-                        // Leaving Keys while its credential prompt is up must
-                        // not leave the excursion counted (it would disable
-                        // the hide and the app lock for the rest of the run).
-                        DisposableEffect(keysExcursion) { onDispose { keysExcursion(false) } }
-                        IdentityListScreen(
-                            repository = identityRepository,
-                            hostRepository = hostRepository,
-                            knownHostsRepository = knownHostsRepository,
-                            credentialStore = credentialStore,
-                            onSystemUiActiveChanged = keysExcursion,
-                            modifier = Modifier.fillMaxSize().padding(padding),
-                        )
-                    }
+                    CompactRootTab.Artifacts -> ArtifactsRootScreen(
+                        modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding),
+                        locked = locked,
+                    )
                     CompactRootTab.Settings -> {
                         // Same for a Settings picker or permission prompt.
                         DisposableEffect(settingsExcursion) { onDispose { settingsExcursion(false) } }
@@ -1816,12 +1977,17 @@ private fun FoundationScreen(
                             sessionRestorePolicy = continuityState?.policy ?: SessionRestorePolicy.ASK,
                             usesCompactShell = usesCompactShell,
                             appLockError = appLockError,
+                            destination = settingsDestination,
+                            onDestinationChanged = { settingsDestination = it },
+                            identityRepository = identityRepository,
+                            hostRepository = hostRepository,
                             knownHostsRepository = knownHostsRepository,
+                            credentialStore = credentialStore,
                             hosts = hosts,
                             pairingCoordinator = pairingCoordinator,
                             onReceivedSetupFinished = {
                                 presentedHostId = null
-                                selectedTab = CompactRootTab.Hosts
+                                selectRootTab(CompactRootTab.Hosts)
                             },
                             diagnostics = diagnostics,
                             onUploadDiagnosticLog = onUploadDiagnosticLog,
@@ -1902,9 +2068,7 @@ private fun FoundationScreen(
                             },
                             onBellNotificationChanged = { enabled ->
                                 compositionScope.launch { preferences.updateBellNotificationEnabled(enabled) }
-                                if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                                    !bellController.canPostNotifications()
-                                ) {
+                                if (enabled && !bellController.canPostNotifications()) {
                                     bellPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                                 }
                             },
@@ -1921,7 +2085,7 @@ private fun FoundationScreen(
                                         source = BellSource.Session("settings-test"),
                                         originOnScreen = false,
                                         hostDisplayName = "tessera",
-                                        paneTitle = "test",
+                                        paneTitle = testBellPaneTitle,
                                     ),
                                     appPreferences.toBellPreferences(),
                                 )
@@ -1934,9 +2098,7 @@ private fun FoundationScreen(
                             },
                             onAgentCenterNotificationsChanged = { enabled ->
                                 compositionScope.launch { preferences.updateAgentCenterNotificationsEnabled(enabled) }
-                                if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                                    !bellController.canPostNotifications()
-                                ) {
+                                if (enabled && !bellController.canPostNotifications()) {
                                     // This is an explicit Agent Center notification opt-in, not screen entry.
                                     bellPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                                 }
@@ -1945,7 +2107,7 @@ private fun FoundationScreen(
                                 it.id == pendingPairingContinuationHostId
                             },
                             onAutoStartConsumed = { pendingPairingContinuationHostId = null },
-                            modifier = Modifier.fillMaxSize().padding(padding),
+                            modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding),
                         )
                     }
                 }
@@ -2103,9 +2265,7 @@ private fun FoundationScreen(
                     sharePreferences.getString(ShareUploadPolicy.rememberedDestinationKey(hostId), null)
                 },
                 onRememberDestination = { hostId, value ->
-                    sharePreferences.edit()
-                        .putString(ShareUploadPolicy.rememberedDestinationKey(hostId), value)
-                        .apply()
+                    sharePreferences.edit { putString(ShareUploadPolicy.rememberedDestinationKey(hostId), value) }
                 },
                 onConfirm = { choice ->
                     hosts.firstOrNull { it.id == choice.targetId }?.let { host ->
@@ -2147,10 +2307,10 @@ private fun FoundationScreen(
         }
         if (pairingRecoveryPrompt && !locked) {
             TesseraConfirmDialog(
-                title = "interrupted continuation",
-                body = "Reconnect the verified destination session? The old pairing transaction will not be resumed.",
-                confirmLabel = "reconnect",
-                cancelLabel = "not now",
+                title = stringResource(R.string.app_continuation_title),
+                body = stringResource(R.string.app_continuation_body),
+                confirmLabel = stringResource(R.string.app_reconnect),
+                cancelLabel = stringResource(R.string.app_not_now),
                 onConfirm = {
                     pairingRecoveryPrompt = false
                     pairingRecoveryHandled = true
@@ -2197,7 +2357,7 @@ private fun readSharedFileMetadata(context: Context, uris: List<Uri>): List<Shar
             }
         }
         SharedFileMetadata(
-            name = name?.takeIf(String::isNotBlank) ?: uri.lastPathSegment.orEmpty().ifBlank { "shared file" },
+            name = name?.takeIf(String::isNotBlank) ?: uri.lastPathSegment.orEmpty().ifBlank { context.getString(R.string.app_shared_file) },
             size = size,
         )
     }
@@ -2219,12 +2379,12 @@ private fun RestorePreviousSessionsDialog(
 ) {
     val tokens = LocalTesseraTokens.current
     TesseraDialog(
-        title = "previous connections",
+        title = stringResource(R.string.app_previous_connections),
         onDismissRequest = {},
         actions = {
-            TesseraButton(text = "not now", onClick = onNotNow, compact = true)
+            TesseraButton(text = stringResource(R.string.app_not_now), onClick = onNotNow, compact = true)
             TesseraButton(
-                text = "reopen",
+                text = stringResource(R.string.app_reopen),
                 onClick = onReopen,
                 style = TesseraButtonStyle.Primary,
                 compact = true,
@@ -2232,7 +2392,7 @@ private fun RestorePreviousSessionsDialog(
         },
     ) {
         Text(
-            "Reopen ${document.snapshots.size} saved session${if (document.snapshots.size == 1) "" else "s"}?",
+            pluralStringResource(R.plurals.app_restore_prompt, document.snapshots.size, document.snapshots.size),
             style = TesseraType.body,
             color = tokens.fgMuted,
         )
@@ -2241,14 +2401,14 @@ private fun RestorePreviousSessionsDialog(
         }
         if (document.snapshots.size > 5) {
             Text(
-                "+${document.snapshots.size - 5} more",
+                pluralStringResource(R.plurals.app_restore_more, document.snapshots.size - 5, document.snapshots.size - 5),
                 style = TesseraType.rowMeta,
                 color = tokens.fgMuted,
             )
         }
         TesseraToggleRow(
-            title = "always reopen",
-            subtitle = "Reopen restorable sessions automatically next time.",
+            title = stringResource(R.string.app_always_reopen),
+            subtitle = stringResource(R.string.app_always_reopen_subtitle),
             checked = alwaysReopen,
             onCheckedChange = onAlwaysReopenChanged,
             contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp),
@@ -2281,12 +2441,13 @@ private fun AppLockOverlay(onUnlock: () -> Unit, modifier: Modifier = Modifier) 
     }
 }
 
-internal enum class CompactRootTab(val icon: ImageVector, val label: String) {
-    Hosts(TesseraIcons.Hosts, "hosts"),
-    Sessions(TesseraIcons.Sessions, "sessions"),
-    Agents(TesseraIcons.Agents, "agents"),
-    Keys(TesseraIcons.Keys, "keys"),
-    Settings(TesseraIcons.Settings, "settings"),
+/** [label] is the stable English id behind test tags; [titleRes] is what the tab bar shows. */
+internal enum class CompactRootTab(val icon: ImageVector, val label: String, @param:StringRes val titleRes: Int) {
+    Hosts(TesseraIcons.Hosts, "hosts", R.string.app_tab_hosts),
+    Sessions(TesseraIcons.Sessions, "sessions", R.string.app_tab_sessions),
+    Agents(TesseraIcons.Agents, "agents", R.string.app_tab_agents),
+    Artifacts(TesseraIcons.Folder, "artifacts", R.string.app_tab_artifacts),
+    Settings(TesseraIcons.Settings, "settings", R.string.app_tab_settings),
 }
 
 /** The production compact shell, also exercised by host-free keyboard tests. */
@@ -2343,8 +2504,18 @@ private fun CompactBottomBar(
                         .weight(1f)
                         .heightIn(min = 56.dp)
                         .testTag("root-${tab.label}")
+                        .onboardingAnchor(
+                            when (tab) {
+                                CompactRootTab.Hosts -> OnboardingTarget.Hosts
+                                CompactRootTab.Sessions -> OnboardingTarget.Sessions
+                                CompactRootTab.Agents -> OnboardingTarget.Agents
+                                CompactRootTab.Artifacts -> OnboardingTarget.Artifacts
+                                CompactRootTab.Settings -> OnboardingTarget.Settings
+                            },
+                        )
                         .clickable(role = Role.Tab) { onSelect(tab) }
                         .semantics {
+                            this.selected = selected
                             if (attention != null) stateDescription = "${attention.total} · $attentionSummary"
                         }
                         .padding(vertical = 8.dp),
@@ -2371,7 +2542,7 @@ private fun CompactBottomBar(
                         }
                     }
                     Text(
-                        tab.label,
+                        stringResource(tab.titleRes),
                         modifier = Modifier.padding(top = 4.dp),
                         color = tint,
                         style = TesseraType.navLabel,
@@ -2398,12 +2569,12 @@ private fun SessionLandingScreen(
     val recordsByHost = restoreRecords.associateBy { it.hostId }
     val restorable = hosts.filter { it.id in liveStates || it.id in recordsByHost }
     Column(modifier.background(tokens.bg)) {
-        TesseraPageHeader("sessions")
+        TesseraPageHeader(stringResource(R.string.app_tab_sessions))
         TesseraHairline()
         if (restorable.isEmpty()) {
             TesseraEmptyState(
-                title = "no active sessions",
-                body = "Open a host to start a terminal session. Sessions you leave stay connected here.",
+                title = stringResource(R.string.app_sessions_empty_title),
+                body = stringResource(R.string.app_sessions_empty_body),
                 icon = TesseraIcons.Sessions,
                 modifier = Modifier.fillMaxWidth().weight(1f),
             )
@@ -2424,17 +2595,19 @@ private fun SessionLandingScreen(
                         // and its row reads dim like every other dormant session.
                         else -> tokens.fgDim
                     }
-                    val label = when (liveState) {
-                        SshSessionUiState.Connected -> "open"
-                        SshSessionUiState.Connecting,
-                        is SshSessionUiState.AwaitingCredential,
-                        is SshSessionUiState.AwaitingHostKey,
-                        is SshSessionUiState.AwaitingOwnerAuthorization -> "connecting"
-                        is SshSessionUiState.Failed -> "failed"
-                        SshSessionUiState.Disconnected -> "connect"
-                        SshSessionUiState.Terminated -> "ended"
-                        null -> "reconnect"
-                    }
+                    val label = stringResource(
+                        when (liveState) {
+                            SshSessionUiState.Connected -> R.string.app_session_state_open
+                            SshSessionUiState.Connecting,
+                            is SshSessionUiState.AwaitingCredential,
+                            is SshSessionUiState.AwaitingHostKey,
+                            is SshSessionUiState.AwaitingOwnerAuthorization -> R.string.app_session_state_connecting
+                            is SshSessionUiState.Failed -> R.string.app_session_state_failed
+                            SshSessionUiState.Disconnected -> R.string.app_session_state_connect
+                            SshSessionUiState.Terminated -> R.string.app_session_state_ended
+                            null -> R.string.app_reconnect
+                        },
+                    )
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -2467,7 +2640,7 @@ private fun SessionLandingScreen(
                         TesseraTag(label, tone = tone)
                         TesseraIconButton(
                             icon = TesseraIcons.Close,
-                            contentDescription = "Close ${host.displayName}",
+                            contentDescription = stringResource(R.string.app_session_close, host.displayName),
                             onClick = { onCloseSession(host.id) },
                         )
                     }
@@ -2484,7 +2657,12 @@ private fun SettingsLandingScreen(
     sessionRestorePolicy: SessionRestorePolicy,
     usesCompactShell: Boolean,
     appLockError: String?,
+    destination: SettingsDestination?,
+    onDestinationChanged: (SettingsDestination?) -> Unit,
+    identityRepository: com.bambouville.tessera.data.IdentityRepository,
+    hostRepository: com.bambouville.tessera.data.HostRepository,
     knownHostsRepository: com.bambouville.tessera.data.KnownHostsRepository,
+    credentialStore: AndroidKeystoreCredentialStore,
     hosts: List<SavedHost>,
     pairingCoordinator: CrossDevicePairingCoordinator,
     onReceivedSetupFinished: () -> Unit,
@@ -2524,25 +2702,33 @@ private fun SettingsLandingScreen(
     onAutoStartConsumed: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var destination by remember {
-        mutableStateOf(
-            if (autoStartContinuationHost == null) null else SettingsDestination.Pairing,
-        )
-    }
-    LaunchedEffect(autoStartContinuationHost?.id) {
-        if (autoStartContinuationHost != null) destination = SettingsDestination.Pairing
+    var section by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
+    fun showSettingsList() {
+        section = null
+        onDestinationChanged(null)
     }
     val tokens = LocalTesseraTokens.current
     when (destination) {
+        SettingsDestination.Keys -> {
+            IdentityListScreen(
+                repository = identityRepository,
+                hostRepository = hostRepository,
+                knownHostsRepository = knownHostsRepository,
+                credentialStore = credentialStore,
+                onBack = ::showSettingsList,
+                modifier = modifier,
+            )
+            return
+        }
         SettingsDestination.KnownHosts -> {
-            KnownHostsScreen(knownHostsRepository, onBack = { destination = null }, modifier = modifier)
+            KnownHostsScreen(knownHostsRepository, onBack = ::showSettingsList, modifier = modifier)
             return
         }
         SettingsDestination.Diagnostics -> {
             DiagnosticsScreen(
                 store = diagnostics,
                 onUploadLog = onUploadDiagnosticLog,
-                onBack = { destination = null },
+                onBack = ::showSettingsList,
                 modifier = modifier,
             )
             return
@@ -2552,11 +2738,11 @@ private fun SettingsLandingScreen(
                 hosts = hosts,
                 coordinator = pairingCoordinator,
                 onExternalUiActiveChanged = onExternalUiActiveChanged,
-                onBack = { destination = null },
+                onBack = ::showSettingsList,
                 autoStartContinuationHost = autoStartContinuationHost,
                 onAutoStartConsumed = onAutoStartConsumed,
                 onReceivedSetupFinished = {
-                    destination = null
+                    showSettingsList()
                     onReceivedSetupFinished()
                 },
                 modifier = modifier,
@@ -2570,19 +2756,18 @@ private fun SettingsLandingScreen(
     // filed diagnostics under security. Sections are their own pages now, named
     // as iOS names them where the same settings exist, so the landing screen is
     // a map rather than a wall.
-    var section by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
     Column(modifier.background(tokens.bg).verticalScroll(rememberScrollState())) {
         val current = section
         if (current == null) {
-            TesseraPageHeader("settings")
+            TesseraPageHeader(stringResource(R.string.app_tab_settings))
             TesseraHairline()
             SettingsSection.entries.forEach { entry ->
                 TesseraNavigationRow(
-                    title = entry.title,
-                    subtitle = entry.summary,
+                    title = stringResource(entry.title),
+                    subtitle = stringResource(entry.summary),
                     onClick = {
                         val opens = entry.opens
-                        if (opens != null) destination = opens else section = entry
+                        if (opens != null) onDestinationChanged(opens) else section = entry
                     },
                 )
                 TesseraHairline(Modifier.padding(start = 18.dp))
@@ -2592,311 +2777,440 @@ private fun SettingsLandingScreen(
         }
 
         TesseraSubPageHeader(
-            title = current.title,
+            title = stringResource(current.title),
             onBack = { section = null },
-            backContentDescription = "back to settings",
+            backContentDescription = stringResource(R.string.app_settings_back),
         )
         TesseraHairline()
 
         if (current == SettingsSection.Appearance) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp)) {
-                Text("color theme", style = TesseraType.rowTitle, color = tokens.fg)
-                Text(
-                    "Applied independently to every terminal surface.",
-                    style = TesseraType.rowMeta,
-                    color = tokens.fgMuted,
-                    modifier = Modifier.padding(top = 3.dp, bottom = 8.dp),
-                )
-                val themes = listOf("void", "graphite", "amber", "paper", "dracula", "nord")
-                TesseraSegmented(
-                    options = themes.take(3),
-                    selectedIndex = themes.take(3).indexOf(preferences.terminalThemeId),
-                    onSelect = { onTerminalThemeChanged(themes[it]) },
-                )
-                TesseraSegmented(
-                    options = themes.drop(3),
-                    selectedIndex = themes.drop(3).indexOf(preferences.terminalThemeId),
-                    onSelect = { onTerminalThemeChanged(themes[it + 3]) },
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-        }
-        TesseraHairline(Modifier.padding(start = 18.dp))
-        Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp)) {
-            Text("terminal font", style = TesseraType.rowTitle, color = tokens.fg)
-            Text(
-                "Applies to the terminal grid only — app chrome keeps its own face.",
-                style = TesseraType.rowMeta,
-                color = tokens.fgMuted,
-                modifier = Modifier.padding(top = 3.dp, bottom = 8.dp),
+            AppearanceSettings(
+                preferences = preferences,
+                onExternalUiActiveChanged = onExternalUiActiveChanged,
+                onTerminalThemeChanged = onTerminalThemeChanged,
+                onTerminalFontChanged = onTerminalFontChanged,
+                onTerminalBackgroundUsesImageChanged = onTerminalBackgroundUsesImageChanged,
+                onTerminalBackgroundImageChanged = onTerminalBackgroundImageChanged,
+                onTerminalBackgroundDimChanged = onTerminalBackgroundDimChanged,
+                onTerminalBackgroundBlurChanged = onTerminalBackgroundBlurChanged,
+                onTerminalBackgroundFillModeChanged = onTerminalBackgroundFillModeChanged,
             )
-            TesseraTerminalFontPicker(
-                selectedId = TerminalFontCatalog.resolve(preferences.terminalFontId),
-                onSelect = onTerminalFontChanged,
-            )
-        }
-        TesseraHairline(Modifier.padding(start = 18.dp))
-        TerminalBackgroundSettings(
-            preferences = preferences,
-            onExternalUiActiveChanged = onExternalUiActiveChanged,
-            onUsesImageChanged = onTerminalBackgroundUsesImageChanged,
-            onImageChanged = onTerminalBackgroundImageChanged,
-            onDimChanged = onTerminalBackgroundDimChanged,
-            onBlurChanged = onTerminalBackgroundBlurChanged,
-            onFillModeChanged = onTerminalBackgroundFillModeChanged,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
-        )
-        TesseraHairline(Modifier.padding(start = 18.dp))
         }
         if (current == SettingsSection.Terminal) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("text size", modifier = Modifier.weight(1f), style = TesseraType.rowTitle, color = tokens.fg)
-                    Text("${preferences.terminalTextSizeSp}sp", style = TesseraType.rowMeta, color = tokens.fgMuted)
-                }
-                TesseraSlider(
-                    value = preferences.terminalTextSizeSp.toFloat(),
-                    onValueChange = { onTerminalTextSizeChanged(it.toInt().coerceIn(8, 40)) },
-                    valueRange = 8f..40f,
-                    stepSize = 1f,
-                    contentDescription = "Terminal text size",
-                )
-                Text(
-                    "user@host:~$ ls -la",
-                    style = TesseraType.code.copy(fontSize = preferences.terminalTextSizeSp.sp),
-                    color = tokens.fgMuted,
-                    maxLines = 1,
-                    modifier = Modifier.padding(bottom = 10.dp),
-                )
-        }
-        TesseraHairline(Modifier.padding(start = 18.dp))
-        Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp)) {
-            Text("cursor", style = TesseraType.rowTitle, color = tokens.fg)
-            val styles = listOf("block", "bar", "underline")
-            TesseraSegmented(
-                options = styles,
-                selectedIndex = styles.indexOf(preferences.terminalCursorStyle).coerceAtLeast(0),
-                onSelect = { onTerminalCursorStyleChanged(styles[it]) },
+            TerminalSettings(
+                preferences = preferences,
+                onTerminalTextSizeChanged = onTerminalTextSizeChanged,
+                onTerminalCursorStyleChanged = onTerminalCursorStyleChanged,
+                onTerminalCursorBlinkChanged = onTerminalCursorBlinkChanged,
+                onScrollbackLinesChanged = onScrollbackLinesChanged,
+                onSmoothScrollingEnabledChanged = onSmoothScrollingEnabledChanged,
+                onSmoothScrollingSpeedChanged = onSmoothScrollingSpeedChanged,
+                onProgramStatusEnabledChanged = onProgramStatusEnabledChanged,
             )
-        }
-        TesseraHairline(Modifier.padding(start = 18.dp))
-        TesseraToggleRow(
-            title = "blink cursor",
-            subtitle = "Blink the active terminal cursor.",
-            checked = preferences.terminalCursorBlink,
-            onCheckedChange = onTerminalCursorBlinkChanged,
-        )
-        TesseraHairline(Modifier.padding(start = 18.dp))
-        Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("scrollback", modifier = Modifier.weight(1f), style = TesseraType.rowTitle, color = tokens.fg)
-                Text("${preferences.scrollbackLines} lines · new sessions", style = TesseraType.rowMeta, color = tokens.fgMuted)
-            }
-            TesseraSlider(
-                value = preferences.scrollbackLines.toFloat(),
-                onValueChange = {
-                    onScrollbackLinesChanged(
-                        ((it.toInt() / 1_000) * 1_000).coerceIn(1_000, 50_000),
-                    )
-                },
-                valueRange = 1_000f..50_000f,
-                stepSize = 1_000f,
-                contentDescription = "Terminal scrollback lines",
-            )
-        }
-        TesseraHairline(Modifier.padding(start = 18.dp))
-        SmoothScrollingSettings(
-            enabled = preferences.smoothScrollingEnabled,
-            speed = preferences.smoothScrollingSpeed,
-            onEnabledChanged = onSmoothScrollingEnabledChanged,
-            onSpeedChanged = onSmoothScrollingSpeedChanged,
-        )
-        TesseraHairline(Modifier.padding(start = 18.dp))
-        TesseraToggleRow(
-            title = "program status",
-            subtitle = "Show needs input, finished, and failed on tmux windows and session lists when programs report it (OSC 7501). Works without Agent Center.",
-            checked = preferences.programStatusEnabled,
-            onCheckedChange = onProgramStatusEnabledChanged,
-        )
-        TesseraHairline(Modifier.padding(start = 18.dp))
         }
         if (current == SettingsSection.Keyboard) {
-            TesseraToggleRow(
-                title = "resize terminal with keyboard",
-                subtitle = "Reflow terminal rows when the software keyboard appears or hides.",
-                checked = preferences.resizeTerminalWithKeyboard,
-                onCheckedChange = onResizeTerminalWithKeyboardChanged,
+            KeyboardSettings(
+                preferences = preferences,
+                onResizeTerminalWithKeyboardChanged = onResizeTerminalWithKeyboardChanged,
+                onAccessoryBarKeysChanged = onAccessoryBarKeysChanged,
+                onModifierBehaviorChanged = onModifierBehaviorChanged,
+                onModifierNotationChanged = onModifierNotationChanged,
             )
-            TesseraHairline(Modifier.padding(start = 18.dp))
-            AccessoryBarEditor(
-                persistedKeys = preferences.accessoryBarKeys,
-                notation = preferences.modifierNotation,
-                onKeysChanged = onAccessoryBarKeysChanged,
-                modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp),
-            )
-            TesseraHairline(Modifier.padding(start = 18.dp))
-            ModifierBehaviorSettings(
-                behavior = preferences.modifierBehavior,
-                notation = preferences.modifierNotation,
-                onBehaviorChanged = onModifierBehaviorChanged,
-                onNotationChanged = onModifierNotationChanged,
-                modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp),
-            )
-            TesseraHairline(Modifier.padding(start = 18.dp))
         }
         if (current == SettingsSection.Continuity) {
-            TesseraNavigationRow(
-                title = "pair another device",
-                subtitle = "Pair with iPhone, iPad, or another Android device over local Wi-Fi.",
-                onClick = { destination = SettingsDestination.Pairing },
+            ContinuitySettings(
+                sessionRestorePolicy = sessionRestorePolicy,
+                usesCompactShell = usesCompactShell,
+                onDestinationChanged = onDestinationChanged,
+                onSessionRestorePolicyChanged = onSessionRestorePolicyChanged,
             )
-            TesseraHairline(Modifier.padding(start = 18.dp))
-            if (usesCompactShell) {
-                TesseraToggleRow(
-                    title = "restore on launch",
-                    subtitle = "Reopen restorable saved-host sessions automatically.",
-                    checked = sessionRestorePolicy != SessionRestorePolicy.NEVER,
-                    onCheckedChange = { enabled ->
-                        onSessionRestorePolicyChanged(
-                            if (enabled) SessionRestorePolicy.ALWAYS else SessionRestorePolicy.NEVER,
-                        )
-                    },
-                )
-            } else {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp)) {
-                    Text("previous connections", style = TesseraType.rowTitle, color = tokens.fg)
-                    Text(
-                        "Choose whether Tessera asks, reopens, or discards sessions after process death.",
-                        style = TesseraType.rowMeta,
-                        color = tokens.fgMuted,
-                        modifier = Modifier.padding(top = 3.dp, bottom = 8.dp),
-                    )
-                    val policies = SessionRestorePolicy.entries
-                    TesseraSegmented(
-                        options = listOf("ask", "always", "never"),
-                        selectedIndex = policies.indexOf(sessionRestorePolicy).coerceAtLeast(0),
-                        onSelect = { index -> onSessionRestorePolicyChanged(policies[index]) },
-                    )
-                }
-        }
-        TesseraHairline(Modifier.padding(start = 18.dp))
-
         }
         if (current == SettingsSection.Bell) {
-            TesseraToggleRow(
-                title = "sound",
-                subtitle = "Play a soft tone when an off-screen terminal emits BEL.",
-                checked = preferences.bellSoundEnabled,
-                onCheckedChange = onBellSoundChanged,
+            BellSettings(
+                preferences = preferences,
+                bellNotificationsAvailable = bellNotificationsAvailable,
+                onBellSoundChanged = onBellSoundChanged,
+                onBellVisualChanged = onBellVisualChanged,
+                onBellNotificationChanged = onBellNotificationChanged,
+                onOpenBellNotificationSettings = onOpenBellNotificationSettings,
+                onTestBell = onTestBell,
             )
-            TesseraHairline(Modifier.padding(start = 18.dp))
-            TesseraToggleRow(
-                title = "visual flash",
-                subtitle = "Show an accent glow and dot on the tmux window that rang.",
-                checked = preferences.bellVisualEnabled,
-                onCheckedChange = onBellVisualChanged,
-            )
-            TesseraHairline(Modifier.padding(start = 18.dp))
-            TesseraToggleRow(
-                title = "notify when backgrounded",
-                subtitle = if (preferences.bellNotificationEnabled && !bellNotificationsAvailable) {
-                    "Enabled in Tessera, but blocked by Android notification settings."
-                } else {
-                    "Show a silent banner when any terminal emits BEL while Tessera is away."
-                },
-                checked = preferences.bellNotificationEnabled,
-                onCheckedChange = onBellNotificationChanged,
-            )
-            if (preferences.bellNotificationEnabled && !bellNotificationsAvailable) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp)) {
-                    TesseraButton(
-                        text = "open Android settings",
-                        onClick = onOpenBellNotificationSettings,
-                        compact = true,
-                    )
-                }
-        }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp)) {
-            TesseraButton(
-                text = "test bell",
-                onClick = onTestBell,
-                style = TesseraButtonStyle.Primary,
-                compact = true,
-            )
-        }
-        TesseraHairline(Modifier.padding(start = 18.dp))
-
         }
         if (current == SettingsSection.Security) {
-            TesseraToggleRow(
-                title = "app lock",
-                subtitle = "Require your device credential when Tessera returns to the foreground.",
-                checked = preferences.appLockEnabled,
-                onCheckedChange = onAppLockChanged,
+            SecuritySettings(
+                preferences = preferences,
+                appLockError = appLockError,
+                onAppLockChanged = onAppLockChanged,
+                onHideContentInAppSwitcherChanged = onHideContentInAppSwitcherChanged,
             )
-            appLockError?.let {
-                com.bambouville.tessera.design.TesseraBanner(
-                    text = it,
-                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp),
-                )
-        }
-        TesseraHairline(Modifier.padding(start = 18.dp))
-        // Shows the effective policy: app lock forces it on, as on iOS.
-        TesseraToggleRow(
-            title = "hide content in app switcher",
-            subtitle = if (preferences.appLockEnabled) {
-                "Always on while app lock is on. Recents shows a blank preview, and screenshots and screen sharing are blocked while Agent Center is open."
-            } else {
-                "Show a blank preview in Recents instead of Tessera's content. While Agent Center is open, this also blocks screenshots and screen sharing."
-            },
-            checked = preferences.hidesContentInAppSwitcher,
-            onCheckedChange = onHideContentInAppSwitcherChanged,
-            enabled = !preferences.appLockEnabled,
-        )
-        TesseraHairline(Modifier.padding(start = 18.dp))
-        TesseraNavigationRow(
-            title = "known hosts",
-            subtitle = "Review trusted fingerprints and remove stale trust records.",
-            onClick = { destination = SettingsDestination.KnownHosts },
-        )
-        TesseraHairline(Modifier.padding(start = 18.dp))
         }
         if (current == SettingsSection.Experimental) {
-            TesseraToggleRow(
-                title = "agent center",
-                subtitle = "Show detected coding-agent threads. Transcript content remains memory-only.",
-                checked = preferences.agentCenterEnabled,
-                onCheckedChange = onAgentCenterEnabledChanged,
+            ExperimentalSettings(
+                preferences = preferences,
+                onAgentCenterEnabledChanged = onAgentCenterEnabledChanged,
+                onAgentCenterNotificationsChanged = onAgentCenterNotificationsChanged,
             )
-            TesseraHairline(Modifier.padding(start = 18.dp))
-            TesseraToggleRow(
-                title = "agent attention notifications",
-                subtitle = "Optional. Tessera sends only “Agent needs input” or “Agent finished” and “Open Tessera to review.” No terminal, task, host, provider, or transcript content leaves the app.",
-                checked = preferences.agentCenterNotificationsEnabled,
-                onCheckedChange = onAgentCenterNotificationsChanged,
-            )
-            TesseraHairline(Modifier.padding(start = 18.dp))
-
         }
         if (current == SettingsSection.About) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TesseraLogoMark(size = 22.dp)
-                Text(
-                    "Tessera for Android",
-                    modifier = Modifier.weight(1f).padding(start = 12.dp),
-                    style = TesseraType.rowTitle,
-                    color = tokens.fg,
-                )
-                Text(BuildConfig.VERSION_NAME, color = tokens.fgMuted, style = TesseraType.rowMeta)
-        }
+            AboutSettings()
         }
         Spacer(Modifier.height(24.dp))
     }
 }
 
-private enum class SettingsDestination { KnownHosts, Diagnostics, Pairing }
+@Composable
+private fun AppearanceSettings(
+    preferences: AppPreferences,
+    onExternalUiActiveChanged: (Boolean) -> Unit,
+    onTerminalThemeChanged: (String) -> Unit,
+    onTerminalFontChanged: (String) -> Unit,
+    onTerminalBackgroundUsesImageChanged: (Boolean) -> Unit,
+    onTerminalBackgroundImageChanged: (String?) -> Unit,
+    onTerminalBackgroundDimChanged: (Float) -> Unit,
+    onTerminalBackgroundBlurChanged: (Int) -> Unit,
+    onTerminalBackgroundFillModeChanged: (String) -> Unit,
+) {
+    val tokens = LocalTesseraTokens.current
+    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp)) {
+        Text(stringResource(R.string.app_color_theme), style = TesseraType.rowTitle, color = tokens.fg)
+        Text(
+            stringResource(R.string.app_color_theme_subtitle),
+            style = TesseraType.rowMeta,
+            color = tokens.fgMuted,
+            modifier = Modifier.padding(top = 3.dp, bottom = 8.dp),
+        )
+        val themes = listOf("void", "graphite", "amber", "paper", "dracula", "nord")
+        TesseraSegmented(
+            options = listOf(stringResource(R.string.app_theme_automatic)),
+            selectedIndex = if (preferences.terminalThemeId == AutomaticTerminalThemeId) 0 else -1,
+            onSelect = { onTerminalThemeChanged(AutomaticTerminalThemeId) },
+        )
+        TesseraSegmented(
+            options = themes.take(3),
+            selectedIndex = themes.take(3).indexOf(preferences.terminalThemeId),
+            onSelect = { onTerminalThemeChanged(themes[it]) },
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        TesseraSegmented(
+            options = themes.drop(3),
+            selectedIndex = themes.drop(3).indexOf(preferences.terminalThemeId),
+            onSelect = { onTerminalThemeChanged(themes[it + 3]) },
+            modifier = Modifier.padding(top = 4.dp),
+        )
+    }
+    TesseraHairline(Modifier.padding(start = 18.dp))
+    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp)) {
+        Text(stringResource(R.string.app_terminal_font), style = TesseraType.rowTitle, color = tokens.fg)
+        Text(
+            stringResource(R.string.app_terminal_font_subtitle),
+            style = TesseraType.rowMeta,
+            color = tokens.fgMuted,
+            modifier = Modifier.padding(top = 3.dp, bottom = 8.dp),
+        )
+        TesseraTerminalFontPicker(
+            selectedId = TerminalFontCatalog.resolve(preferences.terminalFontId),
+            onSelect = onTerminalFontChanged,
+        )
+    }
+    TesseraHairline(Modifier.padding(start = 18.dp))
+    TerminalBackgroundSettings(
+        preferences = preferences,
+        onExternalUiActiveChanged = onExternalUiActiveChanged,
+        onUsesImageChanged = onTerminalBackgroundUsesImageChanged,
+        onImageChanged = onTerminalBackgroundImageChanged,
+        onDimChanged = onTerminalBackgroundDimChanged,
+        onBlurChanged = onTerminalBackgroundBlurChanged,
+        onFillModeChanged = onTerminalBackgroundFillModeChanged,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
+    )
+    TesseraHairline(Modifier.padding(start = 18.dp))
+}
+
+@Composable
+private fun TerminalSettings(
+    preferences: AppPreferences,
+    onTerminalTextSizeChanged: (Int) -> Unit,
+    onTerminalCursorStyleChanged: (String) -> Unit,
+    onTerminalCursorBlinkChanged: (Boolean) -> Unit,
+    onScrollbackLinesChanged: (Int) -> Unit,
+    onSmoothScrollingEnabledChanged: (Boolean) -> Unit,
+    onSmoothScrollingSpeedChanged: (Float) -> Unit,
+    onProgramStatusEnabledChanged: (Boolean) -> Unit,
+) {
+    val tokens = LocalTesseraTokens.current
+    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.app_text_size), modifier = Modifier.weight(1f), style = TesseraType.rowTitle, color = tokens.fg)
+            Text("${preferences.terminalTextSizeSp}sp", style = TesseraType.rowMeta, color = tokens.fgMuted)
+        }
+        TesseraSlider(
+            value = preferences.terminalTextSizeSp.toFloat(),
+            onValueChange = { onTerminalTextSizeChanged(it.toInt().coerceIn(8, 40)) },
+            valueRange = 8f..40f,
+            stepSize = 1f,
+            contentDescription = stringResource(R.string.app_text_size_description),
+        )
+        Text(
+            "user@host:~$ ls -la",
+            style = TesseraType.code.copy(fontSize = preferences.terminalTextSizeSp.sp),
+            color = tokens.fgMuted,
+            maxLines = 1,
+            modifier = Modifier.padding(bottom = 10.dp),
+        )
+    }
+    TesseraHairline(Modifier.padding(start = 18.dp))
+    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp)) {
+        Text(stringResource(R.string.app_cursor), style = TesseraType.rowTitle, color = tokens.fg)
+        val styles = listOf("block", "bar", "underline")
+        TesseraSegmented(
+            options = listOf(
+                stringResource(R.string.app_cursor_block),
+                stringResource(R.string.app_cursor_bar),
+                stringResource(R.string.app_cursor_underline),
+            ),
+            selectedIndex = styles.indexOf(preferences.terminalCursorStyle).coerceAtLeast(0),
+            onSelect = { onTerminalCursorStyleChanged(styles[it]) },
+        )
+    }
+    TesseraHairline(Modifier.padding(start = 18.dp))
+    TesseraToggleRow(
+        title = stringResource(R.string.app_blink_cursor),
+        subtitle = stringResource(R.string.app_blink_cursor_subtitle),
+        checked = preferences.terminalCursorBlink,
+        onCheckedChange = onTerminalCursorBlinkChanged,
+    )
+    TesseraHairline(Modifier.padding(start = 18.dp))
+    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.app_scrollback), modifier = Modifier.weight(1f), style = TesseraType.rowTitle, color = tokens.fg)
+            Text(
+                pluralStringResource(R.plurals.app_scrollback_lines, preferences.scrollbackLines, preferences.scrollbackLines),
+                style = TesseraType.rowMeta,
+                color = tokens.fgMuted,
+            )
+        }
+        TesseraSlider(
+            value = preferences.scrollbackLines.toFloat(),
+            onValueChange = {
+                onScrollbackLinesChanged(
+                    ((it.toInt() / 1_000) * 1_000).coerceIn(1_000, 50_000),
+                )
+            },
+            valueRange = 1_000f..50_000f,
+            stepSize = 1_000f,
+            contentDescription = stringResource(R.string.app_scrollback_description),
+        )
+    }
+    TesseraHairline(Modifier.padding(start = 18.dp))
+    SmoothScrollingSettings(
+        enabled = preferences.smoothScrollingEnabled,
+        speed = preferences.smoothScrollingSpeed,
+        onEnabledChanged = onSmoothScrollingEnabledChanged,
+        onSpeedChanged = onSmoothScrollingSpeedChanged,
+    )
+    TesseraHairline(Modifier.padding(start = 18.dp))
+    TesseraToggleRow(
+        title = stringResource(R.string.app_program_status),
+        subtitle = stringResource(R.string.app_program_status_subtitle),
+        checked = preferences.programStatusEnabled,
+        onCheckedChange = onProgramStatusEnabledChanged,
+    )
+    TesseraHairline(Modifier.padding(start = 18.dp))
+}
+
+@Composable
+private fun KeyboardSettings(
+    preferences: AppPreferences,
+    onResizeTerminalWithKeyboardChanged: (Boolean) -> Unit,
+    onAccessoryBarKeysChanged: (List<String>) -> Unit,
+    onModifierBehaviorChanged: (String) -> Unit,
+    onModifierNotationChanged: (String) -> Unit,
+) {
+    TesseraToggleRow(
+        title = stringResource(R.string.app_resize_with_keyboard),
+        subtitle = stringResource(R.string.app_resize_with_keyboard_subtitle),
+        checked = preferences.resizeTerminalWithKeyboard,
+        onCheckedChange = onResizeTerminalWithKeyboardChanged,
+    )
+    TesseraHairline(Modifier.padding(start = 18.dp))
+    AccessoryBarEditor(
+        persistedKeys = preferences.accessoryBarKeys,
+        notation = preferences.modifierNotation,
+        onKeysChanged = onAccessoryBarKeysChanged,
+        modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp),
+    )
+    TesseraHairline(Modifier.padding(start = 18.dp))
+    ModifierBehaviorSettings(
+        behavior = preferences.modifierBehavior,
+        notation = preferences.modifierNotation,
+        onBehaviorChanged = onModifierBehaviorChanged,
+        onNotationChanged = onModifierNotationChanged,
+        modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp),
+    )
+    TesseraHairline(Modifier.padding(start = 18.dp))
+}
+
+@Composable
+private fun ContinuitySettings(
+    sessionRestorePolicy: SessionRestorePolicy,
+    usesCompactShell: Boolean,
+    onDestinationChanged: (SettingsDestination?) -> Unit,
+    onSessionRestorePolicyChanged: (SessionRestorePolicy) -> Unit,
+) {
+    TesseraNavigationRow(
+        title = stringResource(R.string.app_pair_device),
+        subtitle = stringResource(R.string.app_pair_device_subtitle),
+        onClick = { onDestinationChanged(SettingsDestination.Pairing) },
+    )
+    TesseraHairline(Modifier.padding(start = 18.dp))
+    if (usesCompactShell) {
+        TesseraToggleRow(
+            title = stringResource(R.string.app_restore_on_launch),
+            subtitle = stringResource(R.string.app_restore_on_launch_subtitle),
+            checked = sessionRestorePolicy != SessionRestorePolicy.NEVER,
+            onCheckedChange = { enabled ->
+                onSessionRestorePolicyChanged(
+                    if (enabled) SessionRestorePolicy.ALWAYS else SessionRestorePolicy.NEVER,
+                )
+            },
+        )
+    } else {
+        val tokens = LocalTesseraTokens.current
+        Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp)) {
+            Text(stringResource(R.string.app_previous_connections), style = TesseraType.rowTitle, color = tokens.fg)
+            Text(
+                stringResource(R.string.app_previous_connections_subtitle),
+                style = TesseraType.rowMeta,
+                color = tokens.fgMuted,
+                modifier = Modifier.padding(top = 3.dp, bottom = 8.dp),
+            )
+            val policies = SessionRestorePolicy.entries
+            TesseraSegmented(
+                options = listOf(
+                    stringResource(R.string.app_restore_ask),
+                    stringResource(R.string.app_restore_always),
+                    stringResource(R.string.app_restore_never),
+                ),
+                selectedIndex = policies.indexOf(sessionRestorePolicy).coerceAtLeast(0),
+                onSelect = { index -> onSessionRestorePolicyChanged(policies[index]) },
+            )
+        }
+    }
+    TesseraHairline(Modifier.padding(start = 18.dp))
+}
+
+@Composable
+private fun BellSettings(
+    preferences: AppPreferences,
+    bellNotificationsAvailable: Boolean,
+    onBellSoundChanged: (Boolean) -> Unit,
+    onBellVisualChanged: (Boolean) -> Unit,
+    onBellNotificationChanged: (Boolean) -> Unit,
+    onOpenBellNotificationSettings: () -> Unit,
+    onTestBell: () -> Unit,
+) {
+    TesseraToggleRow(
+        title = stringResource(R.string.app_bell_sound),
+        subtitle = stringResource(R.string.app_bell_sound_subtitle),
+        checked = preferences.bellSoundEnabled,
+        onCheckedChange = onBellSoundChanged,
+    )
+    TesseraHairline(Modifier.padding(start = 18.dp))
+    TesseraToggleRow(
+        title = stringResource(R.string.app_bell_visual),
+        subtitle = stringResource(R.string.app_bell_visual_subtitle),
+        checked = preferences.bellVisualEnabled,
+        onCheckedChange = onBellVisualChanged,
+    )
+    TesseraHairline(Modifier.padding(start = 18.dp))
+    TesseraToggleRow(
+        title = stringResource(R.string.app_bell_notify),
+        subtitle = if (preferences.bellNotificationEnabled && !bellNotificationsAvailable) {
+            stringResource(R.string.app_bell_notify_blocked)
+        } else {
+            stringResource(R.string.app_bell_notify_subtitle)
+        },
+        checked = preferences.bellNotificationEnabled,
+        onCheckedChange = onBellNotificationChanged,
+    )
+    if (preferences.bellNotificationEnabled && !bellNotificationsAvailable) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp)) {
+            TesseraButton(
+                text = stringResource(R.string.app_open_android_settings),
+                onClick = onOpenBellNotificationSettings,
+                compact = true,
+            )
+        }
+    }
+    Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp)) {
+        TesseraButton(
+            text = stringResource(R.string.app_test_bell),
+            onClick = onTestBell,
+            style = TesseraButtonStyle.Primary,
+            compact = true,
+        )
+    }
+    TesseraHairline(Modifier.padding(start = 18.dp))
+}
+
+@Composable
+private fun SecuritySettings(
+    preferences: AppPreferences,
+    appLockError: String?,
+    onAppLockChanged: (Boolean) -> Unit,
+    onHideContentInAppSwitcherChanged: (Boolean) -> Unit,
+) {
+    TesseraToggleRow(
+        title = stringResource(R.string.app_lock_setting),
+        subtitle = stringResource(R.string.app_lock_setting_subtitle),
+        checked = preferences.appLockEnabled,
+        onCheckedChange = onAppLockChanged,
+    )
+    appLockError?.let {
+        com.bambouville.tessera.design.TesseraBanner(
+            text = it,
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp),
+        )
+    }
+    TesseraHairline(Modifier.padding(start = 18.dp))
+    // Shows the effective policy: app lock forces it on, as on iOS.
+    TesseraToggleRow(
+        title = stringResource(R.string.app_hide_in_switcher),
+        subtitle = if (preferences.appLockEnabled) {
+            stringResource(R.string.app_hide_in_switcher_forced)
+        } else {
+            stringResource(R.string.app_hide_in_switcher_subtitle)
+        },
+        checked = preferences.hidesContentInAppSwitcher,
+        onCheckedChange = onHideContentInAppSwitcherChanged,
+        enabled = !preferences.appLockEnabled,
+    )
+    TesseraHairline(Modifier.padding(start = 18.dp))
+}
+
+@Composable
+private fun ExperimentalSettings(
+    preferences: AppPreferences,
+    onAgentCenterEnabledChanged: (Boolean) -> Unit,
+    onAgentCenterNotificationsChanged: (Boolean) -> Unit,
+) {
+    TesseraToggleRow(
+        title = stringResource(R.string.app_agent_center),
+        subtitle = stringResource(R.string.app_agent_center_subtitle),
+        checked = preferences.agentCenterEnabled,
+        onCheckedChange = onAgentCenterEnabledChanged,
+    )
+    TesseraHairline(Modifier.padding(start = 18.dp))
+    TesseraToggleRow(
+        title = stringResource(R.string.app_agent_notifications),
+        subtitle = stringResource(R.string.app_agent_notifications_subtitle),
+        checked = preferences.agentCenterNotificationsEnabled,
+        onCheckedChange = onAgentCenterNotificationsChanged,
+    )
+    TesseraHairline(Modifier.padding(start = 18.dp))
+}
+
+private enum class SettingsDestination { Keys, KnownHosts, Diagnostics, Pairing }
 
 /**
  * Settings grouped the way the iOS build groups them, so a setting lives under
@@ -2904,20 +3218,22 @@ private enum class SettingsDestination { KnownHosts, Diagnostics, Pairing }
  * section is for; the section's own controls carry their full explanations.
  */
 private enum class SettingsSection(
-    val title: String,
-    val summary: String,
+    @param:StringRes val title: Int,
+    @param:StringRes val summary: Int,
     /** Set when the row opens an existing screen instead of a section page. */
     val opens: SettingsDestination? = null,
 ) {
-    Appearance("appearance", "Colour theme, terminal font, and background."),
-    Terminal("terminal", "Text size, cursor, scrollback, scrolling, and program status."),
-    Keyboard("keyboard & input", "Accessory bar and software-keyboard behaviour."),
-    Continuity("sync & continuity", "Pairing and what reopens on launch."),
-    Bell("bell & notifications", "What happens when a terminal rings."),
-    Security("security", "App lock, app-switcher privacy, and trusted host keys."),
-    Diagnostics("diagnostics", "Export or upload the local log.", SettingsDestination.Diagnostics),
-    Experimental("experimental", "Agent Center and other in-progress work."),
-    About("about", "Version and build."),
+    Appearance(R.string.app_settings_appearance, R.string.app_settings_appearance_summary),
+    Terminal(R.string.app_settings_terminal, R.string.app_settings_terminal_summary),
+    Keyboard(R.string.app_settings_keyboard, R.string.app_settings_keyboard_summary),
+    Continuity(R.string.app_settings_continuity, R.string.app_settings_continuity_summary),
+    Bell(R.string.app_settings_bell, R.string.app_settings_bell_summary),
+    Security(R.string.app_settings_security, R.string.app_settings_security_summary),
+    Keys(R.string.app_settings_keys, R.string.app_settings_keys_summary, SettingsDestination.Keys),
+    KnownHosts(R.string.app_settings_known_hosts, R.string.app_settings_known_hosts_summary, SettingsDestination.KnownHosts),
+    Diagnostics(R.string.app_settings_diagnostics, R.string.app_settings_diagnostics_summary, SettingsDestination.Diagnostics),
+    Experimental(R.string.app_settings_experimental, R.string.app_settings_experimental_summary),
+    About(R.string.app_settings_about, R.string.app_settings_about_summary),
 }
 
 
@@ -2942,7 +3258,7 @@ internal fun TerminalBackgroundSettings(
     var previewBlur by remember(preferences.terminalBackgroundImageId) {
         mutableIntStateOf(preferences.terminalBackgroundBlur)
     }
-    var importError by remember { mutableStateOf<String?>(null) }
+    var importFailed by remember { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         onExternalUiActiveChanged(false)
         uri ?: return@rememberLauncherForActivityResult
@@ -2956,9 +3272,9 @@ internal fun TerminalBackgroundSettings(
                 }.getOrNull()
             }
             if (imported == null) {
-                importError = "That image could not be imported. Choose a JPEG, PNG, or HEIF image under 32 MB."
+                importFailed = true
             } else {
-                importError = null
+                importFailed = false
                 onImageChanged(imported.imageId)
                 onUsesImageChanged(true)
                 if (previousId != null && previousId != imported.imageId) {
@@ -2969,15 +3285,18 @@ internal fun TerminalBackgroundSettings(
     }
 
     Column(modifier) {
-        Text("terminal background", style = TesseraType.rowTitle, color = tokens.fg)
+        Text(stringResource(R.string.app_background), style = TesseraType.rowTitle, color = tokens.fg)
         Text(
-            "Use the terminal theme color or an app-owned picture. Background settings are global; per-host overrides are not part of Android v1.",
+            stringResource(R.string.app_background_subtitle),
             style = TesseraType.rowMeta,
             color = tokens.fgMuted,
             modifier = Modifier.padding(top = 3.dp, bottom = 9.dp),
         )
         TesseraSegmented(
-            options = listOf("theme color", "custom image"),
+            options = listOf(
+                stringResource(R.string.app_background_theme_color),
+                stringResource(R.string.app_background_custom_image),
+            ),
             selectedIndex = if (preferences.terminalBackgroundUsesImage) 1 else 0,
             onSelect = { index ->
                 if (index == 0) onUsesImageChanged(false)
@@ -2990,7 +3309,13 @@ internal fun TerminalBackgroundSettings(
         )
         Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TesseraButton(
-                text = if (preferences.terminalBackgroundImageId == null) "choose image" else "replace image",
+                text = stringResource(
+                    if (preferences.terminalBackgroundImageId == null) {
+                        R.string.app_background_choose_image
+                    } else {
+                        R.string.app_background_replace_image
+                    },
+                ),
                 onClick = {
                     onExternalUiActiveChanged(true)
                     picker.launch(arrayOf("image/*"))
@@ -2999,7 +3324,7 @@ internal fun TerminalBackgroundSettings(
             )
             if (preferences.terminalBackgroundImageId != null) {
                 TesseraButton(
-                    text = "remove",
+                    text = stringResource(R.string.app_remove),
                     onClick = {
                         val imageId = preferences.terminalBackgroundImageId
                         onUsesImageChanged(false)
@@ -3011,16 +3336,18 @@ internal fun TerminalBackgroundSettings(
                 )
             }
         }
-        importError?.let { error ->
-            com.bambouville.tessera.design.TesseraBanner(error, Modifier.padding(top = 8.dp))
+        if (importFailed) {
+            com.bambouville.tessera.design.TesseraBanner(
+                stringResource(R.string.app_background_import_failed),
+                Modifier.padding(top = 8.dp),
+            )
         }
         preferences.terminalBackgroundImageId?.let { imageId ->
             TerminalBackgroundPreview(
                 imageId = imageId,
-                themeId = preferences.terminalThemeId,
+                themeId = resolvedTerminalThemeId(preferences.terminalThemeId, isSystemInDarkTheme()),
                 dim = preferences.terminalBackgroundDim,
                 previewBlur = previewBlur,
-                committedBlur = preferences.terminalBackgroundBlur,
                 fillMode = preferences.terminalBackgroundFillMode,
                 enabled = preferences.terminalBackgroundUsesImage,
                 store = store,
@@ -3029,7 +3356,7 @@ internal fun TerminalBackgroundSettings(
         }
         if (preferences.terminalBackgroundUsesImage && preferences.terminalBackgroundImageId != null) {
             Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("dim", modifier = Modifier.weight(1f), style = TesseraType.rowMeta, color = tokens.fgMuted)
+                Text(stringResource(R.string.app_background_dim), modifier = Modifier.weight(1f), style = TesseraType.rowMeta, color = tokens.fgMuted)
                 Text("${(preferences.terminalBackgroundDim * 100).toInt()}%", style = TesseraType.rowMeta, color = tokens.fgMuted)
             }
             TesseraSlider(
@@ -3037,10 +3364,10 @@ internal fun TerminalBackgroundSettings(
                 onValueChange = onDimChanged,
                 valueRange = 0f..0.85f,
                 stepSize = 0.05f,
-                contentDescription = "Terminal background dim",
+                contentDescription = stringResource(R.string.app_background_dim_description),
             )
             Row(Modifier.fillMaxWidth().padding(top = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("blur", modifier = Modifier.weight(1f), style = TesseraType.rowMeta, color = tokens.fgMuted)
+                Text(stringResource(R.string.app_background_blur), modifier = Modifier.weight(1f), style = TesseraType.rowMeta, color = tokens.fgMuted)
                 Text("$previewBlur pt", style = TesseraType.rowMeta, color = tokens.fgMuted)
             }
             TesseraSlider(
@@ -3048,7 +3375,7 @@ internal fun TerminalBackgroundSettings(
                 onValueChange = { previewBlur = it.toInt().coerceIn(0, 24) },
                 valueRange = 0f..24f,
                 stepSize = 1f,
-                contentDescription = "Terminal background blur",
+                contentDescription = stringResource(R.string.app_background_blur_description),
                 onValueChangeFinished = { finalValue ->
                     val committed = finalValue.toInt().coerceIn(0, 24)
                     previewBlur = committed
@@ -3060,9 +3387,14 @@ internal fun TerminalBackgroundSettings(
                     }
                 },
             )
-            Text("fill", style = TesseraType.rowMeta, color = tokens.fgMuted, modifier = Modifier.padding(top = 5.dp, bottom = 4.dp))
+            Text(
+                stringResource(R.string.app_background_fill),
+                style = TesseraType.rowMeta,
+                color = tokens.fgMuted,
+                modifier = Modifier.padding(top = 5.dp, bottom = 4.dp),
+            )
             TesseraSegmented(
-                options = listOf("fill", "fit"),
+                options = listOf(stringResource(R.string.app_background_fill), stringResource(R.string.app_background_fit)),
                 selectedIndex = if (preferences.terminalBackgroundFillMode == "fit") 1 else 0,
                 onSelect = { onFillModeChanged(if (it == 0) "fill" else "fit") },
             )
@@ -3076,7 +3408,6 @@ private fun TerminalBackgroundPreview(
     themeId: String,
     dim: Float,
     previewBlur: Int,
-    committedBlur: Int,
     fillMode: String,
     enabled: Boolean,
     store: TerminalBackgroundImageStore,
@@ -3084,14 +3415,12 @@ private fun TerminalBackgroundPreview(
 ) {
     val tokens = LocalTesseraTokens.current
     val theme = remember(themeId) { TerminalTheme.fromId(themeId) }
-    val usePlatformPreviewBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-    val storedBlur = if (usePlatformPreviewBlur) 0 else committedBlur
-    val image = remember(imageId, dim, storedBlur, fillMode, enabled) {
+    // The view's render effect blurs the preview live, so the image stays sharp.
+    val image = remember(imageId, dim, fillMode, enabled) {
         if (!enabled) null else TerminalBackgroundImage(
             imageId = imageId,
             dim = dim.coerceIn(0f, 0.85f),
             fillMode = TerminalBackgroundFillMode.fromPersisted(fillMode),
-            blurRadiusDp = storedBlur.coerceIn(0, 24).toFloat(),
         )
     }
     val drawable by produceState<android.graphics.drawable.Drawable?>(
@@ -3111,18 +3440,16 @@ private fun TerminalBackgroundPreview(
             factory = { previewContext -> View(previewContext) },
             update = { view ->
                 view.background = drawable
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    val radius = previewBlur.coerceIn(0, 24) * view.resources.displayMetrics.density
-                    view.setRenderEffect(
-                        if (enabled && radius > 0f) {
-                            android.graphics.RenderEffect.createBlurEffect(
-                                radius,
-                                radius,
-                                android.graphics.Shader.TileMode.CLAMP,
-                            )
-                        } else null,
-                    )
-                }
+                val radius = previewBlur.coerceIn(0, 24) * view.resources.displayMetrics.density
+                view.setRenderEffect(
+                    if (enabled && radius > 0f) {
+                        android.graphics.RenderEffect.createBlurEffect(
+                            radius,
+                            radius,
+                            android.graphics.Shader.TileMode.CLAMP,
+                        )
+                    } else null,
+                )
             },
             modifier = Modifier.fillMaxSize(),
         )
@@ -3166,17 +3493,25 @@ internal fun SmoothScrollingSettings(
     val tokens = LocalTesseraTokens.current
     Column(modifier) {
         TesseraToggleRow(
-            title = "smooth scrolling",
-            subtitle = "Glide after a touch scroll in local terminal scrollback.",
+            title = stringResource(R.string.app_smooth_scrolling),
+            subtitle = stringResource(R.string.app_smooth_scrolling_subtitle),
             checked = enabled,
             onCheckedChange = onEnabledChanged,
         )
         if (enabled) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("scroll speed", modifier = Modifier.weight(1f), style = TesseraType.rowTitle, color = tokens.fg)
+                    Text(stringResource(R.string.app_scroll_speed), modifier = Modifier.weight(1f), style = TesseraType.rowTitle, color = tokens.fg)
                     Text(
-                        if (speed < 0.5f) "slow" else if (speed > 0.9f) "fast" else "balanced",
+                        stringResource(
+                            if (speed < 0.5f) {
+                                R.string.app_scroll_speed_slow
+                            } else if (speed > 0.9f) {
+                                R.string.app_scroll_speed_fast
+                            } else {
+                                R.string.app_scroll_speed_balanced
+                            },
+                        ),
                         style = TesseraType.rowMeta,
                         color = tokens.fgMuted,
                     )
@@ -3186,7 +3521,7 @@ internal fun SmoothScrollingSettings(
                     onValueChange = onSpeedChanged,
                     valueRange = 0.15f..1.25f,
                     stepSize = 0.05f,
-                    contentDescription = "Smooth scrolling speed",
+                    contentDescription = stringResource(R.string.app_scroll_speed_description),
                 )
             }
         }
@@ -3226,9 +3561,9 @@ internal fun AccessoryBarEditor(
     LaunchedEffect(reorder) { reorder.onCommit = { order -> commitOrder(order) } }
 
     Column(modifier.fillMaxWidth()) {
-        Text("accessory bar layout", style = TesseraType.rowTitle, color = tokens.fg)
+        Text(stringResource(R.string.app_accessory_layout), style = TesseraType.rowTitle, color = tokens.fg)
         Text(
-            "The software keyboard row only. Tap a preview key to remove it; hold, then drag to reorder. The keyboard button remains fixed at the end of the live row.",
+            stringResource(R.string.app_accessory_layout_subtitle),
             style = TesseraType.rowMeta,
             color = tokens.fgMuted,
             modifier = Modifier.padding(top = 3.dp, bottom = 10.dp),
@@ -3240,7 +3575,7 @@ internal fun AccessoryBarEditor(
         ) {
             Column(Modifier.padding(vertical = 8.dp)) {
                 Text(
-                    "PREVIEW",
+                    stringResource(R.string.app_accessory_preview),
                     style = TesseraType.kicker,
                     color = tokens.fgDim,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
@@ -3301,19 +3636,19 @@ internal fun AccessoryBarEditor(
             }
         }
         Text(
-            "ADD KEYS",
+            stringResource(R.string.app_accessory_add_keys),
             style = TesseraType.kicker,
             color = tokens.fgDim,
             modifier = Modifier.padding(top = 13.dp, bottom = 5.dp),
         )
-        AccessoryEditorPaletteRow("navigation", AccessoryBarKey.navigation, rowKeys, labels, ::commit)
-        AccessoryEditorPaletteRow("modifiers", AccessoryBarKey.modifiers, rowKeys, labels, ::commit)
-        AccessoryEditorPaletteRow("control shortcuts", AccessoryBarKey.controlShortcuts, rowKeys, labels, ::commit)
-        AccessoryEditorPaletteRow("function keys", AccessoryBarKey.functionKeys, rowKeys, labels, ::commit)
-        AccessoryEditorPaletteRow("symbols", AccessoryBarKey.symbols, rowKeys, labels, ::commit)
+        AccessoryEditorPaletteRow(stringResource(R.string.app_accessory_navigation), AccessoryBarKey.navigation, rowKeys, labels, ::commit)
+        AccessoryEditorPaletteRow(stringResource(R.string.app_accessory_modifiers), AccessoryBarKey.modifiers, rowKeys, labels, ::commit)
+        AccessoryEditorPaletteRow(stringResource(R.string.app_accessory_control_shortcuts), AccessoryBarKey.controlShortcuts, rowKeys, labels, ::commit)
+        AccessoryEditorPaletteRow(stringResource(R.string.app_accessory_function_keys), AccessoryBarKey.functionKeys, rowKeys, labels, ::commit)
+        AccessoryEditorPaletteRow(stringResource(R.string.app_accessory_symbols), AccessoryBarKey.symbols, rowKeys, labels, ::commit)
         Row(Modifier.padding(top = 12.dp)) {
             TesseraButton(
-                text = "restore defaults",
+                text = stringResource(R.string.app_restore_defaults),
                 onClick = { commit(AccessoryBarKey.defaultOrder(barDefaults)) },
                 compact = true,
             )
@@ -3342,37 +3677,35 @@ private fun ModifierBehaviorSettings(
     val tokens = LocalTesseraTokens.current
     val chordNotation = rememberChordNotation(notation)
     Column(modifier.fillMaxWidth()) {
-        Text("modifier keys", style = TesseraType.rowTitle, color = tokens.fg)
+        Text(stringResource(R.string.app_modifier_keys), style = TesseraType.rowTitle, color = tokens.fg)
         Text(
-            "One-shot applies an armed control, option, or shift chip to the " +
-                "next key only. Sticky keeps it armed until you tap it off.",
+            stringResource(R.string.app_modifier_keys_subtitle),
             style = TesseraType.rowMeta,
             color = tokens.fgMuted,
             modifier = Modifier.padding(top = 3.dp, bottom = 8.dp),
         )
         val behaviors = SharedModifierBehavior.entries
         TesseraSegmented(
-            options = listOf("one-shot", "sticky"),
+            options = listOf(stringResource(R.string.app_modifier_one_shot), stringResource(R.string.app_modifier_sticky)),
             selectedIndex = behaviors.indexOfFirst { it.wireValue == behavior }.coerceAtLeast(0),
             onSelect = { index -> onBehaviorChanged(behaviors[index].wireValue) },
         )
 
         Text(
-            "chord labels",
+            stringResource(R.string.app_chord_labels),
             style = TesseraType.rowTitle,
             color = tokens.fg,
             modifier = Modifier.padding(top = 16.dp),
         )
         Text(
-            "How a modifier chord is written on the bar and in shortcut lists. " +
-                "Labels only — it never changes what a key sends.",
+            stringResource(R.string.app_chord_labels_subtitle),
             style = TesseraType.rowMeta,
             color = tokens.fgMuted,
             modifier = Modifier.padding(top = 3.dp, bottom = 8.dp),
         )
         val notations = SharedInputEncoding.ChordNotation.entries
         TesseraSegmented(
-            options = listOf("glyphs", "words"),
+            options = listOf(stringResource(R.string.app_chord_glyphs), stringResource(R.string.app_chord_words)),
             selectedIndex = notations.indexOfFirst { it.wireValue == notation }.coerceAtLeast(0),
             onSelect = { index -> onNotationChanged(notations[index].wireValue) },
         )
@@ -3801,6 +4134,8 @@ private fun DiagnosticsScreen(
     }
 
     LaunchedEffect(store) { refresh() }
+    val exportChooserTitle = stringResource(R.string.app_export_log_chooser)
+    val sendChooserTitle = stringResource(R.string.app_send_to_developer_chooser)
 
     /** Stages the report and hands it to [send]; null means nothing was recorded. */
     fun withStagedLog(send: (Uri) -> Unit) {
@@ -3816,9 +4151,9 @@ private fun DiagnosticsScreen(
 
     Column(modifier.background(tokens.bg)) {
         TesseraSubPageHeader(
-            title = "diagnostics",
+            title = stringResource(R.string.app_settings_diagnostics),
             onBack = onBack,
-            backContentDescription = "back to settings",
+            backContentDescription = stringResource(R.string.app_settings_back),
         )
         TesseraHairline()
         Column(
@@ -3827,13 +4162,17 @@ private fun DiagnosticsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 18.dp, vertical = 12.dp),
         ) {
-            Text("debug log", style = TesseraType.rowTitle, color = tokens.fg)
+            Text(stringResource(R.string.app_debug_log), style = TesseraType.rowTitle, color = tokens.fg)
             Text(
                 if (info.isEmpty) {
-                    "nothing recorded yet"
+                    stringResource(R.string.app_debug_log_empty)
                 } else {
-                    "${android.text.format.Formatter.formatShortFileSize(context, info.byteCount)}" +
-                        " · updated ${info.modifiedAt?.let(diagnosticsTimestampFormat::format) ?: "unknown"}"
+                    stringResource(
+                        R.string.app_debug_log_info,
+                        android.text.format.Formatter.formatShortFileSize(context, info.byteCount),
+                        info.modifiedAt?.let(diagnosticsTimestampFormat::format)
+                            ?: stringResource(R.string.app_debug_log_unknown),
+                    )
                 },
                 style = TesseraType.rowMeta,
                 color = tokens.fgMuted,
@@ -3844,49 +4183,49 @@ private fun DiagnosticsScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 TesseraButton(
-                    text = "export log",
+                    text = stringResource(R.string.app_export_log),
                     compact = true,
                     enabled = !info.isEmpty && !staging,
                     onClick = {
                         withStagedLog { uri ->
                             context.startActivity(
                                 Intent.createChooser(
-                                    shareDiagnosticLogIntent(uri, recipient = null),
-                                    "Export Tessera diagnostics",
+                                    shareDiagnosticLogIntent(context, uri, recipient = null),
+                                    exportChooserTitle,
                                 ),
                             )
                         }
                     },
                 )
                 TesseraButton(
-                    text = "upload log",
+                    text = stringResource(R.string.app_upload_log),
                     compact = true,
                     enabled = !info.isEmpty && !staging,
                     onClick = onUploadLog,
                 )
                 TesseraButton(
-                    text = "send to developer",
+                    text = stringResource(R.string.app_send_to_developer),
                     compact = true,
                     enabled = !info.isEmpty && !staging,
                     onClick = {
                         withStagedLog { uri ->
                             context.startActivity(
                                 Intent.createChooser(
-                                    shareDiagnosticLogIntent(uri, recipient = DEVELOPER_EMAIL_ADDRESS),
-                                    "Send Tessera diagnostics",
+                                    shareDiagnosticLogIntent(context, uri, recipient = DEVELOPER_EMAIL_ADDRESS),
+                                    sendChooserTitle,
                                 ),
                             )
                         }
                     },
                 )
                 TesseraButton(
-                    text = "refresh",
+                    text = stringResource(R.string.app_refresh),
                     compact = true,
                     enabled = !staging,
                     onClick = { scope.launch { refresh() } },
                 )
                 TesseraButton(
-                    text = "clear",
+                    text = stringResource(R.string.app_clear),
                     compact = true,
                     style = TesseraButtonStyle.Danger,
                     enabled = !info.isEmpty && !staging,
@@ -3899,8 +4238,7 @@ private fun DiagnosticsScreen(
                 )
             }
             Text(
-                "Connection, trust, transfer, render and input events are recorded here with " +
-                    "secrets redacted. Export or upload the file to read it off the phone.",
+                stringResource(R.string.app_debug_log_footer),
                 style = TesseraType.rowMeta,
                 color = tokens.fgMuted,
                 modifier = Modifier.padding(top = 16.dp),
@@ -3937,7 +4275,7 @@ private fun stageDiagnosticLog(context: Context, store: DiagnosticLogStore): Uri
  * the build and device already filled in - the same envelope the iOS mail
  * composer sends - because a report without them is a report we cannot place.
  */
-private fun shareDiagnosticLogIntent(uri: Uri, recipient: String?): Intent =
+private fun shareDiagnosticLogIntent(context: Context, uri: Uri, recipient: String?): Intent =
     Intent(Intent.ACTION_SEND).apply {
         type = "text/plain"
         putExtra(Intent.EXTRA_STREAM, uri)
@@ -3948,7 +4286,7 @@ private fun shareDiagnosticLogIntent(uri: Uri, recipient: String?): Intent =
         putExtra(
             Intent.EXTRA_TEXT,
             """
-            Describe what happened above this line.
+            ${context.getString(R.string.app_diagnostics_mail_prompt)}
 
             --
             Tessera v${BuildConfig.VERSION_NAME}

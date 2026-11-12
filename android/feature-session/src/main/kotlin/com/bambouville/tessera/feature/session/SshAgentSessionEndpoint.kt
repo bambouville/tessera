@@ -4,6 +4,7 @@ import com.bambouville.tessera.agent.platform.AgentEndpointBinding
 import com.bambouville.tessera.agent.platform.AgentEndpointCapabilities
 import com.bambouville.tessera.agent.platform.AgentEndpointResult
 import com.bambouville.tessera.agent.platform.AgentEndpointTransport
+import com.bambouville.tessera.agent.platform.AgentEndpointUnavailableReason
 import com.bambouville.tessera.agent.platform.AgentExecExitStatus
 import com.bambouville.tessera.agent.platform.AgentExecRequest
 import com.bambouville.tessera.agent.platform.AgentCurrentShellStatus
@@ -61,6 +62,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -121,6 +123,10 @@ internal class SshAgentSessionEndpoint(
     override val capabilities: StateFlow<AgentEndpointCapabilities> = mutableCapabilities.asStateFlow()
     private val mutableLifecycleFrames = MutableSharedFlow<AgentLifecycleFrame>(replay = 64, extraBufferCapacity = 64)
     override val lifecycleFrames: SharedFlow<AgentLifecycleFrame> = mutableLifecycleFrames.asSharedFlow()
+    // Retain one invalidation so a removal just before presenter subscription is not lost.
+    private val mutableTmuxPaneRemovals = MutableSharedFlow<Unit>(replay = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val tmuxPaneRemovals: SharedFlow<Unit> = mutableTmuxPaneRemovals.asSharedFlow()
+    private var lastTmuxPaneIDs: Set<Int>? = null
     override fun retainedLifecycleFrame(binding: AgentEndpointBinding): AgentLifecycleFrame? {
         if (closed.get() || !isTmuxTransport || binding.paneID == null) return null
         return synchronized(tails) {
@@ -160,6 +166,15 @@ internal class SshAgentSessionEndpoint(
      * reader's keystrokes.
      */
     private val execChannels = Semaphore(MAX_CONCURRENT_EXEC_CHANNELS)
+
+    fun noteTmuxPaneSet(paneIds: Set<Int>) {
+        if (closed.get() || !isTmuxTransport) return
+        synchronized(tails) {
+            val previous = lastTmuxPaneIDs
+            lastTmuxPaneIDs = paneIds.toSet()
+            if (previous?.any { it !in paneIds } == true) mutableTmuxPaneRemovals.tryEmit(Unit)
+        }
+    }
 
     fun noteRawOutput(bytes: ByteArray) = noteOutput("raw", mutableBinding.value, bytes)
     fun noteRawSnapshot(snapshot: TerminalTextSnapshot?) {
@@ -269,29 +284,28 @@ internal class SshAgentSessionEndpoint(
                 }
             }
             if (!matches(binding)) return AgentEndpointResult.StaleBinding
-            if (snapshot?.framePending == true || snapshot == null) return AgentEndpointResult.Unavailable("terminal_capture_unavailable")
-            snapshot?.let { snapshot ->
-                val physical = snapshot.physicalRows?.joinToString("\n") ?: snapshot.visibleText
-                val bytes = physical.encodeToByteArray()
-                val truncated = bytes.size > MAX_TAIL_BYTES
-                return AgentEndpointResult.Success(
-                    AgentTerminalObservation(
-                        binding = binding,
-                        visibleTail = bytes.takeLast(MAX_TAIL_BYTES).toByteArray(),
-                        truncated = truncated,
-                        authoritative = true,
-                        currentCursorLine = snapshot.currentLine?.let(::cursorLinePrefix),
-                        cursorRow = snapshot.cursorRow.takeUnless { truncated },
-                        cursorVisible = snapshot.cursorVisible,
-                        cursorColumn = snapshot.cursorColumn.takeUnless { truncated },
-                        screenEvidence = snapshot.screenEvidence.takeUnless { truncated },
-                        captureWaitedForFrame = waitedForFrame,
-                    ),
-                )
-            }
+            if (snapshot?.framePending == true || snapshot == null) return AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.TerminalCapture.reason)
+            val physical = snapshot.physicalRows?.joinToString("\n") ?: snapshot.visibleText
+            val bytes = physical.encodeToByteArray()
+            val truncated = bytes.size > MAX_TAIL_BYTES
+            return AgentEndpointResult.Success(
+                AgentTerminalObservation(
+                    binding = binding,
+                    visibleTail = bytes.takeLast(MAX_TAIL_BYTES).toByteArray(),
+                    truncated = truncated,
+                    authoritative = true,
+                    currentCursorLine = snapshot.currentLine?.let(::cursorLinePrefix),
+                    cursorRow = snapshot.cursorRow.takeUnless { truncated },
+                    cursorVisible = snapshot.cursorVisible,
+                    cursorColumn = snapshot.cursorColumn.takeUnless { truncated },
+                    screenEvidence = snapshot.screenEvidence.takeUnless { truncated },
+                    captureWaitedForFrame = waitedForFrame,
+                    promptText = snapshot.promptText,
+                ),
+            )
         }
         if (isTmuxTransport) {
-            val control = tmuxControl ?: return AgentEndpointResult.Unavailable("tmux control is unavailable")
+            val control = tmuxControl ?: return AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.TmuxControl.reason)
             val pane = binding.paneID ?: return AgentEndpointResult.StaleBinding
             repeat(3) {
                 val before = control.send("display-message -p -t $pane '#{cursor_y}:#{cursor_x}:#{cursor_flag}'")
@@ -318,7 +332,7 @@ internal class SshAgentSessionEndpoint(
             return AgentEndpointResult.Failed("tmux_cursor_moved")
         }
         val tail = synchronized(tails) { tails[binding.paneID ?: "raw"]?.snapshot() }
-            ?: return AgentEndpointResult.Unavailable("fresh terminal evidence is unavailable")
+            ?: return AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.FreshTerminalEvidence.reason)
         return AgentEndpointResult.Success(
             AgentTerminalObservation(
                 binding,
@@ -337,7 +351,7 @@ internal class SshAgentSessionEndpoint(
         val native = request.executable == "tessera-agent-host"
         fun current() = if (native) isCurrentIngestion(binding) else matches(binding)
         if (!current()) return AgentEndpointResult.StaleBinding
-        if (!capabilities.value.remoteData) return AgentEndpointResult.Unavailable(capabilities.value.reason ?: "remote data unavailable")
+        if (!capabilities.value.remoteData) return AgentEndpointResult.Unavailable(capabilities.value.reason ?: AgentEndpointUnavailableReason.RemoteData.reason)
         val execLease: AutoCloseable = if (native) {
             // A process-long observational channel must not hold the exclusive
             // pane binding gate and starve proofs/actions in sibling panes.
@@ -528,11 +542,11 @@ internal class SshAgentSessionEndpoint(
             }
             if (isRawTransport) {
                 val scope = (processDiscoveryScope(binding.value) as? AgentEndpointResult.Success)?.value
-                    ?: return@withTimeoutOrNull AgentEndpointResult.Unavailable("Process root is unavailable")
+                    ?: return@withTimeoutOrNull AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.ProcessRoot.reason)
                 val processes = inventory(scope) ?: return@withTimeoutOrNull AgentEndpointResult.Failed("occupancy_read_failed")
                 return@withTimeoutOrNull AgentEndpointResult.Success(AgentOccupancySnapshot(listOf(pane(null, processes))))
             }
-            val control = tmuxControl ?: return@withTimeoutOrNull AgentEndpointResult.Unavailable("tmux control is unavailable")
+            val control = tmuxControl ?: return@withTimeoutOrNull AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.TmuxControl.reason)
             val listed = parseAgentOccupancyPanes(control.send("list-panes -a -F '#{pane_id} #{pane_pid}'"))
                 ?: return@withTimeoutOrNull AgentEndpointResult.Failed("occupancy_panes_failed")
             val panes = mutableListOf<AgentOccupancyPane>()
@@ -563,7 +577,7 @@ internal class SshAgentSessionEndpoint(
             fixedCommandBytes.size > MAX_ACTIVATION_BYTES || fixedCommandBytes.any { it == 0.toByte() }
         ) return AgentEndpointResult.Failed("invalid_shell_activation")
         val scope = (processDiscoveryScope(binding) as? AgentEndpointResult.Success)?.value
-            ?: return AgentEndpointResult.Unavailable("foreground shell proof is unavailable")
+            ?: return AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.ForegroundShellProof.reason)
         val discovered = discoverProcesses(binding, AgentProcessDiscoveryCommands.command(scope))
         val foregroundShellIDs = (discovered as? AgentEndpointResult.Success)?.value
             ?.foregroundShellProcessIDs
@@ -599,18 +613,18 @@ internal class SshAgentSessionEndpoint(
         when (transport) {
             AgentEndpointTransport.SSH -> {
                 val marker = routeMarker
-                    ?: return AgentEndpointResult.Unavailable("remote server did not accept the route proof marker")
+                    ?: return AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.RouteProofRejected.reason)
                 request.put("routeMarker", marker)
             }
             AgentEndpointTransport.MOSH -> {
                 val rootPID = processRootPID?.invoke()?.takeIf { it > 1 }
-                    ?: return AgentEndpointResult.Unavailable("mosh process root is unavailable")
+                    ?: return AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.MoshProcessRoot.reason)
                 request.put("rootPID", rootPID)
             }
             AgentEndpointTransport.SSH_TMUX, AgentEndpointTransport.MOSH_TMUX -> {
                 val pane = binding.paneID ?: return AgentEndpointResult.StaleBinding
                 if (!validTmuxID(pane, '%')) return AgentEndpointResult.StaleBinding
-                val control = tmuxControl ?: return AgentEndpointResult.Unavailable("tmux control is unavailable")
+                val control = tmuxControl ?: return AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.TmuxControl.reason)
                 val response = control.send("display-message -p -t $pane '#{pane_pid}'")
                 val panePID = response.lines.asSequence().map(String::trim)
                     .firstNotNullOfOrNull(String::toIntOrNull)
@@ -697,14 +711,14 @@ internal class SshAgentSessionEndpoint(
         return when (transport) {
             AgentEndpointTransport.SSH -> routeMarker
                 ?.let { AgentEndpointResult.Success(AgentProcessDiscoveryScope.RouteMarker(it)) }
-                ?: AgentEndpointResult.Unavailable("remote server did not accept the route proof marker")
+                ?: AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.RouteProofRejected.reason)
             AgentEndpointTransport.MOSH -> processRootPID?.invoke()?.takeIf { it > 1 }
                 ?.let { AgentEndpointResult.Success(AgentProcessDiscoveryScope.RootProcess(it)) }
-                ?: AgentEndpointResult.Unavailable("mosh process root is unavailable")
+                ?: AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.MoshProcessRoot.reason)
             AgentEndpointTransport.SSH_TMUX, AgentEndpointTransport.MOSH_TMUX -> {
                 val pane = binding.paneID ?: return AgentEndpointResult.StaleBinding
                 if (!validTmuxID(pane, '%')) return AgentEndpointResult.StaleBinding
-                val control = tmuxControl ?: return AgentEndpointResult.Unavailable("tmux control is unavailable")
+                val control = tmuxControl ?: return AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.TmuxControl.reason)
                 val panePID = control.send("display-message -p -t $pane '#{pane_pid}'")
                     .lines.asSequence().map(String::trim).firstNotNullOfOrNull(String::toIntOrNull)
                     ?.takeIf { it > 1 }
@@ -719,9 +733,9 @@ internal class SshAgentSessionEndpoint(
         if (!isTmuxTransport) {
             // A raw route has no control-mode pane path proof. Do not broaden
             // the exec allow-list with `pwd` or guess from terminal text.
-            return AgentEndpointResult.Unavailable("launch requires a proven SSH+tmux pane directory")
+            return AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.LaunchDirectoryUnproven.reason)
         }
-        val control = tmuxControl ?: return AgentEndpointResult.Unavailable("tmux control is unavailable")
+        val control = tmuxControl ?: return AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.TmuxControl.reason)
         val pane = binding.paneID ?: return AgentEndpointResult.StaleBinding
         if (!validTmuxID(pane, '%')) return AgentEndpointResult.StaleBinding
         val response = control.send("display-message -p -t $pane '#{pane_current_path}'")
@@ -732,7 +746,7 @@ internal class SshAgentSessionEndpoint(
 
     override suspend fun uploadAttachment(binding: AgentEndpointBinding, sourceURI: String): AgentEndpointResult<String> {
         if (!matches(binding)) return AgentEndpointResult.StaleBinding
-        val upload = attachmentUpload ?: return AgentEndpointResult.Unavailable("File uploads are unavailable")
+        val upload = attachmentUpload ?: return AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.Uploads.reason)
         val uploadRoute = try { auxiliaryRoute?.acquire() ?: originalRoute }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Throwable) { return AgentEndpointResult.Failed("attachment_route_unavailable") }
@@ -782,7 +796,7 @@ internal class SshAgentSessionEndpoint(
     ): AgentEndpointResult<Unit> {
         if (!isTmuxTransport) return sendInput(binding, key.encoded())
         if (!matches(binding)) return AgentEndpointResult.StaleBinding
-        val control = tmuxControl ?: return AgentEndpointResult.Unavailable("tmux control is unavailable")
+        val control = tmuxControl ?: return AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.TmuxControl.reason)
         val pane = binding.paneID ?: return AgentEndpointResult.StaleBinding
         if (!validTmuxID(pane, '%')) return AgentEndpointResult.StaleBinding
         val name = key.tmuxName
@@ -794,8 +808,8 @@ internal class SshAgentSessionEndpoint(
 
     override suspend fun focus(binding: AgentEndpointBinding, isCurrentRequest: () -> Boolean): AgentEndpointResult<Unit> {
         if (!isCurrentRequest() || !matches(binding)) return AgentEndpointResult.StaleBinding
-        if (!isTmuxTransport) return AgentEndpointResult.Unavailable("raw transport has one focused terminal")
-        val control = tmuxControl ?: return AgentEndpointResult.Unavailable("tmux control is unavailable")
+        if (!isTmuxTransport) return AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.RawTransportOneFocus.reason)
+        val control = tmuxControl ?: return AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.TmuxControl.reason)
         val window = binding.windowID ?: return AgentEndpointResult.StaleBinding
         val pane = binding.paneID ?: return AgentEndpointResult.StaleBinding
         if (!validTmuxID(window, '@') || !validTmuxID(pane, '%')) return AgentEndpointResult.StaleBinding
@@ -815,10 +829,10 @@ internal class SshAgentSessionEndpoint(
         placement: AgentTmuxPlacement,
     ): AgentEndpointResult<AgentTmuxPlacementReceipt> {
         if (!matches(binding)) return AgentEndpointResult.StaleBinding
-        if (!isTmuxTransport) return AgentEndpointResult.Unavailable("spawn and fork require tmux")
+        if (!isTmuxTransport) return AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.SpawnRequiresTmux.reason)
         // The sender refuses it regardless; this names the reason (D13).
         placementRefusal()?.let { return AgentEndpointResult.Failed(it) }
-        val control = tmuxControl ?: return AgentEndpointResult.Unavailable("tmux control is unavailable")
+        val control = tmuxControl ?: return AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.TmuxControl.reason)
         val command = when (placement) {
             is AgentTmuxPlacement.NewWindow -> {
                 SharedTmuxCommands.newWindowAtEnd(
@@ -845,12 +859,12 @@ internal class SshAgentSessionEndpoint(
         request: ByteArray,
     ): AgentEndpointResult<AgentTmuxLaunchReceipt> {
         if (!matches(binding)) return AgentEndpointResult.StaleBinding
-        if (!isTmuxTransport) return AgentEndpointResult.Unavailable("spawn and fork require tmux")
+        if (!isTmuxTransport) return AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.SpawnRequiresTmux.reason)
         if (runCatching { UUID.fromString(requestID) }.isFailure || request.isEmpty() || request.size > 65_536) {
             return AgentEndpointResult.Failed("invalid_launch_request")
         }
         placementRefusal()?.let { return AgentEndpointResult.Failed(it) }
-        val control = tmuxControl ?: return AgentEndpointResult.Unavailable("tmux control is unavailable")
+        val control = tmuxControl ?: return AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.TmuxControl.reason)
         val buffer = "tessera-agent-launch-${requestID.lowercase()}"
         val encoded = Base64.encodeToString(request, Base64.NO_WRAP)
         if (!control.send("set-buffer -b $buffer '$encoded'").success) {
@@ -908,7 +922,7 @@ internal class SshAgentSessionEndpoint(
         lifecycleDeliveryScope.cancel()
         auxiliaryRoute?.close()
         execBindingGate.close()
-        mutableCapabilities.value = AgentEndpointCapabilities(reason = "session closed")
+        mutableCapabilities.value = AgentEndpointCapabilities(reason = AgentEndpointUnavailableReason.SessionClosed.reason)
         synchronized(tails) {
             tails.clear()
             scanners.clear()
@@ -916,6 +930,7 @@ internal class SshAgentSessionEndpoint(
             lastAgentStateJSON.clear()
             pendingLifecycleFrames.clear()
             lifecycleDrain = null
+            lastTmuxPaneIDs = null
         }
     }
 
@@ -959,7 +974,7 @@ internal class SshAgentSessionEndpoint(
         if (!matches(binding)) return AgentEndpointResult.StaleBinding
         if (command.operation != expected) return AgentEndpointResult.Failed("invalid_integration_command")
         if (!capabilities.value.remoteData) {
-            return AgentEndpointResult.Unavailable(capabilities.value.reason ?: "remote data unavailable")
+            return AgentEndpointResult.Unavailable(capabilities.value.reason ?: AgentEndpointUnavailableReason.RemoteData.reason)
         }
         val startedAt = System.nanoTime()
         val execLease = execBindingGate.acquire(binding, execChannels) { matches(binding) }
@@ -1034,7 +1049,7 @@ internal class SshAgentSessionEndpoint(
     }
 
     private suspend fun sendTmuxBytes(binding: AgentEndpointBinding, bytes: ByteArray): AgentEndpointResult<Unit> {
-        val control = tmuxControl ?: return AgentEndpointResult.Unavailable("tmux control is unavailable")
+        val control = tmuxControl ?: return AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.TmuxControl.reason)
         val pane = binding.paneID ?: return AgentEndpointResult.StaleBinding
         if (!validTmuxID(pane, '%')) return AgentEndpointResult.StaleBinding
         for (chunk in bytes.asList().chunked(MAX_TMUX_INPUT_BYTES)) {
@@ -1151,8 +1166,8 @@ internal class SshAgentSessionEndpoint(
                 remoteData = true,
                 verifiedInput = false,
                 semanticKeys = false,
-                reason = if (rawWriter == null) "raw terminal route unavailable" else
-                    "raw transport has no authoritative prompt capture yet",
+                reason = if (rawWriter == null) AgentEndpointUnavailableReason.RawTerminalRoute.reason else
+                    AgentEndpointUnavailableReason.RawPromptCapture.reason,
             )
             AgentEndpointTransport.SSH_TMUX, AgentEndpointTransport.MOSH_TMUX -> AgentEndpointCapabilities(
                 lifecycleFeed = true,
@@ -1162,7 +1177,7 @@ internal class SshAgentSessionEndpoint(
                 semanticKeys = tmuxControl != null,
                 guardedFocus = tmuxControl != null,
                 acknowledgedTmuxPlacement = tmuxControl != null,
-                reason = if (tmuxControl == null) "tmux control route unavailable" else null,
+                reason = if (tmuxControl == null) AgentEndpointUnavailableReason.TmuxControlRoute.reason else null,
             )
         }
     }
@@ -1171,15 +1186,26 @@ internal class SshAgentSessionEndpoint(
 internal data class AgentOccupancyPaneList(val roots: Map<String, Int>, val complete: Boolean)
 
 internal fun parseAgentOccupancyPanes(reply: AgentTmuxControlAck, limit: Int = 256): AgentOccupancyPaneList? {
-    if (!reply.success) return null
+    // An attached control client always has a pane; an empty reply is not
+    // evidence that every bound pane closed.
+    if (!reply.success || reply.lines.isEmpty()) return null
+    // `-a` lists a pane once per session holding its window, and a view
+    // session shares all of its owner's, so a repeat with the same root is
+    // the same pane; only a different root is malformed.
     val roots = linkedMapOf<String, Int>()
-    for (line in reply.lines.take(limit)) {
+    for (line in reply.lines) {
         val fields = line.trim().split(Regex("\\s+"))
         if (fields.size != 2 || !fields[0].matches(Regex("%[0-9]+"))) return null
         val pid = fields[1].toIntOrNull()?.takeIf { it > 1 } ?: return null
-        if (roots.put(fields[0], pid) != null) return null
+        val known = roots[fields[0]]
+        if (known != null) {
+            if (known != pid) return null
+            continue
+        }
+        if (roots.size == limit) return AgentOccupancyPaneList(roots, complete = false)
+        roots[fields[0]] = pid
     }
-    return AgentOccupancyPaneList(roots, complete = reply.lines.size <= limit)
+    return AgentOccupancyPaneList(roots, complete = true)
 }
 
 /**

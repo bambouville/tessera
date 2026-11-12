@@ -148,6 +148,22 @@ Ranked by demonstrated bug cost × security relevance × extraction cheapness.
 The gaps-doc roadmap items. The win is building each **once in core** rather than letting
 Android re-derive it the way it re-derived tmux policy in week one.
 
+## Artifacts browser — shared first (2026-10-27)
+
+- **Portable policy:** `Packages/TesseraCore/Sources/TesseraArtifactsCore/` owns the value model,
+  pure reducer, kind/viewer table, overview grouping/search, Quick Open intents/suggestions,
+  terminal-link classification, listening-port probe/parsers, forward planning, SHA-256 cache
+  identity/LRU/presentation and lenient v1 persistence. Its only module dependency is
+  `TesseraDomainCore`; path grammar and forwarding validation remain authoritative there.
+- **Language boundary:** `Sources/TesseraCoreABI/ArtifactsABI.swift` exposes fourteen stateless
+  `tessera_artifacts_*` JSON functions, declared in `TesseraCoreABI.h`. Flat tagged enums,
+  sorted keys, omitted optionals, caller-supplied IDs and millisecond times keep the ABI
+  deterministic. `Tests/TesseraCoreABITests/Fixtures/artifacts-abi-golden.json` pins replay pairs
+  for the Kotlin facade. iOS imports `TesseraArtifactsCore` directly.
+- **Platform work remains:** JNI and `SharedArtifacts.kt` carry these documents without
+  reimplementing policy. Stores, file/cache I/O, SSH leases, native viewers, UI and connection
+  ownership stay platform-native. A tab can refresh only an existing live connection.
+
 1. **SwipePad model** — the largest pure block with zero Kotlin counterpart: macro grammar
    (`MacroEncoder`), `regex:` process matcher (exists because Claude Code renames its process
    title every release), `AgentDetectionRules` prompt grammar, ps-output parsers, petal geometry.

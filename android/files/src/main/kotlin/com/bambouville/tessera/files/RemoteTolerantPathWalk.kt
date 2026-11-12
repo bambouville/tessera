@@ -57,10 +57,14 @@ object RemoteTolerantPathWalk {
 
     private fun <T> unique(name: String, entries: List<T>, nameOf: (T) -> String, absolute: String): T? {
         val matches = RemoteSelectionPathResolver.entriesNamed(name, entries, nameOf)
-        check(matches.size <= 1) { "Several files match $absolute — open it from the Files panel." }
+        if (matches.size > 1) throw AmbiguousRemotePathException(absolute)
         return matches.firstOrNull()
     }
 
     private fun join(directory: String, name: String): String =
         if (directory == "/") "/$name" else "$directory/$name"
 }
+
+/** More than one listed name matches [absolute] once spaces are disregarded. */
+class AmbiguousRemotePathException(val absolute: String) :
+    IllegalStateException("Several files match $absolute — open it from the Files panel.")

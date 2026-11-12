@@ -90,7 +90,7 @@ public struct AgentToolRun: Equatable, Sendable {
 
     public var latestCall: (name: String, preview: String)? {
         for entry in entries.reversed() {
-            if case .toolCall(let name, let preview) = entry.block { return (name, preview) }
+            if case .toolCall(let name, let preview, _) = entry.block { return (name, preview) }
         }
         return nil
     }

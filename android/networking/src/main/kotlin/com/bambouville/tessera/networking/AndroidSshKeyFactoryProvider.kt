@@ -11,12 +11,13 @@ import java.security.spec.KeySpec
 import org.conscrypt.Conscrypt
 
 /**
- * Narrow Android JCA adapter for SSHJ 0.40 host-key parsing.
+ * Narrow Android JCA adapter for SSHJ host-key parsing.
  *
  * AndroidKeyStore advertises Ed25519 KeyFactory support but intentionally rejects imported
- * X.509 public keys, while SSHJ also asks for the non-standard `ECDSA` KeyFactory alias. This
- * provider owns only those aliases and delegates imported public-key work to Android's ordinary
- * software crypto provider. It does not implement cryptography or intercept Keystore signatures.
+ * X.509 public keys. This provider owns only SSHJ's Ed25519 names and delegates imported
+ * public-key work to Conscrypt. It does not implement cryptography or intercept Keystore
+ * signatures. NIST ECDSA keys need no alias: since 0.41 SSHJ asks for the standard `EC`
+ * factory, which Android's own providers import.
  */
 internal object AndroidSshKeyFactoryProvider {
     const val NAME = "TesseraSshKeyFactory"
@@ -40,31 +41,26 @@ private class TesseraSshProvider : Provider(
     "Android-safe imported SSH host-key factories",
 ) {
     init {
-        put("KeyFactory.Ed25519", AndroidEd25519KeyFactorySpi::class.java.name)
-        put("KeyFactory.EdDSA", AndroidEd25519KeyFactorySpi::class.java.name)
-        put("KeyFactory.ECDSA", AndroidEcKeyFactorySpi::class.java.name)
+        // Each service constructs its SPI directly. Registered by class name instead, the
+        // SPIs are only ever created by reflection, which R8 cannot see: release builds
+        // emptied them into abstract shells, JCA skipped this provider, and host-key
+        // parsing fell through to AndroidKeyStore's factory, which refuses imported keys.
+        putService(KeyFactoryService(this, "Ed25519") { AndroidEd25519KeyFactorySpi() })
+        putService(KeyFactoryService(this, "EdDSA") { AndroidEd25519KeyFactorySpi() })
     }
 }
 
-class AndroidEd25519KeyFactorySpi : DelegatingKeyFactorySpi("Ed25519")
+private class KeyFactoryService(
+    provider: Provider,
+    algorithm: String,
+    private val create: () -> KeyFactorySpi,
+) : Provider.Service(provider, "KeyFactory", algorithm, KeyFactorySpi::class.java.name, null, null) {
+    override fun newInstance(constructorParameter: Any?): Any = create()
+}
 
-class AndroidEcKeyFactorySpi : DelegatingKeyFactorySpi("EC")
-
-abstract class DelegatingKeyFactorySpi(
-    private val algorithm: String,
-) : KeyFactorySpi() {
+class AndroidEd25519KeyFactorySpi : KeyFactorySpi() {
     private val delegate: KeyFactory by lazy {
-        if (algorithm == "Ed25519") {
-            KeyFactory.getInstance(algorithm, AndroidSshKeyFactoryProvider.importedKeys())
-        } else Security.getProviders().asSequence()
-            .filterNot {
-                it.name == AndroidSshKeyFactoryProvider.NAME || it.name == "AndroidKeyStore"
-            }
-            .mapNotNull { provider ->
-                runCatching { KeyFactory.getInstance(algorithm, provider) }.getOrNull()
-            }
-            .firstOrNull()
-            ?: error("Android has no import-capable $algorithm KeyFactory")
+        KeyFactory.getInstance("Ed25519", AndroidSshKeyFactoryProvider.importedKeys())
     }
 
     override fun engineGeneratePublic(keySpec: KeySpec): PublicKey =

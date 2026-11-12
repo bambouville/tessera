@@ -2,6 +2,7 @@ package com.bambouville.tessera.feature.session
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.advanceTimeBy
@@ -14,6 +15,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class AgentTmuxControlReplyTest {
     @Test
     fun tallPanePreservesPhysicalCursorRowAndComposer() {

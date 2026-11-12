@@ -1,2 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources />
+<resources>
+    <string name="design_font_note_jetbrains_mono">tall x-height, coding ligatures</string>
+    <string name="design_font_note_fira_code">the widest ligature set</string>
+    <string name="design_font_note_hack">wide, plain, built for small sizes</string>
+    <string name="design_font_note_cascadia_mono">Windows Terminal\'s face, no ligatures</string>
+    <string name="design_font_note_source_code_pro">Adobe\'s classic, humanist shapes</string>
+    <string name="design_font_note_ibm_plex_mono">warm and slightly narrow</string>
+    <string name="design_font_note_geist_mono">geometric, very open counters</string>
+    <string name="design_font_note_ubuntu_mono">narrow — fits the most columns</string>
+    <string name="design_font_note_inconsolata">light and compact</string>
+    <string name="design_font_note_dejavu_sans_mono">the broadest Unicode coverage</string>
+    <string name="design_font_note_system">whatever monospace the OS ships</string>
+</resources>

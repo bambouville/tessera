@@ -4,16 +4,21 @@ import Foundation
 /// Callers page explicitly, retain only hits, and stop at their result quota.
 public enum AgentNativePageSearch {
     public static func matches(page: AgentProjectionPage, threadID: AgentThreadID, query: String) -> [AgentSearchResult] {
+        matches(records: page.records, threadID: threadID, query: query)
+    }
+
+    public static func matches(records: [AgentProjectionRecord], threadID: AgentThreadID, query: String) -> [AgentSearchResult] {
         let needle = String(query.prefix(512)).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !needle.isEmpty else { return [] }
         let normalizer = AgentTranscriptNormalizer()
-        return page.records.compactMap { record in
+        return records.compactMap { record in
             guard let message = normalizer.normalize(providerID: threadID.providerID, record: record).message else { return nil }
             let text = message.blocks.compactMap(AgentCenterRuntime.searchText).joined(separator: "\n")
             guard let range = text.range(of: needle, options: [.caseInsensitive, .diacriticInsensitive]) else { return nil }
             let start = text.index(range.lowerBound, offsetBy: -80, limitedBy: text.startIndex) ?? text.startIndex
             let end = text.index(range.upperBound, offsetBy: 160, limitedBy: text.endIndex) ?? text.endIndex
-            return .init(threadID: threadID, recordID: record.recordID, excerpt: String(text[start..<end]))
+            return .init(threadID: threadID, recordID: record.recordID, excerpt: String(text[start..<end]),
+                         sequence: record.sequence, sourceOffset: record.sourceOffset, seekToken: record.seekToken)
         }
     }
 }
@@ -23,14 +28,27 @@ public struct AgentSearchResult: Equatable, Codable, Sendable {
     public let threadID: AgentThreadID
     public let recordID: String
     public let excerpt: String
+    /// Where the matched record stands in its transcript, for opening the
+    /// conversation there (`window.read` seek): its provider order and, when
+    /// the host reported them, the source offset and seek token that prove
+    /// it unmoved.
+    public let sequence: UInt64?
+    public let sourceOffset: UInt64?
+    public let seekToken: String?
 
-    public init(threadID: AgentThreadID, recordID: String, excerpt: String) {
+    public init(threadID: AgentThreadID, recordID: String, excerpt: String,
+                sequence: UInt64? = nil, sourceOffset: UInt64? = nil, seekToken: String? = nil) {
         self.threadID = threadID
         self.recordID = recordID
         self.excerpt = Self.boundedExcerpt(excerpt)
+        self.sequence = sequence
+        self.sourceOffset = sequence == nil ? nil : sourceOffset
+        self.seekToken = sequence == nil ? nil : seekToken.flatMap {
+            !$0.isEmpty && $0.utf8.count <= 128 && $0.utf8.allSatisfy { (33...126).contains($0) } ? $0 : nil
+        }
     }
 
-    private enum CodingKeys: String, CodingKey { case threadID, recordID, excerpt }
+    private enum CodingKeys: String, CodingKey { case threadID, recordID, excerpt, sequence, sourceOffset, seekToken }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let threadID = try values.decode(AgentThreadID.self, forKey: .threadID)
@@ -41,7 +59,10 @@ public struct AgentSearchResult: Equatable, Codable, Sendable {
         }
         // Projectors are permitted to be conservative, but an overlong
         // redacted excerpt must not reject the whole cross-host response.
-        self.init(threadID: threadID, recordID: recordID, excerpt: excerpt)
+        self.init(threadID: threadID, recordID: recordID, excerpt: excerpt,
+                  sequence: try values.decodeIfPresent(UInt64.self, forKey: .sequence),
+                  sourceOffset: try values.decodeIfPresent(UInt64.self, forKey: .sourceOffset),
+                  seekToken: try values.decodeIfPresent(String.self, forKey: .seekToken))
     }
 
     private static func boundedExcerpt(_ input: String) -> String {
@@ -60,6 +81,10 @@ public struct AgentSearchSnapshot: Equatable, Codable, Sendable {
     public static let maximumResults = maximumHosts * maximumResultsPerHost
 
     public let results: [AgentSearchResult]
+    /// Hosts that were not fully searched: unreachable, out of time, or
+    /// stopped before every thread was read to its end. A host listed here
+    /// may also have results, which are then partial. Result hosts and these
+    /// together stay within `maximumHosts`.
     public let unavailableHostIDs: [UUID]
     public init(results: [AgentSearchResult], unavailableHostIDs: [UUID] = []) {
         var admittedHosts: [UUID] = []
@@ -77,14 +102,18 @@ public struct AgentSearchSnapshot: Equatable, Codable, Sendable {
             perHostCount[hostID, default: 0] += 1
         }
         self.results = admitted
-        self.unavailableHostIDs = Array(
-            unavailableHostIDs.reduce(into: [UUID]()) { values, id in
-                guard !perHostCount.keys.contains(id),
-                      !values.contains(id),
-                      perHostCount.keys.count + values.count < Self.maximumHosts else { return }
-                values.append(id)
+        // A partial result host already holds its slot; any other host needs
+        // a free one, so the union stays within the host bound.
+        var unavailable: [UUID] = []
+        var resultlessCount = 0
+        for id in unavailableHostIDs where !unavailable.contains(id) {
+            if perHostCount[id] == nil {
+                guard perHostCount.count + resultlessCount < Self.maximumHosts else { continue }
+                resultlessCount += 1
             }
-        )
+            unavailable.append(id)
+        }
+        self.unavailableHostIDs = unavailable
     }
 
     private enum CodingKeys: String, CodingKey { case results, unavailableHostIDs }
@@ -100,11 +129,33 @@ public struct AgentSearchSnapshot: Equatable, Codable, Sendable {
               resultHosts.count <= Self.maximumHosts,
               unavailableHostIDs.count == unavailableSet.count,
               unavailableHostIDs.count <= Self.maximumHosts,
-              unavailableSet.isDisjoint(with: resultHosts),
               unavailableSet.union(resultHosts).count <= Self.maximumHosts,
               perHostWithinLimit else {
             throw DecodingError.dataCorruptedError(forKey: .results, in: values, debugDescription: "Too many search results")
         }
         self.results = results; self.unavailableHostIDs = unavailableHostIDs
+    }
+
+    /// What the app already holds first, then what its sources found, each
+    /// record once: a search keeps the rows it showed while it ran, in the
+    /// same order, when it ends. A row keeps the first position any copy of
+    /// it reported, so it can still open at its record, or a later copy's
+    /// that carries the token proving it; a position is never split between
+    /// copies.
+    public static func merging(_ loaded: [AgentSearchResult], _ found: [AgentSearchResult],
+                               unavailableHostIDs: [UUID] = []) -> AgentSearchSnapshot {
+        struct Key: Hashable { let threadID: AgentThreadID; let recordID: String }
+        var index: [Key: Int] = [:]
+        var results: [AgentSearchResult] = []
+        for result in loaded + found {
+            let key = Key(threadID: result.threadID, recordID: result.recordID)
+            guard let at = index[key] else { index[key] = results.count; results.append(result); continue }
+            let kept = results[at]
+            if result.sequence != nil, kept.sequence == nil || (kept.seekToken == nil && result.seekToken != nil) {
+                results[at] = .init(threadID: kept.threadID, recordID: kept.recordID, excerpt: kept.excerpt,
+                                    sequence: result.sequence, sourceOffset: result.sourceOffset, seekToken: result.seekToken)
+            }
+        }
+        return .init(results: results, unavailableHostIDs: unavailableHostIDs)
     }
 }

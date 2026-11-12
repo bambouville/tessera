@@ -83,6 +83,9 @@ xcrun simctl terminate "$udid" com.bambouville.TesseraApp >/dev/null 2>&1 || tru
 # user's connection-restore policy or touch their persistent testing devices.
 xcrun simctl spawn "$udid" defaults write com.bambouville.TesseraApp tessera.nearbyBootstrap.completed.v1 -bool YES
 xcrun simctl spawn "$udid" defaults write com.bambouville.TesseraApp tessera.pref.hasSeenWelcome -bool YES
+# A welcomed user who has not seen this release's what's-new card gets it
+# over the app on launch; 999 stays above every release.
+xcrun simctl spawn "$udid" defaults write com.bambouville.TesseraApp tessera.pref.lastSeenWhatsNewVersion 999
 SIMCTL_CHILD_TESSERA_CONTINUITY_LIVE_HARNESS="$config" xcrun simctl launch "$udid" com.bambouville.TesseraApp
 if [[ "${TESSERA_QR_AUTH:-password}" == publicKey ]]; then
   container="$(xcrun simctl get_app_container "$udid" com.bambouville.TesseraApp data)"

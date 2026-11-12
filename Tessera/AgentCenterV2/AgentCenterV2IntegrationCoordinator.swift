@@ -391,7 +391,8 @@ extension AgentCenterV2Coordinator {
             processIDs: target.processIDs,
             shellIntegrationActive: target.shellIntegrationActive,
             agentIntegrationActive: true,
-            agentRequiresLifecycleHook: target.agentRequiresLifecycleHook
+            agentRequiresLifecycleHook: target.agentRequiresLifecycleHook,
+            agentLifecycleDeliverable: target.agentLifecycleDeliverable
         )
     }
 

@@ -295,7 +295,7 @@ object ProgramStatusQueries {
             val entry = terminal.program?.primaryEntry
             ProgramAttentionItem(hostId, state?.hostLabel ?: hostId, key,
                 terminal.paneId?.let { state?.locations?.get(it) }, attention,
-                entry?.takeIf { terminal.program?.programAttention == attention }, terminal.hasAgent,
+                entry?.takeIf { terminal.program.programAttention == attention }, terminal.hasAgent,
                 checkNotNull(ProgramStatusWordsModel.status(terminal)))
         }
     }.sortedWith(compareBy<ProgramAttentionItem> { it.tone }
@@ -454,8 +454,8 @@ object ProgramStatusWordsModel {
         }
         val useEntry = entry != null && (attention == null || native == attention)
         return ProgramStatusStatusWords(entry?.app,
-            if (useEntry) state(entry!!) else this.attention(attention!!),
-            if (useEntry) progressPercent(entry!!) else null, attention?.tone)
+            if (useEntry) state(entry) else this.attention(attention!!),
+            if (useEntry) progressPercent(entry) else null, attention?.tone)
     }
 
     fun countParts(counts: ProgramAttentionCounts, specificKinds: Boolean = false): List<ProgramCountPart> = buildList {

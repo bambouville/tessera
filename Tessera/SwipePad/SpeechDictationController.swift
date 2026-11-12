@@ -100,11 +100,11 @@ final class SpeechDictationController {
         request.requiresOnDeviceRecognition = true
         request.shouldReportPartialResults = true
         let capture = DictationAudioCapture(request: request)
-        await beginListening(cancel: { capture.cancel() }) { id in
+        await beginListening(cancel: { capture.cancel() }) { [self] id in
             self.recognizer = recognizer
             self.recognitionRequest = request
             self.audioCapture = capture
-            self.recognitionTask = recognizer.recognitionTask(with: request) { result, error in
+            self.recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
                 let text = result?.bestTranscription.formattedString
                 let errorDescription = error.map { "\($0)" }
                 Task { @MainActor [weak self] in

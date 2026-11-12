@@ -19,6 +19,13 @@ extension EnvironmentValues {
         get { self[SoftwareKeyboardLiftKey.self] }
         set { self[SoftwareKeyboardLiftKey.self] = newValue }
     }
+
+    /// How far the docked keyboard reaches into the session, whether the
+    /// session lifts above it or resizes to it.
+    @Entry var softwareKeyboardOverlap: CGFloat = 0
+    /// A docked keyboard reaches into the session. Derived from the same
+    /// proposal as the lift, so it flips inside the keyboard's own animation.
+    @Entry var softwareKeyboardUp = false
 }
 
 /// Live accessory bar that hangs at the bottom of an open session. Replaces
@@ -60,64 +67,102 @@ struct SessionAccessoryBar: View {
     /// Defaults to permissive so previews, harnesses and the settings palette
     /// (none of which have a session to scope against) are unchanged.
     var customShortcutApplies: (CustomShortcut) -> Bool = { _ in true }
+    /// The visible session's bar, which may reach past its pane to the docked
+    /// keyboard's edges. Hidden sessions keep their bars inside their panes.
+    var spansKeyboard = false
+    /// An agent in this session waits for an answer. The folded pill marks
+    /// its chevron when the swipe pad, which shows the replies, is off.
+    var attention = false
 
     @Environment(AppearancePreferences.self) private var appearance
     @Environment(ShortcutStore.self) private var shortcutStore
     @Environment(\.softwareKeyboardLift) private var keyboardLift
+    @Environment(\.softwareKeyboardOverlap) private var keyboardOverlap
+    @Environment(\.duoFoldedDeck) private var inFoldedDeck
+    @Environment(\.duoDeckPlacement) private var deckPlacement
+    @Environment(\.duoDeckWidth) private var deckWidth
+    @Environment(\.designTokens) private var T
+    /// Springs back when the drag ends or is cancelled: a cancelled drag
+    /// never delivers onEnded, and must not leave the bar shifted.
+    @GestureState(resetTransaction: Transaction(animation: .snappy(duration: 0.3)))
+    private var pillDrag: CGFloat = 0
+    @State private var puckSlot: CGRect?
     @State private var softwareKeyboardVisible = true
+    @State private var overflow = AccessoryBarOverflow()
+    @Environment(\.duoWindowFrame) private var windowFrame
+    @Environment(\.duoPaneHidden) private var paneHidden
+    /// The bar's own slot, globally: its pane's width.
+    @State private var slot: ClosedRange<CGFloat>?
+    @State private var spannedFrame: CGRect?
+
+    /// The bar floats over the terminal, so it takes the terminal theme's
+    /// polarity rather than the app's: light ink on dark themes, dark ink on
+    /// light ones, with the glass tinted by the theme's canvas.
+    private var palette: AccessoryBarPalette {
+        AccessoryBarPalette(theme: TerminalTheme.find(id: appearance.terminalThemeID))
+    }
+
+    /// Armed and lifted chips wear the user's accent in the variant made for
+    /// the bar's polarity. Sessions pass the dark one, which washes out on a
+    /// light theme's pale glass. On light glass even the light variant is too
+    /// faint for a small label over its own tint, so there the label keeps
+    /// the bar's ink and the accent marks the fill and border.
+    private var chipAccent: Color {
+        guard palette.isLight else { return accent }
+        return DesignTokens.make(
+            mode: .light,
+            accent: appearance.accent,
+            customColor: appearance.accent == .custom
+                ? Color(rgbInt: appearance.customAccentRGB)
+                : nil
+        ).accent
+    }
 
     var body: some View {
-        @Bindable var appearance = appearance
-
         HStack(spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                DraggableChipBar(
-                    keys: $appearance.accessoryBarKeys,
-                    trashEnabled: true,
-                    trashColor: Color(red: 1, green: 69/255, blue: 58/255),
-                    onTap: { item in handleTap(item) },
-                    resolve: { raw in
-                        AccessoryBarItem.resolve(raw) { shortcutStore.customShortcut(withChipRawID: $0) }
-                    },
-                    accessibilityValue: { item in
-                        if item.isModifier {
-                            return armedState(for: item)
-                                ? String(localized: "armed")
-                                : String(localized: "not armed")
-                        }
-                        return Self.canFire(item, applies: customShortcutApplies)
-                            ? nil
-                            : String(localized: "out of scope")
-                    }
-                ) { item, lifted in
-                    chipView(item, lifted: lifted)
+            ForEach(slots, id: \.self) { slot in
+                switch slot {
+                case .chips: chipRow
+                case .chevron: chevronButton
+                case .puck: puckSeat
+                case .keyboard: keyboardToggleButton
                 }
-                .padding(.horizontal, isPhone ? 8 : 12)
-                .padding(.vertical, 4)
             }
-            .overlay(alignment: .trailing) {
-                AccessoryBarOverflowFade(
-                    background: Color(red: 28/255, green: 28/255, blue: 30/255)
-                )
-            }
-            .clipped()
-
-            keyboardToggleButton
         }
         .frame(height: Self.chipRowHeight)
         // Same floating material as the sidebar / top bar, driven by the
         // `chromeMaterial` setting so all chrome stays consistent.
         .floatingGlass(
             appearance.chromeMaterial,
-            tint: .clear,
-            solidFill: Color(red: 28/255, green: 28/255, blue: 30/255),
+            tint: palette.glassTint,
+            solidFill: palette.solidFill,
             in: barShape
         )
         .overlay(alignment: .top) {
-            Rectangle()
-                .fill(Color.white.opacity(0.08))
-                .frame(height: 0.5)
+            if !isPill {
+                Rectangle()
+                    .fill(palette.hairline)
+                    .frame(height: 0.5)
+            }
         }
+        .overlay {
+            if isPill {
+                barShape.strokeBorder(palette.hairline, lineWidth: 0.5)
+            }
+        }
+        .environment(\.colorScheme, palette.colorScheme)
+        .offset(x: isPill ? pillDrag : 0)
+        .highPriorityGesture(pillDragGesture, including: isPill ? .all : .subviews)
+        .preference(key: SwipePadDockKey.self, value: seatsPuck ? puckSlot : nil)
+        // Over a docked keyboard wider than the pane (Duo's rail layouts),
+        // the row reaches the keyboard's edges. Negative padding widens what
+        // the row is offered and reports the slot's own width back, so the
+        // pane's layout and the terminal grid stay as they are.
+        // Measured inside the padding, which reports only the slot's width.
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { spannedFrame = $0 }
+        .padding(.leading, -keyboardSpan.leading)
+        .padding(.trailing, -keyboardSpan.trailing)
+        .preference(key: KeyboardSpanningBarFrameKey.self, value: keyboardSpan == EdgeInsets() ? nil : spannedFrame)
         // When the software keyboard is gone, the row sits in the iPhone's
         // curved lower viewport. Inset the complete material surface and give
         // it a continuous corner rather than letting a full-width rectangle be
@@ -130,7 +175,9 @@ struct SessionAccessoryBar: View {
         // one thing the no-resize layout exists to prevent. The bar is a chip
         // row inside that band, never a slab filling it: a material stretched
         // to the full band reads as a fat empty shelf above the keys.
-        .frame(height: Self.reservedBandHeight(), alignment: .top)
+        // Duo's folded deck rests the row on the hinge, so there it reserves no
+        // home-indicator strip.
+        .frame(height: inFoldedDeck ? Self.chipRowHeight : Self.reservedBandHeight(), alignment: .top)
         // Where the row sits inside the band. Welded to the keyboard's top edge
         // while it is up, resting above the home indicator once it is gone, on
         // the keyboard's own curve. Offsetting DOWN from the band top is what
@@ -138,6 +185,11 @@ struct SessionAccessoryBar: View {
         // session already reserved, so unlike the negative offset this replaces
         // it can never hang over the live terminal rows above.
         .offset(y: collapsedPhoneSlide)
+        .onGeometryChange(for: ClosedRange<CGFloat>.self) { geometry in
+            let frame = geometry.frame(in: .global)
+            return frame.minX...frame.maxX
+        } action: { slot = $0 }
+        .background { WindowBottomSafeAreaProbe() }
         .onChange(of: appearance.accessoryBarKeys) { _, _ in modifierState.cancel() }
         .onChange(of: appearance.modifierBehavior) { _, _ in
             modifierState.behavior = resolvedModifierBehavior
@@ -155,7 +207,168 @@ struct SessionAccessoryBar: View {
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             guard isPhone else { return }
             softwareKeyboardVisible = false
+            // A bar opened while typing lasts until the keyboard goes: the
+            // next one leaves the top half to the terminal and the pill.
+            if appearance.duoBarOpenWhileTyping { appearance.duoBarOpenWhileTyping = false }
         }
+    }
+
+    private enum BarSlot: Hashable {
+        case chips, chevron, puck, keyboard
+    }
+
+    /// Duo's laptop pose puts the buttons on the pill's edge, the chevron
+    /// between them and the keys. Stable identities let them slide across
+    /// when the pill changes edge.
+    private var slots: [BarSlot] {
+        var slots: [BarSlot] = [.chips]
+        if showsChevron { slots.append(.chevron) }
+        if seatsPuck { slots.append(.puck) }
+        slots.append(.keyboard)
+        return buttonEdge == .leading ? slots.reversed() : slots
+    }
+
+    /// In laptop pose the swipe pad's puck stops floating and takes a seat
+    /// in the bar. The session's overlay still draws and drives it there.
+    private var seatsPuck: Bool { deckPlacement != nil && appearance.swipePadEnabled }
+
+    private var puckSeat: some View {
+        Color.clear
+            .frame(width: 44, height: 44)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { puckSlot = $0 }
+            .padding(.vertical, 4)
+            .padding(.horizontal, 2)
+            .accessibilityHidden(true)
+    }
+
+    private var isPill: Bool { deckPlacement?.isPill == true }
+
+    /// The chevron folds and opens the bar while typing; below the hinge the
+    /// bar is open and has nothing to fold.
+    private var showsChevron: Bool {
+        guard let deckPlacement else { return false }
+        return deckPlacement.bar != .desk
+    }
+
+    private var buttonEdge: HorizontalEdge { deckPlacement?.edge ?? .trailing }
+
+    private var outerEdge: Edge.Set { buttonEdge == .leading ? .leading : .trailing }
+
+    private var innerEdge: Edge.Set { buttonEdge == .leading ? .trailing : .leading }
+
+    private var innerAlignment: Alignment { buttonEdge == .leading ? .trailing : .leading }
+
+    private var chipRow: some View {
+        @Bindable var appearance = appearance
+        return ScrollView(.horizontal, showsIndicators: false) {
+            DraggableChipBar(
+                keys: $appearance.accessoryBarKeys,
+                trashEnabled: true,
+                trashColor: Color(red: 1, green: 69/255, blue: 58/255),
+                onTap: { item in handleTap(item) },
+                resolve: { raw in
+                    AccessoryBarItem.resolve(raw) { shortcutStore.customShortcut(withChipRawID: $0) }
+                },
+                accessibilityValue: { item in
+                    if item.isModifier {
+                        return armedState(for: item)
+                            ? String(localized: "armed")
+                            : String(localized: "not armed")
+                    }
+                    return Self.canFire(item, applies: customShortcutApplies)
+                        ? nil
+                        : String(localized: "out of scope")
+                }
+            ) { item, lifted, pressed in
+                chipView(item, lifted: lifted, pressed: pressed)
+            }
+            .padding(.horizontal, isPhone ? 8 : 12)
+            .padding(.vertical, 4)
+        }
+        .onScrollGeometryChange(for: AccessoryBarOverflow.self) { geometry in
+            AccessoryBarOverflow(geometry)
+        } action: { _, overflow in
+            self.overflow = overflow
+        }
+        // Clipped keys fade into the bar's own surface. A painted
+        // gradient can only match one surface colour and read as a dark
+        // band on every other one.
+        .mask {
+            AccessoryBarOverflowMask(overflow: overflow)
+                .animation(.easeOut(duration: 0.15), value: overflow)
+        }
+        // The pill keeps its buttons: the keys fold away into its edge.
+        .frame(width: isPill ? 0 : nil)
+        .opacity(isPill ? 0 : 1)
+        .allowsHitTesting(!isPill)
+        .accessibilityHidden(isPill)
+    }
+
+    /// Folds the bar to the pill while typing, or opens it on the hinge. The
+    /// glyph points where the bar goes: inward to open, at its edge to fold.
+    private var chevronButton: some View {
+        let pointsBackward = (buttonEdge == .trailing) == isPill
+        return Button {
+            withAnimation(.snappy(duration: 0.3)) {
+                appearance.duoBarOpenWhileTyping.toggle()
+            }
+        } label: {
+            Image(systemName: pointsBackward ? "chevron.backward" : "chevron.forward")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(palette.mutedInk)
+                .frame(width: 44, height: 44)
+                .background(palette.toggleFill)
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .overlay(alignment: .topTrailing) {
+                    if isPill && attention && !appearance.swipePadEnabled {
+                        Circle()
+                            .fill(T.amber)
+                            .frame(width: 7, height: 7)
+                            .padding(6)
+                            .accessibilityHidden(true)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isPill ? "Open accessory bar" : "Fold accessory bar")
+        .accessibilityValue(isPill && attention ? String(localized: "agent waiting") : "")
+        .accessibilityIdentifier("duo-accessory-bar-chevron")
+        .padding(outerEdge, 4)
+        .padding(innerEdge, isPill ? 4 : 0)
+        .padding(.vertical, 4)
+        .overlay(alignment: innerAlignment) {
+            if !isPill { divider }
+        }
+    }
+
+    private var divider: some View {
+        Rectangle()
+            .fill(palette.divider)
+            .frame(width: 0.5)
+            .padding(.vertical, 12)
+    }
+
+    /// Dragging the pill past the middle of the deck moves it to that edge.
+    /// A tap still reaches its buttons: the drag needs some travel first.
+    private var pillDragGesture: some Gesture {
+        DragGesture(minimumDistance: 12, coordinateSpace: .named(DuoFoldedInputSpace.name))
+            .updating($pillDrag) { value, drag, _ in
+                if isPill { drag = value.translation.width }
+            }
+            .onEnded { value in
+                guard isPill else { return }
+                let edge = Self.pillEdge(
+                    releasedAt: value.predictedEndLocation.x, deckWidth: deckWidth, current: buttonEdge
+                )
+                withAnimation(.snappy(duration: 0.3)) {
+                    appearance.duoBarEdge = edge == .leading ? "leading" : "trailing"
+                }
+            }
+    }
+
+    static func pillEdge(releasedAt x: CGFloat, deckWidth: CGFloat, current: HorizontalEdge) -> HorizontalEdge {
+        guard deckWidth > 0 else { return current }
+        return x < deckWidth / 2 ? .leading : .trailing
     }
 
     /// On iPhone this dismisses the software keyboard while leaving the
@@ -187,9 +400,9 @@ struct SessionAccessoryBar: View {
         } label: {
             keyboardToggleIcon
                 .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(Color.white.opacity(0.65))
+                .foregroundStyle(palette.mutedInk)
                 .frame(width: 44, height: 44)
-                .background(Color.white.opacity(0.08))
+                .background(palette.toggleFill)
                 .clipShape(RoundedRectangle(cornerRadius: 7))
         }
         .buttonStyle(.plain)
@@ -198,13 +411,12 @@ struct SessionAccessoryBar: View {
                 ? (softwareKeyboardVisible ? "Hide keyboard" : "Show keyboard")
                 : "Hide accessory bar"
         )
-        .padding(.trailing, isPhone ? 4 : 12)
+        .padding(outerEdge, isPhone ? 4 : 12)
+        .padding(innerEdge, isPill && !showsChevron ? 4 : 0)
         .padding(.vertical, 4)
-        .overlay(alignment: .leading) {
-            Rectangle()
-                .fill(Color.white.opacity(0.06))
-                .frame(width: 0.5)
-                .padding(.vertical, 12)
+        .overlay(alignment: innerAlignment) {
+            // Between the keys and the bar's buttons; the chevron draws it when shown.
+            if !isPill && !showsChevron { divider }
         }
     }
 
@@ -216,7 +428,7 @@ struct SessionAccessoryBar: View {
                 Image(systemName: "chevron.up")
                     .font(.system(size: 8, weight: .bold))
                     .padding(2)
-                    .background(Color(red: 28/255, green: 28/255, blue: 30/255))
+                    .background(palette.solidFill)
                     .clipShape(Circle())
                     .offset(x: 3, y: 3)
             }
@@ -226,7 +438,7 @@ struct SessionAccessoryBar: View {
     }
 
     @ViewBuilder
-    private func chipView(_ item: AccessoryBarItem, lifted: Bool) -> some View {
+    private func chipView(_ item: AccessoryBarItem, lifted: Bool, pressed: Bool) -> some View {
         let isArmed = armedState(for: item)
         let highlight = isArmed || lifted
         let isCustom = item.customShortcut != nil
@@ -237,10 +449,13 @@ struct SessionAccessoryBar: View {
         // a fixed position says "not here" without moving its neighbours.
         let outOfScope = !Self.canFire(item, applies: customShortcutApplies)
         chipLabelView(item)
-            .foregroundStyle(highlight ? accent : Color.white)
+            .foregroundStyle(highlight && !palette.isLight ? chipAccent : palette.ink)
             .frame(minWidth: 44, minHeight: 44)
             .padding(.horizontal, isPhone ? 0 : 12)
-            .background(highlight ? accent.opacity(0.20) : chipBackground(isCustom: isCustom))
+            // A finger on the key deepens its fill, as a keyboard's key does,
+            // until it lifts: the tap itself only fires on release.
+            .background { if pressed { palette.pressedFill } }
+            .background(highlight ? chipAccent.opacity(0.20) : chipBackground(isCustom: isCustom))
             .clipShape(RoundedRectangle(cornerRadius: 7))
             .overlay(
                 RoundedRectangle(cornerRadius: 7)
@@ -268,11 +483,11 @@ struct SessionAccessoryBar: View {
     /// only cue left.
     private func chipBackground(isCustom: Bool) -> Color {
         isCustom ? Color(red: 48/255, green: 209/255, blue: 88/255).opacity(0.16)
-                 : Color.white.opacity(0.12)
+                 : palette.chipFill
     }
 
     private func chipBorder(highlight: Bool, isCustom: Bool) -> Color {
-        if highlight { return accent }
+        if highlight { return chipAccent }
         return isCustom
             ? Color(red: 48/255, green: 209/255, blue: 88/255).opacity(0.5)
             : Color.clear
@@ -377,11 +592,7 @@ struct SessionAccessoryBar: View {
     /// keyboard comes and goes.
     static func homeIndicatorReserve() -> CGFloat {
         guard UIDevice.current.userInterfaceIdiom == .phone else { return 0 }
-        return UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows)
-            .first(where: \.isKeyWindow)?
-            .safeAreaInsets.bottom ?? 0
+        return WindowBottomSafeArea.shared.inset
     }
 
     /// 1 while the bar rests in the phone's curved lower viewport, falling to 0
@@ -394,9 +605,11 @@ struct SessionAccessoryBar: View {
 
     private var collapsedPhoneProgress: CGFloat {
         guard isPhone else { return 0 }
+        // On the hinge the row stays a flat, full-width strip in both keyboard states.
+        if inFoldedDeck { return 0 }
         return Self.collapsedProgress(
             lift: keyboardLift,
-            homeIndicator: keyWindow?.safeAreaInsets.bottom ?? 0
+            homeIndicator: Self.homeIndicatorReserve()
         )
     }
 
@@ -404,19 +617,25 @@ struct SessionAccessoryBar: View {
         12 * collapsedPhoneProgress
     }
 
+    /// How far the row reaches past each side of its slot to the window's
+    /// edges, which the docked keyboard spans. Keyed to the keyboard's overlap,
+    /// so the row widens and narrows on the keyboard's own curve.
+    private var keyboardSpan: EdgeInsets {
+        guard spansKeyboard, isPhone, keyboardOverlap > 0, !paneHidden,
+              let windowFrame, let slot else { return EdgeInsets() }
+        return EdgeInsets(
+            top: 0, leading: max(0, slot.lowerBound - windowFrame.minX),
+            bottom: 0, trailing: max(0, windowFrame.maxX - slot.upperBound)
+        )
+    }
+
     /// How far down its reserved band the chip row travels: the full home
     /// indicator reserve while the keyboard is up (row flush against the
     /// keyboard, nothing between them), zero once the keyboard is gone (row
     /// parked at the band top, the reserve left clear below it).
     private var collapsedPhoneSlide: CGFloat {
-        Self.homeIndicatorReserve() * (1 - collapsedPhoneProgress)
-    }
-
-    private var keyWindow: UIWindow? {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows)
-            .first(where: \.isKeyWindow)
+        guard !inFoldedDeck else { return 0 }
+        return Self.homeIndicatorReserve() * (1 - collapsedPhoneProgress)
     }
 
     /// Rounds off as the bar settles into the phone's curved lower viewport and
@@ -424,7 +643,121 @@ struct SessionAccessoryBar: View {
     /// radius keeps the corner on the keyboard's curve; swapping shape types
     /// could only ever cut between two states.
     private var barShape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: 12 * collapsedPhoneProgress, style: .continuous)
+        RoundedRectangle(cornerRadius: isPill ? 16 : 12 * collapsedPhoneProgress, style: .continuous)
+    }
+}
+
+/// The bottom safe-area inset of the accessory bar's window, mirrored for
+/// SwiftUI bodies.
+///
+/// A body must not read `UIWindow.safeAreaInsets` itself. On iOS 27 the getter
+/// can make UIKit ask the root hosting controller for its status-bar and
+/// home-indicator preferences, which SwiftUI combines over the whole view tree,
+/// including the body that is asking. Read from the bar's body at launch, that
+/// formed an AttributeGraph cycle, after which SwiftUI never updated the bar
+/// again: its keyboard toggle and keyboard-following insets froze.
+/// `WindowBottomSafeAreaProbe` refreshes the mirror from UIKit callbacks
+/// instead, a run-loop turn later so that no SwiftUI update is in progress.
+@MainActor @Observable
+final class WindowBottomSafeArea {
+    static let shared = WindowBottomSafeArea()
+
+    private(set) var inset: CGFloat = 0
+
+    func refresh(from window: UIWindow?) {
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window else { return }
+            let inset = window.safeAreaInsets.bottom
+            if self.inset != inset { self.inset = inset }
+        }
+    }
+}
+
+/// Feeds `WindowBottomSafeArea` from the window hosting it: once on arrival,
+/// then whenever rotation or a new safe area lays it out again. The app root
+/// carries one so the mirror is seeded before a session first lays out; the
+/// bar carries its own for hosts without that root, such as previews.
+struct WindowBottomSafeAreaProbe: UIViewRepresentable {
+    func makeUIView(context: Context) -> ProbeView {
+        let view = ProbeView()
+        view.isUserInteractionEnabled = false
+        view.isAccessibilityElement = false
+        return view
+    }
+
+    func updateUIView(_ view: ProbeView, context: Context) {}
+
+    final class ProbeView: UIView {
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            WindowBottomSafeArea.shared.refresh(from: window)
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            WindowBottomSafeArea.shared.refresh(from: window)
+        }
+
+        override func safeAreaInsetsDidChange() {
+            super.safeAreaInsetsDidChange()
+            WindowBottomSafeArea.shared.refresh(from: window)
+        }
+    }
+}
+
+/// Colours of the session accessory bar, keyed to the terminal theme it
+/// floats over. The dark values are the bar's original palette.
+struct AccessoryBarPalette: Equatable {
+    let isLight: Bool
+    let glassTint: Color
+
+    init(theme: TerminalTheme) {
+        isLight = theme.isLight
+        // The theme's own glass wash (`chromeTokens().sidebarBg`), so the bar
+        // carries the canvas's hue like the session's top bar.
+        glassTint = theme.bg.opacity(theme.isLight ? 0.55 : 0.35)
+    }
+
+    var colorScheme: ColorScheme { isLight ? .light : .dark }
+    var ink: Color { isLight ? Color(white: 0.11) : .white }
+    var mutedInk: Color { isLight ? Color.black.opacity(0.55) : Color.white.opacity(0.65) }
+    var chipFill: Color { isLight ? Color.black.opacity(0.06) : Color.white.opacity(0.12) }
+    /// Laid over a pressed key's fill, armed or not.
+    var pressedFill: Color { isLight ? Color.black.opacity(0.14) : Color.white.opacity(0.22) }
+    var toggleFill: Color { isLight ? Color.black.opacity(0.05) : Color.white.opacity(0.08) }
+    var hairline: Color { isLight ? Color.black.opacity(0.08) : Color.white.opacity(0.08) }
+    var divider: Color { isLight ? Color.black.opacity(0.08) : Color.white.opacity(0.06) }
+    var solidFill: Color {
+        isLight ? Color(red: 242/255, green: 242/255, blue: 247/255)
+                : Color(red: 28/255, green: 28/255, blue: 30/255)
+    }
+}
+
+/// Which edges of the chip row have keys scrolled out of view.
+struct AccessoryBarOverflow: Equatable {
+    var leading = false
+    var trailing = false
+
+    init() {}
+
+    init(_ geometry: ScrollGeometry) {
+        leading = geometry.visibleRect.minX > 1
+        trailing = geometry.visibleRect.maxX < geometry.contentSize.width - 1
+    }
+}
+
+/// Fades the chip row out at an edge that hides more keys.
+struct AccessoryBarOverflowMask: View {
+    let overflow: AccessoryBarOverflow
+
+    var body: some View {
+        HStack(spacing: 0) {
+            LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing)
+                .frame(width: overflow.leading ? 22 : 0)
+            Color.black
+            LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
+                .frame(width: overflow.trailing ? 22 : 0)
+        }
     }
 }
 

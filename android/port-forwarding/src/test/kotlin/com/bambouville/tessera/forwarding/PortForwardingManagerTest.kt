@@ -3,6 +3,7 @@ package com.bambouville.tessera.forwarding
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -28,6 +29,23 @@ class PortForwardingManagerTest {
         assertEquals(rules.map { it.id }.toSet(), manager.states.value.keys)
         assertTrue(manager.states.value.values.all { it.status is PortForwardingStatus.Failed })
         manager.close()
+    }
+
+    @Test
+    fun detachedSessionChecksKeepTheOriginalAttachmentFailure() = runBlocking {
+        val rule = localRule()
+        val manager = PortForwardingManager()
+        try {
+            manager.reportTransportUnavailable(listOf(rule), "SSH authentication was cancelled")
+            val failure = manager.states.value
+
+            assertFalse(manager.reconcileIfAttached(listOf(rule)))
+            manager.startIfAttached(rule.id)
+
+            assertEquals(failure, manager.states.value)
+        } finally {
+            manager.close()
+        }
     }
 
     @Test

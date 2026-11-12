@@ -50,6 +50,41 @@ internal fun snapshotTerminalCells(
     return result
 }
 
+/** The rows with each cell's background and reverse video as SGR, read as a
+ * `capture-pane -e` text is: Claude marks its current question tab only by its
+ * background. Continuation cells hold no glyph, as in the cells' own text. */
+internal fun snapshotPromptText(cells: List<List<Cell>>, styleAt: (row: Int, column: Int) -> Long): String {
+    val text = StringBuilder(cells.sumOf { it.size } + cells.size)
+    for ((row, line) in cells.withIndex()) {
+        if (row > 0) text.append('\n')
+        var current = ""
+        for ((column, cell) in line.withIndex()) {
+            if (cell.width == 0) continue
+            val background = backgroundParameters(styleAt(row, column))
+            if (background != current) { text.append("\u001b[0").append(background).append('m'); current = background }
+            text.append(cell.text)
+        }
+        if (current.isNotEmpty()) text.append("\u001b[0m")
+    }
+    return text.toString()
+}
+
+/** SGR parameters, each after a ";", as the program wrote them, up to the 8
+ * and 16 colour codes that the emulator keeps as indexed ones. */
+internal fun backgroundParameters(style: Long): String {
+    val parameters = StringBuilder()
+    if (TextStyle.decodeEffect(style) and TextStyle.CHARACTER_ATTRIBUTE_INVERSE != 0) parameters.append(";7")
+    val color = TextStyle.decodeBackColor(style)
+    when {
+        color and 0xff000000.toInt() == 0xff000000.toInt() ->
+            parameters.append(";48;2;").append(color shr 16 and 0xff).append(';').append(color shr 8 and 0xff).append(';').append(color and 0xff)
+        color in 0..7 -> parameters.append(';').append(40 + color)
+        color in 8..15 -> parameters.append(';').append(92 + color)
+        color in 16..255 -> parameters.append(";48;5;").append(color)
+    }
+    return parameters.toString()
+}
+
 private fun screenStyle(value: Long): Int {
     val effect = TextStyle.decodeEffect(value)
     var result = 0

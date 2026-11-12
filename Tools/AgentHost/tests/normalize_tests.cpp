@@ -35,6 +35,10 @@ std::string kindSignature(const std::string& kind) { return base64(field(2, fiel
 int main(int argc, char** argv) {
     assert(tessera::json::displayText("safe\x1b[31m\xE2\x80\xAE" "evil\xC2\x85\t\n", 1024) == "safe[31mevil\t\n");
     assert(tessera::json::displayText("éé", 3) == "é");
+    // Long printable runs copy whole, still dropping DEL and stopping at the limit.
+    assert(tessera::json::displayText("abcdefghij\x7fklmnopqrstuv\"\\wxyz", 1024) == "abcdefghijklmnopqrstuv\"\\wxyz");
+    assert(tessera::json::displayText("abcdefghijklmnopqrstuvwxyz", 11) == "abcdefghijk");
+    assert(tessera::json::displayText("abcdefgh\x1b" "ijklmnop", 12) == "abcdefghijkl");
     if (argc == 2) {
         simdjson::dom::parser input, output;
         const auto fixtures = input.load(argv[1]).value();
@@ -388,6 +392,45 @@ int main(int argc, char** argv) {
     }) {
         const auto result = tessera::normalize("claude", parsed(raw), false);
         assert(tessera::json::integer(parsed(result.json.c_str()), "unparsedContentCount") > 0);
+    }
+    // The chain index's metadata-only reads decode exactly the chain fields a
+    // display read does.
+    const std::string longID(257, 'x');
+    for (const auto& [provider, raw] : std::initializer_list<std::pair<const char*, std::string>>{
+        {"claude", R"({"type":"user","uuid":"u","parentUuid":"p","message":{"role":"user","content":"hi"}})"},
+        {"claude", R"({"type":"assistant","uuid":"a","parentUuid":null,"isSidechain":true,"message":{"content":[]}})"},
+        {"claude", R"({"type":"user","uuid":"m","isMeta":true,"teamName":"t","message":{"content":"meta"}})"},
+        {"claude", R"({"type":"user","uuid":"d","uuid":"e","message":{"content":"duplicate"}})"},
+        {"claude", R"({"type":"user","uuid":"t","isSidechain":"yes","teamName":7,"message":{"content":"ill-typed"}})"},
+        {"claude", R"({"type":"user","uuid":42,"parentUuid":[],"message":{"content":"ill-typed"}})"},
+        {"claude", R"({"type":"user","uuid":"","message":{"content":"empty"}})"},
+        {"claude", R"({"type":"user","uuid":")" + longID + R"(","message":{"content":"long"}})"},
+        {"claude", R"({"type":"system","subtype":"compact_boundary","uuid":"b","parentUuid":null,"logicalParentUuid":"l"})"},
+        {"claude", R"({"type":"system","subtype":"compact_boundary","subtype":"compact_boundary","uuid":"b","logicalParentUuid":"l"})"},
+        {"claude", R"({"type":"system","subtype":"compact_boundary","uuid":"b","logicalParentUuid":")" + longID + R"("})"},
+        {"claude", R"({"type":"progress","uuid":"g","parentUuid":"u"})"},
+        {"claude", R"({"type":"attachment","uuid":"q","parentUuid":"u","attachment":{"type":"queued_command","prompt":"typed"}})"},
+        {"claude", R"({"type":"file-history-snapshot","messageId":"x","snapshot":{},"isSnapshotUpdate":false})"},
+        {"claude", R"({"type":"summary","payload":{"type":"inner"},"leafUuid":"u"})"},
+        {"claude", R"({"type":")" + std::string(300, 't') + R"("})"},
+        {"pi", R"({"type":"session","version":3,"id":"s","sessionVersion":3})"},
+        {"pi", R"({"type":"message","id":"n","parentId":"s","message":{"role":"user","content":"hi"}})"},
+        {"pi", R"({"type":"message","id":"n","parentId":7,"message":{"role":"user","content":"hi"}})"},
+        {"pi", R"({"type":"message","id":"n","id":"o","message":{"role":"user","content":"hi"}})"},
+        {"pi", R"({"type":"message","message":{"role":"user","content":"no id"}})"},
+    }) {
+        const auto full = tessera::normalize(provider, parsed(raw.c_str()), false);
+        const auto chain = tessera::normalizeChainMetadata(provider, parsed(raw.c_str()), false);
+        // The index reads providerID only from a Pi header.
+        const bool pi = std::string(provider) == "pi";
+        assert(chain.sourceType == full.sourceType && (!pi || chain.providerID == full.providerID) &&
+            chain.parentField == full.parentField && chain.chainEntry == full.chainEntry &&
+            chain.chainMessage == full.chainMessage && chain.chainMain == full.chainMain &&
+            chain.chainID == full.chainID && chain.chainParentID == full.chainParentID &&
+            chain.chainUnproven == full.chainUnproven && chain.chainCompactBoundary == full.chainCompactBoundary &&
+            chain.chainSidechain == full.chainSidechain && chain.chainLogicalParentID == full.chainLogicalParentID);
+        // Only a Pi session header keeps display JSON (the index reads its sessionVersion).
+        assert(chain.json.empty() == !(pi && full.sourceType == "session"));
     }
     std::cout << "Unknown items and malformed known blocks remain diagnostic\n";
 }

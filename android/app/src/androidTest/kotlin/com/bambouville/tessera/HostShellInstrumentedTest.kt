@@ -19,7 +19,10 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.bambouville.tessera.data.AndroidHostRepository
+import com.bambouville.tessera.data.AndroidAppPreferences
 import com.bambouville.tessera.data.AndroidIdentityRepository
+import com.bambouville.tessera.onboarding.OnboardingPresentation
+import com.bambouville.tessera.onboarding.onboardingPresentation
 import com.bambouville.tessera.lifecycle.DiagnosticLogStore
 import com.bambouville.tessera.security.AndroidKeystoreCredentialStore
 import kotlinx.coroutines.flow.first
@@ -32,12 +35,32 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.After
+import org.junit.Before
 import com.bambouville.tessera.feature.session.LiveSessionStore
 
 @RunWith(AndroidJUnit4::class)
 class HostShellInstrumentedTest {
     @get:Rule
     val compose = createAndroidComposeRule<MainActivity>()
+
+    @Before
+    fun dismissTheFirstStartCardBeforeTestingNavigation() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val presentation = runBlocking {
+            val preferences = AndroidAppPreferences(context).values.first()
+            val hosts = AndroidHostRepository(context).observeHosts().first()
+            onboardingPresentation(hosts.size, preferences.hasSeenWelcome, preferences.lastSeenWhatsNewVersion)
+        }
+        if (presentation != OnboardingPresentation.None) {
+            compose.waitUntil(timeoutMillis = 15_000) {
+                compose.onAllNodesWithTag("onboarding-dim").fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.activityRule.scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        }
+        compose.waitUntil(timeoutMillis = 15_000) {
+            compose.onAllNodesWithTag("root-hosts").fetchSemanticsNodes().isNotEmpty()
+        }
+    }
 
     /**
      * Same reason as `BackNavigationInstrumentedTest`: a class that launches the
@@ -98,7 +121,9 @@ class HostShellInstrumentedTest {
         val keyStore = AndroidKeystoreCredentialStore()
 
         try {
-            compose.onNodeWithTag("root-keys").performClick()
+            compose.onNodeWithTag("root-settings").performClick()
+            waitForText("keys")
+            compose.onNodeWithText("keys").performScrollTo().performClick()
             compose.onNodeWithTag("identity-name")
                 .performClick()
                 .performTextReplacement(keyName)
@@ -146,9 +171,16 @@ class HostShellInstrumentedTest {
     @Test
     fun settingsExposePairingKnownHostsDiagnosticsAndTerminalPreferences() {
         assertTrue(compose.onAllNodesWithTag("root-pair").fetchSemanticsNodes().isEmpty())
+        assertTrue(compose.onAllNodesWithTag("root-keys").fetchSemanticsNodes().isEmpty())
+        compose.onNodeWithTag("root-artifacts").assertIsDisplayed()
         compose.onNodeWithTag("root-settings").performClick()
         waitForText("sync & continuity")
-        compose.onNodeWithText("sync & continuity").assertIsDisplayed().performClick()
+        compose.onNodeWithText("known hosts").performScrollTo()
+        val securityTop = compose.onNodeWithText("security").fetchSemanticsNode().boundsInRoot.top
+        val keysTop = compose.onNodeWithText("keys").fetchSemanticsNode().boundsInRoot.top
+        val knownHostsTop = compose.onNodeWithText("known hosts").fetchSemanticsNode().boundsInRoot.top
+        assertTrue("Keys and known hosts follow security", securityTop < keysTop && keysTop < knownHostsTop)
+        compose.onNodeWithText("sync & continuity").performScrollTo().assertIsDisplayed().performClick()
         waitForText("pair another device")
         compose.onNodeWithText("pair another device").performClick()
         waitForText("pair another device")
@@ -156,12 +188,20 @@ class HostShellInstrumentedTest {
         compose.onNodeWithContentDescription("Back").performClick()
 
         waitForText("security")
-        compose.onNodeWithText("security").performClick()
-        compose.onNodeWithText("known hosts").assertIsDisplayed()
+        compose.onNodeWithText("security").performScrollTo().performClick()
+        compose.onNodeWithText("app lock").assertIsDisplayed()
         compose.onNodeWithContentDescription("back to settings").performClick()
 
+        compose.onNodeWithText("keys").performScrollTo().performClick()
+        compose.onNodeWithTag("identity-name").assertIsDisplayed()
+        compose.onNodeWithContentDescription("back to settings").performClick()
+
+        compose.onNodeWithText("known hosts").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Import known hosts").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Back").performClick()
+
         waitForText("diagnostics")
-        compose.onNodeWithText("diagnostics").performClick()
+        compose.onNodeWithText("diagnostics").performScrollTo().performClick()
         // The report is handed off as a file and never drawn: the page shows its
         // size and last write, and the export action is live once app_launch
         // has been recorded.

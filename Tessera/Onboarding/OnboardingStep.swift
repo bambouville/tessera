@@ -3,6 +3,7 @@ import Foundation
 /// Where a spotlight step's callout sits relative to its target. Mirrors the
 /// `place` field in the approved mockup's `render()`.
 enum OnboardingPlacement: Equatable {
+    case above
     case below
     case right
 }
@@ -28,6 +29,9 @@ enum OnboardingIllustration: Equatable {
     /// breadcrumb follows the terminal's cwd (link glyph in accent), with a few
     /// file rows and an in-flight download.
     case filesPanel
+    /// The terminal selection menu and a file row's menu, with the shared
+    /// Open in Artifacts action highlighted in each.
+    case openInArtifacts
     /// The native iOS share sheet, both directions: a remote file exported OUT to
     /// Files / Mail / Messages, and a photo shared IN so it lands on the host.
     case shareInOut
@@ -83,17 +87,19 @@ struct OnboardingStep {
 }
 
 extension OnboardingStep {
-    /// The nine first-run steps, in order. The original feature set came from the
+    /// The eleven first-run steps, in order. The original feature set came from the
     /// approved mockup (`/tmp/tessera-firstlaunch-mockups/index.html`, since
     /// gone — the in-code copy IS the record); the three Remote Files cards
     /// (files panel / share / paste a screenshot) came from the approved mockup
     /// `docs/mockups/onboarding-files/index.html`. Shortcut chords are verified
     /// against `TesseraTerminalView.swift` (⌘⇧E → Files panel).
+    /// The navigation moves and the two Artifacts steps follow board A6 of
+    /// `docs/mockups/iphone-duo/index.html`.
     /// Chords in the body copy follow the user's `modifierNotation`, so the
     /// tour reads the way the rest of the app is written. Taking the notation
     /// as a parameter keeps this type pure data — `OnboardingController`
     /// supplies it from the preference it already holds.
-    static func firstRun(_ notation: ModifierNotation) -> [OnboardingStep] { [
+    static func firstRun(_ notation: ModifierNotation, agentCenterEnabled: Bool = true) -> [OnboardingStep] { [
 
         OnboardingStep(
             title: String(localized: "add your first host"),
@@ -104,9 +110,10 @@ extension OnboardingStep {
         ),
         OnboardingStep(
             title: String(localized: "keys, protected your way"),
-            body: String(localized: "Create recoverable Ed25519 keys or device-bound P-256 keys. Biometrics or passcode are optional, and Tessera can install the public key for you."),
-            kind: .spotlight(.keysNav, .right),
-            compactKind: .illustration(.keySecurity)
+            body: String(localized: "Keys and known hosts live in Settings now, beside security. Create recoverable Ed25519 keys or device-bound P-256 keys. Biometrics or passcode are optional, and Tessera can install the public key for you."),
+            kind: .spotlight(.settingsNav, .right),
+            compactBody: String(localized: "Keys and known hosts moved into Settings, beside security. Generate, import and copy a key to a host as before."),
+            compactKind: .spotlight(.settingsNav, .above)
         ),
         OnboardingStep(
             title: String(localized: "tmux windows & panes"),
@@ -117,7 +124,10 @@ extension OnboardingStep {
         OnboardingStep(
             title: String(localized: "agent center"),
             body: String(localized: "Follow Claude Code and Codex across every session. See who needs input, answer a prompt, or jump straight to the right terminal."),
-            kind: .illustration(.agentCenter)
+            kind: .illustration(.agentCenter),
+            compactTitle: agentCenterEnabled ? String(localized: "agents, its own tab") : nil,
+            compactBody: agentCenterEnabled ? String(localized: "Claude Code and Codex across every session, a tap from anywhere. It shows while Agent Center is on.") : nil,
+            compactKind: agentCenterEnabled ? .spotlight(.agentsNav, .above) : .illustration(.agentCenter)
         ),
         OnboardingStep(
             title: String(localized: "swipe pad"),
@@ -126,10 +136,22 @@ extension OnboardingStep {
         ),
         OnboardingStep(
             title: String(localized: "files, beside your shell"),
-            body: String(localized: "A folder glyph up top — or \(Chord.cmdShift("e").rendered(notation)) — slides out a panel that tracks your shell's directory. Browse, download, and Quick Look files on the host, over SSH and mosh alike."),
+            body: String(localized: "A folder glyph up top — or \(Chord.cmdShift("e").rendered(notation)) — slides out a panel that tracks your shell's directory. Browse, download, and open files in Artifacts, over SSH and mosh alike."),
             kind: .illustration(.filesPanel),
             compactTitle: String(localized: "files from your phone"),
-            compactBody: String(localized: "Open Files from the terminal top bar to browse, download, and Quick Look remote files. SSH, tmux, and mosh sessions share the same file tools.")
+            compactBody: String(localized: "Open Files from the terminal top bar to browse, download, and open files in Artifacts. SSH, tmux, and mosh sessions share the same file tools.")
+        ),
+        OnboardingStep(
+            title: String(localized: "artifacts"),
+            body: String(localized: "Every tab from every session, grouped by host. The pages tunnels used to open are tabs here now."),
+            kind: .spotlight(.artifactsNav, .right),
+            compactBody: String(localized: "Every tab from every session, grouped by host. A file you open lands here, and sessions keeps your terminal where you left it."),
+            compactKind: .spotlight(.artifactsNav, .above)
+        ),
+        OnboardingStep(
+            title: String(localized: "open in artifacts"),
+            body: String(localized: "Quick Look is now Open in Artifacts — in a file's long-press menu and on a path you select. A localhost link opens here too, over a forward made for its tab."),
+            kind: .illustration(.openInArtifacts)
         ),
         OnboardingStep(
             title: String(localized: "share, in and out"),

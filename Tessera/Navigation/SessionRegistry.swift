@@ -24,6 +24,17 @@ final class SessionRegistry {
         let expiresAt: ContinuousClock.Instant
     }
 
+    /// Agent Center's "Reveal in Files": open the bound session's Files
+    /// panel at `directory` once Agent Center has switched to it. Consumed
+    /// once by the matching session view; expires if nothing shows it.
+    struct FilesRevealRequest: Equatable {
+        let token: UInt64
+        let sessionID: UUID
+        let directory: String
+        let carrierID: ObjectIdentifier
+        let expiresAt: ContinuousClock.Instant
+    }
+
     struct TmuxCloseRequest: Equatable {
         let token: UInt64
         let action: CommandPaletteTmuxClose
@@ -57,6 +68,8 @@ final class SessionRegistry {
     /// reads this map to show which live sessions yielded to another device.
     private(set) var gridAuthorityPeerNames: [UUID: String] = [:]
     private(set) var tmuxFocusRequest: TmuxFocusRequest?
+    private(set) var filesRevealRequest: FilesRevealRequest?
+    private var nextFilesRevealToken: UInt64 = 0
     private(set) var tmuxCloseRequest: TmuxCloseRequest?
     private(set) var tmuxMutationRequest: TmuxMutationRequest?
     private var nextTmuxFocusToken: UInt64 = 0
@@ -119,6 +132,10 @@ final class SessionRegistry {
         if let request = tmuxFocusRequest,
            sessions.first(where: { $0.id == request.sessionID }).map({ ObjectIdentifier($0.session.terminalSession) }) != request.carrierID {
             finishTmuxFocus(request, reason: "carrier-changed")
+        }
+        if let request = filesRevealRequest,
+           sessions.first(where: { $0.id == request.sessionID }).map({ ObjectIdentifier($0.session.terminalSession) }) != request.carrierID {
+            filesRevealRequest = nil
         }
     }
 
@@ -257,6 +274,49 @@ final class SessionRegistry {
         tmuxFocusDeadlineTask = nil
         pendingTmuxFocus = nil
         tmuxFocusRequest = nil
+    }
+
+    /// Ask the session view of `sessionID` to reveal `directory` in its
+    /// Files panel the next time it is shown. A later request replaces an
+    /// unconsumed one. Never connects anything: the view only consumes it
+    /// while its own transport is connected.
+    func requestFilesReveal(
+        sessionID: UUID,
+        directory: String,
+        lifetime: Duration = .seconds(10)
+    ) {
+        guard directory.hasPrefix("/"), !directory.contains("\0"),
+              let live = session(for: sessionID) else { return }
+        nextFilesRevealToken &+= 1
+        filesRevealRequest = FilesRevealRequest(
+            token: nextFilesRevealToken,
+            sessionID: sessionID,
+            directory: directory,
+            carrierID: ObjectIdentifier(live.session.terminalSession),
+            expiresAt: ContinuousClock.now.advanced(by: lifetime)
+        )
+    }
+
+    /// The directory to reveal, at most once per request. A hidden view
+    /// leaves the request for when it is shown; a stale or replaced
+    /// carrier, or an expired request, drops it.
+    func takeFilesReveal(
+        sessionID: UUID,
+        carrier: any TerminalSession,
+        isShown: Bool,
+        now: ContinuousClock.Instant = .now
+    ) -> String? {
+        guard let request = filesRevealRequest, request.sessionID == sessionID else { return nil }
+        guard now < request.expiresAt,
+              ObjectIdentifier(carrier) == request.carrierID,
+              session(for: sessionID).map({ ObjectIdentifier($0.session.terminalSession) }) == request.carrierID
+        else {
+            filesRevealRequest = nil
+            return nil
+        }
+        guard isShown else { return nil }
+        filesRevealRequest = nil
+        return request.directory
     }
 
     /// Route a compact switcher's destructive action to the matching

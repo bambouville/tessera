@@ -115,6 +115,27 @@ class ProjectorParityTests(unittest.TestCase):
         self.assertSame(reference, native)
         self.assertEqual([block.get('text') for block in native['blocks']], ['Hello', None, ' again'])
 
+    def test_call_ids_are_kept_whole_or_not_at_all(self):
+        # Clipping could turn one call's ID into another's, so both readers
+        # keep an ID whole or leave it out; the app checks its characters.
+        ids = ['toolu_01:A.b-c', 'toolu_01:A.b-c d/e', 'a' * 255, 'a' * 256, 'a' * 255 + 'é' + 'b', 'a' * 254 + 'é', '']
+        values = [assistant(f'a{index}', [dict(type='tool_use', id=value, name='Read', input={}),
+                                         dict(type='tool_result', tool_use_id=value, content='ok')])
+                  for index, value in enumerate(ids)]
+        # Both names present: each reader takes tool_use_id before call_id.
+        values.append(assistant('both', [dict(type='tool_result', tool_use_id='use-1', call_id='call-1', content='ok')]))
+        values.append(assistant('typed', [dict(type='tool_result', tool_use_id=7, call_id='call-2', content='ok')]))
+        rows = self.both('claude', values)
+        for value, (reference, native) in zip(values, rows):
+            self.assertSame(reference, native, value['uuid'])
+            self.assertEqual([block.get('toolCallID') for block in reference['blocks']],
+                             [block.get('toolCallID') for block in native['blocks']], value['uuid'])
+        kept = [[block.get('toolCallID') for block in native['blocks']] for _, native in rows]
+        self.assertEqual(kept, [['toolu_01:A.b-c'] * 2, ['toolu_01:A.b-c d/e'] * 2, ['a' * 255] * 2, [None] * 2, [None] * 2,
+                                [None] * 2, [None] * 2, ['use-1'], ['call-2']])
+        # An empty input is shown as one, by both.
+        self.assertEqual(rows[0][1]['blocks'][0]['preview'], '{}')
+
 
 if __name__ == '__main__':
     unittest.main()

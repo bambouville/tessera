@@ -197,8 +197,9 @@ final class AppleAgentCenterRuntimeBridge {
         await refreshList()
     }
 
-    func search(query: String) async {
-        searchSnapshot = await runtime.search(query: query)
+    /// What loaded messages match, without changing the shown search.
+    func loadedMatches(query: String) async -> AgentSearchSnapshot {
+        await runtime.loadedMatches(query: query)
     }
 
     func applySearch(_ snapshot: AgentSearchSnapshot) async {
@@ -229,6 +230,11 @@ final class AppleAgentCenterRuntimeBridge {
             if let successor { presentationSuccessors[threadID] = successor }
         }
         if refreshList { await self.refreshList() }
+    }
+
+    /// Offers the thread's snapshot to the next publish again.
+    func notePresentationChange(_ threadID: AgentThreadID) {
+        if threadSnapshots[threadID] != nil { presentationChanges.insert(threadID) }
     }
 
     /// The snapshots changed since the last call (every snapshot after
@@ -313,9 +319,25 @@ final class AppleAgentCenterRuntimeBridge {
         observation: AgentTerminalObservation,
         terminal: AppleAgentTerminalAdapter
     ) async -> Result<Void, AgentActionError> {
-        await performLeaseAction(threadID: request.threadID, action: .answerPrompt, binding: request.binding) { _ in
-            try await terminal.answer(request, freshObservation: observation)
+        await performLeaseAction(threadID: request.threadID, action: .answerPrompt, binding: request.binding) { [runtime] lease in
+            let permit = try await runtime.answerPermit(for: lease)
+            try await terminal.answer(request, freshObservation: observation, screen: {
+                await Self.answerScreen($0, threadID: request.threadID, runtime: runtime)
+            }, beforeWrite: { try await runtime.requirePromptCurrent(lease) }, commitWrite: { permit.commitWrite() })
         }
+    }
+
+    /// A capture's prompt as the thread's card reads it: Claude's question is
+    /// bound to the call its hook says waits, and a dialog whose question
+    /// scrolled off names one only through that call.
+    func answerScreen(_ inspection: AppleAgentTerminalInspection, threadID: AgentThreadID) async -> AgentPromptObservationResult? {
+        await Self.answerScreen(inspection, threadID: threadID, runtime: runtime)
+    }
+
+    private nonisolated static func answerScreen(_ inspection: AppleAgentTerminalInspection, threadID: AgentThreadID,
+                                                 runtime: AgentCenterRuntime) async -> AgentPromptObservationResult? {
+        guard let request = inspection.promptRequest else { return nil }
+        return await runtime.answerScreen(request, threadID: threadID)
     }
 
     func interrupt(

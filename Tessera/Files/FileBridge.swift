@@ -19,6 +19,26 @@ final class FileBridge: FileBridging {
     private static let idleTimeoutSeconds: TimeInterval = 10 * 60
     private static let idleTimeoutNanoseconds: UInt64 = 10 * 60 * 1_000_000_000
     private static let execMaxResponseSize = 1024 * 1024
+    private static let firstReplyTimeoutNanoseconds: UInt64 = 20 * 1_000_000_000
+    private static var firstReplyTimeout: FileBridgeError {
+        .network(String(localized: "The server stopped answering Files. Try again.",
+                        comment: "Files connection failure: SFTP opened but its first reply never came"))
+    }
+
+    /// Whichever of the reply and the watchdog comes first.
+    private enum FirstReply: Equatable {
+        case pending, answered, timedOut
+
+        mutating func settle(_ outcome: FirstReply) -> Bool {
+            guard self == .pending else { return false }
+            self = outcome
+            return true
+        }
+    }
+
+    private enum ConnectWaiter: Equatable {
+        case resolving, attempt(Int)
+    }
 
     let key: FileBridgeKey
     private(set) var state: FileBridgeState = .idle
@@ -37,6 +57,11 @@ final class FileBridge: FileBridging {
     private var isSecureEnclave: Bool
 
     private var client: SSHClient?
+    private var artifactForwarder: PortForwarderManager?
+    var artifactForwarding: PortForwarderManager? {
+        guard state == .connected, client != nil else { return nil }
+        return artifactForwarder
+    }
     /// Bastion clients when the host connects through a jump chain,
     /// outermost first. Closed with the main client on every teardown.
     private var upstreamClients: [SSHClient] = []
@@ -51,7 +76,9 @@ final class FileBridge: FileBridging {
     private var uploadWindow = SFTPPipelineWindow.uploads()
     private var downloadWindow = SFTPPipelineWindow.downloads()
     private var connectTask: Task<Void, Error>?
-    private var connectionGeneration = 0
+    private var connectWaiters: [UUID: ConnectWaiter] = [:]
+    private var claimedConnectionGeneration: Int?
+    private(set) var connectionGeneration = 0
     private var idleTask: Task<Void, Never>?
     private var lastActivity = Date.distantPast
     private var activeOperationCount = 0
@@ -73,6 +100,57 @@ final class FileBridge: FileBridging {
     }
 
     func connect() async throws {
+        try await withConnectWaiter { try await self.connectIfNeeded(waiterID: $0) }
+    }
+
+    /// A queued tab load holds its Files candidate until remote work finishes.
+    func reserveArtifactConnection() -> UUID? {
+        guard state == .connected || state == .connecting else { return nil }
+        let id = UUID()
+        connectWaiters[id] = .attempt(connectionGeneration)
+        return id
+    }
+
+    func releaseArtifactConnection(_ id: UUID) async {
+        await releaseConnectWaiter(id)
+    }
+
+    /// Cancelling one caller releases only its interest in the shared attempt.
+    private func withConnectWaiter(_ operation: (UUID) async throws -> Void) async throws {
+        try Task.checkCancellation()
+        let id = UUID()
+        connectWaiters[id] = .resolving
+        do {
+            try await withTaskCancellationHandler {
+                try await operation(id)
+                try Task.checkCancellation()
+                guard connectWaiters[id] == .attempt(connectionGeneration) else { throw FileBridgeError.cancelled }
+                claimedConnectionGeneration = connectionGeneration
+            } onCancel: {
+                Task { @MainActor [weak self] in await self?.releaseConnectWaiter(id) }
+            }
+        } catch {
+            await releaseConnectWaiter(id)
+            throw error
+        }
+        await releaseConnectWaiter(id)
+    }
+
+    private func releaseConnectWaiter(_ id: UUID) async {
+        guard connectWaiters.removeValue(forKey: id) != nil else { return }
+        // Policy lookups can still join this attempt; obsolete sockets cannot.
+        let hasWaiters = connectWaiters.values.contains { $0 == .resolving || $0 == .attempt(connectionGeneration) }
+        guard !hasWaiters,
+              connectTask != nil || state == .connected,
+              claimedConnectionGeneration != connectionGeneration,
+              activeOperationCount == 0, !suppressIdleTeardown,
+              artifactForwarder?.hasLiveForwards != true else { return }
+        await disconnect(cancelIdleTimer: true)
+    }
+
+    private func connectIfNeeded(waiterID: UUID) async throws {
+        try Task.checkCancellation()
+        connectWaiters[waiterID] = .resolving
         let desiredRouteIdentity: String
         do {
             let policy = try await resolveSSHConnectionPolicy(
@@ -84,42 +162,63 @@ final class FileBridge: FileBridging {
         } catch {
             throw Self.mapConnectError(error)
         }
+        try Task.checkCancellation()
+        try await connect(waiterID: waiterID, desiredRouteIdentity: desiredRouteIdentity) { [weak self] generation in
+            guard let self else { throw FileBridgeError.notConnected }
+            try await self.performConnect(generation: generation)
+        }
+    }
 
+    private func connect(
+        waiterID: UUID,
+        desiredRouteIdentity: String,
+        perform: @escaping @MainActor (Int) async throws -> Void
+    ) async throws {
+        try Task.checkCancellation()
         if state == .connected {
-            guard connectedRouteIdentity != desiredRouteIdentity else { return }
+            if connectedRouteIdentity == desiredRouteIdentity {
+                connectWaiters[waiterID] = .attempt(connectionGeneration)
+                return
+            }
             await disconnect(cancelIdleTimer: true)
+            try Task.checkCancellation()
         }
         if let connectTask {
+            let generation = connectionGeneration
+            connectWaiters[waiterID] = .attempt(generation)
             try await connectTask.value
+            try Task.checkCancellation()
+            guard generation == connectionGeneration else { throw FileBridgeError.cancelled }
+            self.connectTask = nil
             // A model save cancels in-flight SSH establishment, but a topology
             // change can race the subsequent SFTP open. Re-enter once so the
             // completed socket is checked against the route requested here.
             if connectedRouteIdentity != desiredRouteIdentity {
                 await disconnect(cancelIdleTimer: true)
-                try await connect()
+                try await connectIfNeeded(waiterID: waiterID)
             }
             return
         }
 
         connectionGeneration += 1
         let generation = connectionGeneration
+        connectWaiters[waiterID] = .attempt(generation)
         state = .connecting
 
-        let task = Task { [weak self] in
-            guard let self else { throw FileBridgeError.notConnected }
-            try await self.performConnect(generation: generation)
-        }
+        let task = Task { try await perform(generation) }
         connectTask = task
 
         do {
             try await task.value
+            try Task.checkCancellation()
+            guard generation == connectionGeneration else { throw FileBridgeError.cancelled }
             connectTask = nil
             if connectedRouteIdentity != desiredRouteIdentity {
                 await disconnect(cancelIdleTimer: true)
-                try await connect()
+                try await connectIfNeeded(waiterID: waiterID)
             }
         } catch {
-            connectTask = nil
+            if generation == connectionGeneration, !Task.isCancelled { connectTask = nil }
             throw error
         }
     }
@@ -132,21 +231,43 @@ final class FileBridge: FileBridging {
         try await withSFTPOperation {
             let absolutePath = try await $0.getRealPath(atPath: path)
             let listings = try await $0.listDirectory(atPath: absolutePath)
-            let entries = listings
-                .flatMap(\.components)
-                .compactMap { component -> RemoteFileEntry? in
-                    guard component.filename != ".", component.filename != ".." else {
-                        return nil
-                    }
-                    return Self.mapEntry(
-                        filename: component.filename,
-                        absoluteDirectoryPath: absolutePath,
-                        rawMode: component.attributes.permissions,
-                        size: component.attributes.size,
-                        mtime: component.attributes.accessModificationTime?.modificationTime
-                    )
-                }
-            return Self.sortedEntries(entries)
+            return try await Self.directoryEntries(listings, absoluteDirectoryPath: absolutePath) { $0.components }
+        }
+    }
+
+    /// Swift 5's nonisolated async hop keeps name mapping and localized
+    /// sorting off the main actor. The accessor also accepts in-memory listings.
+    nonisolated static func directoryEntries<Listing: Sendable>(
+        _ listings: [Listing], absoluteDirectoryPath: String,
+        components: @Sendable (Listing) -> [SFTPPathComponent]
+    ) async throws -> [RemoteFileEntry] {
+        try Task.checkCancellation()
+        let entries = listings.flatMap(components).compactMap { component -> RemoteFileEntry? in
+            guard component.filename != ".", component.filename != ".." else { return nil }
+            return mapEntry(
+                filename: component.filename,
+                absoluteDirectoryPath: absoluteDirectoryPath,
+                rawMode: component.attributes.permissions,
+                size: component.attributes.size,
+                mtime: component.attributes.accessModificationTime?.modificationTime
+            )
+        }
+        try Task.checkCancellation()
+        return sortedEntries(entries)
+    }
+
+    func attributes(_ path: String) async throws -> RemoteFileEntry {
+        try await withSFTPOperation { sftp in
+            let attributes = try await sftp.getAttributes(at: path)
+            let entry = Self.mapEntry(
+                filename: (path as NSString).lastPathComponent,
+                absoluteDirectoryPath: (path as NSString).deletingLastPathComponent,
+                rawMode: attributes.permissions,
+                size: attributes.size,
+                mtime: attributes.accessModificationTime?.modificationTime
+            )
+            return RemoteFileEntry(name: path == "/" ? "/" : entry.name, path: path, kind: entry.kind,
+                                   size: entry.size, modified: entry.modified, permissions: entry.permissions)
         }
     }
 
@@ -364,18 +485,18 @@ final class FileBridge: FileBridging {
         } catch is CancellationError {
             if let connectedChain { await connectedChain.closeAll() }
             let mapped = FileBridgeError.cancelled
-            applyConnectFailure(mapped, generation: generation)
+            await applyConnectFailure(mapped, generation: generation)
             throw mapped
         } catch {
             if let connectedChain { await connectedChain.closeAll() }
             let mapped = Self.mapConnectError(error)
-            applyConnectFailure(mapped, generation: generation)
+            await applyConnectFailure(mapped, generation: generation)
             throw mapped
         }
 
         guard let connectedChain else {
             let mapped = FileBridgeError.network(String(localized: "SSH connection did not produce a client.", comment: "SSH connection failure"))
-            applyConnectFailure(mapped, generation: generation)
+            await applyConnectFailure(mapped, generation: generation)
             throw mapped
         }
         let connectedClient = connectedChain.client
@@ -385,7 +506,23 @@ final class FileBridge: FileBridging {
             try Task.checkCancellation()
             let sftp = try await connectedClient.openSFTP()
             openedSFTP = sftp
-            let home = try await sftp.getRealPath(atPath: ".")
+            // A server that opens SFTP and then never answers would hold
+            // this connect, and every caller joining it, forever. Closing
+            // the transport fails the pending reply.
+            let reply = OSAllocatedUnfairLock(initialState: FirstReply.pending)
+            let watchdog = Task {
+                try await Task.sleep(nanoseconds: Self.firstReplyTimeoutNanoseconds)
+                guard reply.withLock({ $0.settle(.timedOut) }) else { return }
+                await connectedChain.closeAll()
+            }
+            defer { watchdog.cancel() }
+            let home: String
+            do {
+                home = try await sftp.getRealPath(atPath: ".")
+            } catch where !reply.withLock({ $0.settle(.answered) }) {
+                throw Self.firstReplyTimeout
+            }
+            guard reply.withLock({ $0.settle(.answered) }) else { throw Self.firstReplyTimeout }
             try await closeIfConnectStale(generation: generation, chain: connectedChain, sftp: sftp)
 
             self.client = connectedClient
@@ -396,19 +533,27 @@ final class FileBridge: FileBridging {
             self.uploadWindow = .uploads()
             self.downloadWindow = .downloads()
             self.homeDirectory = home
+            let forwarding = PortForwarderManager()
+            forwarding.attach(to: connectedClient, rules: [])
+            self.artifactForwarder = forwarding
             self.state = .connected
             self.recordActivity()
         } catch is CancellationError {
             try? await openedSFTP?.close()
             await connectedChain.closeAll()
             let mapped = FileBridgeError.cancelled
-            applyConnectFailure(mapped, generation: generation)
+            await applyConnectFailure(mapped, generation: generation)
+            throw mapped
+        } catch let mapped as FileBridgeError {
+            try? await openedSFTP?.close()
+            await connectedChain.closeAll()
+            await applyConnectFailure(mapped, generation: generation)
             throw mapped
         } catch {
             try? await openedSFTP?.close()
             await connectedChain.closeAll()
             let mapped = FileBridgeError.sftpUnavailable(describeSSHError(error))
-            applyConnectFailure(mapped, generation: generation)
+            await applyConnectFailure(mapped, generation: generation)
             throw mapped
         }
     }
@@ -425,11 +570,18 @@ final class FileBridge: FileBridging {
         }
     }
 
-    private func applyConnectFailure(_ error: FileBridgeError, generation: Int) {
+    private func applyConnectFailure(_ error: FileBridgeError, generation: Int) async {
         guard generation == connectionGeneration else {
             return
         }
         state = .failed(error.localizedDescription)
+        await detachArtifactForwarding()
+    }
+
+    private func detachArtifactForwarding() async {
+        let forwarding = artifactForwarder
+        artifactForwarder = nil
+        await forwarding?.detach()
     }
 
     private func disconnect(cancelIdleTimer: Bool) async {
@@ -450,13 +602,14 @@ final class FileBridge: FileBridging {
         upstreamClients = []
         connectedRouteIdentity = nil
         homeDirectory = nil
+        state = .idle
 
+        await detachArtifactForwarding()
         try? await currentSFTP?.close()
         try? await currentClient?.close()
         for bastion in currentUpstream.reversed() {
             try? await bastion.close()
         }
-        state = .idle
     }
 
     private func withSFTPOperation<T>(
@@ -524,6 +677,7 @@ final class FileBridge: FileBridging {
     }
 
     private func runOperation<T>(_ body: () async throws -> T) async throws -> T {
+        claimedConnectionGeneration = connectionGeneration
         activeOperationCount += 1
         recordActivity()
 
@@ -546,8 +700,21 @@ final class FileBridge: FileBridging {
                 await markDropped()
                 throw FileBridgeError.network(describeSSHError(error))
             }
+            if let code = Self.sftpStatusCode(error) {
+                throw FileBridgeError.remoteStatus(
+                    code: code,
+                    message: Self.remoteOperationMessage(error)
+                )
+            }
             throw FileBridgeError.remoteOperationFailed(Self.remoteOperationMessage(error))
         }
+    }
+
+    private static func sftpStatusCode(_ error: Error) -> UInt32? {
+        if let sftpError = error as? SFTPError, case .errorStatus(let status) = sftpError {
+            return status.errorCode.rawValue
+        }
+        return (error as? SFTPMessage.Status)?.errorCode.rawValue
     }
 
     private func finishOperation() {
@@ -578,7 +745,8 @@ final class FileBridge: FileBridging {
         guard state == .connected else {
             return
         }
-        guard activeOperationCount == 0, !suppressIdleTeardown else {
+        guard activeOperationCount == 0, !suppressIdleTeardown,
+              artifactForwarder?.hasLiveForwards != true else {
             scheduleIdleTeardown()
             return
         }
@@ -590,6 +758,31 @@ final class FileBridge: FileBridging {
             scheduleIdleTeardown()
         }
     }
+
+    #if DEBUG
+    /// Exercises the shared connect lifetime without SSH policy or a socket.
+    func harnessConnect(_ operation: @escaping @MainActor () async throws -> Void) async throws {
+        try await withConnectWaiter { waiterID in
+            try await self.connect(waiterID: waiterID, desiredRouteIdentity: self.host.sshConnectionRouteIdentity) { generation in
+                try await operation()
+                try Task.checkCancellation()
+                guard generation == self.connectionGeneration else { throw FileBridgeError.cancelled }
+                self.connectedRouteIdentity = self.host.sshConnectionRouteIdentity
+                self.state = .connected
+            }
+        }
+    }
+
+    var harnessConnectWaiterCount: Int { connectWaiters.count }
+
+    /// Host-free idle-timeout coverage; no client or SFTP subsystem is opened.
+    func harnessExpireIdleTimer(forwarding: PortForwarderManager) async {
+        state = .connected
+        artifactForwarder = forwarding
+        lastActivity = .distantPast
+        await disconnectIfIdle()
+    }
+    #endif
 
     private func markDropped() async {
         idleTask?.cancel()
@@ -606,6 +799,7 @@ final class FileBridge: FileBridging {
         homeDirectory = nil
         state = .dropped
 
+        await detachArtifactForwarding()
         try? await currentSFTP?.close()
         try? await currentClient?.close()
         for bastion in currentUpstream.reversed() {
@@ -790,7 +984,7 @@ enum SFTPTransferPipeline {
         window: SFTPPipelineWindow,
         nextChunk: (Int) throws -> Data?,
         acknowledged: (Int64) -> Void,
-        clock: @escaping @Sendable () -> UInt64 = uptimeNanoseconds
+        clock: @escaping @Sendable () -> UInt64 = { uptimeNanoseconds() }
     ) async throws {
         var inFlight: [(end: Int64, acknowledgement: EventLoopFuture<Void>)] = []
         var submitted: Int64 = 0
@@ -835,7 +1029,7 @@ enum SFTPTransferPipeline {
         sizeHint: Int64?,
         write: (ByteBuffer) throws -> Void,
         progress: (Int64) -> Void,
-        clock: @escaping @Sendable () -> UInt64 = uptimeNanoseconds
+        clock: @escaping @Sendable () -> UInt64 = { uptimeNanoseconds() }
     ) async throws {
         typealias Request = (offset: UInt64, length: UInt32, reply: EventLoopFuture<ByteBuffer>)
         typealias Batch = (requests: [Request], replies: EventLoopFuture<[Result<ByteBuffer, Error>]>)

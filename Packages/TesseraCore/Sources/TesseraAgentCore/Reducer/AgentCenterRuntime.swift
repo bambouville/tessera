@@ -12,9 +12,15 @@ public actor AgentCenterRuntime {
         var preDispatchSourceKey: String?
         var preDispatchEpoch: String?
         var preAcknowledgmentPhysicalOffset: UInt64?
+        /// Pre-ACK observations survive window eviction. Keep this separate
+        /// from the dispatch fence used by Claude's early image receipts.
+        var observedBeforeAcknowledgmentPhysicalOffset: UInt64?
         /// The receipt that settled this send, keyed by physical identity and
         /// offset when available. A replay cannot settle an identical send.
         var matchedReceipt: String?
+        /// Exact receipts assigned to earlier eligible sends. Keep these on
+        /// the waiting send even if the claimant's bubble is later evicted.
+        var excludedReceiptClaims = Set<String>()
         /// A loaded reader held no record at dispatch/ACK: every record is newer.
         var heldNothing = false
         let binding: AgentTerminalBinding
@@ -22,6 +28,7 @@ public actor AgentCenterRuntime {
     /// Defaults until a platform reports its device tier.
     public static let globalContentLimitBytes = AgentContentBudget.compact.globalBytes
     public static let perThreadContentLimitBytes = AgentContentBudget.compact.perThreadBytes
+
 
     private struct ThreadState: Sendable {
         var summary: AgentThreadSummary
@@ -63,6 +70,9 @@ public actor AgentCenterRuntime {
         /// The newest root activity accepted for this thread: not a neutral
         /// subagent callback, and not an End, which proves no ownership.
         var latestRootActivityNanos: UInt64?
+        /// Interrupt comparison also admits a root-issued SubagentStart,
+        /// without letting child callbacks establish process ownership.
+        var latestRootFrameNanos: UInt64?
         var firstChildTimestampNanos: UInt64?
         var childRootTenureStartNanos: UInt64?
         var rootAgentID: String?
@@ -94,11 +104,54 @@ public actor AgentCenterRuntime {
         var hookOverlay = AgentHookOverlayState()
         var messages: [AgentMessage] = []
         var livePrompt: AgentActionPrompt?
+        /// An interrupt has no hook sequence. Its source time fences delayed
+        /// hooks and sequence-fenced captures from the stopped turn.
+        var transcriptInterruptNanos: UInt64?
         var awaitingPermissionResolution = false
         /// A question tool the hook reported, until it is answered or its
         /// prompt is gone from the terminal.
         var pendingQuestion: AgentLifecycleInputHint?
         var pendingQuestionMisses = 0
+        /// The tool-use ID of Claude's AskUserQuestion call that its
+        /// PreToolUse hook opened and nothing has closed: the only call a
+        /// dialog cropped from its question can answer.
+        var waitingQuestionCall: String?
+        /// Calls their PostToolUse hook or an interrupt closed, newest last.
+        /// A transcript lagging behind still lists one as waiting, and a
+        /// delayed PreToolUse must not open it again.
+        var closedQuestionCalls: [String] = []
+        /// Every call a PreToolUse opened that nothing has closed, oldest
+        /// first: a batch's hooks name each, while the newest waits.
+        var openedQuestionCalls: [String] = []
+        /// The calls a PreToolUse opened since the newest root SessionStart,
+        /// closed or not, oldest first: the run's own, wherever the transcript
+        /// or the host's clock puts them.
+        var questionCallsSinceRootBoundary: [String] = []
+        /// Advances with every accepted transition that changes which prompt
+        /// waits: a question tool's boundary, a permission request, a new
+        /// prompt, an interrupt, the turn's or the process's end.
+        var questionEpoch: UInt64 = 0
+        /// `questionEpoch` when the current answer's lease was granted. Its
+        /// writes stop once that prompt is gone (`requirePromptCurrent`).
+        var answerLeaseQuestionEpoch: UInt64?
+        /// Revoked with each `questionEpoch` step and when its lease ends.
+        var answerPermit: AgentAnswerPermit?
+        /// The question the screen last showed, selection, check boxes and
+        /// typed text aside: another one in its place is a transition.
+        var livePromptIdentity: String?
+        /// Its placement parts as last shown; one scrolled off is kept.
+        var livePromptPlacement: String?
+        /// Claude's AskUserQuestion calls the transcript's head last left
+        /// unanswered, oldest first: one leaving them (its result, or the
+        /// next turn) is a transition, and so is another opening in its place.
+        var transcriptQuestionCalls: [String] = []
+        /// The call the current answer's lease was granted for, the hook's or
+        /// else the transcript's: a page is judged against it, not against
+        /// the page before, which may lag the hooks.
+        var answerQuestionCall: String?
+        /// The current answer is for the permission the screen shows, which
+        /// answers no question call.
+        var answerIsPermission = false
         /// A terminal observation, not the hook, set the current attention
         /// and status, so a later miss reverts them.
         var promptRaisedAttention = false
@@ -106,10 +159,32 @@ public actor AgentCenterRuntime {
         /// own attention; nil until one is seen. A permission answered in the
         /// terminal reports nothing until its tool returns.
         var hookPromptMisses: Int?
+        /// A wait the hook raised when the route was retired. Rediscovery
+        /// replays that same frame while the agent still waits, and the
+        /// replay restores it (see `RetiredHookWait`).
+        var retiredHookWait: RetiredHookWait?
         var cursor: String?
         var hasMore = false
         var binding: AgentTerminalBinding?
-        var actionLease: AgentActionLease?
+        /// The agent process of the newest frame Core accepted. Bindings
+        /// cannot tell a new process from the same one rediscovered: both
+        /// platforms unbind a route before binding the process that follows
+        /// it, and a registration may name a process whose frames Core then
+        /// refuses.
+        var lastAgentPID: Int?
+        /// A root SessionStart came after the newest frame naming the agent's
+        /// process: a call opened since by a frame naming none is the
+        /// process's that started then.
+        var startedSinceProof = false
+        var actionLease: AgentActionLease? {
+            didSet {
+                guard actionLease != oldValue else { return }
+                answerPermit?.revoke()
+                answerPermit = nil
+                answerQuestionCall = nil
+                answerIsPermission = false
+            }
+        }
         var outgoing: [OutgoingState] = []
         var lastOutgoingReceiptSequence: UInt64?
         var lastOutgoingReceiptSourceKey: String?
@@ -145,6 +220,26 @@ public actor AgentCenterRuntime {
     private struct DurableCompletion: Equatable, Sendable {
         var unread: String?
         var acknowledged: String?
+    }
+
+    /// Retiring a route drops its prompt state, since the pane may be gone.
+    /// A reconnect then replays the pane's retained hook frame, which a
+    /// relaunch reduces afresh but this process has already seen. Keeping
+    /// what that frame raised, keyed by its fingerprint, lets the replay
+    /// restore it, so a reconnect shows the same wait a relaunch does.
+    private struct RetiredHookWait: Sendable {
+        let fingerprint: String
+        /// The `.needsYou` and `.waitingForInput` the clear reverted.
+        let needsYou: Bool
+        let waitingForInput: Bool
+        let screenRaised: Bool
+        /// The screen had shown the hook's dialog, so misses may end it.
+        let dialogSeen: Bool
+        let awaitingPermissionResolution: Bool
+        let pendingQuestion: AgentLifecycleInputHint?
+
+        /// What restores keeps a screen watch running, which rechecks it.
+        var isWatched: Bool { waitingForInput || awaitingPermissionResolution || pendingQuestion != nil }
     }
 
     private struct NormalizedRecord: Sendable {
@@ -613,6 +708,50 @@ public actor AgentCenterRuntime {
         state.summary.lastActivitySequence = max(state.summary.lastActivitySequence, record.sequence)
     }
 
+    /// Claude emits no interrupt hook. Only a newly admitted root user marker
+    /// newer than the latest frame can end a turn without unread attention.
+    private func applyClaudeInterrupt(from records: [AgentProjectionRecord], head: [AgentProjectionRecord],
+                                      previousHead: [AgentProjectionRecord],
+                                      to state: inout ThreadState) {
+        guard state.summary.id.providerID == .claude, !state.isChildConversation,
+              state.summary.status == .working || state.summary.status == .waitingForInput,
+              let activity = state.latestRootFrameNanos, !records.isEmpty else { return }
+        let newest = head.last { record in
+            guard record.record.objectValue?["isSidechain"]?.boolValue != true,
+                  record.record.objectValue?["isSubagent"]?.boolValue != true else { return false }
+            return normalizedRecord(record, providerID: .claude, state: &state).normalized.message?.role == .user
+        }
+        guard let newest, records.contains(newest),
+              let message = normalizedRecord(newest, providerID: .claude, state: &state).normalized.message,
+              AgentClaudeQuestion.isInterruptMarker(message),
+              let timestamp = message.displayTime,
+              let interruptNanos = UInt64(exactly: (timestamp.timeIntervalSince1970 * 1_000_000_000).rounded()),
+              interruptNanos > activity else { return }
+        // A head refresh may include older rows. Only an append or a changed
+        // retained revision adds evidence, never a newly loaded older marker.
+        let previous = previousHead.first { $0.recordID == newest.recordID }
+        guard (previousHead.last.map({ newest.sequence > $0.sequence }) ?? true) ||
+            previous.map({ newest.sequence == $0.sequence && newest.revision > $0.revision }) == true else { return }
+        let previousSummaryBytes = Self.summaryBytes(state.summary)
+        state.summary.status = .idle
+        state.summary.attention = .none
+        state.pendingQuestion = nil
+        state.pendingQuestionMisses = 0
+        // The interrupted calls, whether or not their hooks ever named them.
+        Self.closeQuestionCalls(in: &state)
+        Self.advanceQuestion(&state)
+        state.livePrompt = nil
+        state.promptRaisedAttention = false
+        state.hookPromptMisses = nil
+        state.awaitingPermissionResolution = false
+        state.retiredHookWait = nil
+        state.completionKey = nil
+        state.transcriptInterruptNanos = interruptNanos
+        durableCompletions[state.summary.id] = .init(unread: nil, acknowledged: state.acknowledgedCompletionKey)
+        state.deliveryGeneration &+= 1
+        state.estimatedContentBytes += Self.summaryBytes(state.summary) - previousSummaryBytes
+    }
+
     /// A canonical record's revision fixes its content (admission rejects a
     /// same-revision body change), so its normalization and sizes are reusable.
     private func normalizedRecord(_ record: AgentProjectionRecord, providerID: AgentProviderID,
@@ -816,6 +955,7 @@ public actor AgentCenterRuntime {
             clearProjectionContent(&state, for: threadID)
             didResetSource = true
         }
+        let previousHead = state.records
         let byID = Dictionary(uniqueKeysWithValues: state.records.map { ($0.recordID, $0.sequence) })
         if page.records.contains(where: { incoming in
             byID[incoming.recordID].map { existingSequence in existingSequence != incoming.sequence } ?? false
@@ -865,6 +1005,11 @@ public actor AgentCenterRuntime {
         }
         refreshTitleSeed(&state)
         reconcileOutgoing(&state, sequenceByID: sequenceByID)
+        reconcilePhysicalOutgoing(&state, records: incoming)
+        if page.from == nil {
+            applyClaudeInterrupt(from: incoming, head: state.records, previousHead: previousHead, to: &state)
+            Self.noteTranscriptQuestionCall(threadID.providerID, in: &state)
+        }
         state.estimatedContentBytes = Self.estimatedBytes(state)
         touch(&state)
         threads[threadID] = state
@@ -940,6 +1085,7 @@ public actor AgentCenterRuntime {
                   page.from == (range.operation == .history ? state.cursor : state.liveCursor) else { return .resyncRequired }
         }
         state.sourceIdentity = page.sourceIdentity
+        let previousHead = state.records
         var records = Dictionary(uniqueKeysWithValues: state.records.map { ($0.recordID, $0) })
         let oldest = state.records.first?.sequence
         let newest = state.records.last?.sequence
@@ -979,6 +1125,11 @@ public actor AgentCenterRuntime {
         }
         state.activity.sort { $0.sequence < $1.sequence }
         reconcileOutgoing(&state, sequenceByID: order)
+        reconcilePhysicalOutgoing(&state, records: incoming)
+        if range.operation != .history {
+            applyClaudeInterrupt(from: incoming, head: state.records, previousHead: previousHead, to: &state)
+            Self.noteTranscriptQuestionCall(threadID.providerID, in: &state)
+        }
         refreshTitleSeed(&state)
         state.changes.authoritativeTotals = state.summary.cost
         state.turns = Self.makeTurns(records: state.records, messages: state.messages)
@@ -997,9 +1148,11 @@ public actor AgentCenterRuntime {
         if !reset {
             guard state.ingestionEpoch == range.epoch, state.sourceIdentity == page.sourceIdentity,
                   let version = state.ingestionWindow?.version, version < UInt64.max, transaction.version == version + 1 else { return .resyncRequired }
-            if transaction.lane == .head || transaction.lane == .revisions {
+            // A seek is read from the live cursor: the head it leaves apart.
+            if [.head, .revisions, .seek].contains(transaction.lane) {
                 guard page.from == state.liveCursor else { return .resyncRequired }
             }
+            if transaction.lane == .seek { state.viewportAnchorRecordID = nil }
         } else {
             guard page.from == nil, transaction.version == 1 else { return .resyncRequired }
             clearProjectionContent(&state, for: threadID,
@@ -1028,6 +1181,9 @@ public actor AgentCenterRuntime {
                     expectedVersion: window.version, pinnedRecordID: state.viewportAnchorRecordID)
             case .revisions: try window.revise(page.records, expectedVersion: window.version,
                 partitions: transaction.partitions, pinnedRecordID: state.viewportAnchorRecordID)
+            case .seek:
+                try window.seek(transaction.segment(source: page.sourceIdentity, records: page.records),
+                    expectedVersion: window.version)
             }
             guard window.version == transaction.version else { return .resyncRequired }
             while true {
@@ -1087,7 +1243,14 @@ public actor AgentCenterRuntime {
         if transaction.lane == .bootstrap || transaction.lane == .head || transaction.lane == .revisions {
             let headOrders = Dictionary(uniqueKeysWithValues: (window.head?.records ?? []).map { ($0.recordID, $0.sequence) })
             reconcileOutgoing(&state, sequenceByID: headOrders)
+            applyClaudeInterrupt(from: page.records, head: window.head?.records ?? [],
+                previousHead: original.ingestionWindow?.head?.records ?? [], to: &state)
+            Self.noteTranscriptQuestionCall(threadID.providerID, in: &state)
         }
+        // A resumed reader may find the sent prompt only in an older page.
+        // Check this accepted page's own physical proof, without rescanning
+        // the retained window or requesting any additional history.
+        reconcilePhysicalOutgoing(&state, records: page.records)
         touch(&state); threads[threadID] = state; enforceCacheLimits(excluding: threadID)
         return reset ? .sourceReset : .applied
     }
@@ -1232,6 +1395,25 @@ public actor AgentCenterRuntime {
             }
             return .rejected(.staleBinding)
         }
+        // Hooks and transcripts arrive separately. A stopped turn's delayed
+        // frames prove route liveness but cannot change the turn.
+        if !isChild, var state = threads[threadID], let interrupt = state.transcriptInterruptNanos,
+           let timestamp = envelope.sourceTimestampNanoseconds, timestamp <= interrupt {
+            if threadID == existingID {
+                state.routeIdentity = proof.sourceIdentity
+                state.isLiveRoute = true
+            }
+            if let sequence = envelope.eventSequence {
+                state.lastLifecycleSequence = max(state.lastLifecycleSequence ?? sequence, sequence)
+            }
+            let fingerprint = Self.lifecycleFingerprint(envelope)
+            if !state.recentLifecycleFingerprints.contains(fingerprint) {
+                state.recentLifecycleFingerprints.append(fingerprint)
+                if state.recentLifecycleFingerprints.count > 64 { state.recentLifecycleFingerprints.removeFirst(state.recentLifecycleFingerprints.count - 64) }
+            }
+            threads[threadID] = state
+            return validation
+        }
         var state: ThreadState
         if let durable = threads[threadID] {
             state = durable
@@ -1265,8 +1447,29 @@ public actor AgentCenterRuntime {
             // A reconnect or a transient discovery miss retires the route, and
             // rediscovery replays the pane's retained hook state. That frame
             // carries no new status or attention, but it does prove this
-            // exact registered route is live again. Adopt the route only;
-            // neither attention nor the delivery generation moves.
+            // exact registered route is live again. Adopt the route; the
+            // delivery generation does not move.
+            //
+            // Being the pane's current hook state, a replay of the newest
+            // frame also proves the agent still waits as that frame said.
+            // Restore the wait retirement cleared, under its old epoch: it is
+            // not new, so it re-alerts nobody, and the screen watch it
+            // resumes picks the dialog up again.
+            if threadID == existingID, let wait = state.retiredHookWait, wait.fingerprint == fingerprint,
+               fingerprint == state.lastLifecycleFingerprint {
+                // Attention the screen raised comes back only under a watch
+                // that can take it away again.
+                if wait.needsYou, !wait.screenRaised || wait.isWatched {
+                    state.summary.attention = .needsYou
+                    state.promptRaisedAttention = wait.screenRaised
+                    state.hookPromptMisses = wait.dialogSeen && !wait.screenRaised ? 0 : nil
+                }
+                if wait.waitingForInput, state.summary.status == .idle { state.summary.status = .waitingForInput }
+                state.awaitingPermissionResolution = wait.awaitingPermissionResolution
+                state.pendingQuestion = wait.pendingQuestion
+                state.retiredHookWait = nil
+                threads[threadID] = state
+            }
             if threadID == existingID, !state.isLiveRoute || state.routeIdentity != proof.sourceIdentity {
                 state.routeIdentity = proof.sourceIdentity
                 state.isLiveRoute = true
@@ -1281,6 +1484,20 @@ public actor AgentCenterRuntime {
             }
             return validation
         }
+        if !isChild, envelope.event == .sessionStart {
+            // No question waits across a start: Claude compacts only between
+            // its calls, and a resumed process does not show the dialogs of
+            // the one before. The hooks' calls close here, before this
+            // frame's process is weighed, and an answer granted before stops.
+            Self.closeQuestionCalls(in: &state, transcript: false)
+            Self.advanceQuestion(&state)
+            state.startedSinceProof = true
+            if let timestamp = envelope.sourceTimestampNanoseconds {
+                state.rootBoundaryNanos = max(state.rootBoundaryNanos ?? timestamp, timestamp)
+                state.questionCallsSinceRootBoundary = []
+            }
+        }
+        Self.noteProcess(of: proof.binding, in: &state)
         let previousAttention = state.summary.attention
         let previousStatus = state.summary.status
         if state.lastLifecycleFingerprint == nil, let stored = durableCompletions[threadID] {
@@ -1295,14 +1512,18 @@ public actor AgentCenterRuntime {
             }
         }
         let childStatusIsNeutral = envelope.event == .subagentStart || envelope.event == .subagentStop
+        // A question's PostToolUse naming another call than the one Claude's
+        // hook says waits (delayed, or replayed) closes that call and nothing
+        // else: the waiting question, its card and its answer stay.
+        let closesAnotherCall = envelope.providerID == .claude && envelope.event == .postToolUse
+            && envelope.inputHint == .question && envelope.toolUseID != nil
+            && state.waitingQuestionCall.map { $0 != envelope.toolUseID } == true
+        let statusIsNeutral = childStatusIsNeutral || closesAnotherCall
         if startsTenure {
             state.tenureStartNanos = envelope.sourceTimestampNanoseconds
             state.rootAgentID = envelope.rootAgentID
         } else if let rootAgentID = envelope.rootAgentID {
             state.rootAgentID = rootAgentID
-        }
-        if !isChild, envelope.event == .sessionStart, let timestamp = envelope.sourceTimestampNanoseconds {
-            state.rootBoundaryNanos = max(state.rootBoundaryNanos ?? timestamp, timestamp)
         }
         if isChild {
             if state.firstChildTimestampNanos == nil { state.firstChildTimestampNanos = envelope.sourceTimestampNanoseconds }
@@ -1317,21 +1538,55 @@ public actor AgentCenterRuntime {
         }
         replacementFences.removeValue(forKey: threadID)
         replacementFenceOrder.removeAll { $0 == threadID }
-        if !childStatusIsNeutral, let sequence = envelope.eventSequence {
+        if !statusIsNeutral, let sequence = envelope.eventSequence {
             state.summary.lastActivitySequence = max(state.summary.lastActivitySequence, sequence)
         }
-        if !childStatusIsNeutral, let timestamp = envelope.sourceTimestampNanoseconds {
+        if !statusIsNeutral, let timestamp = envelope.sourceTimestampNanoseconds {
             state.summary.lastActivity = Date(timeIntervalSince1970: Double(timestamp) / 1_000_000_000)
         }
-        if !childStatusIsNeutral { state.awaitingPermissionResolution = false }
-        if !childStatusIsNeutral { state.summary.status = envelope.status }
+        if !statusIsNeutral { state.awaitingPermissionResolution = false }
+        if !statusIsNeutral {
+            state.summary.status = envelope.status
+            state.transcriptInterruptNanos = nil
+        }
         switch (envelope.event, envelope.inputHint) {
         case (.preToolUse, .some(let hint)):
             state.pendingQuestion = hint
             state.pendingQuestionMisses = 0
-        case (.postToolUse, .question?) where state.pendingQuestion == .question:
+        case (.postToolUse, .question?) where state.pendingQuestion == .question && !closesAnotherCall:
             state.pendingQuestion = nil
         default: break
+        }
+        // Each hook names the call it opens or closes, so neither the order
+        // in which the transcript arrives nor the host's clock can attach one
+        // call's closing to another. A hook naming none opens nothing.
+        if envelope.providerID == .claude, envelope.inputHint == .question {
+            if envelope.event == .preToolUse {
+                state.waitingQuestionCall = envelope.toolUseID.flatMap { state.closedQuestionCalls.contains($0) ? nil : $0 }
+                if let opened = state.waitingQuestionCall, !state.openedQuestionCalls.contains(opened) {
+                    state.openedQuestionCalls.append(opened)
+                    if state.openedQuestionCalls.count > Self.closedQuestionCallLimit { state.openedQuestionCalls.removeFirst() }
+                }
+                if let call = envelope.toolUseID, !state.questionCallsSinceRootBoundary.contains(call) {
+                    state.questionCallsSinceRootBoundary.append(call)
+                    if state.questionCallsSinceRootBoundary.count > Self.closedQuestionCallLimit {
+                        state.questionCallsSinceRootBoundary.removeFirst()
+                    }
+                }
+            } else if envelope.event == .postToolUse {
+                if envelope.toolUseID == nil || envelope.toolUseID == state.waitingQuestionCall { state.waitingQuestionCall = nil }
+                Self.closeQuestionCall(envelope.toolUseID, in: &state)
+            }
+        }
+        // A process that ended leaves its questions unanswered for good, while
+        // a session resumed on the same transcript still shows them waiting.
+        if envelope.providerID == .claude, envelope.event == .sessionEnd || envelope.event == .wrapperExit {
+            Self.closeQuestionCalls(in: &state)
+        }
+        if [.stop, .stopFailure, .sessionEnd, .wrapperExit].contains(envelope.event) { state.waitingQuestionCall = nil }
+        if !closesAnotherCall, envelope.inputHint != nil
+            || [.userPromptSubmit, .permissionRequest, .stop, .stopFailure, .sessionEnd, .wrapperExit].contains(envelope.event) {
+            Self.advanceQuestion(&state)
         }
         // A blocking question cannot outlive its turn or its process. Codex
         // drops its async questions at turn end too, which the next capture
@@ -1345,12 +1600,12 @@ public actor AgentCenterRuntime {
         // (answered in the terminal) must revert it. So does a card an idle
         // reminder or a failed turn leaves up; only a frame that sets
         // attention itself takes it over.
-        if !childStatusIsNeutral, envelope.status == .waitingForInput || envelope.status == .working && !keepsDeferredPrompt {
+        if !statusIsNeutral, envelope.status == .waitingForInput || envelope.status == .working && !keepsDeferredPrompt {
             state.promptRaisedAttention = false
         }
         // The same dialog's notification repeats its wait; any other status ends it.
-        if !childStatusIsNeutral, envelope.status != .waitingForInput { state.hookPromptMisses = nil }
-        if !childStatusIsNeutral, envelope.status == .waitingForInput {
+        if !statusIsNeutral, envelope.status != .waitingForInput { state.hookPromptMisses = nil }
+        if !statusIsNeutral, envelope.status == .waitingForInput {
             // Codex runs this hook before either guardian or human approval.
             // Only a current terminal prompt proves that a person must act.
             state.summary.attention = envelope.providerID == .codex && envelope.event == .permissionRequest
@@ -1363,7 +1618,7 @@ public actor AgentCenterRuntime {
             // Notification for the same dialog; the captured prompt stays.
             if previousStatus != .waitingForInput || state.summary.status != .waitingForInput { state.livePrompt = nil }
             state.completionKey = nil
-        } else if !childStatusIsNeutral, envelope.status == .working {
+        } else if !statusIsNeutral, envelope.status == .working {
             // A newer task supersedes any unread completion from the prior
             // task and invalidates its pending delivery generation.
             state.summary.attention = keepsDeferredPrompt ? .needsYou : .none
@@ -1395,7 +1650,7 @@ public actor AgentCenterRuntime {
             }
             state.actionLease = nil
             Self.unsettleOutgoing(&state)
-        } else if !childStatusIsNeutral {
+        } else if !statusIsNeutral {
             state.conversationEnded = false
             state.conversationEndNanos = nil
         }
@@ -1403,8 +1658,11 @@ public actor AgentCenterRuntime {
         if state.summary.attention != .needsYou { state.promptRaisedAttention = false }
         Self.noteAttentionTransition(from: previousAttention, in: &state)
         durableCompletions[threadID] = .init(unread: state.completionKey, acknowledged: state.acknowledgedCompletionKey)
-        if !isChild, !isEnd, !childStatusIsNeutral, let timestamp = envelope.sourceTimestampNanoseconds {
+        if !isChild, !isEnd, !statusIsNeutral, let timestamp = envelope.sourceTimestampNanoseconds {
             state.latestRootActivityNanos = max(state.latestRootActivityNanos ?? timestamp, timestamp)
+        }
+        if !isChild, !isEnd, envelope.event != .subagentStop, let timestamp = envelope.sourceTimestampNanoseconds {
+            state.latestRootFrameNanos = max(state.latestRootFrameNanos ?? timestamp, timestamp)
         }
         state.binding = proof.binding
         state.routeIdentity = proof.sourceIdentity
@@ -1419,6 +1677,7 @@ public actor AgentCenterRuntime {
             displayTime: nil
         ))
         state.deliveryGeneration &+= 1
+        state.retiredHookWait = nil
         state.lastLifecycleFingerprint = fingerprint
         state.recentLifecycleFingerprints.append(fingerprint)
         if state.recentLifecycleFingerprints.count > 64 { state.recentLifecycleFingerprints.removeFirst(state.recentLifecycleFingerprints.count - 64) }
@@ -1583,18 +1842,26 @@ public actor AgentCenterRuntime {
         if let observedGeneration {
             guard state.deliveryGeneration == observedGeneration else { return false }
         } else if let observedLifecycleSequence {
-            guard observedLifecycleSequence >= (state.lastLifecycleSequence ?? 0) else { return false }
+            guard state.transcriptInterruptNanos == nil,
+                  observedLifecycleSequence >= (state.lastLifecycleSequence ?? 0) else { return false }
         } else {
             return false
         }
         let previousPrompt = state.livePrompt
         let previousAttention = state.summary.attention
         let previousStatus = state.summary.status
-        if let observed = AgentPromptGrammar.observe(request) {
+        if let observed = Self.screenPrompt(request, in: state) {
             // Kimi's background question looks exactly like its blocking one;
             // only the hook knows the agent kept working.
             let blocking = observed.isBlocking && !(state.pendingQuestion == .deferredQuestion && observed.kind != .permission)
             state.livePrompt = Self.livePrompt(observed, isBlocking: blocking)
+            // Another question in this one's place, with no hook between
+            // them (the next question of the same call, answered elsewhere).
+            let same = state.livePromptIdentity.map { observed.isSameQuestion(identity: $0, placement: state.livePromptPlacement) }
+            if same == false { Self.advanceQuestion(&state) }
+            state.livePromptPlacement = AgentPromptObservationResult.placement(same == true ? state.livePromptPlacement : nil,
+                                                                               updatedBy: observed.placement)
+            state.livePromptIdentity = observed.identity
             state.pendingQuestionMisses = 0
             if state.summary.attention != .needsYou || (blocking && state.summary.status != .waitingForInput) {
                 state.promptRaisedAttention = true
@@ -1639,6 +1906,182 @@ public actor AgentCenterRuntime {
         return true
     }
 
+    /// The prompt an answer to this thread reads on a fresh screen, as its
+    /// card was read: the screen itself, or a cropped dialog bound to the
+    /// waiting call that names its question. Each write's screen is read so,
+    /// and nil refuses it.
+    public func answerScreen(_ request: AgentPromptObservationRequest, threadID: AgentThreadID) -> AgentPromptObservationResult? {
+        guard request.providerID == threadID.providerID else { return nil }
+        guard let state = threads[threadID] else { return AgentPromptGrammar.observe(request) }
+        return Self.screenPrompt(request, in: state)
+    }
+
+    /// A fresh screen as this thread's card reads it. Claude's question
+    /// dialog, whole or cropped, is bound to the call its hook says waits: a
+    /// later call drawing the same dialog is another prompt.
+    private static func screenPrompt(_ request: AgentPromptObservationRequest,
+                                     in state: ThreadState) -> AgentPromptObservationResult? {
+        guard let whole = AgentPromptGrammar.observe(request) else { return croppedPrompt(request, in: state) }
+        guard request.providerID == .claude, whole.kind != .permission, let call = state.waitingQuestionCall else { return whole }
+        let bound = ["call", call]
+        return AgentPromptObservationResult(
+            signature: AgentPromptScreens.compact([whole.signature] + bound), options: whole.options, kind: whole.kind,
+            identity: AgentPromptScreens.compact([whole.identity] + bound), isBlocking: whole.isBlocking,
+            title: whole.title, question: whole.question, detail: whole.detail, progress: whole.progress,
+            controls: whole.controls, entry: whole.entry, textFocus: whole.textFocus,
+            pendingCount: whole.pendingCount, isCropped: whole.isCropped, placement: whole.placement) ?? whole
+    }
+
+    /// Claude's dialog in a pane shorter than itself scrolls its question
+    /// off, and the options left on screen could be any question's. Only
+    /// Claude's waiting AskUserQuestion call can name it: its one question
+    /// whose options, labels and descriptions, are exactly those. A screen
+    /// cannot tell apart two of its questions with the same options, or an
+    /// earlier card from the next question's, so those raise nothing; nor
+    /// does any call but the one Claude's hook says waits, or a call with
+    /// another question still open beside it (its hooks, an interrupt or its
+    /// process's end close one): Claude shows the older first, and the hooks
+    /// of calls run together name the last to start. The signature
+    /// binds the screen to the call: a later call drawing the same options
+    /// is another prompt, so an answer meant for this one cannot reach it.
+    private static func croppedPrompt(_ request: AgentPromptObservationRequest,
+                                      in state: ThreadState) -> AgentPromptObservationResult? {
+        guard request.providerID == .claude, let waiting = state.waitingQuestionCall,
+              let cropped = AgentPromptGrammar.observe(request, allowingCroppedTop: true), cropped.isCropped
+        else { return nil }
+        // A closed call waits no more, though its result may not have landed yet.
+        let open = waitingCalls(state)
+            .filter { $0.id.map { !state.closedQuestionCalls.contains($0) } ?? true }
+        guard open.count == 1, let call = open.first, let id = call.id, id == waiting else { return nil }
+        let choices = cropped.options.filter { $0.role == .choice }
+        let asked = call.questions?.enumerated().filter {
+            AgentClaudeQuestion.matches($0.element, choices: choices, multiSelect: cropped.kind == .multiSelect)
+        } ?? []
+        guard asked.count == 1, let question = asked.first else { return nil }
+        let answering = ["call", id, "\(question.offset)"]
+        // The tabs scrolled off with the question; a carried copy would not
+        // follow the answers.
+        return AgentPromptObservationResult(
+            signature: AgentPromptScreens.compact([cropped.signature] + answering), options: cropped.options,
+            kind: cropped.kind, identity: AgentPromptScreens.compact([cropped.identity] + answering),
+            isBlocking: cropped.isBlocking, title: question.element.header, question: question.element.question,
+            detail: cropped.detail, progress: nil, controls: cropped.controls, entry: cropped.entry,
+            textFocus: cropped.textFocus, pendingCount: cropped.pendingCount, isCropped: true)
+    }
+
+    /// Closed calls kept against delayed hooks and lagging transcripts; a
+    /// turn has far fewer questions.
+    static let closedQuestionCallLimit = 16
+
+    /// A transition that changes which prompt waits: an answer planned for
+    /// the one before must not write into this one.
+    private static func advanceQuestion(_ state: inout ThreadState) {
+        state.questionEpoch &+= 1
+        state.answerPermit?.revoke()
+    }
+
+    /// After a head page: Claude's unanswered calls the transcript shows. One
+    /// it showed before that stopped waiting (its result, or the next turn)
+    /// is a transition even while its hooks are still on their way. A call the
+    /// hooks already closed moved the question then: a page still catching up
+    /// with it is behind them.
+    private static func noteTranscriptQuestionCall(_ providerID: AgentProviderID, in state: inout ThreadState) {
+        guard providerID == .claude else { return }
+        let head = headMessages(state)
+        let waiting = waitingCalls(state).compactMap(\.id)
+        defer { state.transcriptQuestionCalls = waiting }
+        let closed = state.closedQuestionCalls, shown = state.transcriptQuestionCalls
+        guard let answered = state.answerQuestionCall else {
+            // A permission's answer is behind a call shown before it getting
+            // its result, which no hook closed; another call opening is not.
+            if shown.contains(where: { !waiting.contains($0) && !closed.contains($0) }),
+               !state.answerIsPermission || waiting.contains(where: { !shown.contains($0) && !closed.contains($0) }) {
+                advanceQuestion(&state)
+            }
+            return
+        }
+        // While the answered call waits, a sibling waiting with it is no
+        // transition: Claude shows the batch's questions in turn. Once it
+        // stops waiting, another open call waits, or it stopped where the
+        // transcript had shown it, or with its result on this page (the first
+        // page after a reopen has shown nothing yet). A page without the
+        // answered call yet is behind the hooks too.
+        guard !waiting.contains(answered) else { return }
+        if waiting.contains(where: { !closed.contains($0) }) || !closed.contains(answered)
+            && (shown.contains(answered) || AgentClaudeQuestion.hasResult(answered, in: head)) {
+            advanceQuestion(&state)
+        }
+    }
+
+    /// The one call of these still open, if just one is left.
+    private static func soleOpenCall(_ calls: [String], closed: [String]) -> String? {
+        let open = calls.filter { !closed.contains($0) }
+        return open.count == 1 ? open[0] : nil
+    }
+
+    private static func closeQuestionCall(_ id: String?, in state: inout ThreadState) {
+        guard let id else { return }
+        state.openedQuestionCalls.removeAll { $0 == id }
+        guard !state.closedQuestionCalls.contains(id) else { return }
+        state.closedQuestionCalls.append(id)
+        if state.closedQuestionCalls.count > closedQuestionCallLimit { state.closedQuestionCalls.removeFirst() }
+    }
+
+    /// Closes every call an interrupt or a process's end leaves unanswered:
+    /// those the hooks opened (the waiting one is the newest), and those the
+    /// transcript shows waiting, whether or not their hooks ever named them.
+    private static func closeQuestionCalls(in state: inout ThreadState, transcript: Bool = true) {
+        let calls = state.openedQuestionCalls + (transcript ? waitingCalls(state).map(\.id) : [])
+        for id in calls { closeQuestionCall(id, in: &state) }
+        state.waitingQuestionCall = nil
+    }
+
+    /// A frame of another process than the newest one Core accepted: it
+    /// resumed the conversation after an end the app never saw. A start
+    /// closed the calls before it, so after one since the newest frame naming
+    /// a process the calls still open are the resumed process's own, opened
+    /// by frames naming none before one of it was proven, and they stay; the
+    /// transcript may already show them. Without one (its start missed)
+    /// they are taken for the process before's and close, the resumed
+    /// process's own too. That start could
+    /// also be the earlier process's compaction, its frames naming no
+    /// process up to its end and the resumed process's start missed: then
+    /// the earlier calls stay, as they do when the next process reuses the
+    /// PID. The same process bound again (a reconnect, a discovery miss)
+    /// keeps them all.
+    private static func noteProcess(of binding: AgentTerminalBinding, in state: inout ThreadState) {
+        guard let pid = binding.agentPID else { return }
+        defer {
+            state.lastAgentPID = pid
+            state.startedSinceProof = false
+        }
+        guard let before = state.lastAgentPID, pid != before else { return }
+        if !state.startedSinceProof { closeQuestionCalls(in: &state, transcript: false) }
+        advanceQuestion(&state)
+    }
+
+    /// Claude's calls of the current turn that no result names, among those
+    /// written since its session's newest SessionStart by the host's clock: a
+    /// process resuming the conversation does not show the dialogs of the
+    /// one before. A call the hooks opened since, found before the start,
+    /// proves the clock wrong; so does a question no hook opened, nothing
+    /// closed and no result answers, written within a minute before the
+    /// start beside one after it (a step back between a batch's calls). Then
+    /// the whole turn is read, so a batch's calls wait together; a closed one
+    /// waits nowhere, though. The calls the hooks opened before the start
+    /// closed with it, wherever the transcript or the clock puts them.
+    private static func waitingCalls(_ state: ThreadState) -> [AgentClaudeQuestion.Call] {
+        AgentClaudeQuestion.pendingCalls(in: headMessages(state),
+            since: state.rootBoundaryNanos.map { Date(timeIntervalSince1970: Double($0) / 1_000_000_000) },
+            opened: state.questionCallsSinceRootBoundary,
+            named: state.openedQuestionCalls + state.closedQuestionCalls)
+    }
+
+    /// The newest messages: a windowed transcript keeps them in its head.
+    private static func headMessages(_ state: ThreadState) -> [AgentMessage] {
+        state.ingestionWindow == nil ? state.messages : state.ingestionHeadMessages
+    }
+
     /// Consecutive empty captures after which an async question is gone.
     static let deferredQuestionMissLimit = 8
     /// Consecutive empty captures after which a dialog the hook raised, and
@@ -1678,7 +2121,24 @@ public actor AgentCenterRuntime {
     }
 
     private static func clearLivePrompt(_ state: inout ThreadState) {
-        if state.livePrompt != nil || state.awaitingPermissionResolution {
+        // Keep exactly what this clears for a replay of the newest frame. A
+        // completion is never kept: reading it must not be undone.
+        let clearsWait = state.livePrompt != nil || state.awaitingPermissionResolution
+        if let fingerprint = state.lastLifecycleFingerprint {
+            let wait = RetiredHookWait(
+                fingerprint: fingerprint,
+                needsYou: clearsWait && state.summary.attention == .needsYou,
+                waitingForInput: clearsWait && state.summary.status == .waitingForInput,
+                screenRaised: state.promptRaisedAttention,
+                dialogSeen: state.hookPromptMisses != nil,
+                awaitingPermissionResolution: state.awaitingPermissionResolution,
+                pendingQuestion: state.pendingQuestion
+            )
+            if wait.needsYou || wait.awaitingPermissionResolution || wait.pendingQuestion != nil {
+                state.retiredHookWait = wait
+            }
+        }
+        if clearsWait {
             state.summary.attention = .none
             if state.summary.status == .waitingForInput { state.summary.status = .idle }
         }
@@ -1925,17 +2385,23 @@ public actor AgentCenterRuntime {
     public func currentSearchSnapshot() -> AgentSearchSnapshot { searchSnapshot }
 
     public func search(query: String) -> AgentSearchSnapshot {
+        searchSnapshot = loadedMatches(query: query)
+        return searchSnapshot
+    }
+
+    /// What the loaded messages match, leaving the shown search as it is.
+    public func loadedMatches(query: String) -> AgentSearchSnapshot {
         let needle = String(query.prefix(512)).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !needle.isEmpty else {
-            searchSnapshot = .init(results: [])
-            return searchSnapshot
-        }
+        guard !needle.isEmpty else { return .init(results: []) }
         var results: [AgentSearchResult] = []
         var hostCounts: [UUID: Int] = [:]
         var admittedHosts: Set<UUID> = []
         for (threadID, state) in threads {
             let hostID = threadID.hostID
             guard hostCounts[hostID, default: 0] < AgentSearchSnapshot.maximumResultsPerHost else { continue }
+            // Each match's own record, for opening the conversation there;
+            // looked up only once the thread has a match.
+            var retained: [String: AgentProjectionRecord]?
             for message in state.messages {
                 let searchable = message.blocks.compactMap(Self.searchText).joined(separator: "\n")
                 guard let range = searchable.range(of: needle, options: [.caseInsensitive, .diacriticInsensitive]) else { continue }
@@ -1948,13 +2414,21 @@ public actor AgentCenterRuntime {
                 }
                 let start = searchable.index(range.lowerBound, offsetBy: -80, limitedBy: searchable.startIndex) ?? searchable.startIndex
                 let end = searchable.index(range.upperBound, offsetBy: 160, limitedBy: searchable.endIndex) ?? searchable.endIndex
-                results.append(.init(threadID: threadID, recordID: message.recordID, excerpt: String(searchable[start..<end])))
+                if retained == nil {
+                    // The copy the detail shows (see rebuildWindow), whose
+                    // position and token name the revision on screen.
+                    let window = state.ingestionWindow
+                    retained = Dictionary(((window?.records ?? []) + (window?.bridge ?? []) + (window?.head?.records ?? []))
+                        .map { ($0.recordID, $0) }, uniquingKeysWith: { lhs, rhs in lhs.revision >= rhs.revision ? lhs : rhs })
+                }
+                let record = retained?[message.recordID]
+                results.append(.init(threadID: threadID, recordID: message.recordID, excerpt: String(searchable[start..<end]),
+                                     sequence: record?.sequence, sourceOffset: record?.sourceOffset, seekToken: record?.seekToken))
                 hostCounts[hostID, default: 0] += 1
                 if hostCounts[hostID, default: 0] == AgentSearchSnapshot.maximumResultsPerHost { break }
             }
         }
-        searchSnapshot = .init(results: results)
-        return searchSnapshot
+        return .init(results: results)
     }
 
     public func setLineage(_ lineage: AgentThreadLineage, for threadID: AgentThreadID) {
@@ -2100,6 +2574,14 @@ public actor AgentCenterRuntime {
         }
         let lease = AgentActionLease(threadID: threadID, binding: binding, action: action)
         state.actionLease = lease
+        state.answerLeaseQuestionEpoch = action == .answerPrompt ? state.questionEpoch : nil
+        state.answerPermit = action == .answerPrompt ? AgentAnswerPermit() : nil
+        // Never a call the hooks closed: what waits now is something else.
+        // A permission answers no call.
+        state.answerIsPermission = action == .answerPrompt && state.livePrompt.map { ($0.kind ?? .permission) == .permission } == true
+        state.answerQuestionCall = action == .answerPrompt && !state.answerIsPermission
+            ? state.waitingQuestionCall ?? Self.soleOpenCall(state.transcriptQuestionCalls, closed: state.closedQuestionCalls)
+            : nil
         if let textRequest {
             state.outgoing.append(.init(message: .init(id: lease.token, text: textRequest.text, status: action == .queue ? .queueing : .sending), binding: binding))
             guard (try? JSONEncoder().encode(state.outgoing.map(\.message)).count).map({ $0 <= 262_144 }) == true else { throw AgentActionError.actionInFlight }
@@ -2122,8 +2604,29 @@ public actor AgentCenterRuntime {
               state.outgoing[index].boundary == nil, state.outgoing[index].frontier == nil,
               !state.outgoing[index].dispatched else { throw AgentActionError.staleBinding }
         state.outgoing[index].frontier = frontier
+        state.outgoing[index].observedBeforeAcknowledgmentPhysicalOffset =
+            Self.maximumReceiptOffset(in: state, identity: frontier.sourceIdentity)
         state.estimatedContentBytes = Self.estimatedBytes(state)
         threads[lease.threadID] = state
+    }
+
+    /// Checked before each of an answer's writes, after every awaited proof:
+    /// its plan was made for the prompt that waited when its lease was
+    /// granted, and a hook since (that question closed, the next one asked,
+    /// the turn over) means the bytes would land in another prompt. The
+    /// answer's own keys raise no hook until its last one.
+    public func requirePromptCurrent(_ lease: AgentActionLease) throws {
+        _ = try answerPermit(for: lease)
+    }
+
+    /// The current answer lease's permit, for the platform to commit each
+    /// write on at its transport (`AgentAnswerPermit.commitWrite`).
+    public func answerPermit(for lease: AgentActionLease) throws -> AgentAnswerPermit {
+        guard lease.action == .answerPrompt, let state = threads[lease.threadID], state.actionLease == lease,
+              state.binding == lease.binding, state.answerLeaseQuestionEpoch == state.questionEpoch,
+              let permit = state.answerPermit, permit.commitWrite()
+        else { throw AgentActionError.stalePrompt }
+        return permit
     }
 
     /// Called when entering terminal dispatch, before the final process/composer
@@ -2144,8 +2647,9 @@ public actor AgentCenterRuntime {
         state.outgoing[index].preDispatchEpoch = state.ingestionEpoch
         state.outgoing[index].heldNothing = records.isEmpty && state.ingestionEpoch != nil
         if let frontier = state.outgoing[index].frontier {
-            state.outgoing[index].preAcknowledgmentPhysicalOffset = records
-                .filter { $0.receiptSourceIdentity == frontier.sourceIdentity }.compactMap(\.receiptSourceOffset).max()
+            state.outgoing[index].preAcknowledgmentPhysicalOffset =
+                [state.outgoing[index].observedBeforeAcknowledgmentPhysicalOffset,
+                 Self.maximumReceiptOffset(in: state, identity: frontier.sourceIdentity)].compactMap { $0 }.max()
         }
         state.estimatedContentBytes = Self.estimatedBytes(state)
         threads[lease.threadID] = state
@@ -2205,6 +2709,21 @@ public actor AgentCenterRuntime {
         guard let state = threads[threadID], let window = state.ingestionWindow, let epoch = state.ingestionEpoch else { return nil }
         return .init(window, epoch: epoch, liveCursor: state.liveCursor, transition: state.ingestionWindowTransition,
             retainsOutgoing: !state.outgoing.isEmpty, derivedRoom: olderPageRoom(state))
+    }
+
+    /// Where a reader in history stands, as a record to seek: their anchor
+    /// row, in the copy shown, wherever the window lies (older pages read
+    /// into a window that still holds the head are history too). A thread
+    /// read again on another connection (after the app was away, or the
+    /// connection dropped) opens there rather than at its newest page. Nil
+    /// for a reader following the newest page, who names no anchor.
+    public func ingestionReaderPlace(for threadID: AgentThreadID) -> AgentSearchResult? {
+        guard let state = threads[threadID], let window = state.ingestionWindow,
+              let anchor = state.viewportAnchorRecordID,
+              let record = window.presentedRecords.filter({ $0.recordID == anchor }).max(by: { $0.revision < $1.revision })
+        else { return nil }
+        return .init(threadID: threadID, recordID: anchor, excerpt: "", sequence: record.sequence,
+                     sourceOffset: record.sourceOffset, seekToken: record.seekToken)
     }
 
     /// The derived-model half of `olderPageFits`: an older page that leaves
@@ -2272,7 +2791,7 @@ public actor AgentCenterRuntime {
                 if lease.threadID.providerID == .claude,
                    AgentTextInsertion.images(provider: "claude", text: state.outgoing[index].message.text) != nil,
                    let frontier = state.outgoing[index].frontier, frontier.consistency == .observedPrefix, let end = frontier.sourceEnd {
-                    let held = state.ingestionWindow == nil ? state.messages : state.ingestionHeadMessages
+                    let held = Self.headMessages(state)
                     // Claim a receipt ingested during Claude's departure check
                     // as an observational match, never as causal proof. The
                     // physical claim prevents reuse by another identical send.
@@ -2281,18 +2800,24 @@ public actor AgentCenterRuntime {
                         guard let offset = record.receiptSourceOffset, offset >= end,
                               state.outgoing[index].preAcknowledgmentPhysicalOffset.map({ offset > $0 }) ?? true,
                               !claimed.contains(Self.receiptClaimKey(record, in: state)),
+                              !state.outgoing[index].excludedReceiptClaims.contains(Self.receiptClaimKey(record, in: state)),
                               let message = held.first(where: { $0.recordID == record.recordID && $0.role == .user }) else { return false }
                         return AgentTextInsertion.matchesReceipt(provider: "claude", text: state.outgoing[index].message.text, blocks: message.blocks)
                     }) {
+                        if let message = held.first(where: { $0.recordID == receipt.recordID }) {
+                            let matching = headReceiptMatches(state, message: message, record: receipt, openingPromptID: nil, protectingImageDeparture: true)
+                            Self.claimOutgoingReceipt(Self.receiptClaimKey(receipt, in: state), physical: true,
+                                for: index, matching: matching, state: &state)
+                        }
                         state.outgoing[index].observationalMatch = true
-                        state.outgoing[index].matchedReceipt = Self.receiptClaimKey(receipt, in: state)
                         // Do not advance the reconcile sequence watermark here:
                         // an older held record may still settle another send.
                     }
                 }
-                let observed = records.compactMap(\.receiptSourceOffset).max()
+                let observed = Self.maximumReceiptOffset(in: state, identity: identity)
                 state.outgoing[index].preAcknowledgmentPhysicalOffset =
-                    [state.outgoing[index].preAcknowledgmentPhysicalOffset, observed].compactMap { $0 }.max()
+                    [state.outgoing[index].preAcknowledgmentPhysicalOffset,
+                     state.outgoing[index].observedBeforeAcknowledgmentPhysicalOffset, observed].compactMap { $0 }.max()
             }
             // A send with no source at dispatch keeps the opening-prompt rule:
             // the new transcript's first window can land before the ACK, and
@@ -2313,11 +2838,16 @@ public actor AgentCenterRuntime {
                     if let receipt = records.first(where: { record in
                         guard state.outgoing[index].preDispatchSequence.map({ record.sequence > $0 }) ?? state.outgoing[index].heldNothing,
                               !claimed.contains(Self.receiptClaimKey(record, in: state)),
+                              !state.outgoing[index].excludedReceiptClaims.contains(Self.receiptClaimKey(record, in: state)),
                               let message = messages.first(where: { $0.recordID == record.recordID && $0.role == .user }) else { return false }
                         return AgentTextInsertion.matchesReceipt(provider: "claude", text: state.outgoing[index].message.text, blocks: message.blocks)
                     }) {
+                        if let message = messages.first(where: { $0.recordID == receipt.recordID }) {
+                            let matching = headReceiptMatches(state, message: message, record: receipt, openingPromptID: nil, protectingImageDeparture: true)
+                            Self.claimOutgoingReceipt(Self.receiptClaimKey(receipt, in: state), physical: receipt.receiptSourceIdentity != nil,
+                                for: index, matching: matching, state: &state)
+                        }
                         state.outgoing[index].observationalMatch = true
-                        state.outgoing[index].matchedReceipt = Self.receiptClaimKey(receipt, in: state)
                         // Leave the reconcile watermark for older held receipts.
                     }
                 }
@@ -2335,97 +2865,200 @@ public actor AgentCenterRuntime {
         threads[lease.threadID] = state
     }
 
+    /// Physical frontiers order records across reader restarts and history
+    /// navigation. Sequence watermarks belong only to the head-only fallback.
+    private func reconcilePhysicalOutgoing(_ state: inout ThreadState, records: [AgentProjectionRecord]) {
+        // At most one action owns the terminal. Retain only its maximum
+        // accepted physical offset, even before dispatch, so replacing the
+        // reader window before the ACK cannot make an old record look new.
+        if let token = state.actionLease?.token,
+           let index = state.outgoing.firstIndex(where: { $0.message.id == token && !$0.terminalAcknowledged }),
+           let identity = state.outgoing[index].frontier?.sourceIdentity,
+           let observed = records.lazy.filter({ $0.receiptSourceIdentity == identity }).compactMap(\.receiptSourceOffset).max() {
+            state.outgoing[index].observedBeforeAcknowledgmentPhysicalOffset =
+                max(state.outgoing[index].observedBeforeAcknowledgmentPhysicalOffset ?? 0, observed)
+        }
+        var pending = state.outgoing.indices.filter {
+            let outgoing = state.outgoing[$0]
+            return outgoing.dispatched && outgoing.terminalAcknowledged && !outgoing.observationalMatch
+                && outgoing.frontier?.consistency == .observedPrefix
+        }
+        guard !pending.isEmpty else { return }
+        var claimed = Set(state.outgoing.compactMap(\.matchedReceipt))
+        for record in records {
+            guard let identity = record.receiptSourceIdentity, let offset = record.receiptSourceOffset else { continue }
+            let claim = Self.receiptClaimKey(record, in: state)
+            let eligible = pending.filter {
+                Self.physicalReceiptMatches(state.outgoing[$0], identity: identity, offset: offset,
+                    claim: claim)
+            }
+            guard !eligible.isEmpty else { continue }
+            guard !claimed.contains(claim) else { continue }
+            // Use this exact accepted revision, never join a displayed
+            // history body to a different head's proof. Reuse its canonical
+            // normalization, without caching any evicted page again.
+            let normalized: AgentNormalizedRecord
+            if let cached = state.normalizedRecords[record.recordID], cached.revision == record.revision,
+               cached.sequence == record.sequence { normalized = cached.normalized }
+            else { normalized = normalizer.normalize(providerID: state.summary.id.providerID, record: record) }
+            guard let message = normalized.message, message.role == .user else { continue }
+            let matching = eligible.filter {
+                AgentTextInsertion.matchesReceipt(provider: state.summary.id.providerID.rawValue,
+                    text: state.outgoing[$0].message.text, blocks: message.blocks)
+            }
+            guard let index = matching.first else { continue }
+            let protected = headReceiptMatches(state, message: message, record: record, openingPromptID: nil, protectingImageDeparture: true)
+            Self.claimOutgoingReceipt(claim, physical: true, for: index, matching: protected, state: &state)
+            Self.advanceOutgoingReceiptWatermark(record.sequence, state: &state)
+            state.outgoing[index].observationalMatch = true
+            state.outgoing[index].message.status = .observed
+            claimed.insert(claim)
+            pending.removeAll { $0 == index }
+            if pending.isEmpty { return }
+        }
+    }
+
+    private static func physicalReceiptMatches(_ outgoing: OutgoingState, identity: String, offset: UInt64, claim: String,
+                                               protectingImageDeparture: Bool = false) -> Bool {
+        guard outgoing.dispatched, outgoing.terminalAcknowledged || protectingImageDeparture, !outgoing.observationalMatch,
+              !outgoing.excludedReceiptClaims.contains(claim),
+              let frontier = outgoing.frontier, frontier.consistency == .observedPrefix,
+              frontier.sourceIdentity == identity, let end = frontier.sourceEnd else { return false }
+        return offset >= end && (outgoing.preAcknowledgmentPhysicalOffset.map { offset > $0 } ?? true)
+    }
+
+    private static func claimOutgoingReceipt(_ claim: String, physical: Bool, for index: Int, matching: [Int], state: inout ThreadState) {
+        let previousBytes = state.outgoing[index].matchedReceipt?.utf8.count ?? 0
+        state.outgoing[index].matchedReceipt = claim
+        state.estimatedContentBytes += claim.utf8.count - previousBytes
+        // Physical sends and the active image departure check can bypass the
+        // fallback sequence watermark; reserve their exact competing claims.
+        for other in matching where other != index && ((physical && state.outgoing[other].frontier?.consistency == .observedPrefix)
+            || Self.isActiveImageDeparture(state.outgoing[other], in: state)) {
+            if state.outgoing[other].excludedReceiptClaims.insert(claim).inserted {
+                // Window admission already measured the retained content.
+                // Account for new claims without re-encoding that window.
+                state.estimatedContentBytes += claim.utf8.count + 16
+            }
+            // Only already-existing eligible sends can precede this one;
+            // later sends cannot claim before an eligible earlier send.
+            assert(state.outgoing[other].excludedReceiptClaims.count < 32)
+        }
+    }
+
+    private static func isActiveImageDeparture(_ outgoing: OutgoingState, in state: ThreadState) -> Bool {
+        outgoing.frontier != nil && outgoing.dispatched && !outgoing.terminalAcknowledged
+            && state.actionLease?.token == outgoing.message.id && state.summary.id.providerID == .claude
+            && AgentTextInsertion.images(provider: "claude", text: outgoing.message.text) != nil
+    }
+
+    private static func advanceOutgoingReceiptWatermark(_ sequence: UInt64, state: inout ThreadState) {
+        let sourceKey = state.sourceIdentity.map(sourceFileKey)
+        // Physical matches ignore this fence, but fallback sends still need
+        // it to exclude a claimed record after its outgoing bubble expires.
+        state.lastOutgoingReceiptSequence = state.lastOutgoingReceiptSourceKey == sourceKey
+            ? max(state.lastOutgoingReceiptSequence ?? 0, sequence) : sequence
+        state.lastOutgoingReceiptSourceKey = sourceKey
+    }
+
+    /// Send fencing includes retained history now that it can supply physical
+    /// receipts. This bounded scan runs only at arm, dispatch, and ACK.
+    private static func maximumReceiptOffset(in state: ThreadState, identity: String?) -> UInt64? {
+        guard let identity else { return nil }
+        func maximum(_ records: [AgentProjectionRecord]) -> UInt64? {
+            records.lazy.filter { $0.receiptSourceIdentity == identity }.compactMap(\.receiptSourceOffset).max()
+        }
+        guard let window = state.ingestionWindow else { return maximum(state.records) }
+        return (window.viewport.compactMap { maximum($0.records) }
+            + [maximum(window.bridge), maximum(window.head?.records ?? [])].compactMap { $0 }).max()
+    }
+
     private func reconcileOutgoing(_ state: inout ThreadState, sequenceByID: [String: UInt64]) {
+        // Pure physical-frontier sends use only the incoming page. When old
+        // fallback sends coexist, arbitrate each head record in send order.
+        guard state.outgoing.contains(where: {
+            $0.dispatched && !$0.observationalMatch && ($0.frontier == nil || $0.frontier?.consistency == .unavailable)
+        }) else { return }
         let held = state.ingestionWindow == nil ? state.messages : state.ingestionHeadMessages
-        // The prompt that opened a transcript this thread holds from its
-        // first record, when it is the only one so far.
+        let records = state.ingestionWindow?.head?.records ?? state.records
+        let byID = Dictionary(uniqueKeysWithValues: records.map { ($0.recordID, $0) })
+        // Only the opening prompt can settle an unavailable frontier that
+        // had no transcript at dispatch.
         let heldFromStart = state.ingestionWindow.map { $0.head?.hasOlder == false } ?? !state.hasMore
         let prompts = held.filter { $0.role == .user }
         let openingPromptID = heldFromStart && prompts.count == 1 ? prompts[0].recordID : nil
         for message in held where message.role == .user {
-            guard let sequence = sequenceByID[message.recordID] else { continue }
-            let sourceKey = state.sourceIdentity.map(Self.sourceFileKey)
-            if state.lastOutgoingReceiptSourceKey == sourceKey,
-               let last = state.lastOutgoingReceiptSequence, sequence <= last { continue }
-            let claimed = state.outgoing.compactMap(\.matchedReceipt)
-            guard let index = state.outgoing.firstIndex(where: {
-                // The transcript belongs to this conversation, not to a route.
-                // A write the terminal acknowledged is settled by its record
-                // even after the thread was rebound (a reconnect, or a new
-                // conversation handing the pane back); a send whose write was
-                // never acknowledged still needs its own route.
-                guard $0.dispatched, !$0.observationalMatch,
-                      $0.binding == state.binding || $0.terminalAcknowledged,
-                      AgentTextInsertion.matchesReceipt(provider: state.summary.id.providerID.rawValue,
-                        text: $0.message.text, blocks: message.blocks) else { return false }
-                if let frontier = $0.frontier, frontier.consistency == .unavailable {
-                    // No source frontier: the transcript did not exist yet
-                    // (a conversation's first prompt), OpenCode, or the host
-                    // did not answer in time. An acknowledged write is
-                    // matched, advisorily, by a newer record than any the
-                    // thread held at its ACK in the same source and reader.
-                    // Without a source then, only the prompt that opens the
-                    // transcript is: older history may repeat the text, and
-                    // another source cannot be ordered against the write.
-                    guard $0.terminalAcknowledged,
-                          let received = (state.ingestionWindow?.head?.records ?? state.records).first(where: { $0.recordID == message.recordID }),
-                          !claimed.contains(Self.receiptClaimKey(received, in: state)) else { return false }
-                    guard let before = $0.preDispatchSourceKey else { return message.recordID == openingPromptID }
-                    guard before == sourceKey, $0.preDispatchEpoch == state.ingestionEpoch else { return false }
-                    // A reader emptied by eviction knows nothing; one that
-                    // loaded an empty transcript knows every record is new.
-                    guard let baseline = $0.preDispatchSequence else { return $0.heldNothing }
-                    return sequence > baseline
-                }
-                if let frontier = $0.frontier {
-                    // The physical offset is the file's, whichever reader or
-                    // chain generation holds it now.
-                    guard $0.terminalAcknowledged, frontier.consistency == .observedPrefix,
-                          let received = (state.ingestionWindow?.head?.records ?? state.records).first(where: { $0.recordID == message.recordID }),
-                          received.receiptSourceIdentity == frontier.sourceIdentity,
-                          let offset = received.receiptSourceOffset, let end = frontier.sourceEnd else { return false }
-                    return offset >= end && ($0.preAcknowledgmentPhysicalOffset.map { offset > $0 } ?? true)
-                        && !claimed.contains(Self.receiptClaimKey(received, in: state))
-                }
-                if $0.preDispatchSourceKey == sourceKey, let before = $0.preDispatchSequence, sequence <= before { return false }
-                guard let boundary = $0.boundary,
-                      Self.sourceFileKey(boundary.sourceIdentity) == state.sourceIdentity.map(Self.sourceFileKey),
-                      AgentTextInsertion.matchesReceipt(provider: state.summary.id.providerID.rawValue,
-                        text: $0.message.text, blocks: message.blocks) else { return false }
-                if let epoch = boundary.summary?.objectValue?["nativeReceiptEpoch"]?.stringValue {
-                    guard epoch == state.ingestionEpoch else { return false }
-                    if AgentIngestionSourceIdentity.file(boundary.sourceIdentity) {
-                        let received = (state.ingestionWindow?.head?.records ?? state.records).first { $0.recordID == message.recordID }
-                        let offset = AgentIngestionSourceIdentity.indexedFile(boundary.sourceIdentity) ? received?.sourceOffset : sequence
-                        guard let raw = boundary.summary?.objectValue?["nativeReceiptSourceEnd"]?.stringValue,
-                              let end = UInt64(raw), offset.map({ $0 >= end }) == true else { return false }
-                    }
-                    guard let anchor = boundary.records.last else { return true }
-                    return sequence > anchor.sequence && (state.ingestionWindow?.head?.records ?? state.records).contains {
-                        $0.recordID == anchor.recordID && $0.sequence == anchor.sequence && $0.revision >= anchor.revision
-                    }
-                }
-                if let value = boundary.summary?.objectValue?["receiptByteOffset"]?.stringValue {
-                    guard let offset = UInt64(value),
-                          let received = state.records.first(where: { $0.recordID == message.recordID }),
-                          let receivedOffset = received.sourceOffset, receivedOffset >= offset else { return false }
-                    guard let anchor = boundary.records.last else { return offset == 0 }
-                    return state.records.contains { $0.sourceOffset == anchor.sourceOffset && $0.sourceHash != nil && $0.sourceHash == anchor.sourceHash && $0.record == anchor.record }
-                }
-                guard let anchor = boundary.records.last else { return true }
-                return sequence > anchor.sequence && state.records.contains { $0.sequence == anchor.sequence && $0.record == anchor.record }
-            }) else { continue }
+            guard sequenceByID[message.recordID] != nil, let record = byID[message.recordID] else { continue }
+            let matching = headReceiptMatches(state, message: message, record: record, openingPromptID: openingPromptID)
+            guard let index = matching.first else { continue }
+            let protected = headReceiptMatches(state, message: message, record: record, openingPromptID: openingPromptID, protectingImageDeparture: true)
+            Self.claimOutgoingReceipt(Self.receiptClaimKey(record, in: state), physical: record.receiptSourceIdentity != nil,
+                for: index, matching: protected, state: &state)
             if state.outgoing[index].frontier != nil {
-                // Even a later full scan cannot upgrade portable EOF/text
-                // evidence into causal proof after truncation or other writes.
+                // Portable EOF/text evidence remains observational.
                 state.outgoing[index].observationalMatch = true
-                if let received = (state.ingestionWindow?.head?.records ?? state.records).first(where: { $0.recordID == message.recordID }) {
-                    state.outgoing[index].matchedReceipt = Self.receiptClaimKey(received, in: state)
-                }
                 if state.outgoing[index].terminalAcknowledged { state.outgoing[index].message.status = .observed }
             } else { state.outgoing.remove(at: index) }
-            state.lastOutgoingReceiptSequence = sequence
-            state.lastOutgoingReceiptSourceKey = sourceKey
+            Self.advanceOutgoingReceiptWatermark(record.sequence, state: &state)
+        }
+    }
+
+    private func headReceiptMatches(_ state: ThreadState, message: AgentMessage, record: AgentProjectionRecord,
+                                    openingPromptID: String?, protectingImageDeparture: Bool = false) -> [Int] {
+        let sourceKey = state.sourceIdentity.map(Self.sourceFileKey)
+        let claim = Self.receiptClaimKey(record, in: state)
+        guard !state.outgoing.contains(where: { $0.matchedReceipt == claim }) else { return [] }
+        let sequence = record.sequence
+        let records = state.ingestionWindow?.head?.records ?? state.records
+        return state.outgoing.indices.filter { index in
+            let outgoing = state.outgoing[index]
+            let protect = protectingImageDeparture && Self.isActiveImageDeparture(outgoing, in: state)
+            // Acknowledged writes belong to the conversation even after a
+            // route rebind; unacknowledged writes still need their own route.
+            guard outgoing.dispatched, !outgoing.observationalMatch,
+                  !outgoing.excludedReceiptClaims.contains(claim),
+                  outgoing.binding == state.binding || outgoing.terminalAcknowledged,
+                  AgentTextInsertion.matchesReceipt(provider: state.summary.id.providerID.rawValue,
+                    text: outgoing.message.text, blocks: message.blocks) else { return false }
+            if let frontier = outgoing.frontier, frontier.consistency == .observedPrefix {
+                guard let identity = record.receiptSourceIdentity, let offset = record.receiptSourceOffset else { return false }
+                // Claude's active image departure check can observe a receipt
+                // before its terminal ACK. Reserve earlier sends' claims for
+                // it now; only the normal acknowledged pass may settle it.
+                return Self.physicalReceiptMatches(outgoing, identity: identity, offset: offset, claim: claim,
+                    protectingImageDeparture: protect)
+            }
+            if state.lastOutgoingReceiptSourceKey == sourceKey,
+               let last = state.lastOutgoingReceiptSequence, sequence <= last { return false }
+            if outgoing.frontier?.consistency == .unavailable {
+                guard outgoing.terminalAcknowledged || protect else { return false }
+                guard let before = outgoing.preDispatchSourceKey else { return message.recordID == openingPromptID }
+                guard before == sourceKey, outgoing.preDispatchEpoch == state.ingestionEpoch else { return false }
+                guard let baseline = outgoing.preDispatchSequence else { return outgoing.heldNothing }
+                return sequence > baseline
+            }
+            if outgoing.preDispatchSourceKey == sourceKey, let before = outgoing.preDispatchSequence, sequence <= before { return false }
+            guard let boundary = outgoing.boundary,
+                  Self.sourceFileKey(boundary.sourceIdentity) == sourceKey else { return false }
+            if let epoch = boundary.summary?.objectValue?["nativeReceiptEpoch"]?.stringValue {
+                guard epoch == state.ingestionEpoch else { return false }
+                if AgentIngestionSourceIdentity.file(boundary.sourceIdentity) {
+                    let offset = AgentIngestionSourceIdentity.indexedFile(boundary.sourceIdentity) ? record.sourceOffset : sequence
+                    guard let raw = boundary.summary?.objectValue?["nativeReceiptSourceEnd"]?.stringValue,
+                          let end = UInt64(raw), offset.map({ $0 >= end }) == true else { return false }
+                }
+                guard let anchor = boundary.records.last else { return true }
+                return sequence > anchor.sequence && records.contains {
+                    $0.recordID == anchor.recordID && $0.sequence == anchor.sequence && $0.revision >= anchor.revision
+                }
+            }
+            if let value = boundary.summary?.objectValue?["receiptByteOffset"]?.stringValue {
+                guard let offset = UInt64(value), let receivedOffset = record.sourceOffset, receivedOffset >= offset else { return false }
+                guard let anchor = boundary.records.last else { return offset == 0 }
+                return state.records.contains { $0.sourceOffset == anchor.sourceOffset && $0.sourceHash != nil && $0.sourceHash == anchor.sourceHash && $0.record == anchor.record }
+            }
+            guard let anchor = boundary.records.last else { return true }
+            return sequence > anchor.sequence && state.records.contains { $0.sequence == anchor.sequence && $0.record == anchor.record }
         }
     }
 
@@ -2543,6 +3176,8 @@ public actor AgentCenterRuntime {
     /// itself transcript-derived provider projection.
     private func clearCachedProjectionContent(_ state: inout ThreadState) {
         state.hookOverlay.reset()
+        // The next page seeds it again; an answer keeps its own call.
+        state.transcriptQuestionCalls = []
         let projectionActivityIDs = Set(state.projectionActivityByRecordID.values)
         state.records = []
         state.ingestionEpoch = nil
@@ -2631,17 +3266,23 @@ public actor AgentCenterRuntime {
         let edits = state.changes.edits.reduce(0) { $0 + (cache[$1.id]?.editBytes ?? encoded($1)) }
         let summary = encoded(state.summary) + encoded(state.changes.authoritativeTotals)
         let outgoing = encoded(state.outgoing.map(\.message))
-        let boundaries = state.outgoing.reduce(0) { $0 + encoded($1.boundary) +
-            encoded($1.frontier) + ($1.preDispatchSourceKey?.utf8.count ?? 0) + 64 }
+        let boundaries = state.outgoing.reduce(0) { total, outgoing in
+            let claims = outgoing.excludedReceiptClaims.reduce(0) { $0 + $1.utf8.count + 16 }
+            let keys = (outgoing.preDispatchSourceKey?.utf8.count ?? 0) + (outgoing.matchedReceipt?.utf8.count ?? 0)
+            return total + encoded(outgoing.boundary) + encoded(outgoing.frontier) + keys + claims + 80
+        }
         return records + messages + headMessages + activity + edits + summary + outgoing + boundaries +
             state.hookOverlay.estimatedBytes + (state.ingestionLastWindowPage == nil ? 0 : state.ingestionLastWindowPageBytes)
     }
 
     static func searchText(_ block: AgentBlock) -> String? {
+        // The app's own notice, not transcript text: every shortened record
+        // would otherwise match "content" or "preview".
+        if block == .shortenedPreviewNotice { return nil }
         switch block {
         case .text(let value), .thinking(let value), .queuedMessage(let value), .workflow(let value), .systemEvent(let value), .compactSummary(let value): return value
-        case .toolCall(let name, let preview): return "\(name)\n\(preview)"
-        case .toolResult(let preview, _): return preview
+        case .toolCall(let name, let preview, _): return "\(name)\n\(preview)"
+        case .toolResult(let preview, _, _): return preview
         case .edit(let path, let diff): return [path, diff].compactMap { $0 }.joined(separator: "\n")
         case .permission(let title), .question(let title): return title
         case .completion(let summary): return summary

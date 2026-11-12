@@ -1,6 +1,7 @@
 package com.bambouville.tessera
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -12,6 +13,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.bambouville.tessera.data.AndroidHostRepository
+import com.bambouville.tessera.data.AndroidAppPreferences
 import com.bambouville.tessera.data.AndroidSessionRestoreRepository
 import com.bambouville.tessera.data.HostDraft
 import com.bambouville.tessera.data.SessionRestoreRecord
@@ -26,6 +28,9 @@ import org.junit.runner.RunWith
 import org.junit.After
 import java.util.UUID
 import com.bambouville.tessera.feature.session.LiveSessionStore
+import com.bambouville.tessera.onboarding.OnboardingPresentation
+import com.bambouville.tessera.onboarding.onboardingPresentation
+import org.junit.Before
 
 /**
  * The system back gesture is in-app navigation, not an exit.
@@ -40,6 +45,21 @@ import com.bambouville.tessera.feature.session.LiveSessionStore
 class BackNavigationInstrumentedTest {
     @get:Rule
     val compose = createAndroidComposeRule<MainActivity>()
+
+    @Before
+    fun dismissTheFirstStartCardBeforeTestingNavigation() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val presentation = runBlocking {
+            val preferences = AndroidAppPreferences(context).values.first()
+            val hosts = AndroidHostRepository(context).observeHosts().first()
+            onboardingPresentation(hosts.size, preferences.hasSeenWelcome, preferences.lastSeenWhatsNewVersion)
+        }
+        if (presentation != OnboardingPresentation.None) {
+            waitForTag("onboarding-dim")
+            pressBack()
+        }
+        waitForTag("root-hosts")
+    }
 
     /**
      * A session opened here outlives this Activity now, and every case in this
@@ -150,6 +170,49 @@ class BackNavigationInstrumentedTest {
 
         waitForText("sync & continuity")
         compose.onNodeWithText("sync & continuity").assertIsDisplayed()
+    }
+
+    @Test
+    fun backLeavesKeysForSettingsThenThePreviousTab() {
+        waitForTag("root-sessions")
+        compose.onNodeWithTag("root-sessions").performClick()
+        compose.onNodeWithTag("root-settings").performClick()
+        waitForText("keys")
+        compose.onNodeWithText("keys").performScrollTo().performClick()
+        waitForTag("identity-name")
+
+        pressBack()
+
+        waitForText("sync & continuity")
+        compose.onNodeWithTag("root-settings").assertIsSelected()
+        assertTrue(compose.onAllNodesWithTag("identity-name").fetchSemanticsNodes().isEmpty())
+
+        pressBack()
+
+        compose.onNodeWithTag("root-sessions").assertIsSelected()
+        assertTrue(compose.onAllNodesWithText("sync & continuity").fetchSemanticsNodes().isEmpty())
+        assertEquals(Lifecycle.State.RESUMED, compose.activityRule.scenario.state)
+    }
+
+    @Test
+    fun backLeavesKnownHostsForSettingsThenArtifacts() {
+        waitForTag("root-artifacts")
+        compose.onNodeWithTag("root-artifacts").performClick()
+        compose.onNodeWithTag("root-settings").performClick()
+        waitForText("known hosts")
+        compose.onNodeWithText("known hosts").performScrollTo().performClick()
+        compose.onNodeWithTag("root-settings").assertIsSelected()
+
+        pressBack()
+
+        waitForText("sync & continuity")
+        compose.onNodeWithTag("root-settings").assertIsSelected()
+
+        pressBack()
+
+        compose.onNodeWithTag("root-artifacts").assertIsSelected()
+        assertTrue(compose.onAllNodesWithText("sync & continuity").fetchSemanticsNodes().isEmpty())
+        assertEquals(Lifecycle.State.RESUMED, compose.activityRule.scenario.state)
     }
 
     /**

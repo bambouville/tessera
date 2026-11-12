@@ -373,6 +373,7 @@ struct ShortcutsEditorView: View {
         switch group {
         case .tmux:  return String(localized: "— live only while a tmux session is attached")
         case .panes: return String(localized: "— live once a window holds more than one pane")
+        case .artifacts: return String(localized: "— live while the artifacts browser has focus")
         case .custom: return String(localized: "— yours")
         default: return nil
         }

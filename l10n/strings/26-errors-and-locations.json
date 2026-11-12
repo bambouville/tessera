@@ -203,14 +203,6 @@
     "zh-Hans": "无法验证 Agent Center 集成。",
     "zh-Hant": "無法驗證 Agent Center 整合。"
   },
-  "Could not verify Agent Center integration: %@": {
-    "de": "Die Agent-Center-Integration konnte nicht geprüft werden: %@",
-    "es": "No se pudo verificar la integración de Agent Center: %@",
-    "fr": "Impossible de vérifier l'intégration d'Agent Center : %@",
-    "ja": "Agent Center の連携を確認できませんでした: %@",
-    "zh-Hans": "无法验证 Agent Center 集成：%@",
-    "zh-Hant": "無法驗證 Agent Center 整合：%@"
-  },
   "Provider hook settings kept changing during installation.": {
     "de": "Die Hook-Einstellungen des Anbieters haben sich während der Installation ständig geändert.",
     "es": "Los ajustes de hooks del proveedor cambiaron continuamente durante la instalación.",

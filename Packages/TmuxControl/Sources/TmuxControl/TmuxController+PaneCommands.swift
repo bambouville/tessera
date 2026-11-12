@@ -79,7 +79,7 @@ public extension TmuxController {
     /// intermediate layout. `-Z` is also a no-op for an unzoomed window, so
     /// use it unconditionally instead of trusting potentially stale layout
     /// metadata from another attached client.
-    public func selectPanePreservingWindowZoom(_ paneId: PaneId) {
+    func selectPanePreservingWindowZoom(_ paneId: PaneId) {
         guard !userMutationsSuppressedWhileYielded,
               mode == .tmuxControl else { return }
         selectPaneAcrossTmuxClients(paneId, preservingWindowZoom: true)
@@ -108,7 +108,7 @@ public extension TmuxController {
     /// Set, rather than toggle, pane zoom so a delayed presentation command
     /// cannot invert state that changed while it crossed the shared session
     /// boundary.
-    public func setPaneZoomed(_ paneId: PaneId, zoomed: Bool) {
+    func setPaneZoomed(_ paneId: PaneId, zoomed: Bool) {
         guard !userMutationsSuppressedWhileYielded,
               mode == .tmuxControl,
               let window = windows.first(where: { window in

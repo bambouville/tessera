@@ -17,6 +17,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -260,8 +261,8 @@ fun SessionVisualHarness(
     val tokens = LocalTesseraTokens.current
     var filesOpen by remember { mutableStateOf(false) }
     var armedModifiers by remember { mutableStateOf(SharedArmedModifiers()) }
-    var activeWindowId by remember { mutableStateOf(1) }
-    var activePaneId by remember { mutableStateOf(11) }
+    var activeWindowId by remember { mutableIntStateOf(1) }
+    var activePaneId by remember { mutableIntStateOf(11) }
     val programScene = scene == SessionHarnessScene.Programs || scene == SessionHarnessScene.ProgramsSwitcher
     var switcherOpen by remember(scene) {
         mutableStateOf(scene == SessionHarnessScene.Switcher || scene == SessionHarnessScene.ProgramsSwitcher)
@@ -282,7 +283,7 @@ fun SessionVisualHarness(
         }
     }
     var keyboardToggle by remember { mutableStateOf<(() -> Unit)?>(null) }
-    var fixtureGeneration by remember { mutableStateOf(0) }
+    var fixtureGeneration by remember { mutableIntStateOf(0) }
     var renderedTerminalFixture by remember { mutableStateOf<String?>(null) }
     var takeBackRequested by remember(scene) { mutableStateOf(false) }
     val density = LocalDensity.current
@@ -299,10 +300,13 @@ fun SessionVisualHarness(
     }
 
     if (scene == SessionHarnessScene.TerminalConnected) {
+        var findOpen by remember { mutableStateOf(false) }
+        var findQuery by remember { mutableStateOf("") }
+        // Like the session, an open Find gives the terminal the whole lift.
         val keyboardLayout = rememberTerminalKeyboardViewportLayout(
             resizeTerminalWithKeyboard = resizeTerminalWithKeyboard,
             terminal = captureSurface,
-            caretFollowingEnabled = true,
+            caretFollowingEnabled = !findOpen,
         )
         // The scene mounts the shipping Scaffold, not only the shipping
         // composables inside it. Where the accessory bar lands is a contract
@@ -325,6 +329,7 @@ fun SessionVisualHarness(
                     onConnect = {},
                     onPaste = {},
                     onToggleFiles = { filesOpen = !filesOpen },
+                    onSearch = { findOpen = true },
                     onCloseSession = {},
                 )
             },
@@ -340,6 +345,20 @@ fun SessionVisualHarness(
                         .fillMaxSize()
                         .then(keyboardLayout.sessionModifier),
                 ) {
+                    if (findOpen) {
+                        TerminalFindBar(
+                            query = findQuery,
+                            result = null,
+                            onQueryChange = { findQuery = it },
+                            onPrevious = {},
+                            onNext = {},
+                            onClose = {
+                                findOpen = false
+                                captureSurface.setFocused(true)
+                            },
+                            modifier = keyboardLayout.chromeCounterShiftModifier,
+                        )
+                    }
                     Box(
                         Modifier
                             .fillMaxWidth()

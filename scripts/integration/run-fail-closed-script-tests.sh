@@ -161,6 +161,8 @@ root = sys.argv[1]
 EXEMPT = {
     "scripts/integration/remote/provision.sh":
         "runs on the Linux fixture host through `ssh bash -s`",
+    "scripts/android/remote/host-run.sh":
+        "runs on the Linux build host that remote-build.sh uploads it to",
 }
 SKIP_DIRS = {"out", ".state", "__pycache__", "secrets"}
 HEREDOC = re.compile(r"<<(-?)\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2")

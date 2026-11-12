@@ -7,23 +7,32 @@ enum AgentTranscriptTypography {
     static func proseSize(isPhone: Bool) -> CGFloat { isPhone ? 15.5 : 14 }
 }
 
-struct AgentMessageView: View, Equatable {
+struct AgentMessageView: View, @MainActor Equatable {
     let message: AgentMessage
     @Bindable var model: AgentCenterV2PresentationModel
     let promptActionsAvailable: Bool
     let isCompact: Bool
+    let artifactHostID: UUID
+    let artifactSessionID: UUID?
+    /// The message index of `message.blocks[0]`, for a part of a message.
+    var firstBlockIndex = 0
 
     /// Unchanged rows skip body evaluation when the transcript re-renders
     /// for scroll position, paging or a newer row elsewhere.
-    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+    static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.message == rhs.message && lhs.model === rhs.model &&
-            lhs.promptActionsAvailable == rhs.promptActionsAvailable && lhs.isCompact == rhs.isCompact
+            lhs.promptActionsAvailable == rhs.promptActionsAvailable && lhs.isCompact == rhs.isCompact &&
+            lhs.artifactHostID == rhs.artifactHostID && lhs.artifactSessionID == rhs.artifactSessionID &&
+            lhs.firstBlockIndex == rhs.firstBlockIndex
     }
     @Environment(\.designTokens) private var T
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.agentBlockDisclosures) private var disclosures
+    @Environment(\.agentPromptAnswerDrafts) private var answerDrafts
     @State private var promptDetailExpanded = false
-    @State private var promptTextOpen = false
-    @State private var promptText = ""
+    /// A standalone message's typed answer; inside Agent Center the root's
+    /// `answerDrafts` keeps it instead.
+    @State private var localTypedAnswer = AgentPromptAnswerDrafts.Draft()
     @FocusState private var promptTextFocused: Bool
 
     private var isPhone: Bool { CompactLayout.isPhone(horizontalSizeClass) }
@@ -31,7 +40,7 @@ struct AgentMessageView: View, Equatable {
     var body: some View {
         VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 7) {
             ForEach(Array(message.blocks.enumerated()), id: \.offset) { pair in
-                blockView(pair.element)
+                blockView(pair.element, disclosure: disclosure(pair.offset))
             }
             if let time = message.displayTime {
                 Text(time, style: .time)
@@ -42,13 +51,19 @@ struct AgentMessageView: View, Equatable {
         .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
     }
 
+    /// Kept by the detail across container swaps; a standalone message keeps
+    /// each disclosure's own state.
+    private func disclosure(_ offset: Int) -> Binding<Bool>? {
+        disclosures?.binding(AgentBlockDisclosures.key(recordID: message.recordID, blockIndex: firstBlockIndex + offset))
+    }
+
     @ViewBuilder
-    private func blockView(_ block: AgentBlock) -> some View {
+    private func blockView(_ block: AgentBlock, disclosure: Binding<Bool>?) -> some View {
         switch block {
         case .text(let text):
             proseBlock(text)
         case .thinking(let text):
-            DisclosureGroup {
+            AgentBlockDisclosureGroup(isExpanded: disclosure) {
                 AgentMarkdownText(source: text, isPhone: isPhone)
                     .foregroundStyle(T.fgDim)
                     .textSelection(.enabled)
@@ -61,12 +76,14 @@ struct AgentMessageView: View, Equatable {
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(T.border, style: StrokeStyle(lineWidth: 1, dash: [3, 3])))
-        case .toolCall(let name, let preview):
-            AgentToolCard(icon: "wrench.adjustable", title: name, preview: preview)
-        case .toolResult(let preview, let truncated):
-            AgentToolCard(icon: "terminal", title: truncated ? "result · truncated" : "result", preview: preview)
+        case .toolCall(let name, let preview, _):
+            AgentToolCard(icon: "wrench.adjustable", title: name, preview: preview, disclosure: disclosure)
+        case .toolResult(let preview, let truncated, _):
+            AgentToolCard(icon: "terminal", title: truncated ? "result · truncated" : "result", preview: preview,
+                          disclosure: disclosure)
         case .edit(let path, let diff):
-            AgentEditCard(path: path, diff: diff)
+            AgentEditCard(path: path, diff: diff, hostID: artifactHostID, sessionID: artifactSessionID,
+                          disclosure: disclosure)
         case .permission(let title), .question(let title):
             passivePrompt(title)
         case .queuedMessage(let text):
@@ -81,7 +98,7 @@ struct AgentMessageView: View, Equatable {
         case .subagent(let id, let type):
             labeledCard(icon: "point.3.connected.trianglepath.dotted", title: type ?? "subagent", detail: id)
         case .compactSummary(let text):
-            DisclosureGroup {
+            AgentBlockDisclosureGroup(isExpanded: disclosure) {
                 AgentMarkdownText(source: text, isPhone: isPhone)
                     .foregroundStyle(T.fgDim)
                     .textSelection(.enabled)
@@ -224,9 +241,16 @@ struct AgentMessageView: View, Equatable {
                     ForEach(prompt.options) { option in promptOption(option, prompt: prompt, available: available, vertical: false) }
                 }
             }
-            if promptTextOpen || prompt.kind == .textEntry && prompt.options.isEmpty {
+            if typedAnswer(prompt).isOpen || prompt.kind == .textEntry && prompt.options.isEmpty {
                 HStack(spacing: 7) {
-                    TextField("Your answer", text: $promptText)
+                    TextField("Your answer", text: Binding(
+                        get: { typedAnswer(prompt).text },
+                        set: { text in
+                            var draft = typedAnswer(prompt)
+                            draft.text = text
+                            setTypedAnswer(draft, for: prompt)
+                        }
+                    ))
                         .focused($promptTextFocused)
                         .textFieldStyle(.plain)
                         .font(Typography.tesseraMono(size: 11))
@@ -240,7 +264,7 @@ struct AgentMessageView: View, Equatable {
                     Button("Send") { sendPromptText(prompt, available: available) }
                         .font(Typography.tesseraMono(size: 10.5, weight: .medium))
                         .frame(minWidth: 44, minHeight: 44)
-                        .disabled(!available || AgentPromptAnswerPlanner.sanitizedText(promptText).isEmpty)
+                        .disabled(!available || AgentPromptAnswerPlanner.sanitizedText(typedAnswer(prompt).text).isEmpty)
                         .accessibilityIdentifier("agent-center-v2-answer-send")
                 }
                 .onChange(of: promptTextFocused) { _, focused in
@@ -274,9 +298,15 @@ struct AgentMessageView: View, Equatable {
         .padding(12)
         .background(T.inputBgSoft, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).stroke(T.border, lineWidth: 1))
-        .onChange(of: prompt.token.rawValue) { _, _ in
-            promptText = ""
-            promptTextOpen = false
+        .background(GeometryReader { geometry in
+            Color.clear.preference(key: AgentPromptCardPreference.self, value: AgentPromptCardFrame(
+                token: prompt.token, frame: geometry.frame(in: .named("agent-rows"))))
+        })
+        .onChange(of: prompt.token.rawValue) { previous, _ in
+            localTypedAnswer = .init()
+            if let answerDrafts, let thread = model.selectedThreadID {
+                answerDrafts[.init(thread: thread, token: previous)] = .init()
+            }
             promptTextFocused = false
             promptDetailExpanded = false
         }
@@ -287,8 +317,7 @@ struct AgentMessageView: View, Equatable {
                               available: Bool, vertical: Bool) -> some View {
         Button {
             if option.acceptsText == true {
-                promptText = ""
-                promptTextOpen = true
+                setTypedAnswer(.init(isOpen: true), for: prompt)
                 promptTextFocused = true
             } else {
                 answer(prompt, goal: .option(option.id))
@@ -328,6 +357,21 @@ struct AgentMessageView: View, Equatable {
         }
     }
 
+    /// The answer typed into this card. Prompt cards answer the selected
+    /// thread (see `answer`), so its drafts are kept under that thread.
+    private func typedAnswer(_ prompt: AgentActionPrompt) -> AgentPromptAnswerDrafts.Draft {
+        guard let answerDrafts, let thread = model.selectedThreadID else { return localTypedAnswer }
+        return answerDrafts[.init(thread: thread, token: prompt.token.rawValue)]
+    }
+
+    private func setTypedAnswer(_ draft: AgentPromptAnswerDrafts.Draft, for prompt: AgentActionPrompt) {
+        guard let answerDrafts, let thread = model.selectedThreadID else {
+            localTypedAnswer = draft
+            return
+        }
+        answerDrafts[.init(thread: thread, token: prompt.token.rawValue)] = draft
+    }
+
     private func answer(_ prompt: AgentActionPrompt, goal: AgentPromptAnswerGoal) {
         model.keyboardFocus = .action
         guard let threadID = model.selectedThreadID else { return }
@@ -335,8 +379,9 @@ struct AgentMessageView: View, Equatable {
     }
 
     private func sendPromptText(_ prompt: AgentActionPrompt, available: Bool) {
-        guard available, !AgentPromptAnswerPlanner.sanitizedText(promptText).isEmpty else { return }
-        answer(prompt, goal: .text(promptText))
+        let text = typedAnswer(prompt).text
+        guard available, !AgentPromptAnswerPlanner.sanitizedText(text).isEmpty else { return }
+        answer(prompt, goal: .text(text))
         promptTextFocused = false
     }
 
@@ -630,11 +675,12 @@ private struct AgentToolCard: View {
     let icon: String
     let title: String
     let preview: String
-    @State private var expanded = false
+    var disclosure: Binding<Bool>? = nil
+    @State private var localExpanded = false
     @Environment(\.designTokens) private var T
 
     var body: some View {
-        DisclosureGroup(isExpanded: $expanded) {
+        DisclosureGroup(isExpanded: disclosure ?? $localExpanded) {
             Text(preview)
                 .font(Typography.tesseraMono(size: 10.5))
                 .foregroundStyle(T.fgMuted)
@@ -658,17 +704,52 @@ private struct AgentToolCard: View {
 private struct AgentEditCard: View {
     let path: String?
     let diff: String?
-    @State private var expanded = false
+    var hostID: UUID? = nil
+    var sessionID: UUID? = nil
+    var disclosure: Binding<Bool>? = nil
+    @State private var localExpanded = false
     @Environment(\.designTokens) private var T
+    @Environment(\.openArtifact) private var openArtifact
 
     var body: some View {
-        DisclosureGroup(isExpanded: $expanded) {
+        DisclosureGroup(isExpanded: disclosure ?? $localExpanded) {
             if let diff {
                 Text(diff)
                     .font(Typography.tesseraMono(size: 10))
                     .foregroundStyle(T.fgMuted)
                     .textSelection(.enabled)
                     .padding(.top, 8)
+            }
+            if let path, let diff, let hostID, let openArtifact {
+                Button {
+                    // Snapshots expose the host/binding but no thread cwd;
+                    // keep relative paths intact rather than guessing a root.
+                    let firstLine = String(diff.prefix { !$0.isNewline })
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    UIApplication.shared.sendAction(
+                        #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil
+                    )
+                    openArtifact(ArtifactOpenRequest(
+                        hostID: hostID,
+                        target: .change(
+                            path: path, diff: diff,
+                            summary: firstLine.isEmpty ? String(localized: "edit") : firstLine
+                        ),
+                        origin: .agentEdit,
+                        sessionID: sessionID
+                    ))
+                } label: {
+                    Label("open as a tab", systemImage: "square.stack.3d.up")
+                        .font(Typography.tesseraMono(size: 10.5))
+                        .foregroundStyle(T.fgMuted)
+                        .padding(.horizontal, 10)
+                        .frame(minHeight: 44)
+                        .background(T.inputBgSoft, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(T.border, lineWidth: 1))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 8)
             }
         } label: {
             HStack(spacing: 9) {
@@ -759,6 +840,8 @@ private struct AgentSubagentGroupView: View {
 
 struct AgentChangesView: View {
     let changes: AgentChangeSummary
+    var hostID: UUID? = nil
+    var sessionID: UUID? = nil
     @Environment(\.designTokens) private var T
 
     var body: some View {
@@ -777,12 +860,24 @@ struct AgentChangesView: View {
                     .foregroundStyle(T.fgDim)
             } else {
                 ForEach(changes.edits) { edit in
-                    AgentEditCard(path: edit.path, diff: edit.diff)
+                    AgentEditCard(path: edit.path, diff: edit.diff, hostID: hostID, sessionID: sessionID)
                 }
             }
         }
         .padding(12)
         .background(T.inputBg, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(T.border, lineWidth: 1))
+    }
+}
+
+/// A disclosure whose state the detail keeps when it supplies one.
+private struct AgentBlockDisclosureGroup<Content: View, Label: View>: View {
+    let isExpanded: Binding<Bool>?
+    @ViewBuilder let content: () -> Content
+    @ViewBuilder let label: () -> Label
+    @State private var localExpanded = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: isExpanded ?? $localExpanded, content: content, label: label)
     }
 }

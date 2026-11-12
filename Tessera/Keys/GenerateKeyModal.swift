@@ -112,6 +112,7 @@ struct GenerateKeyModal: View {
             )
             .onTapGesture {}
             .padding(.horizontal, isPhone ? 18 : 0)
+            .modifier(KeyModalStage(onDismiss: onClose))
         }
         .onChange(of: draft.name) { _, _ in
             if draft.errorText == String(localized: "name is required") {
@@ -263,5 +264,26 @@ struct GenerateKeyModal: View {
                     .fill(T.accent)
                     .frame(width: 2)
             }
+    }
+}
+
+/// Centres a key modal's card over the dimmed page, and scrolls it where the
+/// space is shorter than the card (a phone in landscape, or with the keyboard
+/// up) so its actions never sit off the screen. A tap beside the card still
+/// dismisses it; the card swallows its own.
+struct KeyModalStage: ViewModifier {
+    let onDismiss: () -> Void
+
+    func body(content: Content) -> some View {
+        GeometryReader { proxy in
+            ScrollView {
+                content
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: onDismiss)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
     }
 }

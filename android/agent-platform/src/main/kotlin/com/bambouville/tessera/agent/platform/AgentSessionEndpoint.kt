@@ -1,6 +1,7 @@
 package com.bambouville.tessera.agent.platform
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONObject
 import com.bambouville.tessera.core.bridge.AgentIntegrationConfigSnapshot
@@ -93,6 +94,9 @@ data class AgentTerminalObservation(
     val screenEvidence: com.bambouville.tessera.core.bridge.SharedTerminalScreenEvidence? = null,
     /** Re-prove the process and recapture before mutation after a frame wait. */
     val captureWaitedForFrame: Boolean = false,
+    /** A local grid as a prompt observation reads it, its cells' backgrounds as SGR, which
+     * [visibleTail] loses; null where the tail is a tmux capture, which keeps its SGR. */
+    val promptText: String? = null,
 )
 
 data class AgentExecRequest(
@@ -546,6 +550,8 @@ interface AgentSessionEndpoint : AutoCloseable, AgentRemoteDataChannel {
     fun isCurrentIngestion(candidate: AgentEndpointBinding): Boolean = isCurrentRoute(candidate)
     val capabilities: StateFlow<AgentEndpointCapabilities>
     val lifecycleFrames: Flow<AgentLifecycleFrame>
+    /** Pane removals request fresh occupancy proof; a layout change alone cannot retire a thread. */
+    val tmuxPaneRemovals: Flow<Unit> get() = emptyFlow()
     /** The last lifecycle state delivered for this visible tmux pane, if retained. */
     fun retainedLifecycleFrame(binding: AgentEndpointBinding): AgentLifecycleFrame? = null
 
@@ -603,7 +609,7 @@ interface AgentSessionEndpoint : AutoCloseable, AgentRemoteDataChannel {
     ): AgentEndpointResult<AgentProcessDiscoverySnapshot>
     /** Reads requested process roots on this carrier, including vanished panes. */
     suspend fun observeOccupancy(bindings: List<AgentEndpointBinding>): AgentEndpointResult<AgentOccupancySnapshot> =
-        AgentEndpointResult.Unavailable("Process occupancy is unavailable for this terminal")
+        AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.ProcessOccupancy.reason)
     /**
      * Sends only a core-generated activation byte sequence after a fresh
      * foreground shell check. It never appends caller-defined shell text.
@@ -617,7 +623,7 @@ interface AgentSessionEndpoint : AutoCloseable, AgentRemoteDataChannel {
     suspend fun validatedDirectories(binding: AgentEndpointBinding): AgentEndpointResult<List<String>>
     /** Upload to this session's private temporary storage; never writes terminal input. */
     suspend fun uploadAttachment(binding: AgentEndpointBinding, sourceURI: String): AgentEndpointResult<String> =
-        AgentEndpointResult.Unavailable("File uploads are unavailable for this terminal")
+        AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.TerminalUploads.reason)
     /**
      * Why [sendInput] would refuse [binding] before its first byte, or null.
      * The sender still decides admission; only an explicit

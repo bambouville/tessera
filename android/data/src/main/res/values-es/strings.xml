@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="data_hostname_required">el nombre de host es obligatorio</string>
+    <string name="data_hostname_whitespace">el nombre de host no puede contener espacios</string>
+    <string name="data_hostname_control_characters">el nombre de host no puede contener caracteres de control</string>
+    <string name="data_username_required">el nombre de usuario es obligatorio</string>
+    <string name="data_username_whitespace">el nombre de usuario no puede contener espacios</string>
+    <string name="data_username_control_characters">el nombre de usuario no puede contener caracteres de control</string>
+    <string name="data_name_control_characters">el nombre no puede contener caracteres de control</string>
+    <string name="data_port_range">el puerto debe estar entre 1 y 65535</string>
+    <string name="data_host_text_too_long">el texto del host supera 64 KiB o contiene un carácter NUL</string>
+    <string name="data_invalid_tmux_mode">modo de tmux no válido</string>
+    <string name="data_invalid_transport_kind">tipo de transporte no válido</string>
+    <string name="data_tmux_target_required">se necesita un destino de tmux fijo</string>
+    <string name="data_tmux_target_too_long">el destino de tmux es demasiado largo</string>
+    <string name="data_tmux_target_characters">el destino de tmux solo puede usar letras, dígitos, guion bajo, guion o punto</string>
+    <string name="data_host_jump_through_itself">un host no puede usarse a sí mismo como host de salto</string>
+    <string name="data_jump_route_cycle">la ruta de salto contiene un ciclo</string>
+    <string name="data_route_host_unavailable">un host de la ruta no está disponible</string>
+    <string name="data_jump_host_unavailable">el host de salto no está disponible</string>
+    <string name="data_identity_name_required">el nombre de la identidad es obligatorio</string>
+    <string name="data_identity_name_control_characters">el nombre de la identidad no puede contener caracteres de control</string>
+    <plurals name="data_jump_route_too_long">
+        <item quantity="one">la ruta de salto supera %1$d host</item>
+        <item quantity="many">la ruta de salto supera los %1$d hosts</item>
+        <item quantity="other">la ruta de salto supera los %1$d hosts</item>
+    </plurals>
+</resources>

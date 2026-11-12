@@ -51,7 +51,7 @@ android {
     // copied — a copy is a second version to drift from.
     sourceSets {
         getByName("androidTest") {
-            assets.srcDir("../../ProtocolVectors")
+            assets.directories += "../../ProtocolVectors"
         }
     }
 
@@ -81,9 +81,6 @@ android {
         getByName("main") {
             jniLibs.directories.add(generatedJniLibraries.get().asFile.absolutePath)
         }
-        getByName("androidTest") {
-            assets.directories.add("../../ProtocolVectors")
-        }
     }
 
     lint {
@@ -104,4 +101,11 @@ dependencies {
     testImplementation(libs.json)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
+}
+
+// The artifacts golden replay reads the shared fixture from the repository, so
+// a fixture edit alone must invalidate cached test results.
+tasks.withType<Test>().configureEach {
+    inputs.file("../../Packages/TesseraCore/Tests/TesseraCoreABITests/Fixtures/artifacts-abi-golden.json")
+        .withPropertyName("artifactsAbiGolden")
 }

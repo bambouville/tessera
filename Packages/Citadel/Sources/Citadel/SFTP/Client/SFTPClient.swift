@@ -40,18 +40,27 @@ public final class SFTPClient: Sendable {
     internal static func setupChannelHanders(channel: Channel, logger: Logger) -> EventLoopFuture<SFTPClient> {
         let responses = SFTPResponses(sftpVersion: channel.eventLoop.makePromise())
 
-        let deserializeHandler = ByteToMessageHandler(SFTPMessageParser())
-        let serializeHandler = MessageToByteHandler(SFTPMessageSerializer())
-        let sftpInboundHandler = SFTPClientInboundHandler(responses: responses, logger: logger)
+        let addHandlers: @Sendable () throws -> Void = {
+            let deserializeHandler = ByteToMessageHandler(SFTPMessageParser())
+            let serializeHandler = MessageToByteHandler(SFTPMessageSerializer())
+            let sftpInboundHandler = SFTPClientInboundHandler(responses: responses, logger: logger)
 
-        return channel.pipeline.addHandlers(
-            SSHChannelDataUnwrapper(),
-            SSHOutboundChannelDataWrapper(),
-            deserializeHandler,
-            serializeHandler,
-            sftpInboundHandler,
-            CloseErrorHandler(logger: logger)
-        ).map {
+            try channel.pipeline.syncOperations.addHandlers(
+                SSHChannelDataUnwrapper(),
+                SSHOutboundChannelDataWrapper(),
+                deserializeHandler,
+                serializeHandler,
+                sftpInboundHandler,
+                CloseErrorHandler(logger: logger)
+            )
+        }
+        let initialized: EventLoopFuture<Void>
+        if channel.eventLoop.inEventLoop {
+            initialized = channel.eventLoop.makeCompletedFuture(withResultOf: addHandlers)
+        } else {
+            initialized = channel.eventLoop.submit(addHandlers)
+        }
+        return initialized.map {
             let client = SFTPClient(channel: channel, responses: responses, logger: logger)
 
             client.channel.closeFuture.whenComplete { _ in
@@ -176,19 +185,9 @@ public final class SFTPClient: Sendable {
             throw SFTPError.invalidResponse
         }
 
-        var names = [SFTPMessage.Name]()
-        var response = try await sendRequest(
-            .readdir(
-                .init(
-                    requestId: self.allocateRequestId(),
-                    handle: handle.handle
-                )
-            )
-        )
-
-        while case .name(let name) = response {
-            names.append(name)
-            response = try await sendRequest(
+        do {
+            var names = [SFTPMessage.Name]()
+            var response = try await sendRequest(
                 .readdir(
                     .init(
                         requestId: self.allocateRequestId(),
@@ -196,9 +195,20 @@ public final class SFTPClient: Sendable {
                     )
                 )
             )
-        }
 
-        return names
+            while case .name(let name) = response {
+                names.append(name)
+                response = try await sendRequest(.readdir(.init(
+                    requestId: self.allocateRequestId(), handle: handle.handle
+                )))
+            }
+
+            _ = try? await sendRequest(.closeFile(.init(requestId: self.allocateRequestId(), handle: handle.handle)))
+            return names
+        } catch {
+            _ = try? await sendRequest(.closeFile(.init(requestId: self.allocateRequestId(), handle: handle.handle)))
+            throw error
+        }
     }
 
     /// Get the attributes of a file on the SFTP server.

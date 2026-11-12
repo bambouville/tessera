@@ -2,7 +2,8 @@ import SwiftUI
 import SwiftData
 import PortForwarding
 
-/// Global Tunnels view, mounted at `SidebarItem.tunnels` in ContentView.
+/// Legacy global Tunnels view, retained for integration compatibility.
+/// Sidebar navigation now routes to Settings; rules live in host editors.
 /// Projects every host's defined `[PortForwardRule]` (from SwiftData)
 /// crossed with the currently-live `PortForwarderManager` instances
 /// (from `TunnelsRegistry`), so the user can see and control all

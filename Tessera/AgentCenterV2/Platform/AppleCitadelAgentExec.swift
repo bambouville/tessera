@@ -50,15 +50,15 @@ enum AppleAgentBoundedCommandExec {
                 guard await operation.accept(close: { try? await writer.close() }) else { return }
                 do {
                     var input = ByteBuffer()
-                    input.writeString(command + (installation ? "\n" : ";exit\n"))
+                    input.writeString(command + "\n")
                     try await writer.write(input)
-                    if installation { try await writer.closeInput() }
+                    try await writer.closeInput()
                     for try await chunk in inbound {
                         let bytes: ByteBuffer
                         switch chunk { case .stdout(let value), .stderr(let value): bytes = value }
                         try await operation.append(Data(bytes.readableBytesView))
                     }
-                    // Settle before withTTY's cleanup: remote EOF may already
+                    // Settle before withExec's cleanup: remote EOF may already
                     // have closed the child, which is not a command failure.
                     await operation.succeed()
                 } catch {
@@ -66,13 +66,12 @@ enum AppleAgentBoundedCommandExec {
                     throw error
                 }
             }
-            if installation {
-                try await client.withExec("/bin/sh -s", perform: perform)
-            } else {
-                // Match executeCommand(inShell: true)'s ShellRequest so login
-                // profile exports (CODEX_HOME, PATH, etc.) remain available.
-                try await client.withTTY(perform: perform)
-            }
+            // Reads run as installs do, and as Android runs both: `/bin/sh` on
+            // stdin, not the account's login shell. A login shell sourced the
+            // profile on every check, so a bash profile's Tessera line left a
+            // shell marker per check that nothing removes, and it read
+            // CODEX_HOME and friends where the installer never writes.
+            try await client.withExec("/bin/sh -s", perform: perform)
         }
     }
 
@@ -271,22 +270,22 @@ final class AppleCitadelAgentExecHandle: AppleAgentStreamingExecHandle {
                     stdin.writeBytes(request.stdin)
                     try await childWriter.write(stdin)
                     if request.program != .ingestionHost { try await childWriter.closeInput() }
-                    await self.markReady(writer: childWriter)
+                    self.markReady(writer: childWriter)
 
                     for try await output in inbound {
-                        await self.emit(output)
+                        self.emit(output)
                     }
                 }
-                await self.emitExit(status: 0)
-                await self.finish(throwing: nil)
+                self.emitExit(status: 0)
+                self.finish(throwing: nil)
             } catch is CancellationError {
-                await self.finish(throwing: AppleAgentPlatformError.cancelled)
+                self.finish(throwing: AppleAgentPlatformError.cancelled)
             } catch let failure as SSHClient.CommandFailed {
                 let status = Int32(clamping: failure.exitCode)
-                await self.emitExit(status: status)
-                await self.finish(throwing: nil)
+                self.emitExit(status: status)
+                self.finish(throwing: nil)
             } catch {
-                await self.finish(throwing: error)
+                self.finish(throwing: error)
             }
         }
     }

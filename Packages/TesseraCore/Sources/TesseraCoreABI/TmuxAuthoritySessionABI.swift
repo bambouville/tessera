@@ -152,6 +152,7 @@ enum TmuxAuthoritySessionWire {
             carriedShow: session.carriedShow(now: now).map(TmuxAuthoritySessionCarriedShowDTO.init),
             nextDeadlineMillis: session.nextDeadline,
             currentQueryID: session.query.current?.id,
+            ownedGeometryRecord: session.ownedGeometryRecord,
             effects: effects,
             trace: trace
         )
@@ -282,6 +283,15 @@ struct TmuxAuthoritySessionRequest: Decodable {
     let fenceID: UInt64?
     /// `claimFenceForce` (required): the force still awaits its proof.
     let outstanding: Bool?
+    /// `restoreOwnedGeometry` (required): the `ownedGeometryRecord`s earlier
+    /// processes kept, at most `maximumRestoredRecords`, each with
+    /// 1...`TmuxOwnedSizeHistory.limit` positive grids.
+    let ownedGeometryRecords: [TmuxOwnedGeometryRecord]?
+
+    /// What an adapter may hand back: the session keeps the newest
+    /// `TmuxOwnedGeometryRecord.restoreLimit`, so a longer list is an
+    /// adapter's store that stopped pruning.
+    static let maximumRestoredRecords = 4 * TmuxOwnedGeometryRecord.restoreLimit
 }
 
 struct TmuxAuthoritySessionClaimFenceDTO: Encodable {
@@ -450,6 +460,11 @@ struct TmuxAuthoritySessionResponse: Encodable {
     /// reduction can replace a due retry with a newer read, so an adapter
     /// sends a `queryAuthority` only while its id is still this one.
     let currentQueryID: UInt64?
+    /// The grids owned under our standing stamp, for the adapter to keep
+    /// across a process death and send back with `restoreOwnedGeometry`;
+    /// absent when no stamp of ours stands or nothing is owned yet. Its
+    /// absence never deletes a record already kept.
+    let ownedGeometryRecord: TmuxOwnedGeometryRecord?
     let effects: [TmuxAuthoritySessionEffectDTO]
     /// `TmuxGridAuthoritySession.describeTransition`; absent for `snapshot`.
     let trace: String?
@@ -577,6 +592,15 @@ extension TmuxAuthoritySessionRequest {
             return .abortClaim(generation: generation, reason: abortReason)
         case "tick":
             return .tick
+        case "restoreOwnedGeometry":
+            guard let records = ownedGeometryRecords,
+                  records.count <= Self.maximumRestoredRecords,
+                  records.allSatisfy({ record in
+                      (1...TmuxOwnedSizeHistory.limit).contains(record.sizes.count)
+                          && record.sizes.allSatisfy { $0.columns > 0 && $0.rows > 0 }
+                  })
+            else { return nil }
+            return .restoreOwnedGeometry(records)
         default:
             return nil
         }

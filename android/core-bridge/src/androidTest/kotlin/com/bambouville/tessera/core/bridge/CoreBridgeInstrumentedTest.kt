@@ -83,6 +83,24 @@ class CoreBridgeInstrumentedTest {
     }
 
     @Test
+    fun plainMoshAgentIsReadyThroughTheSharedReducer() {
+        fun decide(deliverable: Boolean?) = SharedAgentIntegrationDecisions.resolve(
+            SharedAgentIntegrationObservation(
+                installation = SharedAgentIntegrationInstallation.Current,
+                foreground = SharedAgentIntegrationForeground.Agent,
+                shellIntegrationActive = false,
+                agentIntegrationActive = false,
+                agentRequiresLifecycleHook = true,
+                agentLifecycleDeliverable = deliverable,
+            ),
+        )
+
+        assertEquals(SharedAgentIntegrationDecisionKind.Ready, decide(false).kind)
+        assertEquals(false, decide(false).showsWarning)
+        assertEquals(SharedAgentIntegrationDecisionKind.InsideAgent, decide(null).kind)
+    }
+
+    @Test
     fun newerHostIntegrationRequiresAnAppUpdateAndRefusesInstall() {
         val decision = SharedAgentIntegrationDecisions.resolve(
             SharedAgentIntegrationObservation(

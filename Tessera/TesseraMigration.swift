@@ -113,10 +113,22 @@ enum TesseraModelContainer {
     /// previous `.modelContainer(for:)` modifier used, so existing installs keep
     /// their data.
     static func make(inMemory: Bool = false) throws -> ModelContainer {
-        try ModelContainer(
+        let configuration = ModelConfiguration(isStoredInMemoryOnly: inMemory)
+        if !inMemory { prepareStoreDirectory(for: configuration) }
+        return try ModelContainer(
             for: currentSchema,
             migrationPlan: TesseraMigrationPlan.self,
-            configurations: ModelConfiguration(isStoredInMemoryOnly: inMemory)
+            configurations: configuration
+        )
+    }
+
+    /// The store lives in the app group container, whose Application Support
+    /// directory a fresh install does not have yet. Core Data creates it only
+    /// after logging a failed open and a recovery, so make it first.
+    static func prepareStoreDirectory(for configuration: ModelConfiguration) {
+        try? FileManager.default.createDirectory(
+            at: configuration.url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
         )
     }
 }

@@ -1,13 +1,18 @@
 #include "ReadWorker.h"
+#include "SearchFold.h"
 #include "OpenCodeStore.h"
 #include "Json.h"
 #include "JsonlReader.h"
 #include "ReadStatus.h"
 #include <algorithm>
 #include <cctype>
+#include <climits>
+#include <cstdlib>
 #include <limits>
 #include <stdexcept>
 #include <set>
+#include <unordered_map>
+#include <unordered_set>
 #include <fcntl.h>
 #include <cerrno>
 #include <sys/resource.h>
@@ -108,6 +113,8 @@ void ReadWorker::run() {
             if (!changes_.empty()) notify();
             for (auto client : cancellations_) {
                 inventories_.erase(client);
+                for (auto it = searches_.begin(); it != searches_.end();)
+                    if (it->second.client == client) it = searches_.erase(it); else ++it;
                 for (auto it = native_.begin(); it != native_.end();)
                     if (it->first.first == client) it = native_.erase(it); else ++it;
                 for (auto it = windows_.begin(); it != windows_.end();)
@@ -194,7 +201,7 @@ std::string ReadWorker::cursor(uint64_t client, const std::string& thread, const
     cursors_[token] = {client, position, anchor, thread, identity, direction, providerCursor};
     cursorOrder_.push_back(token); return token;
 }
-std::vector<Source> ReadWorker::inventory() {
+ReadWorker::InventoryWalk ReadWorker::inventory() {
     const auto now = std::chrono::steady_clock::now();
     if (inventoryRefresh_ > now) return sharedInventory_;
     // The walk keeps no partial state, so it runs outside the read slice.
@@ -202,13 +209,43 @@ std::vector<Source> ReadWorker::inventory() {
     // Pi/Kimi header it had not cached yet (88 s on a real host). Headers
     // are bounded reads, and each is cached by its file witness.
     auto sources = [&] { JsonlContinuation::Suspend unsliced; return catalog_.inventory(); }();
-    inventoryFallback_.clear();
+    InventoryWalk walk;
+    walk.skipped = catalog_.skippedSources(); walk.skipReason = catalog_.skipReason();
+    walk.incomplete = catalog_.inventoryIncomplete();
     // Explicitly include every documented source kind. An empty sourceKinds
     // list means interactive-only in 0.154.0, not all historical sessions.
     // Codex's budget starts after the walk: a walk longer than it skipped
     // Codex's own list on every refresh.
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
     const auto initialNativeBytes = codex_.bytesRead();
+    std::unordered_set<std::string> listedCodex;
+    for (const auto& source : sources) if (source.provider == "codex") listedCodex.insert(source.path);
+    // Codex may record a rollout through a link or another spelling of its
+    // home. Its directory's real path finds the walk's spelling, once per
+    // directory; a miss walks from / per row.
+    std::unordered_map<std::string, std::string> realDirectories;
+    auto listedPath = [&](const std::string& path) -> std::string {
+        if (listedCodex.count(path)) return path;
+        // Only a path remember() would accept: never a relative one, nor one
+        // whose dot segments or NUL realpath() would read differently.
+        if (!Catalog::plainAbsolutePath(path)) return {};
+        const auto slash = path.rfind('/');
+        if (slash == 0) return {};
+        const auto [entry, added] = realDirectories.try_emplace(path.substr(0, slash));
+        if (added) { char resolved[PATH_MAX]; if (::realpath(entry->first.c_str(), resolved)) entry->second = resolved; }
+        if (entry->second.empty()) return {};
+        auto candidate = entry->second + path.substr(slash);
+        return listedCodex.count(candidate) ? candidate : std::string();
+    };
+    // Rows by handle and by Codex session, replacing a linear search per
+    // native row: rows x sources string compares inside the 1.5 s budget.
+    // Lists keep every index that ever held a key; a lookup re-checks the row.
+    std::unordered_map<std::string, std::vector<size_t>> byHandle, byCodexSession;
+    auto index = [&](size_t position) {
+        byHandle[sources[position].handle].push_back(position);
+        if (sources[position].provider == "codex") byCodexSession[sources[position].sessionID].push_back(position);
+    };
+    for (size_t position = 0; position < sources.size(); ++position) index(position);
     try {
         for (bool archived : {false, true}) {
             std::string next; std::set<std::string> seen;
@@ -233,12 +270,22 @@ std::vector<Source> ReadWorker::inventory() {
                 for (const auto row : simdjson::dom::array(json::get(response, "data").get_array().value())) {
                     const auto path = json::text(row, "path");
                     const auto modified = json::integer(row, "updatedAt");
-                    auto source = catalog_.identifyCodex(json::text(row, "id"), path, static_cast<uint64_t>(std::max<int64_t>(0, modified)));
-                    const auto found = std::find_if(sources.begin(), sources.end(), [&](const Source& item) {
-                        return item.handle == source.handle || (item.provider == "codex" && item.sessionID == source.sessionID);
+                    auto source = catalog_.identifyCodex(json::text(row, "id"), path, static_cast<uint64_t>(std::max<int64_t>(0, modified)),
+                        path.empty() ? std::string() : listedPath(path));
+                    // The first row with this handle or, for Codex, this session.
+                    size_t found = sources.size();
+                    auto earliest = [&](const auto& keys, const std::string& key, auto matches) {
+                        const auto entry = keys.find(key);
+                        if (entry == keys.end()) return;
+                        for (const auto position : entry->second)
+                            if (position < found && matches(sources[position])) found = position;
+                    };
+                    earliest(byHandle, source.handle, [&](const Source& item) { return item.handle == source.handle; });
+                    earliest(byCodexSession, source.sessionID, [&](const Source& item) {
+                        return item.provider == "codex" && item.sessionID == source.sessionID;
                     });
-                    if (found != sources.end()) *found = source;
-                    else if (sources.size() < 16384) sources.push_back(std::move(source));
+                    if (found != sources.size()) { sources[found] = source; index(found); }
+                    else if (sources.size() < 16384) { sources.push_back(std::move(source)); index(sources.size() - 1); }
                     else throw std::runtime_error("catalogBudgetExceeded");
                 }
                 next = json::text(response, "nextCursor");
@@ -251,13 +298,19 @@ std::vector<Source> ReadWorker::inventory() {
         }
     } catch (const std::exception& error) {
         if (cancelled_.load()) throw;
-        inventoryFallback_ = error.what();
+        walk.fallback = error.what();
     }
     std::sort(sources.begin(), sources.end(), [](const Source& left, const Source& right) {
         return left.modified != right.modified ? left.modified > right.modified : left.handle < right.handle;
     });
-    sharedInventory_ = sources; inventoryRefresh_ = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    return sources;
+    // One row per conversation, the newest. A rollout in both Codex roots was
+    // listed twice under two handles, and each client failed every pass on a
+    // thread with a second handle.
+    std::set<std::pair<std::string, std::string>> listed;
+    for (auto& source : sources)
+        if (source.sessionID.empty() || listed.emplace(source.provider, source.sessionID).second) walk.sources.push_back(std::move(source));
+    sharedInventory_ = walk; inventoryRefresh_ = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    return walk;
 }
 ReadResult ReadWorker::execute(const ReadJob& job) {
     ReadResult result; result.client = job.client;
@@ -326,7 +379,8 @@ ReadResult ReadWorker::execute(const ReadJob& job) {
             }
             auto snapshot = inventories_.find(job.client);
             if (snapshot == inventories_.end()) throw std::runtime_error("cursorExpired");
-            auto& inventory = snapshot->second.sources;
+            const auto& walk = snapshot->second.walk;
+            const auto& inventory = walk.sources;
             const auto& generation = snapshot->second.generation;
             if (!token.empty()) {
                 auto found = cursors_.find(token);
@@ -359,9 +413,189 @@ ReadResult ReadWorker::execute(const ReadJob& job) {
                 result.frames.push_back(std::move(encoded));
             }
             auto reply = envelope("inventory.end"); reply.boolean("hasMore", offset < inventory.size());
-            reply.optional("fallbackReason", inventoryFallback_, 128);
+            reply.optional("fallbackReason", walk.fallback, 128);
+            if (walk.skipped) {
+                reply.number("skippedSources", walk.skipped);
+                reply.optional("skipReason", walk.skipReason, 128);
+            }
+            // A source skipped mid-write lists once written: ask again.
+            if (walk.incomplete) reply.boolean("incomplete", true);
             if (offset < inventory.size()) reply.string("cursor", cursor(job.client, "", generation, offset, 0, "inventory"));
             result.frames.push_back(reply.finish()); return result;
+        }
+        if (result.kind == "search") {
+            // Each frame names its own thread; a request-level one would
+            // label them all.
+            if (!result.thread.empty()) { result.thread.clear(); throw std::runtime_error("invalidRequest"); }
+            const auto now = std::chrono::steady_clock::now();
+            for (auto it = searches_.begin(); it != searches_.end();)
+                if (it->second.expires <= now) it = searches_.erase(it); else ++it;
+            std::string key;
+            if (!token.empty()) {
+                const auto found = searches_.find(token);
+                if (found == searches_.end() || found->second.client != job.client) throw std::runtime_error("cursorExpired");
+                key = token;
+                // Threads the client already holds enough exact matches for.
+                // All or none: a rejected list leaves the search as it was.
+                const auto satisfied = json::get(request, "satisfied");
+                if (!satisfied.is_null()) {
+                    if (!satisfied.is_array()) throw std::runtime_error("invalidRequest");
+                    auto& state = found->second;
+                    const std::set<std::string_view> known(state.threads.begin(), state.threads.end());
+                    std::vector<std::string_view> handles;
+                    for (const auto thread : satisfied.get_array().value()) {
+                        std::string_view handle;
+                        if (thread.get_string().get(handle) || !known.count(handle)) throw std::runtime_error("invalidRequest");
+                        handles.push_back(handle);
+                    }
+                    state.satisfied.insert(handles.begin(), handles.end());
+                }
+            } else {
+                // A rerun after readPending continues the search it started.
+                for (const auto& entry : searches_)
+                    if (entry.second.client == job.client && entry.second.request == result.id) key = entry.first;
+            }
+            if (key.empty()) {
+                Search state; state.client = job.client; state.request = result.id;
+                const auto query = json::text(request, "query");
+                const auto threads = json::get(request, "threads");
+                if (query.empty() || query.size() > 512 || !threads.is_array()) throw std::runtime_error("invalidRequest");
+                state.query = search::query(search::foldQuery(query));
+                if (state.query.words.empty() && !state.query.phrase && !state.query.pageAll) throw std::runtime_error("invalidRequest");
+                std::set<std::string> unique;
+                for (const auto thread : threads.get_array().value()) {
+                    std::string_view handle;
+                    if (thread.get_string().get(handle) || handle.empty() || handle.size() > 128 ||
+                        handle.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != std::string_view::npos ||
+                        !unique.emplace(handle).second || unique.size() > 4096) throw std::runtime_error("invalidRequest");
+                    state.threads.emplace_back(handle);
+                }
+                if (state.threads.empty()) throw std::runtime_error("invalidRequest");
+                if (!json::get(request, "limit").is_null()) {
+                    const auto limit = json::integer(request, "limit");
+                    if (limit < 1 || limit > 100) throw std::runtime_error("invalidRequest");
+                    state.limit = static_cast<size_t>(limit);
+                }
+                // Two searches per client, the newest kept; sixteen in all. A
+                // busy host keeps the client's searches as they were.
+                std::vector<std::string> owned;
+                for (const auto& entry : searches_) if (entry.second.client == job.client) owned.push_back(entry.first);
+                if (searches_.size() - (owned.size() >= 2 ? 1 : 0) >= 16) throw std::runtime_error("busy");
+                if (owned.size() >= 2) {
+                    auto oldest = std::min_element(owned.begin(), owned.end(), [&](const std::string& a, const std::string& b) {
+                        return searches_[a].expires < searches_[b].expires;
+                    });
+                    searches_.erase(*oldest);
+                }
+                key = randomID();
+                searches_[key] = std::move(state);
+            }
+            auto& state = searches_[key];
+            state.expires = now + std::chrono::seconds(60);
+            // Like a stateless page: open windows keep their indexes.
+            std::set<std::string> pinnedChains;
+            for (const auto& entry : windows_) if (!entry.second.sourcePath().empty()) pinnedChains.insert(entry.second.sourcePath());
+            claudeChains_.pin(pinnedChains); kimiHistories_.pin(pinnedChains); codexHistories_.pin(std::move(pinnedChains));
+            result.frames.push_back(envelope("search.begin").finish());
+            size_t bytes = result.frames.back().size();
+            uint64_t scanned = 0, bytesRead = 0, candidates = 0, oversized = 0;
+            bool progressed = false;
+            std::string folded;
+            WindowPageReader reader(catalog_, codex_, [this] { return cancelled_.load(); }, &claudeChains_, false, &codexHistories_, &kimiHistories_);
+            const auto nextThread = [&] {
+                ++state.next; state.found = 0; state.identity.clear(); state.codexPath.clear(); state.anchor.reset(); progressed = true;
+            };
+            // Bounded: about a quarter second and 192 KiB of matches, and
+            // never more than one read slice past the first finished page.
+            while (state.next < state.threads.size() &&
+                   !(progressed && (bytes >= 192 * 1024 || std::chrono::steady_clock::now() - now >= std::chrono::milliseconds(250)))) {
+                const auto handle = state.threads[state.next];
+                if (state.satisfied.count(handle)) { nextThread(); continue; }
+                Source source;
+                WindowRead selected;
+                try {
+                    if (state.query.pageAll) throw std::runtime_error("searchUnsupported");
+                    source = catalog_.source(handle);
+                    // A source with no file is read through the provider's
+                    // own server, whose record IDs a file search cannot give.
+                    if (source.path.empty()) throw std::runtime_error("searchUnsupported");
+                    if (source.provider == "codex" && !state.codexPath.empty()) source.path = state.codexPath;
+                    else if (source.provider == "codex") {
+                        uint64_t header = 0;
+                        if (!reader.canonicalCodexAvailable(source, header)) throw std::runtime_error("searchUnsupported");
+                        bytesRead += header; state.codexPath = source.path;
+                    }
+                    uint64_t revision = 0;
+                    selected = reader.read(source, state.identity, state.anchor, false, 100, revision);
+                    bytesRead += selected.bytesRead;
+                } catch (const std::exception& error) {
+                    const std::string code = error.what();
+                    if (code == "readPending" || cancelled_.load()) {
+                        if (progressed) break;
+                        throw;
+                    }
+                    auto skipped = envelope("search.skipped");
+                    skipped.string("thread", handle, 128); skipped.string("code", code, 128);
+                    result.frames.push_back(skipped.finish()); bytes += result.frames.back().size();
+                    nextThread(); continue;
+                }
+                const auto& identity = selected.segment.source;
+                const auto& records = selected.segment.records;
+                const bool resumable = source.provider != "opencode" && selected.segment.anchors.size() == records.size();
+                bool paused = false;
+                // Newest first, as the pages go.
+                for (size_t index = records.size(); index-- > 0;) {
+                    if (state.found >= state.limit) break;
+                    const auto& record = records[index];
+                    ++scanned;
+                    folded.clear();
+                    const auto kind = search::appendJsonValues(folded, record.value.json);
+                    if (!kind.composed && !search::matches(state.query, folded)) continue;
+                    auto value = envelope("search.record");
+                    value.string("thread", handle, 128); value.string("sourceIdentity", identity, 256);
+                    value.string("recordID", source.provider == "opencode" ? record.value.providerID : identity + ":" + std::to_string(record.start), 256);
+                    value.number("order", record.start); value.number("revision", record.revision);
+                    value.optional("providerRecordID", record.value.providerID, 256); value.optional("parentID", record.value.parentID, 256);
+                    value.string("seekToken", seekToken(record.value), 128);
+                    if (record.sourceByteOffset != UINT64_MAX) value.number("sourceOffset", record.sourceByteOffset);
+                    if (!record.receiptSourceIdentity.empty() && record.receiptSourceOffset != UINT64_MAX) {
+                        value.string("receiptSourceIdentity", record.receiptSourceIdentity, 256);
+                        value.string("receiptSourceOffset", std::to_string(record.receiptSourceOffset));
+                    }
+                    value.raw("record", record.value.json);
+                    auto encoded = value.finish();
+                    if (encoded.size() > 65536) { ++oversized; continue; }
+                    // A reply stays within its budget even inside one page: the
+                    // next request reads on from this record, which a backward
+                    // read from its end includes.
+                    if (resumable && candidates && bytes + encoded.size() > 192 * 1024) {
+                        const auto& after = selected.segment.anchors[index].after;
+                        state.identity = identity;
+                        state.anchor = WindowAnchor{identity, "", "", after.position, after.fileWitness, false, false};
+                        --scanned; paused = true; break;
+                    }
+                    bytes += encoded.size(); result.frames.push_back(std::move(encoded));
+                    ++state.found; ++candidates;
+                }
+                progressed = true;
+                if (paused) break;
+                if (state.found >= state.limit || !selected.segment.hasOlder || selected.segment.records.empty()) { nextThread(); continue; }
+                state.identity = identity;
+                state.anchor = WindowAnchor{identity, source.provider == "opencode" ? selected.before.providerCursor : "", "",
+                    selected.before.position, selected.before.fileWitness, false, false};
+            }
+            auto end = envelope("search.end");
+            end.number("records", candidates); end.number("scannedRecords", scanned);
+            end.number("threadsLeft", state.threads.size() - state.next);
+            end.number("bytesRead", bytesRead + job.resumedBytes);
+            if (oversized) end.number("oversizedRecords", oversized);
+            if (state.next < state.threads.size()) {
+                // The next request names the cursor; this request's ID no
+                // longer reaches the search.
+                state.request.clear(); end.string("cursor", key);
+            } else searches_.erase(key);
+            result.frames.push_back(end.finish());
+            return result;
         }
         auto source = catalog_.source(result.thread);
         result.provider = source.provider; result.sessionID = source.sessionID;
@@ -459,6 +693,22 @@ ReadResult ReadWorker::execute(const ReadJob& job) {
             }
             const auto requestedLimit = json::get(request, "limit").is_null() ? 100 : json::integer(request, "limit");
             if (requestedLimit <= 0 || requestedLimit > 100) throw std::runtime_error("invalidRequest");
+            WindowSeek seek;
+            if (json::text(request, "operation") == "seek") {
+                if (json::get(request, "order").get_uint64().get(seek.order)) throw std::runtime_error("invalidRequest");
+                seek.recordID = json::text(request, "recordID");
+                if (seek.recordID.empty() || seek.recordID.size() > 512) throw std::runtime_error("invalidRequest");
+                if (!json::get(request, "seekToken").is_null()) {
+                    seek.token = json::text(request, "seekToken");
+                    if (!validSeekToken(seek.token)) throw std::runtime_error("invalidRequest");
+                }
+                const auto offset = json::get(request, "sourceOffset");
+                if (!offset.is_null()) {
+                    uint64_t value = 0;
+                    if (offset.get_uint64().get(value)) throw std::runtime_error("invalidRequest");
+                    seek.sourceOffset = value;
+                }
+            }
             WindowPageReader reader(catalog_, codex_, [this] { return cancelled_.load(); }, &claudeChains_, job.automatic, &codexHistories_, &kimiHistories_);
             // The service-wide retained budget: committed plus staged pages of
             // every client's windows. This lane is the only writer, so the
@@ -470,7 +720,7 @@ ReadResult ReadWorker::execute(const ReadJob& job) {
             WindowReply page;
             try {
                 page = window.read(reader, codex_, source, result.id, json::text(request, "operation"), token,
-                    static_cast<uint64_t>(version), static_cast<size_t>(requestedLimit), job.automatic, serviceBytes);
+                    static_cast<uint64_t>(version), static_cast<size_t>(requestedLimit), job.automatic, serviceBytes, seek);
             } catch (...) {
                 if (!window.version() && !window.pending()) windows_.erase(key);
                 throw;
@@ -480,13 +730,14 @@ ReadResult ReadWorker::execute(const ReadJob& job) {
             if (page.unchanged) return result;
             try {
                 const auto operation = page.lane == "bootstrap" ? "bootstrap" :
-                    (page.lane == "before" || page.lane == "after") ? "history" : "updates";
+                    (page.lane == "before" || page.lane == "after" || page.lane == "seek") ? "history" : "updates";
                 auto begin = envelope("page.begin"); begin.string("sourceIdentity", page.source); begin.optional("from", token);
                 begin.string("operation", operation); result.frames.push_back(begin.finish());
                 std::sort(page.records.begin(), page.records.end(), [](const auto& left, const auto& right) { return left.start < right.start; });
                 for (const auto& record : page.records) {
                     auto value = envelope("page.record"); value.string("recordID", page.native ? record.value.providerID : page.source + ":" + std::to_string(record.start), 256);
                     value.number("order", record.start); value.number("revision", record.revision); value.raw("record", record.value.json);
+                    value.string("seekToken", seekToken(record.value), 128);
                     value.string("sourceType", record.value.sourceType, 256);
                     value.string("disposition", record.value.disposition, 32);
                     value.boolean("visible", record.value.visible);
@@ -855,6 +1106,7 @@ ReadResult ReadWorker::execute(const ReadJob& job) {
             value.string("recordID", native ? record.value.providerID : page.sourceIdentity + ":" + std::to_string(record.start), 256);
             value.number("order", record.start); value.number("revision", record.revision);
             value.optional("providerRecordID", record.value.providerID, 256); value.optional("parentID", record.value.parentID, 256);
+            value.string("seekToken", seekToken(record.value), 128);
             if (record.sourceByteOffset != UINT64_MAX) value.number("sourceOffset", record.sourceByteOffset);
             if (!record.receiptSourceIdentity.empty() && record.receiptSourceOffset != UINT64_MAX) {
                 value.string("receiptSourceIdentity", record.receiptSourceIdentity, 256);
@@ -894,7 +1146,12 @@ ReadResult ReadWorker::execute(const ReadJob& job) {
             (!JsonlContinuation::active() || JsonlContinuation::active()->consumed() == 0))
             result.code = "readContinuationTimeout";
         auto reply = envelope("error"); reply.string("code", result.code, 128);
-        reply.raw("status", ReadStatus::from(result.code).json()); result.frames.push_back(reply.finish());
+        // A refused seek leaves the window as it was and the app opens at
+        // the newest page instead: no read failed, so no status asks for a
+        // recovery.
+        if (result.code != "seekUnsupported" && result.code != "seekRecordMoved")
+            reply.raw("status", ReadStatus::from(result.code).json());
+        result.frames.push_back(reply.finish());
     }
     return result;
 }

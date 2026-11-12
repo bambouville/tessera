@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- The Linux Agent Host builds ride along as assets only to be uploaded
+         to the remote host over SFTP. The app never extracts or runs them on
+         the device, so there is no local native code to protect. -->
+    <issue id="UnsafeNativeCodeLocation">
+        <ignore regexp="SharedAssets/agent-host/tessera-agent-host-linux-(aarch64|x86_64)" />
+    </issue>
+</lint>

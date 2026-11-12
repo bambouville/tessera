@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="forwarding_title">端口转发</string>
+    <string name="forwarding_intro">本地和动态监听器留在本设备上。远程绑定位于服务器端。</string>
+    <string name="forwarding_add">添加</string>
+    <string name="forwarding_no_rules">没有转发规则。</string>
+    <string name="forwarding_enabled">已启用</string>
+    <string name="forwarding_open">↗ 打开</string>
+    <string name="forwarding_edit">编辑</string>
+    <string name="forwarding_delete">删除</string>
+    <string name="forwarding_stop">停止</string>
+    <string name="forwarding_start">开始</string>
+    <string name="forwarding_summary_remote">%1$s → 设备 %2$s</string>
+    <string name="forwarding_rule_title">转发规则</string>
+    <string name="forwarding_edit_title">编辑 %1$s</string>
+    <string name="forwarding_cancel">取消</string>
+    <string name="forwarding_save">保存</string>
+    <string name="forwarding_label">标签</string>
+    <string name="forwarding_optional">可选</string>
+    <string name="forwarding_bind_address">绑定地址</string>
+    <string name="forwarding_loopback_only">仅限回环地址</string>
+    <string name="forwarding_bind_port">绑定端口</string>
+    <string name="forwarding_bind_port_zero_allowed">绑定端口 · 允许 0</string>
+    <string name="forwarding_remote_host">远程主机</string>
+    <string name="forwarding_device_host">设备端主机</string>
+    <string name="forwarding_target_port">目标端口</string>
+    <string name="forwarding_ports_whole_numbers">端口必须是整数。</string>
+    <string name="forwarding_direction_local">本地</string>
+    <string name="forwarding_direction_remote">远程</string>
+    <string name="forwarding_direction_dynamic">动态</string>
+    <string name="forwarding_status_stopped">已停止</string>
+    <string name="forwarding_status_starting">正在启动</string>
+    <string name="forwarding_status_serving">有服务响应 · 0 个活动连接</string>
+    <string name="forwarding_status_nothing_serving">监听中 · 远程端口 %1$s 无服务响应</string>
+    <string name="forwarding_status_checking">监听中 · 正在检查…</string>
+    <string name="forwarding_status_listening">监听中 · 0 个活动连接</string>
+    <string name="forwarding_invalid_bind_address">需要填写绑定地址。</string>
+    <string name="forwarding_invalid_bind_port">绑定端口必须有效。</string>
+    <string name="forwarding_non_loopback_local_bind">本地和动态转发必须绑定到回环地址。</string>
+    <string name="forwarding_missing_target">需要填写目标。</string>
+    <string name="forwarding_invalid_target_address">需要填写目标主机。</string>
+    <string name="forwarding_invalid_target_port">目标端口必须有效。</string>
+    <string name="forwarding_dynamic_cannot_have_target">动态转发会按每个 SOCKS 请求选择目标。</string>
+    <string name="forwarding_bind_collision">另一个本地监听器正在使用此端口。</string>
+    <string name="forwarding_runtime_unavailable">SSH 转发不可用</string>
+    <string name="forwarding_listener_stopped">转发监听器意外停止</string>
+    <string name="forwarding_mosh_without_side_channel">Mosh 没有经过认证的 SSH 侧信道</string>
+    <string name="forwarding_transport_unsupported_local">此传输方式不支持本地转发</string>
+    <string name="forwarding_transport_unsupported_remote">此传输方式不支持远程转发</string>
+    <string name="forwarding_transport_unsupported_dynamic">此传输方式不支持动态转发</string>
+    <string name="forwarding_chrome_label">端口转发</string>
+    <plurals name="forwarding_chrome_label_serving">
+        <item quantity="other">端口转发，%1$d 个有服务响应</item>
+    </plurals>
+    <string name="forwarding_browser_back">返回</string>
+    <string name="forwarding_browser_forward">前进</string>
+    <string name="forwarding_browser_stop">停止</string>
+    <string name="forwarding_browser_reload">重新加载</string>
+    <string name="forwarding_browser_done">完成</string>
+    <string name="forwarding_browser_no_answer">该隧道没有响应</string>
+    <string name="forwarding_browser_check_rule">请确认该规则正在监听，且远程服务已启动。</string>
+    <string name="forwarding_browser_retry">重试</string>
+    <string name="forwarding_browser_connection_failed">连接失败</string>
+    <plurals name="forwarding_status_active_connections">
+        <item quantity="other">%1$d 个活动连接</item>
+    </plurals>
+    <plurals name="forwarding_chrome_active_tunnels">
+        <item quantity="other">%1$d 个活动隧道</item>
+    </plurals>
+    <plurals name="forwarding_chrome_active_tunnels_serving">
+        <item quantity="other">%1$d 个活动隧道，%2$d 个有服务响应</item>
+    </plurals>
+</resources>

@@ -9,7 +9,8 @@ import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.ComposeTimeoutException
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.bambouville.tessera.core.bridge.SharedScrollRoute
 import com.bambouville.tessera.core.bridge.SharedTmuxCellRect
@@ -40,6 +41,28 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class MoshPaneHistoryOverlayInstrumentedTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    /** [waitUntil][androidx.compose.ui.test.junit4.ComposeTestRule.waitUntil], failing with the native view's state. */
+    private fun waitForNativeView(
+        runtime: MoshPaneHistoryOverlayRuntime,
+        state: () -> String = { "" },
+        condition: () -> Boolean,
+    ) {
+        try {
+            compose.waitUntil(timeoutMillis = 5_000, condition = condition)
+        } catch (timeout: ComposeTimeoutException) {
+            val described = compose.runOnUiThread {
+                val view = runtime.surface.view
+                val ancestors = generateSequence(view.parent as? View) { it.parent as? View }
+                    .joinToString(">") { "${it.javaClass.simpleName}:${it.visibility}" }
+                "topRow=${view.topRow} recorded=${runtime.lastNativeTopRow} pending=${view.isHistoryScrollPending} " +
+                    "shown=${view.isShown} attached=${view.isAttachedToWindow} window=${view.windowVisibility} " +
+                    "size=${view.width}x${view.height} grid=${view.mEmulator?.mColumns}x${view.mEmulator?.mRows} " +
+                    "ancestors=$ancestors ${state()}"
+            }
+            throw AssertionError(described, timeout)
+        }
+    }
 
     @Test
     fun fedCaptureRevealsDetachedOverlayThenParksItAtLiveTail() {
@@ -76,6 +99,10 @@ class MoshPaneHistoryOverlayInstrumentedTest {
                 paneId = paneId,
                 surface = TermuxTerminalSurface(compose.activity),
             )
+            // The production host commits the pane grid when it creates the
+            // surface. Left to layout, the grid lands one settle delay later
+            // and resets the placed history row to the live tail.
+            runtime.surface.resize(60, 24)
         }
         compose.setContent {
             if (mounted.value) {
@@ -168,7 +195,7 @@ class MoshPaneHistoryOverlayInstrumentedTest {
             runtime.surface.view.topRow = -4
             runtime.surface.view.invalidate()
         }
-        compose.waitUntil(timeoutMillis = 5_000) { runtime.lastNativeTopRow < 0 }
+        waitForNativeView(runtime, { "visible=${visible.value} dismisses=$dismisses" }) { runtime.lastNativeTopRow < 0 }
         compose.runOnIdle {
             runtime.surface.view.topRow = 0
             runtime.surface.view.invalidate()

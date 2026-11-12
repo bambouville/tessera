@@ -15,10 +15,13 @@ final class TerminalKeyboardHandoffTests: XCTestCase {
         @Published var mountsTerminal = true
         @Published var mountsSecondTerminal = false
         @Published var secondSuppressed = true
+        @Published var coveringSheet = false
         @Published var updateID = 0
         var appliedUpdateID = -1
         var secondAppliedUpdateID = -1
         var mountCount = 0
+        /// The update each primary-surface callback was installed by.
+        var callbackUpdateIDs: [String: Int] = [:]
         weak var terminal: TesseraResponderAwareTerminalView?
         weak var secondTerminal: TesseraResponderAwareTerminalView?
     }
@@ -44,6 +47,9 @@ final class TerminalKeyboardHandoffTests: XCTestCase {
 
         private func surface(isSecondary: Bool) -> some View {
             let updateID = state.updateID
+            func record(_ callback: String) {
+                if !isSecondary { state.callbackUpdateIDs[callback] = updateID }
+            }
             return TerminalSurfaceBound(
                 initialData: [],
                 onMade: {
@@ -54,10 +60,10 @@ final class TerminalKeyboardHandoffTests: XCTestCase {
                         state.mountCount += 1
                     }
                 },
-                onReady: {},
-                onSend: { _ in },
-                onResize: { _, _ in },
-                onTitle: { _ in },
+                onReady: { record("ready") },
+                onSend: { _ in record("send") },
+                onResize: { _, _ in record("resize") },
+                onTitle: { _ in record("title") },
                 onUserActivity: {
                     if isSecondary {
                         state.secondAppliedUpdateID = updateID
@@ -65,7 +71,7 @@ final class TerminalKeyboardHandoffTests: XCTestCase {
                         state.appliedUpdateID = updateID
                     }
                 },
-                onBell: nil,
+                onBell: { record("bell") },
                 mouseReportingImpliesAltScreen: false,
                 suppressDirectColorQueryResponses: true,
                 tmuxShortcutsEnabled: false,
@@ -74,7 +80,8 @@ final class TerminalKeyboardHandoffTests: XCTestCase {
                 onSwitcherShortcut: nil,
                 onOpenSettings: nil,
                 suppressFirstResponderReclaim: isSecondary ? state.secondSuppressed : state.suppressed,
-                onHardwareKey: nil
+                coveringSheetPresented: !isSecondary && state.coveringSheet,
+                onHardwareKey: { _ in record("hardwareKey") }
             )
             .frame(width: 320, height: 120)
         }
@@ -121,6 +128,7 @@ final class TerminalKeyboardHandoffTests: XCTestCase {
     private func settle(
         _ controller: UIViewController,
         minimumDuration: TimeInterval = 0.15,
+        timeout: TimeInterval = 3,
         until condition: () -> Bool
     ) -> Bool {
         let start = ProcessInfo.processInfo.systemUptime
@@ -138,7 +146,7 @@ final class TerminalKeyboardHandoffTests: XCTestCase {
             } else {
                 satisfiedAt = nil
             }
-        } while ProcessInfo.processInfo.systemUptime - start < 3
+        } while ProcessInfo.processInfo.systemUptime - start < timeout
         return false
     }
 
@@ -153,7 +161,9 @@ final class TerminalKeyboardHandoffTests: XCTestCase {
         // Clean up even if a prerequisite throws before returning the fixture.
         var ready = false
         defer { if !ready { fixture.close() } }
-        XCTAssertTrue(settle(fixture.controller) {
+        // A cold terminal mount on a loaded machine can outlast the 3 s that
+        // the behavior checks below allow; only this setup gets longer.
+        XCTAssertTrue(settle(fixture.controller, timeout: 15) {
             fixture.window.isKeyWindow
                 && (!mountsTerminal || fixture.state.terminal?.window === fixture.window)
         }, "the terminal test window never became key or mounted its surface")
@@ -170,9 +180,13 @@ final class TerminalKeyboardHandoffTests: XCTestCase {
         return fixture
     }
 
-    private func publishHandoff(_ fixture: Fixture, age: TimeInterval = 0) {
+    /// Cases about consumption, suppression and replay take a window a loaded
+    /// simulator cannot outlast; only the expiry case uses the production one.
+    private func publishHandoff(
+        _ fixture: Fixture, age: TimeInterval = 0, validity: TimeInterval = 30
+    ) {
         fixture.state.handoff = TerminalKeyboardHandoff(
-            issuedAt: ProcessInfo.processInfo.systemUptime - age
+            issuedAt: ProcessInfo.processInfo.systemUptime - age, validity: validity
         )
         fixture.state.updateID += 1
     }
@@ -234,7 +248,8 @@ final class TerminalKeyboardHandoffTests: XCTestCase {
         defer { fixture.close() }
 
         fixture.state.suppressed = false
-        publishHandoff(fixture, age: TerminalKeyboardHandoff.validityDuration + 1)
+        publishHandoff(fixture, age: TerminalKeyboardHandoff.validityDuration + 1,
+                       validity: TerminalKeyboardHandoff.validityDuration)
 
         assertFieldKeepsFocus(fixture)
     }
@@ -257,8 +272,7 @@ final class TerminalKeyboardHandoffTests: XCTestCase {
 
         XCTAssertTrue(fixture.state.handoff === handoff)
         XCTAssertTrue(handoff.isSpent)
-        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - handoff.issuedAt,
-                          TerminalKeyboardHandoff.validityDuration,
+        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - handoff.issuedAt, handoff.validity,
                           "this case must exercise consumption before the handoff expires")
         XCTAssertEqual(fixture.state.mountCount, 1)
     }
@@ -273,9 +287,44 @@ final class TerminalKeyboardHandoffTests: XCTestCase {
         assertFieldKeepsFocus(fixture)
         let handoff = try XCTUnwrap(fixture.state.handoff)
         XCTAssertTrue(handoff.isLive, "suppression must block an otherwise live handoff")
-        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - handoff.issuedAt,
-                          TerminalKeyboardHandoff.validityDuration,
+        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - handoff.issuedAt, handoff.validity,
                           "this case must exercise suppression before the handoff expires")
+    }
+
+    func testCoveringSheetYieldsFocusOnceAndReturnsItOnClose() throws {
+        let fixture = try makeFixture()
+        defer { fixture.close() }
+        let terminal = try XCTUnwrap(fixture.state.terminal)
+        XCTAssertTrue(fixture.field.resignFirstResponder())
+        fixture.state.suppressed = false
+        fixture.state.updateID += 1
+        XCTAssertTrue(settle(fixture.controller) { terminal.isFirstResponder },
+                      "the unsuppressed terminal never reclaimed focus")
+
+        fixture.state.coveringSheet = true
+        fixture.state.updateID += 1
+        XCTAssertTrue(settle(fixture.controller) {
+            hasAppliedUpdate(fixture) && !terminal.isFirstResponder
+        }, "raising the sheet must resign the terminal and hold reclaim off")
+
+        // A terminal tap under the open sheet takes focus; later updates
+        // while the sheet stays up must not strip it again.
+        XCTAssertTrue(terminal.becomeFirstResponder())
+        fixture.state.updateID += 1
+        XCTAssertTrue(settle(fixture.controller) {
+            hasAppliedUpdate(fixture) && terminal.isFirstResponder
+        }, "focus taken under the sheet was resigned again")
+
+        XCTAssertTrue(terminal.resignFirstResponderForTransition())
+        fixture.state.updateID += 1
+        XCTAssertTrue(settle(fixture.controller) {
+            hasAppliedUpdate(fixture) && !terminal.isFirstResponder
+        }, "the open sheet must keep holding reclaim off")
+        fixture.state.coveringSheet = false
+        fixture.state.updateID += 1
+        XCTAssertTrue(settle(fixture.controller) {
+            hasAppliedUpdate(fixture) && terminal.isFirstResponder
+        }, "closing the sheet never returned focus to the terminal")
     }
 
     func testLiveHandoffReachesNewlyMountedSurface() throws {
@@ -380,8 +429,7 @@ final class TerminalKeyboardHandoffTests: XCTestCase {
         XCTAssertFalse(firstTerminal.isFirstResponder)
         XCTAssertFalse(secondTerminal.isFirstResponder,
                        "surface B must not replay a handoff consumed by surface A")
-        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - handoff.issuedAt,
-                          TerminalKeyboardHandoff.validityDuration,
+        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - handoff.issuedAt, handoff.validity,
                           "this case must exercise shared consumption before expiry")
     }
 
@@ -402,6 +450,10 @@ final class TerminalKeyboardHandoffTests: XCTestCase {
         XCTAssertTrue(fixture.secondField.isFirstResponder)
         XCTAssertTrue(handoff.isSpent, "a new text input must revoke the palette handoff")
         XCTAssertFalse(handoff.isLive)
+        // The palette's own window: measured where revocation is checked, since
+        // the settle below can outlast it on a loaded simulator.
+        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - handoff.issuedAt, handoff.validity,
+                          "this case must exercise editing revocation before expiry")
 
         fixture.state.suppressed = false
         fixture.state.updateID += 1
@@ -412,9 +464,30 @@ final class TerminalKeyboardHandoffTests: XCTestCase {
         XCTAssertTrue(fixture.secondField.isFirstResponder)
         XCTAssertFalse(fixture.field.isFirstResponder)
         XCTAssertFalse(fixture.state.terminal?.isFirstResponder == true)
-        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - handoff.issuedAt,
-                          TerminalKeyboardHandoff.validityDuration,
-                          "this case must exercise editing revocation before expiry")
+    }
+
+    /// The coordinator outlives the view values SwiftUI makes on every state
+    /// change. A callback kept from the first would act on that first state:
+    /// a resize after an iPad grew out of compact went out under the compact
+    /// guard and never reached the server.
+    func testEveryTerminalCallbackActsOnTheLatestUpdate() throws {
+        let fixture = try makeFixture()
+        defer { fixture.close() }
+        for _ in 0..<2 {
+            fixture.state.updateID += 1
+            XCTAssertTrue(settle(fixture.controller) { hasAppliedUpdate(fixture) }, "the update never applied")
+        }
+        let coordinator = try XCTUnwrap(fixture.state.terminal?.terminalDelegate as? TerminalSurfaceBound.Coordinator)
+        fixture.state.callbackUpdateIDs = [:]
+        coordinator.onReady()
+        coordinator.onSend([0x61][...])
+        coordinator.onResize(80, 24)
+        coordinator.onTitle("title")
+        coordinator.onBell?()
+        coordinator.onHardwareKey?(.pageUp)
+        let latest = fixture.state.updateID
+        XCTAssertEqual(fixture.state.callbackUpdateIDs, ["ready": latest, "send": latest, "resize": latest,
+                                                         "title": latest, "bell": latest, "hardwareKey": latest])
     }
 
     func testPaletteClosePublishesOncePerOpenToClosedTransition() {
@@ -432,6 +505,7 @@ final class TerminalKeyboardHandoffTests: XCTestCase {
             return
         }
         XCTAssertFalse(palette.isOpen)
+        XCTAssertEqual(first.validity, TerminalKeyboardHandoff.validityDuration)
         XCTAssertGreaterThanOrEqual(first.issuedAt, beforeClose)
         XCTAssertLessThanOrEqual(first.issuedAt, ProcessInfo.processInfo.systemUptime)
         palette.close()

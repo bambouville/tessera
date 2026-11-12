@@ -27,13 +27,13 @@ public protocol SFTPDirectoryHandle {
 }
 
 /// The context for the current SSH connection. This is passed to the delegate for each operation.
-public struct SSHContext {
+public struct SSHContext: Sendable {
     /// The username of the user that is connected to the SSH server.
     public let username: String?
 }
 
-public struct SSHShellContext {
-    public struct WindowSize {
+public struct SSHShellContext: Sendable {
+    public struct WindowSize: Sendable {
         public let columns: Int
         public let rows: Int
     }
@@ -104,13 +104,15 @@ enum SFTPServerSubsystem {
             username: username
         )
 
-        return channel.pipeline.addHandlers(
-            SSHChannelDataUnwrapper(),
-            SSHOutboundChannelDataWrapper(),
-            deserializeHandler,
-            serializeHandler,
-            sftpInboundHandler,
-            CloseErrorHandler(logger: logger)
-        )
+        return channel.eventLoop.makeCompletedFuture {
+            try channel.pipeline.syncOperations.addHandlers(
+                SSHChannelDataUnwrapper(),
+                SSHOutboundChannelDataWrapper(),
+                deserializeHandler,
+                serializeHandler,
+                sftpInboundHandler,
+                CloseErrorHandler(logger: logger)
+            )
+        }
     }
 }

@@ -1,9 +1,11 @@
 package com.bambouville.tessera.forwarding
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -17,8 +19,13 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.bambouville.tessera.core.bridge.SharedForwardedWebTarget
+import com.bambouville.tessera.design.ArtifactOpenOrigin
+import com.bambouville.tessera.design.ArtifactOpenRequest
+import com.bambouville.tessera.design.LocalArtifactOpener
 import com.bambouville.tessera.design.LocalTesseraTokens
 import com.bambouville.tessera.design.TesseraBanner
 import com.bambouville.tessera.design.TesseraButton
@@ -31,6 +38,7 @@ import com.bambouville.tessera.design.TesseraSegmented
 import com.bambouville.tessera.design.TesseraTextField
 import com.bambouville.tessera.design.TesseraToggleRow
 import com.bambouville.tessera.design.TesseraType
+import com.bambouville.tessera.design.text
 
 /**
  * Compact-safe host editor panel. Persistence and the live manager remain
@@ -49,8 +57,11 @@ fun PortForwardingPanel(
      * panel appears: the user opened it to read these answers.
      */
     onProbeServices: () -> Unit = {},
+    hostId: String? = null,
+    sessionHint: String? = null,
 ) {
     val tokens = LocalTesseraTokens.current
+    val artifactOpener = LocalArtifactOpener.current
     var editing by remember { mutableStateOf<PortForwardRule?>(null) }
     var creating by remember { mutableStateOf(false) }
     var browsing by remember { mutableStateOf<BrowsingTunnel?>(null) }
@@ -63,21 +74,21 @@ fun PortForwardingPanel(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                TesseraKicker("port forwarding")
+                TesseraKicker(stringResource(R.string.forwarding_title))
                 Text(
-                    "Local and dynamic listeners stay on this device. Remote binds are server-side.",
+                    stringResource(R.string.forwarding_intro),
                     modifier = Modifier.padding(top = 4.dp),
                     style = TesseraType.rowMeta,
                     color = tokens.fgMuted,
                 )
             }
-            TesseraButton(text = "add", onClick = { creating = true }, compact = true)
+            TesseraButton(text = stringResource(R.string.forwarding_add), onClick = { creating = true }, compact = true)
         }
         TesseraHairline()
 
         if (rules.isEmpty()) {
             Text(
-                "No forwarding rules.",
+                stringResource(R.string.forwarding_no_rules),
                 modifier = Modifier.padding(18.dp),
                 style = TesseraType.body,
                 color = tokens.fgMuted,
@@ -96,7 +107,9 @@ fun PortForwardingPanel(
                         onStart = { onStartRule(rule.id) },
                         onStop = { onStopRule(rule.id) },
                         onOpenInBrowser = { target ->
-                            browsing = BrowsingTunnel(target, rule.label)
+                            val page = forwardingArtifactPage(rule, hostId, target.scheme, sessionHint)
+                            if (artifactOpener != null && page != null) artifactOpener.open(page)
+                            else browsing = BrowsingTunnel(target, rule.label)
                         },
                     )
                     TesseraHairline(Modifier.padding(start = 18.dp))
@@ -139,6 +152,31 @@ fun PortForwardingPanel(
 /** The tunnel the in-app browser is showing, with the label its chrome names. */
 private data class BrowsingTunnel(val target: SharedForwardedWebTarget, val label: String)
 
+/** A page tab is remote loopback; a rule targeting another machine keeps its browser. */
+internal fun forwardingArtifactPage(
+    rule: PortForwardRule,
+    hostId: String?,
+    scheme: String,
+    sessionHint: String? = null,
+): ArtifactOpenRequest.Page? {
+    val target = rule.target ?: return null
+    if (hostId.isNullOrBlank() || rule.direction != PortForwardDirection.LOCAL ||
+        target.port !in 1..65_535 || !isArtifactLoopbackHost(target.host)) return null
+    return ArtifactOpenRequest.Page(hostId, scheme, target.port, "/", ArtifactOpenOrigin.Forwarding, sessionHint)
+}
+
+/** Numeric parsing only: classifying a rule must never resolve a hostname. */
+internal fun isArtifactLoopbackHost(host: String): Boolean {
+    val value = host.trim()
+    if (value.equals("localhost", ignoreCase = true) ||
+        value in setOf("::1", "[::1]", "0:0:0:0:0:0:0:1", "[0:0:0:0:0:0:0:1]")) return true
+    val octets = value.split('.')
+    return octets.size == 4 && octets.first() == "127" && octets.all { octet ->
+        octet.isNotEmpty() && octet.length <= 3 && octet.all { it in '0'..'9' } &&
+            octet.toInt() in 0..255
+    }
+}
+
 @Composable
 private fun ForwardRuleRow(
     rule: PortForwardRule,
@@ -159,15 +197,16 @@ private fun ForwardRuleRow(
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.weight(1f)) {
+                    val directionTitle = stringResource(directionLabel(rule.direction)).lowercase()
                     Text(
-                        rule.label.ifBlank { directionLabel(rule.direction).lowercase() },
+                        rule.label.ifBlank { directionTitle },
                         style = TesseraType.rowTitle,
                         color = tokens.fg,
                     )
                     Text(ruleSummary(rule), style = TesseraType.code, color = tokens.fgMuted)
                 }
                 TesseraToggleRow(
-                    title = "enabled",
+                    title = stringResource(R.string.forwarding_enabled),
                     checked = rule.enabled,
                     onCheckedChange = onEnabledChanged,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 10.dp),
@@ -175,7 +214,7 @@ private fun ForwardRuleRow(
                 )
             }
             Text(
-                forwardRuleStatusText(rule, state, probed),
+                forwardRuleStatusText(forwardRuleStatus(rule, state, probed)),
                 style = TesseraType.rowMeta,
                 color = statusColor(
                     status = status,
@@ -195,16 +234,16 @@ private fun ForwardRuleRow(
                 val webTarget = addressable.takeIf { status.isCarrying() }
                 if (webTarget != null) {
                     TesseraButton(
-                        text = "\u2197 open",
+                        text = stringResource(R.string.forwarding_open),
                         onClick = { onOpenInBrowser(webTarget) },
                         style = TesseraButtonStyle.Primary,
                         compact = true,
-                        modifier = Modifier.testTag("tunnel-open-${rule.bind.port}"),
+                        modifier = Modifier.heightIn(min = 48.dp).testTag("tunnel-open-${rule.bind.port}"),
                     )
                 }
-                TesseraButton(text = "edit", onClick = onEdit, compact = true)
+                TesseraButton(text = stringResource(R.string.forwarding_edit), onClick = onEdit, compact = true)
                 TesseraButton(
-                    text = "delete",
+                    text = stringResource(R.string.forwarding_delete),
                     onClick = onDelete,
                     style = TesseraButtonStyle.Danger,
                     compact = true,
@@ -212,10 +251,10 @@ private fun ForwardRuleRow(
                 if (status is PortForwardingStatus.Listening || status is PortForwardingStatus.Active ||
                     status is PortForwardingStatus.Starting
                 ) {
-                    TesseraButton(text = "stop", onClick = onStop, compact = true)
+                    TesseraButton(text = stringResource(R.string.forwarding_stop), onClick = onStop, compact = true)
                 } else if (rule.enabled) {
                     TesseraButton(
-                        text = "start",
+                        text = stringResource(R.string.forwarding_start),
                         onClick = onStart,
                         style = TesseraButtonStyle.Primary,
                         compact = true,
@@ -239,7 +278,7 @@ private fun ForwardRuleEditor(
     var bindPort by remember(initial.id) { mutableStateOf(initial.bind.port.toString()) }
     var targetHost by remember(initial.id) { mutableStateOf(initial.target?.host.orEmpty()) }
     var targetPort by remember(initial.id) { mutableStateOf(initial.target?.port?.toString().orEmpty()) }
-    var validation by remember(initial.id) { mutableStateOf<String?>(null) }
+    var validation by remember(initial.id) { mutableStateOf<Int?>(null) }
 
     fun save() {
         val rule = ruleFromForm(
@@ -252,7 +291,7 @@ private fun ForwardRuleEditor(
             targetPort = targetPort,
         )
         if (rule == null) {
-            validation = "Ports must be whole numbers."
+            validation = R.string.forwarding_ports_whole_numbers
         } else {
             val error = PortForwardRuleValidator.validate(rule, existing)
             if (error == null) onSave(rule) else validation = validationText(error)
@@ -260,12 +299,16 @@ private fun ForwardRuleEditor(
     }
 
     TesseraDialog(
-        title = if (initial.label.isBlank()) "forwarding rule" else "edit ${initial.label}",
+        title = if (initial.label.isBlank()) {
+            stringResource(R.string.forwarding_rule_title)
+        } else {
+            stringResource(R.string.forwarding_edit_title, initial.label)
+        },
         onDismissRequest = onDismiss,
         actions = {
-            TesseraButton(text = "cancel", onClick = onDismiss, compact = true)
+            TesseraButton(text = stringResource(R.string.forwarding_cancel), onClick = onDismiss, compact = true)
             TesseraButton(
-                text = "save",
+                text = stringResource(R.string.forwarding_save),
                 onClick = ::save,
                 style = TesseraButtonStyle.Primary,
                 compact = true,
@@ -277,33 +320,43 @@ private fun ForwardRuleEditor(
             TesseraTextField(
                 value = label,
                 onValueChange = { label = it },
-                label = "label",
-                placeholder = "optional",
+                label = stringResource(R.string.forwarding_label),
+                placeholder = stringResource(R.string.forwarding_optional),
             )
             TesseraTextField(
                 value = bindHost,
                 onValueChange = { bindHost = it },
-                label = "bind address",
-                supporting = if (direction != PortForwardDirection.REMOTE) "loopback only" else null,
+                label = stringResource(R.string.forwarding_bind_address),
+                supporting = if (direction != PortForwardDirection.REMOTE) {
+                    stringResource(R.string.forwarding_loopback_only)
+                } else {
+                    null
+                },
             )
             TesseraTextField(
                 value = bindPort,
                 onValueChange = { bindPort = it.filter(Char::isDigit) },
-                label = if (direction == PortForwardDirection.REMOTE) "bind port · 0 allowed" else "bind port",
+                label = stringResource(
+                    if (direction == PortForwardDirection.REMOTE) R.string.forwarding_bind_port_zero_allowed
+                    else R.string.forwarding_bind_port,
+                ),
             )
             if (direction != PortForwardDirection.DYNAMIC) {
                 TesseraTextField(
                     value = targetHost,
                     onValueChange = { targetHost = it },
-                    label = if (direction == PortForwardDirection.LOCAL) "remote host" else "device host",
+                    label = stringResource(
+                        if (direction == PortForwardDirection.LOCAL) R.string.forwarding_remote_host
+                        else R.string.forwarding_device_host,
+                    ),
                 )
                 TesseraTextField(
                     value = targetPort,
                     onValueChange = { targetPort = it.filter(Char::isDigit) },
-                    label = "target port",
+                    label = stringResource(R.string.forwarding_target_port),
                 )
             }
-            validation?.let { TesseraBanner(it) }
+            validation?.let { TesseraBanner(stringResource(it)) }
         }
     }
 }
@@ -312,7 +365,7 @@ private fun ForwardRuleEditor(
 private fun DirectionPicker(direction: PortForwardDirection, onSelected: (PortForwardDirection) -> Unit) {
     val choices = PortForwardDirection.entries
     TesseraSegmented(
-        options = choices.map(::directionLabel),
+        options = choices.map { stringResource(directionLabel(it)) },
         selectedIndex = choices.indexOf(direction),
         onSelect = { onSelected(choices[it]) },
     )
@@ -344,47 +397,78 @@ private fun defaultRule() = PortForwardRule(
     target = PortForwardEndpoint("localhost", 80),
 )
 
-private fun directionLabel(direction: PortForwardDirection): String = when (direction) {
-    PortForwardDirection.LOCAL -> "Local"
-    PortForwardDirection.REMOTE -> "Remote"
-    PortForwardDirection.DYNAMIC -> "Dynamic"
+@StringRes
+private fun directionLabel(direction: PortForwardDirection): Int = when (direction) {
+    PortForwardDirection.LOCAL -> R.string.forwarding_direction_local
+    PortForwardDirection.REMOTE -> R.string.forwarding_direction_remote
+    PortForwardDirection.DYNAMIC -> R.string.forwarding_direction_dynamic
 }
 
+@Composable
 private fun ruleSummary(rule: PortForwardRule): String = when (rule.direction) {
     PortForwardDirection.LOCAL -> "${rule.bind.host}:${rule.bind.port} → ${rule.target?.host}:${rule.target?.port}"
-    PortForwardDirection.REMOTE -> "${rule.bind.host}:${rule.bind.port} → device ${rule.target?.host}:${rule.target?.port}"
+    PortForwardDirection.REMOTE -> stringResource(
+        R.string.forwarding_summary_remote,
+        "${rule.bind.host}:${rule.bind.port}",
+        "${rule.target?.host}:${rule.target?.port}",
+    )
     PortForwardDirection.DYNAMIC -> "SOCKS5 ${rule.bind.host}:${rule.bind.port}"
 }
 
 /**
- * A rule row's status line. A listening rule also says whether anything
- * answers at the far end; those lines match iOS `listeningStatusText` word
- * for word.
+ * What a rule row's status line says. A listening rule also says whether
+ * anything answers at the far end; those lines match iOS
+ * `listeningStatusText` word for word.
  *
  * "checking…" is promised only for a rule the manager actively probes
  * ([probed]) and whose server has not refused forwarding outright: any other
  * unknown rule would never resolve, so it says only that it is listening.
  * The row already shows the bound address.
  */
-internal fun forwardRuleStatusText(
+internal sealed interface ForwardRuleStatusLine {
+    data object Stopped : ForwardRuleStatusLine
+    data object Starting : ForwardRuleStatusLine
+    data object Serving : ForwardRuleStatusLine
+    data class NothingServing(val remotePort: Int?) : ForwardRuleStatusLine
+    data object Checking : ForwardRuleStatusLine
+    data object Listening : ForwardRuleStatusLine
+    data class Active(val connections: Int) : ForwardRuleStatusLine
+    data class Failed(val failure: PortForwardingFailure) : ForwardRuleStatusLine
+}
+
+internal fun forwardRuleStatus(
     rule: PortForwardRule,
     state: PortForwardingState?,
     probed: Boolean,
-): String = when (val status = state?.status ?: PortForwardingStatus.Idle) {
-    PortForwardingStatus.Idle -> "Stopped"
-    PortForwardingStatus.Starting -> "Starting"
+): ForwardRuleStatusLine = when (val status = state?.status ?: PortForwardingStatus.Idle) {
+    PortForwardingStatus.Idle -> ForwardRuleStatusLine.Stopped
+    PortForwardingStatus.Starting -> ForwardRuleStatusLine.Starting
     is PortForwardingStatus.Listening -> when {
-        state?.service == ForwardedServiceState.Serving -> "serving \u00b7 0 active"
-        state?.service == ForwardedServiceState.NotServing ->
-            "listening \u00b7 nothing serving on remote port ${rule.target?.port}"
-        probed && state?.forwardingProhibited != true -> "listening \u00b7 checking\u2026"
-        else -> "listening \u00b7 0 active"
+        state?.service == ForwardedServiceState.Serving -> ForwardRuleStatusLine.Serving
+        state?.service == ForwardedServiceState.NotServing -> ForwardRuleStatusLine.NothingServing(rule.target?.port)
+        probed && state?.forwardingProhibited != true -> ForwardRuleStatusLine.Checking
+        else -> ForwardRuleStatusLine.Listening
     }
-    is PortForwardingStatus.Active -> "${status.connectionCount} active connection${if (status.connectionCount == 1) "" else "s"}"
-    is PortForwardingStatus.Failed -> when (val failure = status.failure) {
-        is PortForwardingFailure.Transport -> failure.reason
-        is PortForwardingFailure.Unsupported -> failure.reason
-        is PortForwardingFailure.Validation -> validationText(failure.error)
+    is PortForwardingStatus.Active -> ForwardRuleStatusLine.Active(status.connectionCount)
+    is PortForwardingStatus.Failed -> ForwardRuleStatusLine.Failed(status.failure)
+}
+
+/** The row's status line in the user's language. */
+@Composable
+internal fun forwardRuleStatusText(line: ForwardRuleStatusLine): String = when (line) {
+    ForwardRuleStatusLine.Stopped -> stringResource(R.string.forwarding_status_stopped)
+    ForwardRuleStatusLine.Starting -> stringResource(R.string.forwarding_status_starting)
+    ForwardRuleStatusLine.Serving -> stringResource(R.string.forwarding_status_serving)
+    is ForwardRuleStatusLine.NothingServing ->
+        stringResource(R.string.forwarding_status_nothing_serving, line.remotePort.toString())
+    ForwardRuleStatusLine.Checking -> stringResource(R.string.forwarding_status_checking)
+    ForwardRuleStatusLine.Listening -> stringResource(R.string.forwarding_status_listening)
+    is ForwardRuleStatusLine.Active ->
+        pluralStringResource(R.plurals.forwarding_status_active_connections, line.connections, line.connections)
+    is ForwardRuleStatusLine.Failed -> when (val failure = line.failure) {
+        is PortForwardingFailure.Transport -> failure.display.text()
+        is PortForwardingFailure.Unsupported -> failure.display.text()
+        is PortForwardingFailure.Validation -> stringResource(validationText(failure.error))
     }
 }
 
@@ -411,13 +495,14 @@ private fun statusColor(
     }
 }
 
-private fun validationText(error: PortForwardRuleError): String = when (error) {
-    is PortForwardRuleError.InvalidBindAddress -> "A bind address is required."
-    is PortForwardRuleError.InvalidBindPort -> "Bind port must be valid."
-    is PortForwardRuleError.NonLoopbackLocalBind -> "Local and dynamic forwarding must bind to loopback."
-    PortForwardRuleError.MissingTarget -> "A target is required."
-    is PortForwardRuleError.InvalidTargetAddress -> "A target host is required."
-    is PortForwardRuleError.InvalidTargetPort -> "Target port must be valid."
-    PortForwardRuleError.DynamicForwardCannotHaveTarget -> "Dynamic forwarding chooses a target per SOCKS request."
-    is PortForwardRuleError.BindCollision -> "Another local listener uses this port."
+@StringRes
+private fun validationText(error: PortForwardRuleError): Int = when (error) {
+    is PortForwardRuleError.InvalidBindAddress -> R.string.forwarding_invalid_bind_address
+    is PortForwardRuleError.InvalidBindPort -> R.string.forwarding_invalid_bind_port
+    is PortForwardRuleError.NonLoopbackLocalBind -> R.string.forwarding_non_loopback_local_bind
+    PortForwardRuleError.MissingTarget -> R.string.forwarding_missing_target
+    is PortForwardRuleError.InvalidTargetAddress -> R.string.forwarding_invalid_target_address
+    is PortForwardRuleError.InvalidTargetPort -> R.string.forwarding_invalid_target_port
+    PortForwardRuleError.DynamicForwardCannotHaveTarget -> R.string.forwarding_dynamic_cannot_have_target
+    is PortForwardRuleError.BindCollision -> R.string.forwarding_bind_collision
 }

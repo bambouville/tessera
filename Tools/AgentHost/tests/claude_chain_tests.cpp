@@ -2,6 +2,7 @@
 #include "KimiHistoryIndex.h"
 #include <cassert>
 #include <stdexcept>
+#include <filesystem>
 #include <fstream>
 #include <unistd.h>
 #include <memory>
@@ -284,6 +285,35 @@ int main() {
         assert(index.lazy() && index.size() == 96 && index.bytes() < 16384);
         assert(index.entry(reader, 0).id == "r0" && index.entry(reader, 95).id == "r95");
     }
+    // A same-width interior rewrite that also appends keeps the stat's growth
+    // and the boundary witness. The entry contradicting the index fails once
+    // and the next refresh rebuilds, rather than every read failing.
+    {
+        auto record = [](size_t i, const std::string& id) {
+            return "{\"type\":\"user\",\"uuid\":\"" + id + "\",\"parentUuid\":" +
+                (i ? "\"c" + std::to_string(i - 1) + "x\"" : std::string("null")) +
+                ",\"message\":{\"role\":\"user\",\"content\":\"synthetic\"}}\n";
+        };
+        std::string content;
+        for (size_t i = 0; i < 20; ++i) content += record(i, "c" + std::to_string(i) + "x");
+        { std::ofstream file(filename); file << content; }
+        Index index; { tessera::JsonlReader reader(filename, "claude"); refreshIndex(index, reader); }
+        assert(!index.lazy() && index.size() == 20);
+        const auto generation = index.generation();
+        const auto at = content.find("\"c5x\""); content.replace(at + 1, 3, "c5y");
+        content += record(20, "c20x");
+        { std::fstream file(filename, std::ios::in | std::ios::out | std::ios::binary); file << content; }
+        { tessera::JsonlReader reader(filename, "claude"); refreshIndex(index, reader); }
+        assert(index.generation() == generation && index.size() == 21);
+        size_t contradictions = 0;
+        for (size_t i = 0; i < index.size() && !contradictions; ++i)
+            try { (void)indexEntry(index, i); }
+            catch (const std::runtime_error& error) { assert(std::string(error.what()) == "sourceChanged"); ++contradictions; }
+        assert(contradictions == 1);
+        { tessera::JsonlReader reader(filename, "claude"); refreshIndex(index, reader); }
+        assert(index.generation() != generation);
+        for (size_t i = 0; i < index.size(); ++i) (void)indexEntry(index, i);
+    }
     // A read owns one finite validation cut. Appends at every reconstruction
     // yield cannot keep moving its target or restart branch proof forever.
     for (const size_t budget : {size_t(4096), size_t(128 * 1024 * 1024)}) {
@@ -411,6 +441,12 @@ int main() {
             }
             // Reverse window reads rebuild the lazy ancestry cursor.
             for (size_t i = expected.size(); i-- > 0;) assert(index.entry(reader, i).start == offsets[expected[i]]);
+            // Pages in any order, newer than the walk too, resume it where it
+            // passed their boundary.
+            std::vector<size_t> order(expected.size());
+            for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+            std::shuffle(order.begin(), order.end(), std::mt19937(7));
+            for (const auto i : order) assert(index.entry(reader, i).start == offsets[expected[i]]);
         }
         return expected;
     };
@@ -658,6 +694,83 @@ int main() {
                 }
             }
         }
+    }
+    // Paging newer after a deep read resumes the lazy walk at a page
+    // boundary it passed, not at the tail: reading a long path oldest first
+    // costs a few walks, not one per page. Each step finds a parent that
+    // appears once just before its child, never by rereading the file
+    // after it.
+    {
+        Graph graph{user(0, "n0", "")};
+        for (uint64_t i = 1; i < 20000; ++i) graph.push_back(user(i, "n" + std::to_string(i), "n" + std::to_string(i - 1)));
+        graph.push_back(user(20000, "aside", "n0", false));
+        const auto offsets = writeGraph(graph);
+        const auto expected = selection(graph, Index::chain(graph, {}, true));
+        tessera::JsonlReader reader(filename, "claude"); Index index;
+        refreshIndex(index, reader, {}, 1024 * 1024);
+        assert(index.lazy() && !index.linear() && index.size() == expected.size());
+        const auto built = reader.bytesRead();
+        assert(index.entry(reader, 0).start == offsets[expected[0]]);
+        const auto deep = reader.bytesRead() - built;
+        for (size_t i = 1; i < expected.size(); ++i) assert(index.entry(reader, i).start == offsets[expected[i]]);
+        const auto newer = reader.bytesRead() - built - deep;
+        const auto fileBytes = static_cast<uint64_t>(std::filesystem::file_size(filename));
+        std::cout << "claude lazy newer paging bytes=" << newer << " deep=" << deep << " file=" << fileBytes << '\n';
+        assert(deep > 0 && newer < 3 * deep && deep < 16 * fileBytes);
+        // Another index opening takes a byte: the build, its UUID filters
+        // (folded to fit) and checkpoints stay, so paging costs the same.
+        const auto kept = reader.bytesRead();
+        refreshIndex(index, reader, {}, 1024 * 1024 - 1);
+        assert(index.lazy() && index.size() == expected.size() && index.bytes() < 1024 * 1024 - 1);
+        const auto refreshed = reader.bytesRead() - kept;
+        assert(refreshed < fileBytes / 8);
+        for (size_t i = 0; i < expected.size(); ++i) {
+            assert(index.entry(reader, i).start == offsets[expected[i]]);
+            assert(reader.bytesRead() - kept - refreshed < 2 * newer);
+        }
+        std::cout << "claude lazy smaller budget refresh=" << refreshed << " paging=" << reader.bytesRead() - kept - refreshed << '\n';
+        // Far smaller, the walk still pages from what stays.
+        refreshIndex(index, reader, {}, 64 * 1024);
+        assert(index.lazy() && index.bytes() < 64 * 1024);
+        for (size_t i = expected.size(); i-- > 0;) assert(index.entry(reader, i).start == offsets[expected[i]]);
+    }
+    // A smaller budget folds the UUID filters: a node revised after its
+    // child still reads as repeated there, so the child finds the revision
+    // rather than the stale copy just above it.
+    {
+        Graph graph{user(0, "n0", "")};
+        for (uint64_t i = 1; i < 600; ++i) graph.push_back(user(i, "n" + std::to_string(i), "n" + std::to_string(i - 1)));
+        for (const uint64_t revised : {100, 300, 450}) graph.push_back(user(graph.size(), "n" + std::to_string(revised), "n" + std::to_string(revised - 1)));
+        graph.push_back(user(graph.size(), "last", "n599"));
+        const auto offsets = writeGraph(graph);
+        const auto expected = selection(graph, Index::chain(graph, {}, true));
+        tessera::JsonlReader reader(filename, "claude"); Index index;
+        refreshIndex(index, reader, {}, 16 * 1024);
+        assert(index.lazy() && index.size() == expected.size());
+        for (size_t i = 0; i < expected.size(); ++i) assert(index.entry(reader, i).start == offsets[expected[i]]);
+        refreshIndex(index, reader, {}, 16 * 1024 - 1);
+        for (size_t i = expected.size(); i-- > 0;) assert(index.entry(reader, i).start == offsets[expected[i]]);
+    }
+    // A filter small for the file seems to hold many lone UUIDs twice: their
+    // lookups read the later copies the fill met, not the file after the
+    // child, and real revisions are still the copies that win.
+    {
+        Graph graph{user(0, "n0", "")};
+        for (uint64_t i = 1; i < 20000; ++i) graph.push_back(user(i, "n" + std::to_string(i), "n" + std::to_string(i - 1)));
+        for (const uint64_t revised : {5000, 12000, 19000}) graph.push_back(user(graph.size(), "n" + std::to_string(revised), "n" + std::to_string(revised - 1)));
+        graph.push_back(user(graph.size(), "aside", "n0", false));
+        const auto offsets = writeGraph(graph);
+        const auto expected = selection(graph, Index::chain(graph, {}, true));
+        tessera::JsonlReader reader(filename, "claude"); Index index;
+        refreshIndex(index, reader, {}, 256 * 1024);
+        assert(index.lazy() && !index.linear() && index.size() == expected.size());
+        const auto built = reader.bytesRead();
+        assert(index.entry(reader, 0).start == offsets[expected[0]]);
+        const auto deep = reader.bytesRead() - built;
+        for (size_t i = 1; i < expected.size(); ++i) assert(index.entry(reader, i).start == offsets[expected[i]]);
+        const auto fileBytes = static_cast<uint64_t>(std::filesystem::file_size(filename));
+        std::cout << "claude lazy small filters deep=" << deep << " newer=" << reader.bytesRead() - built - deep << " file=" << fileBytes << '\n';
+        assert(deep < 16 * fileBytes);
     }
     // Pi keeps its persisted active branch and version-specific identities.
     for (unsigned version : {1U, 2U, 3U}) {

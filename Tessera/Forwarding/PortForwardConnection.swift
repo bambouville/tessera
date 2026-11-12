@@ -234,12 +234,11 @@ final class PortForwardConnection: Identifiable, Hashable {
         readyWaiter?.resume(throwing: PortForwardConnectionError.cancelled)
         readyWaiter = nil
 
-        remote.outbound.finish()
         if cancelLocal {
             local.cancel()
         }
         local.stateUpdateHandler = nil
-        try? await remote.channel.close().get()
+        await remote.finishAndClose()
 
         DiagnosticLogStore.appendForwarding(
             "connection summary id=\(shortID) cancelLocal=\(cancelLocal) durationMs=\(durationMs) bytesUp=\(bytesUp) bytesDown=\(bytesDown)"
@@ -296,5 +295,14 @@ private final class PortForwardConnectionReadyWaiter: @unchecked Sendable {
         didResume = true
         continuation?.resume(throwing: error)
         continuation = nil
+    }
+}
+
+extension NIOAsyncChannel {
+    /// Finishes the writer and waits out the channel's close, ignoring a
+    /// failed close. This is `executeThenClose`'s own path when its body
+    /// throws, reached without the deprecated `outbound` accessor.
+    func finishAndClose() async {
+        try? await executeThenClose { _, _ in throw CancellationError() }
     }
 }

@@ -3,6 +3,7 @@ package com.bambouville.tessera.terminal
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Typeface
 import android.os.Looper
 import android.util.Log
@@ -11,6 +12,7 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewTreeObserver
+import android.view.WindowInsets
 import android.view.inputmethod.InputMethodManager
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -133,6 +135,8 @@ data class TerminalTextSnapshot(
     /** Immutable cell evidence; provider interpretation remains in shared Core. */
     val screenEvidence: com.bambouville.tessera.core.bridge.SharedTerminalScreenEvidence? = null,
     val framePending: Boolean = false,
+    /** The screen as a prompt observation reads it: the cells' backgrounds as SGR, which the text loses. */
+    val promptText: String? = null,
 )
 
 enum class TerminalSelectionPathAction { QuickOpen, RevealInFiles }
@@ -214,6 +218,13 @@ interface TerminalSurface {
      * shape). Null disables it. Typed text never passes through here.
      */
     var imeTraceSink: ((String) -> Unit)?
+        get() = null
+        set(_) {}
+    /**
+     * Whether the session takes keys now. TalkBack's page key for a
+     * full-screen program reports the edge, not a key, while it refuses them.
+     */
+    var inputAdmission: (() -> Boolean)?
         get() = null
         set(_) {}
     /** The ledger owner permitted to paint this surface, or null while the ledger is idle. */
@@ -359,6 +370,11 @@ class TermuxTerminalSurface(
             field = value
             view.setImeTraceSink(value?.let { sink -> java.util.function.Consumer<String> { sink(it) } })
         }
+    override var inputAdmission: (() -> Boolean)? = null
+        set(value) {
+            field = value
+            view.setInputAdmission(value?.let { admits -> java.util.function.BooleanSupplier { admits() } })
+        }
     override var boundOwner: RenderOwner? = null
         private set
     override var droppedForeignFeeds: Int = 0
@@ -379,24 +395,7 @@ class TermuxTerminalSurface(
 
     override fun snapshotText(): TerminalTextSnapshot? {
         requireMainThread()
-        val emulator = view.mEmulator ?: return null
-        if (emulator.isSynchronizedOutputPending) return TerminalTextSnapshot("", null, framePending = true)
-        val columns = emulator.mColumns
-        val rows = emulator.mRows
-        if (rows <= 0 || columns <= 0 || columns > 65_536 / rows) return null
-        val physical = (0 until rows).map { row -> emulator.screen.getSelectedText(0, row, columns - 1, row) }
-        val cells = snapshotTerminalCells(physical, columns) { row, col -> emulator.screen.getStyleAt(row, col) } ?: return null
-        val screen = com.bambouville.tessera.core.bridge.SharedTerminalScreenEvidence(columns, cells,
-            (0 until rows).map { row ->
-                // Termux marks the previous row's outgoing wrap; Core and
-                // SwiftTerm mark this row as continuing its predecessor.
-                (row > 0 || emulator.screen.activeTranscriptRows > 0) && emulator.screen.getLineWrap(row - 1)
-            }, emulator.cursorRow,
-            emulator.cursorCol, emulator.isCursorEnabled, emulator.isAlternateBufferActive)
-        val captured = screen.physicalRows
-        val current = captured.getOrNull(screen.cursorRow)?.trimEnd() ?: return null
-        return TerminalTextSnapshot(captured.joinToString("\n"), current, captured, screen.cursorRow,
-            screen.cursorVisible, screen.cursorColumn, screenEvidence = screen)
+        return snapshotEmulatorText(view.mEmulator ?: return null)
     }
 
     override var onInput: ((ByteArray) -> Unit)? = null
@@ -441,6 +440,8 @@ class TermuxTerminalSurface(
     private var fontSizeSp = initialFontSizeSp.coerceIn(8, 40)
     private var theme = initialTheme
     private var backgroundImage: TerminalBackgroundImage? = null
+    /** [backgroundImage]'s decoded picture; the theme colour shows until it is. */
+    private var backgroundBitmap: Bitmap? = null
     private var cursorStyle = initialCursorStyle
     private var cursorBlink = initialCursorBlink
     private var outputAwaitingDraw = false
@@ -539,13 +540,12 @@ class TermuxTerminalSurface(
             val next = (fontSizeSp + delta).coerceIn(8, 40)
             if (next != fontSizeSp) {
                 fontSizeSp = next
-                view.setTextSize(textSizePixels(next))
-                view.requestLayout()
+                view.setFont(textSizePixels(next), view.typeface)
                 onFontSizeChanged?.invoke(next)
             }
             return 1f
         }
-        override fun onSingleTapUp(event: MotionEvent) {
+        override fun onSingleTapUp(event: MotionEvent?) {
             onSoftwareKeyboardRequested?.invoke()
         }
         override fun shouldBackButtonBeMappedToEscape(): Boolean = false
@@ -671,6 +671,10 @@ class TermuxTerminalSurface(
     override fun feed(owner: RenderOwner?, bytes: ByteArray): Boolean {
         requireMainThread()
         check(!closed) { "terminal surface is closed" }
+        // The bound owner's page has arrived, even an empty one (a
+        // zero-range capture), as has an admitted painter frame below: the
+        // transcript is no longer the one a bind just emptied.
+        if (owner != null && owner == boundOwner) view.noteRebuildContent()
         if (bytes.isEmpty()) return true
         if ((owner == null && !painterFeedsAdmitted) ||
             (owner != null && owner != boundOwner)
@@ -678,6 +682,7 @@ class TermuxTerminalSurface(
             droppedForeignFeeds += 1
             return false
         }
+        if (owner == null) view.noteRebuildContent()
         if (!outputRendered) outputAwaitingDraw = true
         if (view.mEmulator == null) {
             check(pendingOutputBytes + bytes.size <= MAX_PENDING_OUTPUT_BYTES) {
@@ -696,8 +701,10 @@ class TermuxTerminalSurface(
         require(columns >= 4 && rows >= 4)
         view.cancelPendingLayoutResize()
         val renderer = view.mRenderer
-        session.updateSize(columns, rows, renderer.fontWidth.toInt(), renderer.fontLineSpacing)
-        view.mEmulator = session.emulator
+        view.keepReaderAcross {
+            session.updateSize(columns, rows, renderer.fontWidth.toInt(), renderer.fontLineSpacing)
+            view.mEmulator = session.emulator
+        }
         lastColumns = columns
         lastRows = rows
         view.invalidate()
@@ -717,11 +724,21 @@ class TermuxTerminalSurface(
     override fun setBackgroundImage(background: TerminalBackgroundImage?) {
         requireMainThread()
         backgroundImage = background
+        backgroundBitmap = background?.let(terminalBackgroundStore::cachedImage)
+        if (background != null && backgroundBitmap == null) {
+            // Decoding (or blurring) on the main thread drops frames: show the
+            // theme colour until the store's worker has the picture.
+            terminalBackgroundStore.decode(background) { bitmap ->
+                if (closed || backgroundImage != background) return@decode
+                backgroundBitmap = bitmap
+                applyTheme()
+            }
+        }
         applyTheme()
     }
 
     /** A new drawable for a surrounding scaled tmux viewport, if it needs the same backdrop. */
-    fun backgroundDrawable() = terminalBackgroundStore.drawable(theme.backgroundArgb, backgroundImage)
+    fun backgroundDrawable() = terminalBackgroundStore.backdrop(theme.backgroundArgb, backgroundImage, backgroundBitmap)
 
     fun isCursorKeysApplicationMode(): Boolean = view.mEmulator?.isCursorKeysApplicationMode ?: false
 
@@ -736,12 +753,12 @@ class TermuxTerminalSurface(
         requireMainThread()
         require(font.sizeSp > 0)
         fontSizeSp = font.sizeSp.coerceIn(8, 40)
-        view.setTextSize(textSizePixels(fontSizeSp))
-        font.typeface?.let(view::setTypeface)
-        // A geometry-neutral tmux viewport measures this view in exact cells.
-        // Font metrics therefore affect layout even when the outer viewport's
-        // physical bounds did not change.
-        view.requestLayout()
+        val pixels = textSizePixels(fontSizeSp)
+        val typeface = font.typeface ?: view.typeface
+        if (pixels == view.textSizePixels && typeface == view.typeface) return
+        // A geometry-neutral tmux viewport measures this view in exact cells,
+        // so the new metrics must reach layout before the grid is derived.
+        view.setFont(pixels, typeface)
     }
 
     fun gridMetrics(): TerminalGridMetrics {
@@ -859,9 +876,8 @@ class TermuxTerminalSurface(
         view.post {
             if (closed || !view.isAttachedToWindow) return@post
             view.requestFocus()
-            ViewCompat.getWindowInsetsController(view)?.show(WindowInsetsCompat.Type.ime())
-            view.context.getSystemService(InputMethodManager::class.java)
-                ?.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
+            view.windowInsetsController?.show(WindowInsets.Type.ime())
+            view.context.getSystemService(InputMethodManager::class.java)?.showSoftInput(view, 0)
         }
     }
 
@@ -874,12 +890,8 @@ class TermuxTerminalSurface(
     override fun toggleSoftwareKeyboard() {
         requireMainThread()
         if (closed) return
-        val ime = WindowInsetsCompat.Type.ime()
-        val controller = ViewCompat.getWindowInsetsController(view)
-        val input = view.context.getSystemService(InputMethodManager::class.java)
-        if (ViewCompat.getRootWindowInsets(view)?.isVisible(ime) == true) {
-            controller?.hide(ime)
-            input?.hideSoftInputFromWindow(view.windowToken, 0)
+        if (ViewCompat.getRootWindowInsets(view)?.isVisible(WindowInsetsCompat.Type.ime()) == true) {
+            view.hideSoftwareKeyboard()
         } else {
             requestSoftwareKeyboard()
         }
@@ -911,6 +923,7 @@ class TermuxTerminalSurface(
             (searchIndex - 1 + searchRows.size) % searchRows.size
         }
         val row = searchRows[searchIndex]
+        view.dropRebuildScroll()
         view.topRow = row.coerceIn(-emulator.screen.activeTranscriptRows, 0)
         view.invalidate()
         return TerminalSearchResult(searchIndex + 1, searchRows.size)
@@ -1031,3 +1044,36 @@ class TermuxTerminalSurface(
  */
 private val SharedArmedModifiers.armsTerminalBytes: Boolean
     get() = control || alternate || shift
+
+/**
+ * Hides the software keyboard of this view's window, whichever of its editors
+ * raised it. Call it while that editor still has focus: once focus is cleared
+ * the window no longer serves an editor, and the keyboard stays up.
+ */
+fun View.hideSoftwareKeyboard() {
+    windowInsetsController?.hide(WindowInsets.Type.ime())
+    context.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(windowToken, 0)
+}
+
+
+/** The live grid as an agent inspection reads it; the surface calls it on the main thread. */
+internal fun snapshotEmulatorText(emulator: TerminalEmulator): TerminalTextSnapshot? {
+    if (emulator.isSynchronizedOutputPending) return TerminalTextSnapshot("", null, framePending = true)
+    val columns = emulator.mColumns
+    val rows = emulator.mRows
+    if (rows <= 0 || columns <= 0 || columns > 65_536 / rows) return null
+    val physical = (0 until rows).map { row -> emulator.screen.getSelectedText(0, row, columns - 1, row) }
+    val cells = snapshotTerminalCells(physical, columns) { row, col -> emulator.screen.getStyleAt(row, col) } ?: return null
+    val screen = com.bambouville.tessera.core.bridge.SharedTerminalScreenEvidence(columns, cells,
+        (0 until rows).map { row ->
+            // Termux marks the previous row's outgoing wrap; Core and
+            // SwiftTerm mark this row as continuing its predecessor.
+            (row > 0 || emulator.screen.activeTranscriptRows > 0) && emulator.screen.getLineWrap(row - 1)
+        }, emulator.cursorRow,
+        emulator.cursorCol, emulator.isCursorEnabled, emulator.isAlternateBufferActive)
+    val captured = screen.physicalRows
+    val current = captured.getOrNull(screen.cursorRow)?.trimEnd() ?: return null
+    return TerminalTextSnapshot(captured.joinToString("\n"), current, captured, screen.cursorRow,
+        screen.cursorVisible, screen.cursorColumn, screenEvidence = screen,
+        promptText = snapshotPromptText(cells) { row, col -> emulator.screen.getStyleAt(row, col) })
+}

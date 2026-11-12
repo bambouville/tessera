@@ -282,6 +282,55 @@ data class SharedTmuxAuthorityActiveWindow(
     val authoritative: Boolean,
 )
 
+/**
+ * The grids this device owned under one of its own stamps
+ * (`TmuxOwnedGeometryRecord`), which the adapter keeps across a process death
+ * (§6.9) and hands back with [SharedTmuxAuthoritySession.restoreOwnedGeometry].
+ */
+data class SharedTmuxOwnedGeometryRecord(
+    /** The stamp generation the grids were owned under. */
+    val generation: Long,
+    /** Oldest first. */
+    val sizes: List<SharedTmuxGridSize>,
+) {
+    companion object {
+        /** `TmuxOwnedGeometryRecord.restoreLimit`: the generations a session takes back. */
+        const val RESTORE_LIMIT = 16
+        /** `TmuxOwnedSizeHistory.limit`: the grids one record holds. */
+        const val SIZE_LIMIT = 8
+
+        /**
+         * [records] with [record] kept, as `TmuxOwnedGeometryRecord.keeping`
+         * keeps one tmux session's: it joins its generation's earlier record,
+         * whose grids rank older (two windows of this device can read one
+         * stamp as theirs), and only the newest [RESTORE_LIMIT] stay, newest
+         * first.
+         */
+        fun keeping(
+            record: SharedTmuxOwnedGeometryRecord,
+            records: List<SharedTmuxOwnedGeometryRecord>,
+        ): List<SharedTmuxOwnedGeometryRecord> {
+            val earlier = records.firstOrNull { it.generation == record.generation }
+            val kept = if (earlier == null) record else record.copy(sizes = ownedHistory(earlier.sizes + record.sizes))
+            return (listOf(kept) + records.filter { it.generation != record.generation })
+                .sortedByDescending { it.generation }
+                .take(RESTORE_LIMIT)
+        }
+
+        /** `TmuxOwnedSizeHistory(sizes).sizes`: a repeat moves to newest, the newest [SIZE_LIMIT] stay. */
+        private fun ownedHistory(sizes: List<SharedTmuxGridSize>): List<SharedTmuxGridSize> {
+            val history = ArrayList<SharedTmuxGridSize>()
+            for (size in sizes) {
+                if (history.lastOrNull() == size) continue
+                history.remove(size)
+                history.add(size)
+                if (history.size > SIZE_LIMIT) history.removeAt(0)
+            }
+            return history
+        }
+    }
+}
+
 sealed interface SharedTmuxAuthoritySessionEffect {
     /** Send `show-options -qv @tessera_authority`; report its reply or failure with [queryId]. */
     data class QueryAuthority(val queryId: Long) : SharedTmuxAuthoritySessionEffect
@@ -362,6 +411,12 @@ data class SharedTmuxAuthoritySessionState(
     val currentQueryId: Long? = null,
     /** The live claim's latest fence; null before its first fence and outside a claim. */
     val claimFence: SharedTmuxAuthorityClaimFence? = null,
+    /**
+     * The grids owned under our standing stamp, to keep across a process
+     * death; null when no stamp of ours stands or nothing is owned yet. A
+     * null never deletes a record already kept.
+     */
+    val ownedGeometryRecord: SharedTmuxOwnedGeometryRecord? = null,
 )
 
 data class SharedTmuxAuthoritySessionResult(
@@ -439,6 +494,28 @@ class SharedTmuxAuthoritySession internal constructor(
 
     fun resetTransport(nowMillis: Long, preservingPeer: Boolean): SharedTmuxAuthoritySessionResult =
         submit(Requests.resetTransport(nowMillis, preservingPeer))
+
+    /**
+     * The records earlier processes kept for this stamp's tmux session, sent
+     * before the connection's read can answer. Records the wire cannot carry
+     * (no grid, too many, a non-positive one) are dropped; none at all
+     * clears what an earlier restore left pending, as on iOS. A restore the
+     * core still rejects is lost evidence, not a failed connection: it
+     * changes nothing.
+     */
+    fun restoreOwnedGeometry(
+        nowMillis: Long,
+        records: List<SharedTmuxOwnedGeometryRecord>,
+    ): SharedTmuxAuthoritySessionResult {
+        val carried = records
+            .filter { record ->
+                record.generation >= 0 && record.sizes.size in 1..SharedTmuxOwnedGeometryRecord.SIZE_LIMIT &&
+                    record.sizes.all { it.isWireSize }
+            }
+            .sortedByDescending { it.generation }
+            .take(SharedTmuxOwnedGeometryRecord.RESTORE_LIMIT)
+        return submitOrNull(Requests.restoreOwnedGeometry(nowMillis, carried)) ?: unchanged
+    }
 
     /** Whether the attached control channel can carry a command now. */
     fun channelLiveness(nowMillis: Long, live: Boolean): SharedTmuxAuthoritySessionResult =
@@ -686,6 +763,23 @@ class SharedTmuxAuthoritySession internal constructor(
         fun resetTransport(nowMillis: Long, preservingPeer: Boolean): JSONObject =
             bare("resetTransport", nowMillis).put("preservingPeer", preservingPeer)
 
+        fun restoreOwnedGeometry(nowMillis: Long, records: List<SharedTmuxOwnedGeometryRecord>): JSONObject =
+            bare("restoreOwnedGeometry", nowMillis).put(
+                "ownedGeometryRecords",
+                JSONArray().apply {
+                    records.forEach { record ->
+                        put(
+                            JSONObject().put("generation", record.generation).put(
+                                "sizes",
+                                JSONArray().apply {
+                                    record.sizes.forEach { put(JSONObject().put("columns", it.columns).put("rows", it.rows)) }
+                                },
+                            ),
+                        )
+                    }
+                },
+            )
+
         fun channelLiveness(nowMillis: Long, live: Boolean): JSONObject =
             bare("channelLiveness", nowMillis).put("channelLive", live)
 
@@ -869,6 +963,13 @@ class SharedTmuxAuthoritySession internal constructor(
                 currentQueryId = value.takeIf { it.has("currentQueryID") && !it.isNull("currentQueryID") }
                     ?.getLong("currentQueryID"),
                 claimFence = value.optJSONObject("claimFence")?.claimFence(),
+                ownedGeometryRecord = value.optJSONObject("ownedGeometryRecord")?.let { record ->
+                    val sizes = record.getJSONArray("sizes")
+                    SharedTmuxOwnedGeometryRecord(
+                        generation = record.getLong("generation"),
+                        sizes = List(sizes.length()) { sizes.getJSONObject(it).grid() },
+                    )
+                },
             )
             return SharedTmuxAuthoritySessionResult(
                 state = state,

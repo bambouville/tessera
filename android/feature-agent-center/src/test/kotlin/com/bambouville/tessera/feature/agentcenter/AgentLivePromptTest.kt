@@ -48,6 +48,23 @@ class AgentLivePromptTest {
         )
         for ((raw, plain) in cases) assertEquals(raw, plain, withoutTerminalEscapes(raw))
         assertEquals("a\nb", bottomPromptRows("\u001b[1mdiscard\u001b[0m\na\n\u001b[2mb\u001b[22m", 3))
+        // Backgrounds stay, each row on its own (Claude's current tab).
+        val backgrounds = listOf(
+            "a\u001b[38;5;16m\u001b[48;5;153mb\u001b[39m\u001b[49mc" to "a\u001b[0;48;5;153mb\u001b[0mc",
+            "\u001b[44mab\ncd\u001b[0m" to "\u001b[0;44mab\u001b[0m\n\u001b[0;44mcd\u001b[0m",
+            "\u001b[7mx\u001b[27my" to "\u001b[0;7mx\u001b[0my",
+            "\u001b[7;104mx\u001b[0my" to "\u001b[0;7;104mx\u001b[0my",
+            "\u001b[48:2::1:2:3mx" to "\u001b[0;48;2;1;2;3mx\u001b[0m",
+            "\u001b[48;2;1;2;3mx\u001b[48;2;1;2;3my" to "\u001b[0;48;2;1;2;3mxy\u001b[0m",
+            "\u001b[38;5;48mx\u001b[38;2;48;5;153my" to "xy",
+            "\u001b[48;5mx\u001b[48;5;256my\u001b[?7mz" to "xyz",
+            "\u001b[44m\u001b[0m\u001b[45m" to "",
+            "\u001b[44m\u001b[38;5\nx" to "\n\u001b[0;44mx\u001b[0m",
+        )
+        for ((raw, kept) in backgrounds) {
+            assertEquals(raw, kept, bottomPromptRows(raw))
+            assertEquals(raw, withoutTerminalEscapes(raw), withoutTerminalEscapes(kept))
+        }
     }
 
     @Test fun cardDecodesEveryLiveField() {

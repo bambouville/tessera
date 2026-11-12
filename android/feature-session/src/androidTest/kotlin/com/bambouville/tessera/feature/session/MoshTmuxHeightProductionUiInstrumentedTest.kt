@@ -9,6 +9,7 @@ import android.util.Log
 import androidx.lifecycle.Lifecycle
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.ComponentActivity
@@ -302,7 +303,7 @@ class MoshTmuxHeightProductionUiInstrumentedTest {
             delay(200) // Production connected/presentation effect first requests its keyboard.
             onMain {
                 val view = surface().view
-                ViewCompat.getWindowInsetsController(view)?.hide(WindowInsetsCompat.Type.ime())
+                view.windowInsetsController?.hide(WindowInsets.Type.ime())
                 context.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(view.windowToken, 0)
             }
             await("default fixture IME hidden") { onMain { nativeState().getInt("imeBottomPixels") == 0 } }
@@ -391,7 +392,7 @@ class MoshTmuxHeightProductionUiInstrumentedTest {
             await("all real local grids56x48") { exactLocalGrid() }
             await("initial owned layout56x48") {
                 val w = ownController().tmuxSnapshot.value?.activeWindow
-                ownController().tmuxAuthority.value is SharedTmuxGridAuthoritySnapshot.Mine && w?.layout?.width == 56 && w?.layout?.height == 48
+                ownController().tmuxAuthority.value is SharedTmuxGridAuthoritySnapshot.Mine && w?.layout?.width == 56 && w.layout?.height == 48
             }
             await("real bottom48-row SSP content") { onMain { surface().snapshotText()?.visibleText?.contains("BOTTOM-$token-48") == true } }
             val carrier = SshSessionController::class.java.getDeclaredField("moshTransport").apply { isAccessible = true }

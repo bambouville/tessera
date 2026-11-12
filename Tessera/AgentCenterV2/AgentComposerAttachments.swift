@@ -50,7 +50,7 @@ final class AgentComposerAttachments {
         }
         guard isCurrent(target), tasks[target.threadID] == nil else {
             removePhotoCopies(for: request)
-            model.reportUnavailable("Attachment cancelled: the original terminal changed.")
+            model.reportUnavailable(String(localized: "Attachment cancelled: the original terminal changed."))
             return
         }
         model.uploadingThreads.insert(target.threadID)
@@ -66,7 +66,7 @@ final class AgentComposerAttachments {
                 do {
                     try Task.checkCancellation()
                     guard isCurrent(target) else {
-                        model.reportUnavailable("Upload stopped: the original terminal changed.")
+                        model.reportUnavailable(String(localized: "Upload stopped: the original terminal changed."))
                         return
                     }
                     let scoped = url.startAccessingSecurityScopedResource()
@@ -75,20 +75,20 @@ final class AgentComposerAttachments {
                     defer { try? FileManager.default.removeItem(at: staged.deletingLastPathComponent()) }
                     try Task.checkCancellation()
                     guard isCurrent(target) else {
-                        model.reportUnavailable("Upload stopped: the original terminal changed.")
+                        model.reportUnavailable(String(localized: "Upload stopped: the original terminal changed."))
                         return
                     }
                     let path = try await upload(target.binding, staged)
                     try Task.checkCancellation()
                     guard !path.isEmpty, !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
-                        model.reportUnavailable("The upload returned an unsupported file path.")
+                        model.reportUnavailable(String(localized: "The upload returned an unsupported file path."))
                         return
                     }
                     let encoder = JSONEncoder()
                     encoder.outputFormatting = .withoutEscapingSlashes
                     let quoted = String(decoding: try encoder.encode(path), as: UTF8.self)
                     guard isCurrent(target) else {
-                        model.reportUnavailable("File uploaded to \(quoted); the terminal changed, so no draft was changed.")
+                        model.reportUnavailable(String(localized: "File uploaded to \(quoted); the terminal changed, so no draft was changed."))
                         return
                     }
                     let draft = model.draftBinding(for: target.threadID)
@@ -98,7 +98,7 @@ final class AgentComposerAttachments {
                     return
                 } catch {
                     guard !Task.isCancelled, isCurrent(target) else { return }
-                    model.reportUnavailable("File upload failed: \(error.localizedDescription)")
+                    model.reportUnavailable(String(localized: "File upload failed: \(error.localizedDescription)"))
                     return
                 }
             }
@@ -258,6 +258,6 @@ enum AgentAttachmentPhotos {
 
     static func failure() -> NSError {
         NSError(domain: "TesseraAttachment", code: 2,
-            userInfo: [NSLocalizedDescriptionKey: "The selected photo could not be loaded."])
+            userInfo: [NSLocalizedDescriptionKey: String(localized: "The selected photo could not be loaded.")])
     }
 }

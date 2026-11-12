@@ -454,6 +454,11 @@ def claude_cases(s):
     s.scenario("stale", stale)
 
 
+# Wider than any pane's row: Codex breaks it inside the word.
+LONG_PATH = ("/srv/ledger/migrations/2026-11-06/"
+             "0042_split_the_ledger_tables_into_hot_and_cold_partitions_by_quarter_and_by_region_for_the_east.sql")
+
+
 def codex_cases(s):
     # Shift+Tab toggles Plan mode. The footer is an independent TUI assertion.
     s.wait_composer()
@@ -484,6 +489,30 @@ def codex_cases(s):
                       "request_user_input free text")
     s.scenario("rui-text", rui_text)
 
+    def rui_long():
+        # A note wider than the field wraps onto rows of its own at every pane
+        # size the lane runs (the field holds about 103 characters a row at 110
+        # columns, 44 at a portrait iPhone's 49), and its path breaks inside
+        # the word. At 110 columns it takes five of the field's six rows and
+        # reads whole from the field's marker row; in a phone's pane it
+        # outgrows them and scrolls, so only its tail reads back.
+        note = ("CockroachDB with a replica in the east region and a standby in the west region, schema at "
+                f"{LONG_PATH} which the platform team reviews every quarter. Keep nightly backups for thirty "
+                "days and page the on-call engineer when replication lag passes ten seconds.")
+        start = len(s.records())
+        s.send_prompt("rui")
+        s.wait("q=Which database should we use?", "Codex long notes question")
+        output = s.action("text", note)
+        s.assert_mock(start, [f"user_note: {note}"], "request_user_input wrapped free text")
+        read = re.search(r"^read: (\S+)$", output, re.M)
+        require(read, f"the driver read no note back: {output}")
+        whole, shown = "".join(note.split()), read.group(1).strip("…")
+        if int(COLUMNS) >= 100:
+            require(shown == whole, f"the note did not read whole at {SIZE}: {shown}")
+        else:
+            require(shown != whole and whole.endswith(shown), f"the note did not scroll at {SIZE}: {shown}")
+    s.scenario("rui-long", rui_long)
+
     s.wait_composer()
     s.tmux("send-keys", "-t", s.target, "BTab")
     deadline = time.monotonic() + 20
@@ -507,19 +536,127 @@ def codex_cases(s):
         s.action("option", "2")
         s.wait("q=Describe the rollout window you prefer.", "Codex deferred free text")
         s.action("text", "Weekday mornings, UTC")
-        # Codex queues async answers until the running turn's next tool call.
-        deadline = time.monotonic() + 30
-        while True:
-            screen = s.capture("async2-queued")
-            if "Messages to be submitted" in screen and "SQLite" in screen and "Weekday mornings, UTC" in screen:
-                break
-            require(time.monotonic() < deadline, "Codex did not queue both async answers")
-            time.sleep(0.25)
-        (s.evidence / "release-hold").touch()
-        s.assert_mock(start, ["SQLite", "Weekday mornings, UTC"],
-                      "queued follow-ups delivered to Responses", timeout=65)
+        deliver_async(s, start, {"SQLite": "Which database should the service use?",
+                                 "Weekday mornings, UTC": "Describe the rollout window you prefer."}, "async2")
         s.assert_hook("deferred-question", "async hook", diag)
     s.scenario("async2", async2)
+
+    def async2other():
+        # The first of two questions answered through its Other field, while
+        # the second waits. Both answers wrap at every pane size the lane runs,
+        # breaking inside their path.
+        other = f"CockroachDB with a replica in the east region, schema at {LONG_PATH}"
+        window = f"Weekends only, between 2 and 4 am Pacific time, runbook at {LONG_PATH}"
+        start = len(s.records())
+        s.wait_composer()
+        (s.evidence / "release-hold").unlink(missing_ok=True)
+        s.send_prompt("async2")
+        s.wait("kind=deferred", "Codex deferred card for Other")
+        s.action("control", "open")
+        first = s.wait("q=Which database should the service use?", "Codex deferred database for Other")
+        require("place=others=1,position=1 of 2" in first, f"Codex first question's counter: {first}")
+        s.action("text", other)
+        s.wait("q=Describe the rollout window you prefer.", "Codex deferred free text after Other")
+        s.action("text", window)
+        deliver_async(s, start, {other: "Which database should the service use?",
+                                 window: "Describe the rollout window you prefer."}, "async2other")
+    s.scenario("async2other", async2other)
+
+    def asyncpara():
+        # Twins whose first paragraphs differ and wrap in a phone's pane: the
+        # counter sits alone a blank row above the first, and the twin left
+        # alone has none.
+        start = len(s.records())
+        # The turn async2 released must end before the next one can hold.
+        s.wait_composer()
+        (s.evidence / "release-hold").unlink(missing_ok=True)
+        s.send_prompt("asyncpara")
+        s.wait("kind=deferred", "Codex deferred paragraphs card")
+        s.action("control", "open")
+        first = s.wait("q=Staging takes the first rollout, on the shared cluster in the east region. "
+                       "Describe the rollout window you prefer.", "Codex first paragraph question read whole")
+        require("place=others=1,position=1 of 2" in first, f"Codex first paragraph question's counter: {first}")
+        s.action("text", "Staging mornings")
+        second = s.wait("q=Production takes the second rollout, on the dedicated cluster in the west region. "
+                        "Describe the rollout window you prefer.", "Codex second paragraph question read whole")
+        require("place=others=0,position=1 of 1" in second, f"Codex second paragraph question alone: {second}")
+        s.action("text", "Production evenings")
+        deliver_async(s, start, {"Staging mornings": "Staging takes the first rollout",
+                                 "Production evenings": "Production takes the second rollout"}, "asyncpara")
+    s.scenario("asyncpara", asyncpara)
+
+
+def deliver_async(s, start, answers, label):
+    """Waits for Codex to queue or send the async answers, releases the held
+    turn, and requires each to reach the question it was typed for. Codex
+    before 0.166 queues them until the running turn's next tool call; 0.166
+    sends each into the running turn at once."""
+    def sent():
+        replies = question_replies(s.records()[start:])
+        return all(f'"answer":{json.dumps(answer)}' in replies for answer in answers)
+    deadline = time.monotonic() + 30
+    while True:
+        screen = s.capture(f"{label}-queued")
+        queued = queued_for(screen, answers.values())
+        if queued or sent():
+            break
+        require(time.monotonic() < deadline, f"Codex neither queued nor sent the {label} answers")
+        time.sleep(0.25)
+    (s.evidence / "release-hold").touch()
+    if queued:
+        s.assert_mock(start, list(answers), f"queued {label} answers delivered to Responses", timeout=65)
+    require_answered(s.records()[start:], answers)
+
+
+def queued_for(screen, questions):
+    """Whether Codex lists an answer queued for each question. Before 0.166
+    it draws each under "Messages to be submitted" as "↳ > question", the
+    answer below it, and may cut a long one short: the questions say which
+    are queued, wrapped like any row, and the replies check the answers."""
+    lines = screen.splitlines()
+    heads = [index for index, line in enumerate(lines) if "Messages to be submitted" in line]
+    if not heads:
+        return False
+    section = []
+    for line in lines[heads[-1] + 1:]:
+        if line.startswith("•") or line.lstrip().startswith("›"):
+            break
+        section.append(line)
+    items = sum(1 for line in section if line.lstrip().startswith("↳"))
+    bare = re.sub(r"\s+", "", "\n".join(section))
+    questions = list(questions)
+    return items >= len(questions) and all(re.sub(r"\s+", "", question) in bare for question in questions)
+
+
+def require_answered(records, questions):
+    """Each async answer went to the question it was typed for: its reply
+    names the question as Codex asked it."""
+    pairs = []
+    for text in question_replies(records).split("<send_user_message_question_reply>")[1:]:
+        body = text.split("</send_user_message_question_reply>")[0].strip()
+        try:
+            items = json.loads(body)
+        except ValueError:
+            continue
+        pairs += [(item.get("answer"), item.get("question") or "") for item in items if isinstance(item, dict)]
+    for answer, question in questions.items():
+        asked = [q for a, q in pairs if a == answer]
+        require(asked and all(q.startswith(question) for q in asked),
+                f"Codex answer {answer!r} paired with {asked}, not {question!r}")
+
+
+def question_replies(records):
+    """The async answers Codex delivered, as the user messages carrying them."""
+    texts = []
+    for record in records:
+        for prompt in record.get("prompts", []):
+            if prompt.get("type") != "user":
+                continue
+            for part in prompt.get("content") or []:
+                text = part.get("text", "") if isinstance(part, dict) else ""
+                if "<send_user_message_question_reply>" in text:
+                    texts.append(text)
+    return "\n".join(texts)
 
 
 def kimi_cases(s):

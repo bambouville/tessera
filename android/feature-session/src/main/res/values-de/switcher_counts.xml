@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="switcher_window_count">
+        <item quantity="one">%d Fenster</item>
+        <item quantity="other">%d Fenster</item>
+    </plurals>
+    <plurals name="switcher_session_count">
+        <item quantity="one">%d Sitzung</item>
+        <item quantity="other">%d Sitzungen</item>
+    </plurals>
+    <plurals name="session_switcher_panes_open_full_screen">
+        <item quantity="one">%d Bereich · öffnet im Vollbild</item>
+        <item quantity="other">%d Bereiche · jeder öffnet im Vollbild</item>
+    </plurals>
+</resources>

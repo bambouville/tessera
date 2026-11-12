@@ -192,10 +192,31 @@ final class AppearancePreferences {
     }
 
     // MARK: - Themes (M4 §settings.themes)
-    /// One of the named TerminalTheme IDs (void, graphite, amber, paper, dracula, nord).
-    /// Wired to SwiftTerm.installColors at session boot in W2.
-    var terminalThemeID: String = "void" {
-        didSet { UserDefaults.standard.set(terminalThemeID, forKey: "tessera.pref.terminalThemeID") }
+    /// The user's theme choice: one of the named TerminalTheme IDs, or
+    /// `TerminalTheme.automaticID` until they pick one, which follows the
+    /// app's light or dark appearance. Persisted only once chosen, so an
+    /// install that never opened the picker keeps following the appearance.
+    var terminalThemeSelection: String = TerminalTheme.automaticID {
+        didSet { UserDefaults.standard.set(terminalThemeSelection, forKey: "tessera.pref.terminalThemeID") }
+    }
+
+    /// The colour scheme the app's root last rendered with. Not persisted:
+    /// the root reports it on launch and whenever the system or `mode`
+    /// changes it; the automatic terminal theme follows it.
+    private(set) var observedColorScheme: ColorScheme =
+        UIScreen.main.traitCollection.userInterfaceStyle == .light ? .light : .dark
+
+    /// The theme sessions render with: the selection, or for the automatic
+    /// one Paper in light appearance and Void in dark.
+    var terminalThemeID: String {
+        TerminalTheme.resolvedID(
+            selection: terminalThemeSelection,
+            prefersLight: resolvedMode(systemColorScheme: observedColorScheme) == .light
+        )
+    }
+
+    func noteColorScheme(_ scheme: ColorScheme) {
+        if observedColorScheme != scheme { observedColorScheme = scheme }
     }
 
     // MARK: - Terminal background picture (settings.themes → background)
@@ -254,6 +275,17 @@ final class AppearancePreferences {
     }
 
     // MARK: - Keyboard & Input (M4 §settings.keyboard + §14.8 customization)
+    /// A device-local keyboard habit: another device may have a different
+    /// hardware keyboard or a different use for a command-only hold.
+    var shortcutCheatSheetEnabled: Bool = true {
+        didSet {
+            UserDefaults.standard.set(
+                shortcutCheatSheetEnabled,
+                forKey: "tessera.pref.shortcutCheatSheetEnabled"
+            )
+        }
+    }
+
     /// Translate macOS-style text-editing chords (Option/Command arrows and
     /// delete variants) into the readline/meta bytes expected by shells and
     /// terminal apps. Default-on preserves the existing Option-arrow behavior.
@@ -464,6 +496,15 @@ final class AppearancePreferences {
     var swipePadLastY: Double = -1 {
         didSet { UserDefaults.standard.set(swipePadLastY, forKey: "tessera.pref.swipePadLastY") }
     }
+    /// Duo laptop pose: the edge the accessory bar's pill keeps while typing.
+    /// Values: leading|trailing. Set by dragging the pill across the screen.
+    var duoBarEdge: String = "trailing" {
+        didSet { UserDefaults.standard.set(duoBarEdge, forKey: "tessera.pref.duoBarEdge") }
+    }
+    /// Duo laptop pose: the bar opens over the terminal's bottom rows instead
+    /// of folding to the pill while typing. The bar's chevron toggles it and
+    /// the keyboard going down clears it, so it is never stored.
+    var duoBarOpenWhileTyping: Bool = false
     /// Master gate for double-tap dictation on the puck. On by default (the
     /// double-tap is the feature's only entry point); the Experimental
     /// settings toggle persists it here, and SwipePadView consults it before
@@ -493,6 +534,12 @@ final class AppearancePreferences {
     /// SwiftData to dodge the iOS-26 `[String]`-array migration landmine.
     var hasSeenWelcome: Bool = false {
         didSet { UserDefaults.standard.set(hasSeenWelcome, forKey: "tessera.pref.hasSeenWelcome") }
+    }
+
+    /// Last release card acknowledged on this device. Never transferred with
+    /// appearance settings: updating one device must not dismiss another's card.
+    var lastSeenWhatsNewVersion: String = "" {
+        didSet { UserDefaults.standard.set(lastSeenWhatsNewVersion, forKey: "tessera.pref.lastSeenWhatsNewVersion") }
     }
 
     init() {
@@ -549,7 +596,7 @@ final class AppearancePreferences {
         }
 
         if let raw = ud.string(forKey: "tessera.pref.terminalThemeID"), !raw.isEmpty {
-            terminalThemeID = raw
+            terminalThemeSelection = raw
         }
 
         if ud.object(forKey: "tessera.pref.terminalBackgroundUsesImage") != nil {
@@ -573,6 +620,9 @@ final class AppearancePreferences {
             }
         }
 
+        if ud.object(forKey: "tessera.pref.shortcutCheatSheetEnabled") != nil {
+            shortcutCheatSheetEnabled = ud.bool(forKey: "tessera.pref.shortcutCheatSheetEnabled")
+        }
         if ud.object(forKey: "tessera.pref.naturalTextEditingEnabled") != nil {
             naturalTextEditingEnabled = ud.bool(forKey: "tessera.pref.naturalTextEditingEnabled")
         }
@@ -680,9 +730,17 @@ final class AppearancePreferences {
         if ud.object(forKey: "tessera.pref.swipePadLastY") != nil {
             swipePadLastY = ud.double(forKey: "tessera.pref.swipePadLastY")
         }
+        if let raw = ud.string(forKey: "tessera.pref.duoBarEdge"), ["leading", "trailing"].contains(raw) {
+            duoBarEdge = raw
+        }
+        // Once stored, which kept a bar opened once over the terminal for good.
+        ud.removeObject(forKey: "tessera.pref.duoBarOpenWhileTyping")
 
         if ud.object(forKey: "tessera.pref.hasSeenWelcome") != nil {
             hasSeenWelcome = ud.bool(forKey: "tessera.pref.hasSeenWelcome")
+        }
+        if let version = ud.string(forKey: "tessera.pref.lastSeenWhatsNewVersion") {
+            lastSeenWhatsNewVersion = version
         }
 
         if agentCenterEnabled && agentCenterNotificationsEnabled {

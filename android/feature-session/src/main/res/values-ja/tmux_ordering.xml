@@ -18,4 +18,25 @@
     <string name="tmux_split_left">左に分割</string>
     <string name="tmux_split_down">下に分割</string>
     <string name="tmux_split_up">上に分割</string>
+
+    <!-- tmux window and pane verbs shared by the switcher, the window strip and their dialogs -->
+    <string name="session_new_tmux_window">新規 tmux ウインドウ</string>
+    <string name="session_tmux_rename">名称変更</string>
+    <string name="session_tmux_zoom_pane_menu">ペインをズーム</string>
+    <string name="session_tmux_unzoom_pane_menu">ペインのズームを解除</string>
+    <string name="session_tmux_close_window_menu">ウインドウを閉じる</string>
+    <string name="session_tmux_close_window_title">%1$s を閉じますか？</string>
+    <string name="session_tmux_close_pane_title">ペイン %1$s を閉じますか？</string>
+    <string name="session_tmux_close_body">このターゲットのリモート tmux プロセスは終了されます。</string>
+    <string name="session_tmux_rename_window_title">ウインドウ名を変更</string>
+    <string name="session_tmux_rename_confirm">名称変更</string>
+    <string name="session_tmux_window_name">ウインドウ名</string>
+    <string name="session_tmux_rename_window_description">ウインドウ名を変更</string>
+    <string name="session_tmux_split_left_right_description">ペインを左右に分割</string>
+    <string name="session_tmux_split_top_bottom_description">ペインを上下に分割</string>
+    <string name="session_tmux_zoom_pane_description">ペインをズーム</string>
+    <string name="session_tmux_unzoom_pane_description">ペインのズームを解除</string>
+    <string name="session_tmux_panes_kicker">ペイン</string>
+    <string name="session_tmux_close_pane_description">ペインを閉じる</string>
+    <string name="session_tmux_close_window_description">ウインドウを閉じる</string>
 </resources>

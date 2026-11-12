@@ -1,0 +1,14 @@
+{
+  "id": "K6-shortcut-cheat-sheet",
+  "title": "Holding ⌘ shows every configured shortcut in the chosen surface material; ⌘⇧A opens Agent Center with the sidebar collapsed",
+  "matrix_ids": ["K6"],
+  "invariants": [
+    "Every *-pinned and *-held capture shows one centered cheat sheet listing the global, sessions, find, tmux and panes groups with their chords; nothing is clipped and no scrolling is needed, on iPad and iPhone landscape.",
+    "liquidGlass-pinned and -held read as refractive glass over the landing page, frosted-* as a blurred translucent panel, solid-* as an opaque panel; liquidGlass-light uses light tokens. Borders are hairlines and glyphs are monochrome in every variant.",
+    "Every *-released capture is the landing page with no sheet and no residue.",
+    "sheet-log.txt holds a show and a hide for each material hold, and no show for the 0.3 s tap or for the ⌘ hold interrupted by ⇧.",
+    "ipad-agents-open shows Agent Center across the full width with the hosts sidebar collapsed and only the reveal control at top left; ipad-agents-closed returns to the landing page with the sidebar shown."
+  ],
+  "capture_notes": "Host-free: the hosts landing page with first-open Nearby Setup and the welcome tour skipped through argument-domain defaults. ⌘ is held with AXe HID (key 227 --duration), which reaches GCKeyboard like a hardware keyboard; pinned captures use the DEBUG TESSERA_SHORTCUT_CHEAT_SHEET_PREVIEW hook; hold captures are simctl screenshots 2.6 s into a 5 s hold and 0.7 s after release. The DEBUG [cheat-sheet] log is the show/hide oracle. Physical Magic Keyboard feel, Stage Manager multi-window and iPadOS 18's own ⌘ overlay remain device checks.",
+  "deterministic_precheck": {"verdict": "pass", "details": "ShortcutCheatSheetTests (hold detector, content model, keyboard event fan-out) must pass before this case is captured."}
+}

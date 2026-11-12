@@ -9,6 +9,9 @@ struct NormalizedRecord {
     std::string disposition;
     std::string providerID;
     std::string parentID;
+    // Codex only: the turn an item belongs to. A Codex item is named by its
+    // turn and providerID together.
+    std::string turnID;
     bool visible = false;
     // Metadata-only Claude branch index; never serialized as message content.
     bool chainEntry = false, chainMessage = false, chainMain = false, parentField = false;
@@ -29,6 +32,10 @@ struct NormalizedRecord {
 NormalizedRecord normalize(const std::string& provider, simdjson::dom::element source, bool truncated,
                            const std::string& fallbackID = {});
 NormalizedRecord normalizeKimi(simdjson::dom::element source, bool truncated, const std::string& fallbackID = {});
+// Only the chain fields, source type and Pi identity ClaudeChainIndex decodes
+// ("claude" or "pi"); no display JSON except a Pi session header's.
+NormalizedRecord normalizeChainMetadata(const std::string& provider, simdjson::dom::element source, bool truncated,
+                                        const std::string& fallbackID = {});
 NormalizedRecord normalizeCodexItem(simdjson::dom::element item, const std::string& turnID, bool truncated = false);
 // Core TurnItem (rollout item_completed) uses a different tagged vocabulary
 // from public ThreadItem. Selection/ownership/revision merging is the caller's

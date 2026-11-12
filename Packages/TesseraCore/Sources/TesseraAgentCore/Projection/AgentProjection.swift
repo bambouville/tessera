@@ -106,8 +106,11 @@ public struct AgentProjectionRecord: Equatable, Codable, Sendable {
     public let receiptSourceIdentity: String?
     public let receiptSourceOffset: UInt64?
     public let revision: UInt64
+    /// What the host names the record by for a seek to it (`window.seek.v1`),
+    /// opaque to the app.
+    public let seekToken: String?
 
-    public init?(sequence: UInt64, recordID: String, record: AgentJSONValue, sourceOffset: UInt64? = nil, sourceHash: String? = nil, revision: UInt64 = 1, receiptSourceIdentity: String? = nil, receiptSourceOffset: UInt64? = nil) {
+    public init?(sequence: UInt64, recordID: String, record: AgentJSONValue, sourceOffset: UInt64? = nil, sourceHash: String? = nil, revision: UInt64 = 1, receiptSourceIdentity: String? = nil, receiptSourceOffset: UInt64? = nil, seekToken: String? = nil) {
         let record = Self.presentationRecord(record)
         guard (receiptSourceIdentity == nil) == (receiptSourceOffset == nil),
               receiptSourceIdentity.map({ !$0.isEmpty && $0.utf8.count <= 512 && !$0.contains("\0") }) ?? true,
@@ -120,9 +123,13 @@ public struct AgentProjectionRecord: Equatable, Codable, Sendable {
         self.sourceHash = sourceHash
         self.receiptSourceIdentity = receiptSourceIdentity; self.receiptSourceOffset = receiptSourceOffset
         self.revision = revision
+        // Advisory: one the app cannot send back is dropped, not the record.
+        self.seekToken = seekToken.flatMap {
+            !$0.isEmpty && $0.utf8.count <= 128 && $0.utf8.allSatisfy { (33...126).contains($0) } ? $0 : nil
+        }
     }
 
-    private enum CodingKeys: String, CodingKey { case sequence, recordID, record, sourceOffset, sourceHash, revision, receiptSourceIdentity, receiptSourceOffset }
+    private enum CodingKeys: String, CodingKey { case sequence, recordID, record, sourceOffset, sourceHash, revision, receiptSourceIdentity, receiptSourceOffset, seekToken }
 
     private static func presentationRecord(_ record: AgentJSONValue) -> AgentJSONValue {
         guard var object = record.objectValue,
@@ -147,7 +154,8 @@ public struct AgentProjectionRecord: Equatable, Codable, Sendable {
         let revision = try values.decodeIfPresent(UInt64.self, forKey: .revision) ?? 1
         guard let validated = Self(sequence: sequence, recordID: recordID, record: record, sourceOffset: sourceOffset, sourceHash: sourceHash, revision: revision,
             receiptSourceIdentity: try values.decodeIfPresent(String.self, forKey: .receiptSourceIdentity),
-            receiptSourceOffset: try values.decodeIfPresent(UInt64.self, forKey: .receiptSourceOffset)) else {
+            receiptSourceOffset: try values.decodeIfPresent(UInt64.self, forKey: .receiptSourceOffset),
+            seekToken: try values.decodeIfPresent(String.self, forKey: .seekToken)) else {
             let key: CodingKeys = recordID.isEmpty || recordID.utf8.count > 512 ? .recordID
                 : !Self.presentationRecord(record).isBounded() ? .record : .sourceHash
             throw DecodingError.dataCorruptedError(forKey: key, in: values, debugDescription: "Invalid projection record")

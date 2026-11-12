@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="data_hostname_required">Hostname ist erforderlich</string>
+    <string name="data_hostname_whitespace">Hostname darf keine Leerzeichen enthalten</string>
+    <string name="data_hostname_control_characters">Hostname darf keine Steuerzeichen enthalten</string>
+    <string name="data_username_required">Benutzername ist erforderlich</string>
+    <string name="data_username_whitespace">Benutzername darf keine Leerzeichen enthalten</string>
+    <string name="data_username_control_characters">Benutzername darf keine Steuerzeichen enthalten</string>
+    <string name="data_name_control_characters">Name darf keine Steuerzeichen enthalten</string>
+    <string name="data_port_range">Port muss zwischen 1 und 65535 liegen</string>
+    <string name="data_host_text_too_long">Host-Text überschreitet 64 KiB oder enthält ein NUL-Zeichen</string>
+    <string name="data_invalid_tmux_mode">ungültiger tmux-Modus</string>
+    <string name="data_invalid_transport_kind">ungültige Transportart</string>
+    <string name="data_tmux_target_required">ein festgelegtes tmux-Ziel ist erforderlich</string>
+    <string name="data_tmux_target_too_long">tmux-Ziel ist zu lang</string>
+    <string name="data_tmux_target_characters">tmux-Ziel darf nur Buchstaben, Ziffern, Unterstrich, Bindestrich oder Punkt enthalten</string>
+    <string name="data_host_jump_through_itself">ein Host kann sich nicht selbst als Jump-Host verwenden</string>
+    <string name="data_jump_route_cycle">die Jump-Route enthält einen Zyklus</string>
+    <string name="data_route_host_unavailable">ein Host der Route ist nicht verfügbar</string>
+    <string name="data_jump_host_unavailable">der Jump-Host ist nicht verfügbar</string>
+    <string name="data_identity_name_required">Name der Identität ist erforderlich</string>
+    <string name="data_identity_name_control_characters">Name der Identität darf keine Steuerzeichen enthalten</string>
+    <plurals name="data_jump_route_too_long">
+        <item quantity="one">die Jump-Route umfasst mehr als %1$d Host</item>
+        <item quantity="other">die Jump-Route umfasst mehr als %1$d Hosts</item>
+    </plurals>
+</resources>

@@ -146,6 +146,8 @@ public final class TerminalRow {
         Arrays.fill(mStyle, style);
         mSpaceUsed = (short) mColumns;
         mHasNonOneWidthOrSurrogateChars = false;
+        // A cleared row is a new one, which a ring buffer reuses: it continues no line.
+        mLineWrap = false;
     }
 
     // https://github.com/steven676/Android-Terminal-Emulator/commit/9a47042620bec87617f0b4f5d50568535668fe26

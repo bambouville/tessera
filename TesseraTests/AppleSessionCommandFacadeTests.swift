@@ -585,7 +585,7 @@ final class AppleSessionCommandFacadeTests: XCTestCase {
             hostID: UUID(),
             disconnectProbe: probe
         )
-        weak var weakSession = session
+        weak let weakSession = session
         let facade = AppleSessionCommandFacade(session: session!)
 
         facade.disconnect()

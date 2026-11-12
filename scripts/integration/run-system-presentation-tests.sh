@@ -35,10 +35,10 @@ cleanup() {
 }
 trap 'fail_closed_trap cleanup' EXIT
 
-# The hosted SystemPresentationTests (12) and the picker UI tests (2) all
+# The hosted SystemPresentationTests (23) and the picker UI tests (2) all
 # ran and passed: a skip (the seeded-file variable missing) or a test that
 # stopped being selected must not read as green.
-expected_tests=24
+expected_tests=25
 require_presentation_results() {
   local bundle="$1" summary
   summary="$(xcrun xcresulttool get test-results summary --path "$bundle" --compact)" || return 1
@@ -66,6 +66,16 @@ run_presentation_tests() {
   documents="$(xcrun simctl get_app_container "$udid" com.bambouville.TesseraApp data)/Documents"
   mkdir -p "$documents"
   cp "$key_dir/$seeded_file" "$documents/$seeded_file"
+  # A fresh simulator's fileproviderd has not started local storage, and the
+  # picker's service blocks on it while browsing: taps drop and queries of
+  # its view can exceed XCTest's 60 s. Asking for its state starts it (5-38
+  # s), and evaluating the seeded key makes it resolve the file in local
+  # storage: after the hosted picker tests, iPhone's picker then showed the
+  # key 22-48 s after Browse instead of 49-156 s. The import test copes with
+  # a picker still warming.
+  { simctl_bounded 120000 spawn "$udid" fileproviderctl dump \
+      && simctl_bounded 120000 spawn "$udid" fileproviderctl evaluate "$documents/$seeded_file"; } >/dev/null 2>&1 \
+    || note "fileproviderd did not answer; the picker may start cold"
   TEST_RUNNER_TESSERA_KEY_IMPORT_SEEDED_FILE="$seeded_file" xcodebuild test-without-building \
     -project "$REPO_ROOT/Tessera.xcodeproj" \
     -scheme Tessera \

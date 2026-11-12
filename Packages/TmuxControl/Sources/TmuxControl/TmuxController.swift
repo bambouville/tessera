@@ -56,6 +56,25 @@ public final class TmuxController {
     /// on the peer's takeover overlay ("continued on iPhone").
     public typealias GridAuthorityIdentity = TmuxGridAuthorityIdentity
 
+    /// Where a controller keeps the grids it owned under its own stamps
+    /// across a process death (§6.9), by the tmux session the stamp lives
+    /// on. A relaunch whose stamp still stands judges the window by them
+    /// instead of veiling it as another device's.
+    public struct OwnedGeometryStore {
+        /// Every record kept for the session, in any order.
+        public var records: @MainActor (_ sessionName: String) -> [TmuxOwnedGeometryRecord]
+        /// Keeps `record`, replacing the session's record for its generation.
+        public var keep: @MainActor (_ record: TmuxOwnedGeometryRecord, _ sessionName: String) -> Void
+
+        public init(
+            records: @escaping @MainActor (_ sessionName: String) -> [TmuxOwnedGeometryRecord],
+            keep: @escaping @MainActor (_ record: TmuxOwnedGeometryRecord, _ sessionName: String) -> Void
+        ) {
+            self.records = records
+            self.keep = keep
+        }
+    }
+
     /// Who currently owns the shared tmux grid, as observed through the
     /// authority stamp. `.unknown` until the first stamp observation of a
     /// connection; `.peer` drives the continued-elsewhere overlay.
@@ -327,6 +346,19 @@ public final class TmuxController {
                 name: windowName,
                 activePaneTitle: activePaneTitle,
                 activePaneTitleIsDefault: activePaneTitleIsDefault
+            )
+        }
+
+        public var activePane: PaneInfo? {
+            if let activePaneId { return panes.first { $0.id == activePaneId } }
+            return panes.first(where: \.isActive)
+        }
+
+        public func agentDisplayName(agentProvider: String?) -> String {
+            TmuxWindowSnapshot.agentDisplayName(
+                windowID: id, name: windowName, activePaneTitle: activePaneTitle,
+                activePaneTitleIsDefault: activePaneTitleIsDefault,
+                activePaneCurrentCommand: activePane?.currentCommand, agentProvider: agentProvider
             )
         }
 
@@ -808,6 +840,13 @@ public final class TmuxController {
             updateGridAuthorityPresentation()
         }
     }
+    /// Set by the owner after construction, before the first attach. Nil
+    /// keeps nothing across a relaunch.
+    @ObservationIgnored public var gridAuthorityOwnedGeometryStore: OwnedGeometryStore?
+    /// The session whose records this connection restored, and the record
+    /// last kept and under which session, so neither repeats.
+    @ObservationIgnored private var restoredOwnedGeometryScope: (session: String, connection: UInt64)?
+    @ObservationIgnored private var keptOwnedGeometry: (record: TmuxOwnedGeometryRecord, session: String)?
     /// Compact grid presentation mounts only the active pane. Keep authority
     /// repaint completion aligned with the surfaces that actually exist;
     /// regular-width and unzoomed grids repaint every rendered pane.
@@ -2965,7 +3004,7 @@ public final class TmuxController {
             activeWindowID: nil,
             highestIndex: windows.compactMap(\.index).max()
         ) else {
-            windowOrderError = "The window order changed. Try again."
+            windowOrderError = String(localized: "The window order changed. Try again.", bundle: .main, comment: "tmux window ordering failure")
             return
         }
         guard !plan.commands.isEmpty else { return }
@@ -2984,8 +3023,8 @@ public final class TmuxController {
                     token: token,
                     error: Self.windowOrderErrorMessage(
                         result,
-                        fallback: "Could not verify the tmux session group."
-                    ) ?? "Could not verify the tmux session group."
+                        fallback: String(localized: "Could not verify the tmux session group.", bundle: .main, comment: "tmux window ordering failure")
+                    ) ?? String(localized: "Could not verify the tmux session group.", bundle: .main, comment: "tmux window ordering failure")
                 )
                 return
             }
@@ -2995,7 +3034,7 @@ public final class TmuxController {
             ) else {
                 self.abandonWindowOrderMutation(
                     token: token,
-                    error: "Could not verify the tmux session group."
+                    error: String(localized: "Could not verify the tmux session group.", bundle: .main, comment: "tmux window ordering failure")
                 )
                 Self.logDiagnostic(
                     "window-order group parse failed own=\(sessionID) lines=\(lines.count)"
@@ -3003,7 +3042,10 @@ public final class TmuxController {
                 return
             }
             guard self.runtimeEngine.snapshot.authoritativeWindowOrder == order else {
-                self.abandonWindowOrderMutation(token: token, error: "The window order changed. Try again.")
+                self.abandonWindowOrderMutation(
+                    token: token,
+                    error: String(localized: "The window order changed. Try again.", bundle: .main, comment: "tmux window ordering failure")
+                )
                 return
             }
             guard let grouped = TmuxSessionGroupQuery.renumberPlan(for: states, preservingAttached: sessionID) else { return }
@@ -3039,14 +3081,23 @@ public final class TmuxController {
                   ),
                   !states.isEmpty
             else {
-                self.abandonWindowOrderMutation(token: token, error: Self.windowOrderErrorMessage(result, fallback: "Could not discover the tmux session group.") ?? "Could not discover the tmux session group.")
+                self.abandonWindowOrderMutation(
+                    token: token,
+                    error: Self.windowOrderErrorMessage(
+                        result,
+                        fallback: String(localized: "Could not discover the tmux session group.", bundle: .main, comment: "tmux window ordering failure")
+                    ) ?? String(localized: "Could not discover the tmux session group.", bundle: .main, comment: "tmux window ordering failure")
+                )
                 return
             }
             guard let plan = TmuxSessionGroupQuery.renumberPlan(
                 for: states,
                 preservingAttached: ownSessionId
             ) else {
-                self.abandonWindowOrderMutation(token: token, error: "Could not build a safe tmux tidy operation.")
+                self.abandonWindowOrderMutation(
+                    token: token,
+                    error: String(localized: "Could not build a safe tmux tidy operation.", bundle: .main, comment: "tmux window ordering failure")
+                )
                 return
             }
             self.beginWindowOrderMutation(
@@ -3073,7 +3124,7 @@ public final class TmuxController {
                pendingWindowReorderToken == existingToken {
                 abandonWindowOrderMutation(
                     token: existingToken,
-                    error: "The tmux session changed before the window could move."
+                    error: String(localized: "The tmux session changed before the window could move.", bundle: .main, comment: "tmux window ordering failure")
                 )
             } else {
                 windowOrderOperationPending = false
@@ -3117,7 +3168,7 @@ public final class TmuxController {
                 self.windowOrderDeadlineTask = nil
                 self.windowOrderError = results.lazy.compactMap { result in
                     Self.windowOrderErrorMessage(result, fallback: nil)
-                }.first ?? "Could not update the tmux window order."
+                }.first ?? String(localized: "Could not update the tmux window order.", bundle: .main, comment: "tmux window ordering failure")
             }
             self.projectCoreSnapshot()
             self.sendPendingWindowOrderRefreshIfNeeded()
@@ -3167,7 +3218,7 @@ public final class TmuxController {
             self.pendingWindowReorderToken = nil
             self.windowOrderOperationPending = false
             self.windowOrderDeadlineTask = nil
-            self.windowOrderError = "The tmux window order did not update in time."
+            self.windowOrderError = String(localized: "The tmux window order did not update in time.", bundle: .main, comment: "tmux window ordering failure")
             self.projectCoreSnapshot()
             self.sendPendingWindowOrderRefreshIfNeeded()
         }
@@ -3193,15 +3244,15 @@ public final class TmuxController {
         case .failure(.tmuxError(let lines)):
             let message = lines.joined(separator: " ")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            return message.isEmpty ? (fallback ?? "tmux rejected the window order change.") : message
+            return message.isEmpty ? (fallback ?? String(localized: "tmux rejected the window order change.", bundle: .main, comment: "tmux window ordering failure")) : message
         case .failure(.timedOut):
-            return "The tmux window order command timed out."
+            return String(localized: "The tmux window order command timed out.", bundle: .main, comment: "tmux window ordering failure")
         case .failure(.cancelled):
-            return fallback ?? "The tmux window order change was cancelled."
+            return fallback ?? String(localized: "The tmux window order change was cancelled.", bundle: .main, comment: "tmux window ordering failure")
         case .failure(.notInTmuxMode):
-            return fallback ?? "The tmux control connection is unavailable."
+            return fallback ?? String(localized: "The tmux control connection is unavailable.", bundle: .main, comment: "tmux window ordering failure")
         case .failure(.refusedByAuthority):
-            return fallback ?? "This session is being controlled from another device."
+            return fallback ?? String(localized: "This session is being controlled from another device.", bundle: .main, comment: "tmux window ordering failure")
         }
     }
 
@@ -4320,9 +4371,39 @@ public final class TmuxController {
         ) {
             Self.logDiagnostic("grid-authority session \(trace)")
         }
+        keepGridAuthorityOwnedGeometry()
         updateGridAuthorityPresentation()
         scheduleGridAuthorityWake()
         return effects
+    }
+
+    /// The tmux session an authority stamp of ours lives on: a mosh view's
+    /// group owner, else the session tmux attached this client to.
+    private var gridAuthorityStampSessionName: String? {
+        gridAuthorityOwnerSessionName ?? ownSessionName
+    }
+
+    /// Hands the session the records kept for its stamp's tmux session, once
+    /// per connection and session, before that connection's read can answer.
+    private func restoreGridAuthorityOwnedGeometry() {
+        guard participatesInGridAuthority, let store = gridAuthorityOwnedGeometryStore,
+              let session = gridAuthorityStampSessionName,
+              restoredOwnedGeometryScope.map({ $0 != (session, controlConnectionGeneration) }) ?? true
+        else { return }
+        restoredOwnedGeometryScope = (session, controlConnectionGeneration)
+        // Even none: what an earlier scope's restore left pending is not
+        // this session's.
+        applyGridAuthorityLifecycleEffects(reduceGridAuthority(.restoreOwnedGeometry(store.records(session))))
+    }
+
+    private func keepGridAuthorityOwnedGeometry() {
+        // A renamed tmux session keeps an unchanged record under its new name.
+        guard let record = gridAuthoritySession.ownedGeometryRecord,
+              let store = gridAuthorityOwnedGeometryStore, let session = gridAuthorityStampSessionName,
+              keptOwnedGeometry.map({ $0 != (record, session) }) ?? true
+        else { return }
+        keptOwnedGeometry = (record, session)
+        store.keep(record, session)
     }
 
     private func scheduleGridAuthorityWake() {
@@ -5846,7 +5927,7 @@ public final class TmuxController {
         if lost || (claim.phase == .awaitingRepaint && after?.phase == .awaitingFence) {
             let target = claim.targetGrid.map { "\($0.columns)x\($0.rows)" } ?? "-"
             Self.logDiagnostic(
-                "grid-authority claim geometry \(lost ? "lost" : "unsettled") gen=\(claim.generation) layout=\(columns)x\(rows) target=\(target) context=\(context)"
+                "grid-authority claim geometry \(lost ? "lost" : "unsettled") gen=\(claim.generation) layout=\(columns)x\(rows) claimed=\(target) context=\(context)"
             )
         }
         if let after, after.generation == claim.generation,
@@ -6141,6 +6222,7 @@ public final class TmuxController {
             return
         }
 
+        restoreGridAuthorityOwnedGeometry()
         applyGridAuthorityLifecycleEffects(
             reduceGridAuthority(.attached)
         )
@@ -8961,6 +9043,9 @@ public final class TmuxController {
             ownSessionName = name
             if priorSessionId != sessionId, participatesInGridAuthority {
                 applyGridAuthorityLifecycleEffects(reduceGridAuthority(.controlSessionChanged(replacedKnownSession: priorSessionId != nil)))
+                // An inline attach learns its session here, before its read
+                // answers; a switch dropped the old session's records.
+                restoreGridAuthorityOwnedGeometry()
             }
             Self.logDiagnostic("session-changed own session set to \(sessionId)")
 
@@ -9041,6 +9126,8 @@ public final class TmuxController {
         case .sessionRenamed(let sessionId, let name):
             if ownSessionId == nil || ownSessionId == sessionId {
                 ownSessionName = name
+                // A relaunch looks the record up under the new name.
+                keepGridAuthorityOwnedGeometry()
             }
 
         case .unlinkedWindowAdd, .unlinkedWindowRenamed,

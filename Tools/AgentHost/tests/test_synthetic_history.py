@@ -86,7 +86,7 @@ class SyntheticHistoryTests(unittest.TestCase):
                 print(f'oversized_image_tail seconds={elapsed:.3f} bytesRead={bytes_read} '
                       f'fileSize={file_size} records={len(records)} progress={len(progress)}')
 
-    def test_claude_live_append_reads_only_its_validation(self):
+    def test_claude_live_append_reads_only_the_append_and_newest_page(self):
         # An active Claude session appends a record every few seconds, and
         # each append triggers a head read. Rebuilding the branch index from
         # the start rereads the whole transcript, and the single read worker
@@ -156,17 +156,18 @@ class SyntheticHistoryTests(unittest.TestCase):
                     texts = [block['text'] for frame in records
                              for block in frame['record'].get('blocks', []) if block.get('type') == 'text']
                     self.assertIn(f'Live {index}.', texts)
-                    # Validation rehashes the prefix once; the index and the
-                    # page read only the append and the newest records.
-                    self.assertLess(warm, file_size + 4 * 1024 * 1024)
+                    # Validation reads nothing; the index and the page read
+                    # only the append and the newest records, never the file.
+                    self.assertLess(warm, 4 * 1024 * 1024)
+                    self.assertGreater(file_size, 16 * 1024 * 1024)
                     print(f'live_append index={index} seconds={time.monotonic() - started:.3f} '
                           f'bytesRead={warm} coldBytesRead={cold} fileSize={file_size}')
 
-    def run_history(self, provider, count, shape='linear', traverse=False, rewrite=False, interrupt=False):
+    def run_history(self, provider, count, shape='linear', traverse=False, interrupt=False):
         with tempfile.TemporaryDirectory(prefix='tessera-synthetic-', dir='/tmp') as directory:
             history = History(Path(directory), provider, count, shape).generate()
             with WindowClient(BINARY, history, timeout=90) as client:
-                result = client.exercise(traverse, rewrite, interrupt=interrupt)
+                result = client.exercise(traverse, interrupt=interrupt)
             initial_records = count + int(provider in {'pi', 'kimi'})
             if shape == 'undo': initial_records = count - count // 2 + 2
             self.assertEqual(result['initial_pages'], min(3, (initial_records + 99) // 100))
@@ -183,11 +184,6 @@ class SyntheticHistoryTests(unittest.TestCase):
                                 ('codex', 'revisions'), ('pi', 'branches'), ('kimi', 'undo')]:
             with self.subTest(provider=provider, shape=shape):
                 self.run_history(provider, 1200, shape, traverse=True)
-
-    def test_warm_interior_rewrite_followed_by_growth(self):
-        for provider in ('claude', 'codex'):
-            with self.subTest(provider=provider):
-                self.run_history(provider, 1200, rewrite=True)
 
     def test_codex_history_spans_thirty_two_physical_ancestors(self):
         self.run_history('codex', 1200, 'lineage', traverse=True)

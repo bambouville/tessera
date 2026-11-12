@@ -7,6 +7,9 @@ import TesseraCore
 struct AppleAgentTerminalInspection: Sendable {
     let observation: AgentTerminalObservation
     let promptScreen: AgentPromptObservationResult?
+    /// What `promptScreen` was read from: an answer reads a cropped dialog
+    /// again through its thread (`AgentCenterRuntime.answerScreen`).
+    let promptRequest: AgentPromptObservationRequest?
     let composerText: String?
     let queueSupported: Bool
     let composerRow: Int?
@@ -15,10 +18,15 @@ struct AppleAgentTerminalInspection: Sendable {
     let composerCursorVisible: Bool?
     let screenEvidence: TerminalScreenEvidence?
     let bracketedPasteEnabled: Bool
+    /// An answer's write admission, taken on the MainActor as the last step
+    /// before its bytes go (`AgentAnswerPermit.commitWrite`).
+    var commitWrite: (@Sendable () -> Bool)?
 
-    init(observation: AgentTerminalObservation, promptScreen: AgentPromptObservationResult? = nil, composerText: String? = nil, queueSupported: Bool = false, composerRow: Int? = nil, composerColumn: Int? = nil, composerVisibleText: String? = nil, composerCursorVisible: Bool? = nil, screenEvidence: TerminalScreenEvidence? = nil, bracketedPasteEnabled: Bool = false) {
+    init(observation: AgentTerminalObservation, promptScreen: AgentPromptObservationResult? = nil,
+         promptRequest: AgentPromptObservationRequest? = nil, composerText: String? = nil, queueSupported: Bool = false, composerRow: Int? = nil, composerColumn: Int? = nil, composerVisibleText: String? = nil, composerCursorVisible: Bool? = nil, screenEvidence: TerminalScreenEvidence? = nil, bracketedPasteEnabled: Bool = false) {
         self.observation = observation
         self.promptScreen = promptScreen
+        self.promptRequest = promptRequest
         self.composerText = composerText.map { String($0.prefix(32_768)) }
         self.queueSupported = queueSupported
         self.composerRow = composerRow
@@ -119,11 +127,27 @@ actor AppleAgentTerminalAdapter: AgentTerminalObservationPort, AgentTerminalActi
     }
 
     func observe(binding: AgentTerminalBinding) async throws -> AgentTerminalObservation {
-        let inspection = try await inspectSettled(binding, exhausted: .inputNotReady)
-        return inspection.observation
+        try await inspect(binding: binding).observation
+    }
+
+    func inspect(binding: AgentTerminalBinding) async throws -> AppleAgentTerminalInspection {
+        try await inspectSettled(binding, exhausted: .inputNotReady)
     }
 
     func answer(_ request: AgentPromptAnswerRequest, freshObservation: AgentTerminalObservation) async throws {
+        try await answer(request, freshObservation: freshObservation, screen: { $0.promptScreen })
+    }
+
+    /// `screen` reads each capture's prompt as the thread's card was read,
+    /// before the first write and every later one. `beforeWrite` runs after
+    /// every awaited proof of each write: the prompt the plan was made for
+    /// may have closed while they ran, and the next one drawn in its place.
+    /// `commitWrite` closes what is left: the send takes it as its last step
+    /// before the bytes go.
+    func answer(_ request: AgentPromptAnswerRequest, freshObservation: AgentTerminalObservation,
+                screen: @Sendable (AppleAgentTerminalInspection) async -> AgentPromptObservationResult?,
+                beforeWrite: (@Sendable () async throws -> Void)? = nil,
+                commitWrite: (@Sendable () -> Bool)? = nil) async throws {
         try Task.checkCancellation()
         guard freshObservation.binding == request.binding,
               request.binding.capabilities.contains(.promptAnswer)
@@ -134,14 +158,15 @@ actor AppleAgentTerminalAdapter: AgentTerminalObservationPort, AgentTerminalActi
             try Task.checkCancellation()
             let inspection = try await inspectSettled(request.binding,
                 exhausted: history.isEmpty ? .inputNotReady : .verificationFailed)
+            let promptScreen = await screen(inspection)
             if history.isEmpty {
-                guard let screen = inspection.promptScreen,
-                      request.actionToken == AgentPromptGrammar.actionToken(for: screen.signature)
+                guard let promptScreen,
+                      request.actionToken == AgentPromptGrammar.actionToken(for: promptScreen.signature)
                 else { throw AgentActionError.stalePrompt }
             }
             let plan = AgentPromptAnswerPlanner.next(provider: request.threadID.providerID,
                 goal: request.goal, expectedSignature: request.expectedSignature,
-                anchor: anchor, observation: inspection.promptScreen, history: history)
+                anchor: anchor, observation: promptScreen, history: history)
             anchor = plan.anchor
             switch plan.step.action {
             case .done: return
@@ -158,8 +183,11 @@ actor AppleAgentTerminalAdapter: AgentTerminalObservationPort, AgentTerminalActi
                     throw AgentActionError.verificationFailed
                 }
                 try await fence.requireCurrent(request.binding)
+                try await beforeWrite?()
                 let input = plan.step.semanticKey?.bytes ?? bytes
-                guard try await operations.sendText(Data(input.utf8), .promptAnswer, request.binding, inspection) else {
+                var committed = inspection
+                committed.commitWrite = commitWrite
+                guard try await operations.sendText(Data(input.utf8), .promptAnswer, request.binding, committed) else {
                     if history.isEmpty, request.binding.transport == .ssh || request.binding.transport == .mosh {
                         throw AgentActionError.inputNotReady
                     }

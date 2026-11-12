@@ -7,7 +7,7 @@ import PortForwarding
 
 @MainActor
 @Observable
-public final class PortForwarder: Identifiable {
+public final class PortForwarder: @MainActor Identifiable {
     public enum State: Equatable {
         case idle
         case listening
@@ -31,6 +31,8 @@ public final class PortForwarder: Identifiable {
     public private(set) var forwardingProhibited = false
 
     private let listener = PortListener()
+
+    @ObservationIgnored private var ephemeralListener: ArtifactEphemeralListener?
 
     @ObservationIgnored
     private var connections: Set<PortForwardConnection> = []
@@ -216,6 +218,26 @@ public final class PortForwarder: Identifiable {
     }
 
     public func start(over client: SSHClient) {
+        ephemeralListener?.stop()
+        ephemeralListener = nil
+        start(over: client, acceptedConnections: nil)
+    }
+
+    /// Binds before returning so the caller can use the actual OS-assigned
+    /// port. A busy preferred port falls back to an ephemeral loopback port.
+    public func startEphemeral(over client: SSHClient) async throws {
+        await stop()
+        let listener = ArtifactEphemeralListener()
+        let bound: ArtifactEphemeralListener.Bound
+        do { bound = try await listener.listen(preferredPort: rule.bind.port) }
+        catch { listener.stop(); throw error }
+        guard !Task.isCancelled else { listener.stop(); throw CancellationError() }
+        rule.bind.port = bound.port
+        ephemeralListener = listener
+        start(over: client, acceptedConnections: bound.connections)
+    }
+
+    private func start(over client: SSHClient, acceptedConnections suppliedConnections: AsyncThrowingStream<AcceptedTCPConnection, Error>?) {
         resetService()
         self.client = client
 
@@ -251,7 +273,9 @@ public final class PortForwarder: Identifiable {
 
         serveTask = Task { @MainActor [weak self, listener, client] in
             do {
-                let acceptedConnections = try await listener.listen(port: localPort)
+                let acceptedConnections: AsyncThrowingStream<AcceptedTCPConnection, Error>
+                if let suppliedConnections { acceptedConnections = suppliedConnections }
+                else { acceptedConnections = try await listener.listen(port: localPort) }
                 DiagnosticLogStore.appendForwarding("rule listening rule=\(self?.ruleShortID ?? "unknown") localPort=\(localPort)")
 
                 for try await accepted in acceptedConnections {
@@ -301,13 +325,13 @@ public final class PortForwarder: Identifiable {
 
                         if Task.isCancelled {
                             accepted.connection.cancel()
-                            await Self.closeRemote(remote)
+                            await remote.finishAndClose()
                             break
                         }
 
                         guard let self else {
                             accepted.connection.cancel()
-                            await Self.closeRemote(remote)
+                            await remote.finishAndClose()
                             continue
                         }
 
@@ -382,6 +406,8 @@ public final class PortForwarder: Identifiable {
         serveTask?.cancel()
         serveTask = nil
         listener.stop()
+        ephemeralListener?.stop()
+        ephemeralListener = nil
 
         let activeConnections = connections
         for conn in activeConnections {
@@ -442,11 +468,6 @@ public final class PortForwarder: Identifiable {
         case .cancelled:
             return String(localized: "Listener cancelled.")
         }
-    }
-
-    private static func closeRemote(_ remote: NIOAsyncChannel<ByteBuffer, ByteBuffer>) async {
-        remote.outbound.finish()
-        try? await remote.channel.close().get()
     }
 
     private var ruleShortID: String {

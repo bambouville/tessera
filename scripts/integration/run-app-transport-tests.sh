@@ -293,6 +293,18 @@ if [[ "$mixed_selected" == 1 ]]; then
   ' "$tests_json" >/dev/null || die 'mixed-pair XCTest must pass without skipping'
 fi
 
+# §6.9 across a process death: a relaunch over a grid it owned is not
+# another device's. Also an individual case, never an incidental skip.
+relaunch_test='test_liveSSHtmuxRelaunchOverAGridItOwnedIsNotAnotherDevice'
+if [[ "$TEST_FILTER" == TesseraTests ||
+      "$TEST_FILTER" == TesseraTests/RealHostTransportIntegrationTests ||
+      "$TEST_FILTER" == *"$relaunch_test"* ]]; then
+  jq -e --arg test "$relaunch_test" '
+    [.. | objects | select(.nodeType? == "Test Case" and ((.name? // "") | contains($test)))]
+    | length == 1 and .[0].result == "Passed"
+  ' "$tests_json" >/dev/null || die 'relaunch XCTest must pass without skipping'
+fi
+
 # Explicit focused filters are supported by this runner too. Require the
 # isolation proof only when that case was selected; otherwise a successful
 # diagnostics/unit smoke test incorrectly fails for omitting an unrelated case.

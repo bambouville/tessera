@@ -238,7 +238,8 @@ final class GridAuthorityTests: XCTestCase {
         attach: Bool = true,
         authorityConfiguration: TmuxGridAuthoritySession.Configuration = .init(),
         authorityNow: (() -> Int64)? = nil,
-        ownerName: String? = nil
+        ownerName: String? = nil,
+        ownedGeometryStore: TmuxController.OwnedGeometryStore? = nil
     ) -> (controller: TmuxController, sent: ByteSink) {
         let sent = ByteSink()
         let controller = TmuxController(authorityInitialGeneration: 0,
@@ -251,6 +252,7 @@ final class GridAuthorityTests: XCTestCase {
         controller.feedTerminal = { _ in }
         controller.sendBytes = { sent.append($0); fixture.noteSent($0) }
         controller.gridAuthorityOwnerSessionName = ownerName
+        controller.gridAuthorityOwnedGeometryStore = ownedGeometryStore
         controller.gridAuthorityIdentity = identity
         controller.gridAuthorityAdoptShown()
         controller.updateClientSize(cols: localCols, rows: localRows)
@@ -2787,6 +2789,141 @@ final class GridAuthorityTests: XCTestCase {
         XCTAssertNil(controller.gridAuthorityLifecycleForTesting.claim)
         XCTAssertEqual(controller.gridAuthority, .mine)
         XCTAssertFalse(controller.gridAuthorityGeometryHeldForTesting)
+    }
+
+    /// An owned-geometry store keyed by tmux session, recording every keep.
+    private final class OwnedGeometryShelf {
+        var records: [String: [TmuxOwnedGeometryRecord]]
+        var kept: [(session: String, record: TmuxOwnedGeometryRecord)] = []
+        /// The sessions whose records were restored, in order.
+        var restored: [String] = []
+
+        init(_ records: [String: [TmuxOwnedGeometryRecord]] = [:]) { self.records = records }
+
+        var store: TmuxController.OwnedGeometryStore {
+            .init(
+                records: { [unowned self] session in
+                    self.restored.append(session)
+                    return self.records[session] ?? []
+                },
+                keep: { [unowned self] record, session in
+                    self.kept.append((session, record))
+                    self.records[session] = TmuxOwnedGeometryRecord.keeping(record, in: self.records[session] ?? [])
+                }
+            )
+        }
+    }
+
+    /// §6.9: a relaunch finds our stamp still standing over the grid this
+    /// device owned before the process died. The kept record proves it ours,
+    /// so the window comes back to the new viewport with no veil, no claim
+    /// and no stamp write; the merged record is kept for the next relaunch.
+    func test_relaunchOverAGridOwnedBeforeTheProcessDiedReplaysWithoutAVeil() {
+        let owned = TmuxGridSize(columns: Self.peerGrid.columns, rows: Self.peerGrid.rows)
+        for (path, ownerName) in [(TmuxController.ControlPath.inline, nil), (.sideChannel, "dev")] as [(TmuxController.ControlPath, String?)] {
+            let shelf = OwnedGeometryShelf(["dev": [
+                .init(generation: 1, sizes: [owned]),
+                .init(generation: 9, sizes: [TmuxGridSize(columns: 80, rows: 24)]),
+            ]])
+            let (controller, sent) = makeController(path: path, remoteStamp: selfValue(gen: 1), attach: false,
+                                                    ownerName: ownerName, ownedGeometryStore: shelf.store)
+            controller.ingest(Array(Self.handshake.utf8))
+            ackAllPending(controller, frames: 40)
+
+            XCTAssertEqual(controller.gridAuthority, .mine, "\(path)")
+            XCTAssertEqual(controller.gridAuthorityPresentation, .none, "\(path)")
+            XCTAssertTrue(sent.string.contains("refresh-client -C 92,38"), "\(path): \(sent.string)")
+            XCTAssertFalse(sent.string.contains("set-option \(TmuxController.gridAuthorityOption)"), "\(path): \(sent.string)")
+            XCTAssertNil(controller.gridAuthorityLifecycleForTesting.claim, "\(path)")
+            XCTAssertEqual(shelf.kept.last?.session, "dev", "\(path)")
+            XCTAssertEqual(shelf.kept.last?.record,
+                           .init(generation: 1, sizes: [owned, TmuxGridSize(columns: 92, rows: 38)]), "\(path)")
+        }
+    }
+
+    /// Records kept for another tmux session, or under a generation our
+    /// stamp no longer carries, prove nothing: the window still reads as
+    /// another device's.
+    func test_relaunchWithoutARecordForTheStandingStampStillVeils() {
+        let owned = TmuxGridSize(columns: Self.peerGrid.columns, rows: Self.peerGrid.rows)
+        for records in [["other": [TmuxOwnedGeometryRecord(generation: 1, sizes: [owned])]],
+                        ["dev": [TmuxOwnedGeometryRecord(generation: 2, sizes: [owned])]]] {
+            let shelf = OwnedGeometryShelf(records)
+            let (controller, sent) = makeController(path: .inline, remoteStamp: selfValue(gen: 1),
+                                                    ownedGeometryStore: shelf.store)
+            XCTAssertEqual(controller.gridAuthorityPresentation, .veiled(peerName: TmuxStamplessPeer.displayName), "\(records)")
+            assertNoGeometryOrStamp(sent.string, "\(records)")
+            XCTAssertTrue(shelf.kept.isEmpty, "\(records)")
+        }
+    }
+
+    func test_anOwnerKeepsItsGridsUnderItsStampsSession() {
+        let shelf = OwnedGeometryShelf()
+        let (controller, _) = makeController(path: .sideChannel, remoteStamp: selfValue(),
+                                             remoteGrid: FixtureGrid(columns: 92, rows: 38),
+                                             ownerName: "owner", ownedGeometryStore: shelf.store)
+        XCTAssertEqual(controller.gridAuthority, .mine)
+        XCTAssertEqual(shelf.kept.map(\.session), ["owner"], "the stamp lives on the group owner")
+        XCTAssertEqual(shelf.kept.last?.record, .init(generation: 1, sizes: [TmuxGridSize(columns: 92, rows: 38)]))
+    }
+
+    /// Each tmux session restores its own records when tmux names it: a
+    /// switch to a session whose grid this device owned is ours, a switch
+    /// back to one it never owned still another device's.
+    func test_aSessionSwitchRestoresTheNewSessionsRecords() {
+        let owned = TmuxGridSize(columns: Self.peerGrid.columns, rows: Self.peerGrid.rows)
+        let shelf = OwnedGeometryShelf(["other": [.init(generation: 1, sizes: [owned])]])
+        let (controller, _) = makeController(path: .inline, remoteStamp: selfValue(gen: 1),
+                                             ownedGeometryStore: shelf.store)
+        XCTAssertEqual(controller.gridAuthorityPresentation, .veiled(peerName: TmuxStamplessPeer.displayName))
+
+        controller.ingest(Array("%session-changed $1 other\r\n".utf8))
+        ackAllPending(controller, frames: 40)
+        XCTAssertEqual(controller.gridAuthority, .mine)
+        XCTAssertEqual(controller.gridAuthorityPresentation, .none)
+
+        controller.ingest(Array("%session-changed $0 dev\r\n".utf8))
+        ackAllPending(controller, frames: 40)
+        XCTAssertEqual(controller.gridAuthorityPresentation, .veiled(peerName: TmuxStamplessPeer.displayName),
+                       "the other session's grids are no evidence here")
+        // Naming a session and hydrating it after the switch's reset are
+        // two scopes; each restores the session just named.
+        XCTAssertEqual(shelf.restored.reduce(into: [String]()) { if $0.last != $1 { $0.append($1) } },
+                       ["dev", "other", "dev"])
+    }
+
+    /// A new control connection restores its session's records again,
+    /// before its own read can answer.
+    func test_aNewControlConnectionRestoresAgain() {
+        let owned = TmuxGridSize(columns: Self.peerGrid.columns, rows: Self.peerGrid.rows)
+        let shelf = OwnedGeometryShelf(["dev": [.init(generation: 1, sizes: [owned])]])
+        let (controller, _) = makeController(path: .sideChannel, remoteStamp: selfValue(gen: 1), attach: false,
+                                             ownerName: "dev", ownedGeometryStore: shelf.store)
+        controller.ingest(Array(Self.handshake.utf8))
+        ackAllPending(controller, frames: 40)
+        XCTAssertEqual(controller.gridAuthority, .mine)
+        XCTAssertEqual(shelf.restored, ["dev"])
+
+        controller.sideChannelDisconnected()
+        controller.ingest([0x1B, 0x50, 0x31, 0x30, 0x30, 0x30, 0x70])
+        controller.ingest(Array("%session-changed $0 dev\r\n".utf8))
+        controller.ingest(Array("%begin 200 1 0\r\n%end 200 1 0\r\n".utf8))
+        ackAllPending(controller, frames: 40)
+        XCTAssertEqual(controller.gridAuthority, .mine)
+        XCTAssertEqual(shelf.restored.last, "dev")
+        XCTAssertGreaterThan(shelf.restored.count, 1, "the new connection restored: \(shelf.restored)")
+    }
+
+    func test_aRenamedSessionKeepsItsRecordUnderTheNewName() {
+        let shelf = OwnedGeometryShelf()
+        let (controller, _) = makeController(path: .inline, remoteStamp: selfValue(),
+                                             remoteGrid: FixtureGrid(columns: 92, rows: 38),
+                                             ownedGeometryStore: shelf.store)
+        XCTAssertEqual(controller.gridAuthority, .mine)
+        let record = try? XCTUnwrap(shelf.kept.last?.record)
+        controller.ingest(Array("%session-renamed $0 renamed\r\n".utf8))
+        XCTAssertEqual(shelf.kept.last?.session, "renamed")
+        XCTAssertEqual(shelf.kept.last?.record, record)
     }
 
     func test_sessionSwitchDropsPriorSessionAuthorityAndRederives() {

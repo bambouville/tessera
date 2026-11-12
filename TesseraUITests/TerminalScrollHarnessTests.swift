@@ -1,6 +1,91 @@
 import XCTest
 import CoreFoundation
 
+/// Launch arguments that mark this release's What's New card as seen. A
+/// version above any real release keeps working when the card's version
+/// moves on; naming the current one broke every shell test at each bump.
+let skipsWhatsNewArguments = ["-tessera.pref.lastSeenWhatsNewVersion", "999"]
+
+/// The iPhone Duo simulator. Its typed keys never reach the app's scene: a
+/// tapped system text field reports no keyboard focus to XCUITest, and
+/// `typeKey` leaves both that field and the first-responder terminal empty.
+var isIPhoneDuoSimulator: Bool {
+    ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] == "iPhone19,4"
+}
+
+extension XCUIApplication {
+    /// A root tab of the compact shell. Phones list the tabs in a tab bar, but
+    /// iPhone Duo's TabView draws a trailing rail that XCUITest exposes as
+    /// plain buttons outside any TabBar, so take the trailing-most button with
+    /// the tab's label there. Waits up to `timeout` for either shape.
+    func compactRootTab(_ label: String, timeout: TimeInterval = 10) -> XCUIElement {
+        let barTab = tabBars.buttons[label]
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if barTab.exists { return barTab }
+            if let railTab = trailingRailButton(label) { return railTab }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        } while Date() < deadline
+        return barTab
+    }
+
+    /// Sends the app to the background and reports whether it left the
+    /// foreground. The iPhone Duo simulator on iOS 27.1 can ignore
+    /// XCUIDevice's Home press outright; activating SpringBoard backgrounds
+    /// the app the way the Home gesture does.
+    @discardableResult
+    func sendToBackground(timeout: TimeInterval = 5) -> Bool {
+        XCUIDevice.shared.press(.home)
+        if waitToLeaveForeground(timeout: timeout) { return true }
+        XCUIApplication(bundleIdentifier: "com.apple.springboard").activate()
+        return waitToLeaveForeground(timeout: timeout)
+    }
+
+    private func waitToLeaveForeground(timeout: TimeInterval) -> Bool {
+        let left = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "state != %d", XCUIApplication.State.runningForeground.rawValue),
+            object: self
+        )
+        return XCTWaiter.wait(for: [left], timeout: timeout) == .completed
+    }
+
+    private func trailingRailButton(_ label: String) -> XCUIElement? {
+        let window = windows.firstMatch.frame
+        guard !window.isEmpty else { return nil }
+        return buttons.matching(NSPredicate(format: "label == %@", label))
+            .allElementsBoundByIndex
+            .filter { $0.exists && $0.frame.minX >= window.maxX - 96 }
+            .max { $0.frame.minX < $1.frame.minX }
+    }
+}
+
+extension XCUIElement {
+    /// Taps a text field and waits until it holds keyboard focus. `typeText`
+    /// checks focus once, but on a loaded simulator the software keyboard has
+    /// taken over ten seconds to come up after the tap; one more tap covers a
+    /// tap that landed while the field was still settling.
+    func tapForKeyboardFocus(timeout: TimeInterval = 15) -> Bool {
+        let focused = NSPredicate(format: "hasKeyboardFocus == true")
+        for _ in 0..<2 {
+            tap()
+            let expectation = XCTNSPredicateExpectation(predicate: focused, object: self)
+            if XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed { return true }
+        }
+        return false
+    }
+
+    /// Waits for a text field to read `expected`. A typed key can reach the
+    /// field after `typeKey` returns: on a loaded iOS 27 iPad a read straight
+    /// after the key found the text one character short, while the run's
+    /// screen recording shows the character in the field moments later. The
+    /// same load has made one lookup of the field take over 4 s.
+    func waitForTextValue(_ expected: String, timeout: TimeInterval = 15) -> Bool {
+        let predicate = NSPredicate(format: "value == %@", expected)
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: self)
+        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+}
+
 final class SetupFlowPresentationHarnessTests: XCTestCase {
     func testNearbyZeroGrantReviewAndConfigureLater() { exercise(mode: "nearby") }
     func testQRCopySelectionReview() { exercise(mode: "qr") }
@@ -207,34 +292,43 @@ final class CompactNavigationTransitionHarnessTests: XCTestCase {
             route: "Hosts"
         )
 
-        tapCenter(app.buttons["sidebar-navigation-keys"])
+        tapCenter(app.buttons["sidebar-navigation-settings"])
+        tapCenter(app.buttons["settings-section-keys"])
         assertRoundTrip(
-            compactTab: "keys",
+            compactTab: "settings",
             regularVisible: app.buttons["+ generate"],
             compactVisible: app.buttons["+ generate"],
             route: "Keys",
             screenshotPath: "/tmp/tessera-compact-navigation-transition-current.png"
         )
 
-        tapCenter(app.buttons["sidebar-navigation-known-hosts"])
+        tapCenter(app.buttons["settings-section-known-hosts"])
         assertRoundTrip(
-            compactTab: "keys",
+            compactTab: "settings",
             regularVisible: app.buttons["export"],
             compactVisible: app.descendants(matching: .any)["known-hosts-page"],
             route: "Known Hosts"
         )
 
-        tapCenter(app.buttons["sidebar-navigation-settings"])
+        tapCenter(app.buttons["settings-section-appearance"])
         assertRoundTrip(
             compactTab: "settings",
-            regularVisible: app.staticTexts["appearance"],
-            compactVisible: app.staticTexts["appearance"],
+            regularVisible: app.buttons["settings-section-appearance"],
+            compactVisible: app.staticTexts["appearance"].firstMatch,
             route: "Settings"
+        )
+
+        tapCenter(app.buttons["sidebar-navigation-artifacts"])
+        assertRoundTrip(
+            compactTab: "artifacts",
+            regularVisible: app.descendants(matching: .any)["artifacts-page"],
+            compactVisible: app.descendants(matching: .any)["artifacts-page"],
+            route: "Artifacts"
         )
 
         tapCenter(app.buttons["agent-sidebar-row"])
         assertRoundTrip(
-            compactTab: "sessions",
+            compactTab: "agents",
             regularVisible: app.descendants(matching: .any)["agent-center-page"],
             compactVisible: app.descendants(matching: .any)["agent-center-page"],
             route: "Agent Center"
@@ -291,7 +385,60 @@ final class CompactNavigationTransitionHarnessTests: XCTestCase {
         )
     }
 
-    private func launch(initialSize: String, initialRoute: String) {
+    func testCompactTabsIncludeAgentsAndArtifacts() throws {
+        launch(initialSize: "compact", initialRoute: "hosts")
+
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 10))
+        XCTAssertEqual(
+            app.tabBars.buttons.allElementsBoundByIndex.map(\.label),
+            ["hosts", "sessions", "agents", "artifacts", "settings"]
+        )
+        app.tabBars.buttons["agents"].tap()
+        assertSelectedTab("agents", route: "Agents tab")
+        XCTAssertTrue(app.descendants(matching: .any)["agent-center-page"].waitForExistence(timeout: 5))
+        app.tabBars.buttons["artifacts"].tap()
+        assertSelectedTab("artifacts", route: "Artifacts tab")
+        XCTAssertTrue(app.staticTexts["your work, open here"].waitForExistence(timeout: 5))
+        app.tabBars.buttons["sessions"].tap()
+        assertSelectedTab("sessions", route: "Sessions tab")
+        XCTAssertTrue(app.staticTexts["navigation fixture session"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.tabBars.buttons["keys"].exists)
+    }
+
+    func testCompactTabsHideAgentsWhileAgentCenterIsOff() throws {
+        launch(initialSize: "compact", initialRoute: "hosts", agentCenterEnabled: false)
+
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 10))
+        XCTAssertEqual(
+            app.tabBars.buttons.allElementsBoundByIndex.map(\.label),
+            ["hosts", "sessions", "artifacts", "settings"]
+        )
+        app.tabBars.buttons["artifacts"].tap()
+        assertSelectedTab("artifacts", route: "Artifacts without Agent Center")
+        XCTAssertTrue(app.staticTexts["your work, open here"].waitForExistence(timeout: 5))
+    }
+
+    func testLegacySelectionsRouteToSettingsAcrossShells() throws {
+        for size in ["regular", "compact"] {
+            for route in ["keys", "known-hosts", "tunnels"] {
+                launch(initialSize: size, initialRoute: route)
+                let destination: XCUIElement
+                switch route {
+                case "keys": destination = app.buttons["+ generate"].firstMatch
+                case "known-hosts": destination = app.buttons["export"].firstMatch
+                // Tunnels' pages are artifact tabs now.
+                default: destination = app.descendants(matching: .any)["artifacts-page"].firstMatch
+                }
+                XCTAssertTrue(destination.waitForExistence(timeout: 10), "legacy \(route) in \(size)")
+                if size == "compact" {
+                    assertSelectedTab(route == "tunnels" ? "artifacts" : "settings", route: "legacy \(route)")
+                }
+                app.terminate()
+            }
+        }
+    }
+
+    private func launch(initialSize: String, initialRoute: String, agentCenterEnabled: Bool = true) {
         app = XCUIApplication()
         app.launchEnvironment["TESSERA_COMPACT_NAVIGATION_HARNESS"] = "1"
         app.launchEnvironment["TESSERA_COMPACT_NAVIGATION_INITIAL_SIZE"] = initialSize
@@ -303,8 +450,8 @@ final class CompactNavigationTransitionHarnessTests: XCTestCase {
         app.launchArguments += [
             "-tessera.nearbyBootstrap.completed.v1", "YES",
             "-tessera.pref.hasSeenWelcome", "YES",
-            "-tessera.pref.agentCenterEnabled", "YES",
-        ]
+            "-tessera.pref.agentCenterEnabled", agentCenterEnabled ? "YES" : "NO",
+        ] + skipsWhatsNewArguments
         app.launch()
     }
 
@@ -348,7 +495,7 @@ final class CompactNavigationTransitionHarnessTests: XCTestCase {
             to: URL(fileURLWithPath: "/tmp/tessera-compact-navigation-return-current.png")
         )
         XCTAssertTrue(
-            app.buttons["sidebar-navigation-keys"].waitForExistence(timeout: 5),
+            app.buttons["sidebar-navigation-artifacts"].waitForExistence(timeout: 5),
             "regular shell did not return after round-tripping \(route)"
         )
         XCTAssertTrue(
@@ -453,6 +600,25 @@ final class KeyImportPickerHarnessTests: XCTestCase {
         app = nil
     }
 
+    /// iOS 27 reports the picker's bar-button Cancel as a plain element
+    /// rather than a Button, so match it by name at any element type.
+    private func systemPickerCancel(in app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any)["Cancel"].firstMatch
+    }
+
+    /// The first presentation cold-starts the out-of-process picker service.
+    /// On a freshly booted simulator under load that alone has taken 8.6 s
+    /// before the remote view began loading; a warm picker presents at once.
+    private static let coldPickerTimeout: TimeInterval = 30
+    /// Browsing On My iPhone/iPad the first time waits on fileproviderd. After
+    /// the lane's other picker tests on a fresh iPhone, the key file has
+    /// taken 49-156 s to show.
+    private static let pickerBrowseTimeout: TimeInterval = 300
+    /// A picker row still the deepest this long after its tap is tapped again.
+    private static let pickerRetapInterval: TimeInterval = 15
+    /// iPhone's picker opens Tessera's folder itself; its root waits this long.
+    private static let pickerSelfOpeningRootInterval: TimeInterval = 60
+
     func testDocumentPickerCancelsAndReopens() {
         XCUIDevice.shared.orientation = XCUIDevice.shared.supportsPointerInteraction ? .landscapeLeft : .portrait
         app = XCUIApplication()
@@ -461,12 +627,18 @@ final class KeyImportPickerHarnessTests: XCTestCase {
         app.launchArguments += [
             "-tessera.nearbyBootstrap.completed.v1", "YES",
             "-tessera.pref.hasSeenWelcome", "YES",
-        ]
+        ] + skipsWhatsNewArguments
         app.launch()
 
-        let keysTab = app.tabBars.buttons["keys"]
-        XCTAssertTrue(keysTab.waitForExistence(timeout: 10))
-        keysTab.tap()
+        let settingsTab = app.compactRootTab("settings")
+        XCTAssertTrue(settingsTab.waitForExistence(timeout: 10))
+        settingsTab.tap()
+        let keysSection = app.buttons["settings-section-keys"]
+        for _ in 0..<8 where !keysSection.isHittable {
+            app.scrollViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(keysSection.waitForExistence(timeout: 5))
+        keysSection.tap()
 
         let importButton = app.buttons["import"].firstMatch
         XCTAssertTrue(importButton.waitForExistence(timeout: 5))
@@ -481,9 +653,9 @@ final class KeyImportPickerHarnessTests: XCTestCase {
             // iPad's split browser and iPhone's compact browser. Its system
             // Cancel action is stable on both; Tessera's own action is the
             // distinct lowercase "cancel" label.
-            let cancel = app.buttons["Cancel"].firstMatch
+            let cancel = systemPickerCancel(in: app)
             XCTAssertTrue(
-                cancel.waitForExistence(timeout: 10),
+                cancel.waitForExistence(timeout: attempt == 1 ? Self.coldPickerTimeout : 10),
                 "system document picker did not present on attempt \(attempt)"
             )
 
@@ -509,12 +681,18 @@ final class KeyImportPickerHarnessTests: XCTestCase {
         app.launchArguments += [
             "-tessera.nearbyBootstrap.completed.v1", "YES",
             "-tessera.pref.hasSeenWelcome", "YES",
-        ]
+        ] + skipsWhatsNewArguments
         app.launch()
 
-        let keysTab = app.tabBars.buttons["keys"]
-        XCTAssertTrue(keysTab.waitForExistence(timeout: 10))
-        keysTab.tap()
+        let settingsTab = app.compactRootTab("settings")
+        XCTAssertTrue(settingsTab.waitForExistence(timeout: 10))
+        settingsTab.tap()
+        let keysSection = app.buttons["settings-section-keys"]
+        for _ in 0..<8 where !keysSection.isHittable {
+            app.scrollViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(keysSection.waitForExistence(timeout: 5))
+        keysSection.tap()
         let importButton = app.buttons["import"].firstMatch
         XCTAssertTrue(importButton.waitForExistence(timeout: 5))
         importButton.tap()
@@ -522,25 +700,20 @@ final class KeyImportPickerHarnessTests: XCTestCase {
         XCTAssertTrue(chooseFile.waitForExistence(timeout: 5))
         chooseFile.tap()
         XCTAssertTrue(
-            app.buttons["Cancel"].firstMatch.waitForExistence(timeout: 10),
+            systemPickerCancel(in: app).waitForExistence(timeout: Self.coldPickerTimeout),
             "system document picker did not present"
         )
 
         // iPhone's browser has a Browse tab; iPad's sidebar lists locations.
         let browse = app.buttons.matching(identifier: "Browse").firstMatch
-        if browse.exists && browse.isHittable {
+        let browsesFromTab = browse.exists && browse.isHittable
+        if browsesFromTab {
             browse.tap()
         }
-        try tapPickerItem(labelled: ["On My iPhone", "On My iPad"])
-        try tapPickerItem(labelled: ["Tessera"])
-        try tapPickerItem(labelled: [fileName])
+        try chooseInPicker(fileName, opensFolderItself: browsesFromTab)
 
         // The file name is also a row in the picker; only read it from the
         // modal once the picker has gone.
-        XCTAssertTrue(
-            app.buttons["Cancel"].firstMatch.waitForNonExistence(timeout: 10),
-            "the document picker stayed up after choosing the key file"
-        )
         XCTAssertTrue(
             app.staticTexts[fileName].waitForExistence(timeout: 10),
             "the chosen key file never reached the import modal"
@@ -556,24 +729,60 @@ final class KeyImportPickerHarnessTests: XCTestCase {
         )
     }
 
-    private func tapPickerItem(labelled labels: [String]) throws {
-        let deadline = Date().addingTimeInterval(10)
+    /// Browses to the key file and chooses it, tapping the deepest row on
+    /// screen once it holds still. Browsing waits on fileproviderd, which a
+    /// fresh simulator has not asked for local storage yet, and the cold
+    /// picker drops taps that land while its rows animate in: iPhone has
+    /// held On My iPhone selected, unopened, for 90 s, and iPad has sat on
+    /// the folder with the key file unchosen. Once the provider answers it
+    /// can also open Tessera's folder on its own. So a row is tapped again
+    /// only while it is still the deepest one, 15 s after its last tap.
+    ///
+    /// iPhone's Browse tab does open the folder itself, and On My iPhone
+    /// tapped meanwhile has only stayed selected: six taps 15 s apart held
+    /// the folder back to 110 s, against 16-52 s untouched. There the
+    /// picker's own opening counts as the root's first tap, retried each 60 s.
+    private func chooseInPicker(_ fileName: String, opensFolderItself: Bool) throws {
+        let picker = systemPickerCancel(in: app)
+        // Deepest first, and cells only: the open folder's title is a
+        // "Tessera, Actions Menu" button whose menu hides the file.
+        let rows = [fileName, "Tessera,", "On My "].map { NSPredicate(format: "label BEGINSWITH %@", $0) }
+        let root = rows.count - 1
+        let deadline = Date().addingTimeInterval(Self.pickerBrowseTimeout)
+        var lastTap: (depth: Int, at: Date)? = opensFolderItself ? (root, Date()) : nil
+        func retapInterval(_ depth: Int) -> TimeInterval {
+            depth == root && opensFolderItself ? Self.pickerSelfOpeningRootInterval : Self.pickerRetapInterval
+        }
         while Date() < deadline {
-            for label in labels {
-                let match = app.descendants(matching: .any)
-                    .matching(NSPredicate(format: "label BEGINSWITH %@", label))
-                    .allElementsBoundByIndex
-                    .first { $0.isHittable }
-                if let match {
-                    match.tap()
-                    return
-                }
+            if !picker.exists { return }
+            if let found = deepestSettledRow(rows),
+               lastTap.map({ found.depth < $0.depth
+                   || (found.depth == $0.depth && Date().timeIntervalSince($0.at) >= retapInterval(found.depth)) }) ?? true {
+                found.row.tap()
+                lastTap = (found.depth, Date())
+                // The chosen file dismisses the picker, and a row query that
+                // lands on its leaving view fails on a dead element.
+                if found.depth == 0, picker.waitForNonExistence(timeout: Self.pickerRetapInterval) { return }
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.25))
         }
         add(XCTAttachment(string: app.debugDescription))
-        XCTFail("document picker never showed any of \(labels)")
+        let tapped = lastTap.map { ["the key file", "Tessera's folder", "On My iPhone/iPad"][$0.depth] } ?? "nothing"
+        XCTFail("the document picker stayed up; deepest row tapped or left to the picker: \(tapped)")
         throw XCTestError(.failureWhileWaiting)
+    }
+
+    /// A row that has not moved for half a second has finished animating in.
+    private func deepestSettledRow(_ rows: [NSPredicate]) -> (depth: Int, row: XCUIElement)? {
+        for (depth, predicate) in rows.enumerated() {
+            guard let row = app.cells.matching(predicate).allElementsBoundByIndex.first(where: \.isHittable) else {
+                continue
+            }
+            let frame = row.frame
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+            return row.isHittable && row.frame == frame ? (depth, row) : nil
+        }
+        return nil
     }
 }
 
@@ -1004,11 +1213,15 @@ final class SwipePadOverflowHarnessTests: XCTestCase {
         let start = puck.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         let down = puck.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 2.0))
         start.press(forDuration: 0.08, thenDragTo: down)
-        expectation(
-            for: NSPredicate(format: "label CONTAINS %@", "sent 35 0d"),
-            evaluatedWith: outcome
+        let sent = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label CONTAINS %@", "sent 35 0d"),
+            object: outcome
         )
-        waitForExpectations(timeout: 5)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [sent], timeout: 5),
+            .completed,
+            "the down swipe must send its macro: \(outcome.label)"
+        )
     }
 }
 
@@ -1038,7 +1251,7 @@ final class SidebarToggleHarnessTests: XCTestCase {
         app.launchArguments += [
             "-tessera.nearbyBootstrap.completed.v1", "YES",
             "-tessera.pref.hasSeenWelcome", "YES",
-        ]
+        ] + skipsWhatsNewArguments
         app.launch()
         defer { app.terminate() }
 
@@ -1062,6 +1275,64 @@ final class SidebarToggleHarnessTests: XCTestCase {
             collapse.waitForExistence(timeout: 5),
             "sidebar did not reopen after tapping the reveal button"
         )
+    }
+}
+
+/// The production rail toolbar over stub actions (`TESSERA_DUO_RAIL_HARNESS`).
+/// Rail glyphs are monochrome: the back chevron, the actions and a lit toggle
+/// never take the accent.
+final class DuoRailToolbarHarnessTests: XCTestCase {
+    func testRailGlyphsNeverTakeTheAccent() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone, !isIPhoneDuoSimulator else {
+            throw XCTSkip("the check reads a phone's bottom tab bar")
+        }
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchEnvironment["TESSERA_DUO_RAIL_HARNESS"] = "1"
+        app.launchEnvironment["TESSERA_DUO_RAIL_HARNESS_OPEN"] = "find"
+        app.launch()
+        defer { app.terminate() }
+
+        let back = app.buttons["duo-rail-back"]
+        XCTAssertTrue(back.waitForExistence(timeout: 10))
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+
+        let screenshot = XCUIScreen.main.screenshot()
+        let attachment = XCTAttachment(screenshot: screenshot)
+        attachment.name = "rail-toolbar"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        let image = try XCTUnwrap(screenshot.image.cgImage)
+        let scale = CGFloat(image.height) / app.frame.height
+        let bar = (back.frame.minY - 4) * scale..<(back.frame.maxY + 4) * scale
+        // The lit find toggle alone fills a glyph-sized disc; the harness label
+        // across the bar accounts for about 1,400.
+        let glyphs = Self.pixels(in: image, rows: bar) { r, g, b in min(r, g, b) > 200 }
+        let accent = Self.pixels(in: image, rows: bar) { r, g, b in b >= 180 && b - r >= 80 && b - g >= 30 }
+        XCTAssertGreaterThan(glyphs, 6_000, "the capture must show the rail's glyphs")
+        XCTAssertEqual(accent, 0, "a rail glyph took the accent")
+    }
+
+    /// Pixels in `rows` (pixel rows) whose colour `matches`.
+    private static func pixels(in image: CGImage, rows: Range<CGFloat>, matching matches: (Int, Int, Int) -> Bool) -> Int {
+        let width = image.width, height = image.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(
+            data: &pixels, width: width, height: height, bitsPerComponent: 8,
+            bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return -1 }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        let first = max(0, Int(rows.lowerBound)), last = min(height, Int(rows.upperBound))
+        guard first < last else { return 0 }
+        var count = 0
+        for y in first..<last {
+            for x in 0..<width {
+                let i = (y * width + x) * 4
+                if matches(Int(pixels[i]), Int(pixels[i + 1]), Int(pixels[i + 2])) { count += 1 }
+            }
+        }
+        return count
     }
 }
 
@@ -1165,6 +1436,153 @@ final class IPhoneKeyboardHarnessTests: XCTestCase {
             description: "return after showing the keyboard"
         )
         XCTAssertTrue(app.buttons["Hide keyboard"].waitForExistence(timeout: 5))
+    }
+
+    /// RT-03: a real interface rotation keeps the keyboard with the terminal,
+    /// both ways. The orientation noise above never rotates the window, and
+    /// a rotation that resigned the terminal left it waiting for a SwiftUI
+    /// update that a rotation does not send.
+    func testRealRotationKeepsTheKeyboardWithTheTerminal() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("iPhone keyboard harness requires an iPhone simulator")
+        }
+
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchEnvironment["TESSERA_IPHONE_KEYBOARD_HARNESS"] = "1"
+        // `[Tessera][KeyboardDiag]` lines in the simulator log name each
+        // focus and keyboard event, for a failure here.
+        app.launchArguments += ["-Diagnostics.VerboseEnabled", "YES"]
+        app.launch()
+        defer {
+            XCUIDevice.shared.orientation = .portrait
+            app.terminate()
+        }
+
+        let state = app.descendants(matching: .any)["iphone-keyboard-state"]
+        XCTAssertTrue(state.waitForExistence(timeout: 10))
+        try waitForValue("visible", on: state, timeout: 8)
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+        attachScreen("rotation-start")
+        // The bar rides the keyboard UIKit reports, so its toggle keeps one
+        // distance above that keyboard's top in every orientation. Not the
+        // drawn keys: after a rotation iOS's one-time slide-to-type card draws
+        // taller than the keyboard it reports.
+        let gap = try barGapAboveKeyboard(app)
+        XCTAssertGreaterThanOrEqual(gap, 0, "the bar must start above the keyboard")
+
+        for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
+            XCUIDevice.shared.orientation = orientation
+            let window = app.windows.firstMatch
+            let deadline = Date().addingTimeInterval(8)
+            while Date() < deadline,
+                  (window.frame.width > window.frame.height) != orientation.isLandscape {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            }
+            XCTAssertEqual(
+                window.frame.width > window.frame.height, orientation.isLandscape,
+                "the window did not rotate to \(orientation.rawValue)"
+            )
+            // Past the rotation's own keyboard animation, so a hide that
+            // nothing reclaims has had time to land.
+            RunLoop.current.run(until: Date().addingTimeInterval(2))
+            attachScreen("rotation-\(orientation.rawValue)")
+            XCTAssertEqual(
+                String(describing: state.value ?? ""), "visible",
+                "the keyboard must stay up after rotating to \(orientation.rawValue)"
+            )
+            XCTAssertTrue(app.buttons["Hide keyboard"].exists)
+            XCTAssertFalse(app.buttons["Show keyboard"].exists)
+            XCTAssertEqual(
+                try barGapAboveKeyboard(app), gap, accuracy: 1,
+                "the bar must stay on the keyboard after rotating to \(orientation.rawValue)"
+            )
+        }
+    }
+
+    /// Points between the bar's keyboard toggle and the reported keyboard top.
+    private func barGapAboveKeyboard(_ app: XCUIApplication) throws -> CGFloat {
+        let top = app.descendants(matching: .any)["iphone-keyboard-top"]
+        XCTAssertTrue(top.waitForExistence(timeout: 5))
+        let value = String(describing: top.value ?? "")
+        let keyboardTop = try XCTUnwrap(Double(value), "no reported keyboard top: \(value)")
+        let toggle = app.buttons["Hide keyboard"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        return CGFloat(keyboardTop) - toggle.frame.maxY
+    }
+
+    /// N-05: the lifted terminal draws nothing above where it rests. A fed
+    /// prompt walks to the last row, so the whole layer rides the keyboard's
+    /// lift and its rows would reach the status bar's band beside the
+    /// Dynamic Island. The band must stay dark; the rows below it must not,
+    /// or the capture missed the terminal and the band proves nothing.
+    func testLiftedTerminalDrawsNothingAboveItsRestingTop() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("iPhone keyboard harness requires an iPhone simulator")
+        }
+
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchEnvironment["TESSERA_IPHONE_KEYBOARD_HARNESS"] = "1"
+        app.launchEnvironment["TESSERA_KEYBOARD_HARNESS_FEED"] = "1"
+        app.launch()
+        defer { app.terminate() }
+
+        let state = app.descendants(matching: .any)["iphone-keyboard-state"]
+        XCTAssertTrue(state.waitForExistence(timeout: 10))
+        try waitForValue("visible", on: state, timeout: 8)
+        // Outside the keyboard layout, so it marks the session's resting top.
+        let restingTop = app.buttons["iphone-keyboard-orientation-noise"]
+        XCTAssertTrue(restingTop.waitForExistence(timeout: 5))
+        let top = restingTop.frame.minY
+        // A phone without a notch or island, its status bar hidden, has no
+        // band above the terminal to overdraw.
+        guard top > 20 else { throw XCTSkip("no band above the terminal on this device") }
+
+        // One line every 0.4 s fills the visible rows within ~16 s.
+        RunLoop.current.run(until: Date().addingTimeInterval(20))
+        XCTAssertEqual(String(describing: state.value ?? ""), "visible")
+
+        let screenshot = XCUIScreen.main.screenshot()
+        let attachment = XCTAttachment(screenshot: screenshot)
+        attachment.name = "lifted-terminal"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        let image = try XCTUnwrap(screenshot.image.cgImage)
+        let scale = CGFloat(image.height) / app.frame.height
+        let band = Self.litPixels(in: image, rows: 2 * scale..<(top - 2) * scale)
+        let rows = Self.litPixels(in: image, rows: (top + 40) * scale..<(top + 240) * scale)
+        XCTAssertGreaterThan(rows, 200, "the capture must show the terminal's rows")
+        XCTAssertEqual(band, 0, "lifted rows drew above the terminal's resting top")
+    }
+
+    /// Pixels brighter than the dark harness background in a band of rows.
+    private func attachScreen(_ name: String) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    private static func litPixels(in image: CGImage, rows: Range<CGFloat>) -> Int {
+        let width = image.width, height = image.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(
+            data: &pixels, width: width, height: height, bitsPerComponent: 8,
+            bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return -1 }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        let first = max(0, Int(rows.lowerBound)), last = min(height, Int(rows.upperBound))
+        guard first < last else { return 0 }
+        var lit = 0
+        for y in first..<last {
+            for x in 0..<width {
+                let i = (y * width + x) * 4
+                if max(pixels[i], pixels[i + 1], pixels[i + 2]) > 96 { lit += 1 }
+            }
+        }
+        return lit
     }
 
     func testOptInResizeChangesViewportRows() throws {
@@ -1616,7 +2034,7 @@ final class IPhoneCompanionHarnessTests: XCTestCase {
 
         let window = app.descendants(matching: .any)["tmux-window-@1"]
         XCTAssertTrue(window.waitForExistence(timeout: 10))
-        window.press(forDuration: 1)
+        pressForMenu(window, showing: app.buttons["Switch to"])
 
         XCTAssertTrue(app.buttons["Switch to"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Rename"].waitForExistence(timeout: 5))
@@ -1639,7 +2057,7 @@ final class IPhoneCompanionHarnessTests: XCTestCase {
 
         let pane = app.descendants(matching: .any)["tmux-pane-%20"]
         XCTAssertTrue(pane.waitForExistence(timeout: 10))
-        pane.press(forDuration: 1)
+        pressForMenu(pane, showing: app.buttons["Switch to"])
 
         XCTAssertTrue(app.buttons["Switch to"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Split left / right"].waitForExistence(timeout: 5))
@@ -1649,6 +2067,18 @@ final class IPhoneCompanionHarnessTests: XCTestCase {
         Thread.sleep(forTimeInterval: 1.5)
         XCTAssertTrue(app.buttons["Close pane"].exists)
         XCTAssertFalse(app.buttons["Close window"].exists)
+    }
+
+    /// A loaded simulator can starve the main thread mid-press, so the
+    /// release lands before the context menu presents and UIKit cancels it,
+    /// as it would for a real press released that early. Press again only
+    /// while the element is still uncovered; a menu that never appears still
+    /// fails every attempt.
+    private func pressForMenu(_ element: XCUIElement, showing marker: XCUIElement) {
+        for _ in 0..<3 {
+            element.press(forDuration: 1.5)
+            if marker.waitForExistence(timeout: 8) || !element.isHittable { return }
+        }
     }
 }
 
@@ -1793,21 +2223,18 @@ final class AccessoryEditorHarnessTests: XCTestCase {
             "chip row fits without overflow on this device; horizontal scrolling is not exercised"
         )
 
-        let initialX = trailingChip.frame.minX
-        preview.swipeLeft()
-
-        let movedLeft = NSPredicate(
-            block: { _, _ in
-                preview.descendants(matching: .any)["Tilde"].frame.minX < initialX - 20
-            }
-        )
-        let expectation = XCTNSPredicateExpectation(
-            predicate: movedLeft,
-            object: trailingChip
-        )
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [expectation], timeout: 5),
-            .completed,
+        // A loaded simulator can deliver a swipe's moves late enough for the
+        // chip long press to recognize first. That reorders a chip but never
+        // moves the trailing one left, so retry it; a swipe the reorder
+        // gesture always captures still fails every attempt.
+        var scrolled = false
+        for _ in 0..<3 where !scrolled {
+            let initialX = trailingChip.frame.minX
+            preview.swipeLeft()
+            scrolled = eventually { trailingChip.frame.minX < initialX - 20 }
+        }
+        XCTAssertTrue(
+            scrolled,
             "a quick horizontal swipe should scroll the Preview instead of being captured by chip reorder gestures"
         )
     }
@@ -1826,23 +2253,26 @@ final class AccessoryEditorHarnessTests: XCTestCase {
         XCTAssertTrue(escape.waitForExistence(timeout: 5))
         XCTAssertTrue(leftArrow.waitForExistence(timeout: 5))
 
-        let initialX = escape.frame.minX
-        escape.press(forDuration: 0.4, thenDragTo: leftArrow)
+        // A loaded simulator can hand the app the touch-down, the hold and the
+        // first drag moves in one late batch; the long press (0.22 s, 10 pt)
+        // then sees the movement first and the scroll view takes the drag.
+        // Hold well past the threshold, and retry a drag that only scrolled;
+        // a reorder that never works still fails every attempt.
+        var moved = false
+        for _ in 0..<3 where !moved {
+            let initialX = escape.frame.minX
+            escape.press(forDuration: 1.0, thenDragTo: leftArrow)
+            moved = eventually { escape.frame.minX > initialX + 20 }
+        }
+        XCTAssertTrue(moved, "holding before dragging should still reorder Preview chips")
+    }
 
-        let movedRight = NSPredicate(
-            block: { _, _ in
-                preview.descendants(matching: .any)["Escape"].frame.minX > initialX + 20
-            }
-        )
-        let expectation = XCTNSPredicateExpectation(
-            predicate: movedRight,
-            object: escape
-        )
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [expectation], timeout: 5),
-            .completed,
-            "holding before dragging should still reorder Preview chips"
-        )
+    /// Polls `condition` for up to `timeout`; one accessibility lookup has
+    /// taken seconds on a loaded simulator.
+    private func eventually(timeout: TimeInterval = 10, _ condition: @escaping () -> Bool) -> Bool {
+        let predicate = NSPredicate { _, _ in condition() }
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
+        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
     }
 }
 
@@ -1900,6 +2330,7 @@ final class GridAuthorityEventHarnessTests: XCTestCase {
         )
         XCTAssertFalse(app.buttons["take back control"].exists)
     }
+
 }
 
 /// Host-free check of the production shell's show-edge app facts. A cold
@@ -1922,12 +2353,7 @@ final class SessionShowEdgeLaunchTests: XCTestCase {
             "a cold launch is a foreground, with no background round trip: \(probe.label)"
         )
 
-        XCUIDevice.shared.press(.home)
-        let left = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "state != %d", XCUIApplication.State.runningForeground.rawValue),
-            object: app
-        )
-        XCTAssertEqual(XCTWaiter.wait(for: [left], timeout: 10), .completed, "home backgrounds the app")
+        XCTAssertTrue(app.sendToBackground(), "home backgrounds the app")
         app.activate()
         XCTAssertTrue(
             wait(for: probe, labelContains: ["foreground=true", "foregroundChanges=3"]),
@@ -1964,6 +2390,7 @@ final class ContinuityHarnessTests: XCTestCase {
     private func assertQROffer(orientation: UIDeviceOrientation) {
         XCUIDevice.shared.orientation = orientation
         let app = XCUIApplication()
+        app.launchArguments = skipsWhatsNewArguments
         app.launchEnvironment["TESSERA_QR_REVIEW"] = "send"
         app.launch()
         XCTAssertTrue(app.staticTexts["Scan with your other device"].waitForExistence(timeout: 10))
@@ -2004,23 +2431,33 @@ final class ContinuityHarnessTests: XCTestCase {
     private func assertQRManualEntry(orientation: UIDeviceOrientation) {
         XCUIDevice.shared.orientation = orientation
         let app = XCUIApplication()
+        app.launchArguments = skipsWhatsNewArguments
         app.launchEnvironment["TESSERA_QR_REVIEW"] = "receive"
         app.launch()
         // Resolve the first-use permission sheet before finding/tapping the
         // disclosure. XCTest's default interruption handler otherwise replays
         // the tap after unavailable-camera handling has already expanded it,
         // accidentally collapsing the fallback again.
+        // iOS 26 titles it "“Tessera” would like to access the Camera.", iOS 27
+        // "Allow “Tessera” to access your camera?".
         let permission = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-            .alerts["“Tessera” would like to access the Camera."]
+            .alerts.matching(NSPredicate(format: "label CONTAINS[c] %@", "camera")).firstMatch
         if permission.waitForExistence(timeout: 3) {
             permission.buttons["Allow"].tap()
         }
         let entry = app.descendants(matching: .any)["pairing.manual-text"]
-        XCTAssertTrue(app.buttons["Enter a pairing code instead"].waitForExistence(timeout: 10))
-        if !entry.waitForExistence(timeout: 2) { app.buttons["Enter a pairing code instead"].tap() }
+        let disclosure = app.buttons["Enter a pairing code instead"]
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 10))
+        // Unavailable-camera handling expands the fallback on its own, later
+        // on some devices than others, so a tap can race it and collapse the
+        // fallback. Tap only while the disclosure still reads collapsed.
+        let expandDeadline = Date().addingTimeInterval(10)
+        while !entry.waitForExistence(timeout: 2), Date() < expandDeadline {
+            if disclosure.images["collapsed"].exists { disclosure.tap() }
+        }
         XCTAssertTrue(app.buttons["use code"].waitForExistence(timeout: 5))
         XCTAssertTrue(entry.waitForExistence(timeout: 5))
-        entry.tap()
+        XCTAssertTrue(entry.tapForKeyboardFocus(), "the pairing field takes keyboard focus")
         entry.typeText("not-a-valid-pairing-code")
         XCTAssertTrue(app.keyboards.firstMatch.exists, "exercise the actual software keyboard")
         XCTAssertTrue(app.buttons["use code"].isHittable)
@@ -2108,6 +2545,7 @@ final class ContinuityHarnessTests: XCTestCase {
         try requireHarnessEnvironment()
         XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
+        app.launchArguments = skipsWhatsNewArguments
         app.launchEnvironment["TESSERA_CONTINUITY_HARNESS"] = "locked-ssh-tmux"
         app.launch()
         defer { app.terminate() }
@@ -2158,6 +2596,7 @@ final class ContinuityHarnessTests: XCTestCase {
 
         XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
+        app.launchArguments = skipsWhatsNewArguments
         app.launchEnvironment["TESSERA_CONTINUITY_HARNESS"] = harnessValue
         app.launch()
         defer {
@@ -2244,6 +2683,7 @@ final class ContinuityHarnessTests: XCTestCase {
         try requireHarnessEnvironment()
         XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
+        app.launchArguments = skipsWhatsNewArguments
         app.launchEnvironment["TESSERA_CONTINUITY_HARNESS"] = harnessValue
         app.launch()
         defer { app.terminate() }
@@ -2274,6 +2714,7 @@ final class ContinuityHarnessTests: XCTestCase {
         try requireHarnessEnvironment()
         XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
+        app.launchArguments = skipsWhatsNewArguments
         app.launchEnvironment["TESSERA_CONTINUITY_HOSTKEY_HARNESS"] = mode
         app.launch()
         defer { app.terminate() }
@@ -2318,10 +2759,22 @@ final class OrientationButtonSweepTests: XCTestCase {
 
         // Sidebar starts expanded; its nav rows route to each browse page.
         expect(any("hide sidebar"), "sidebar collapse chevron at launch")
-        tapAndExpect(button("keys"), any("+ generate"), "sidebar keys row -> keys page")
-        tapAndExpect(button("known hosts"), any("export"), "sidebar known-hosts row -> page")
-        tapAndExpect(button("tunnels"), text("no tunnels yet"), "sidebar tunnels row -> page")
         tapAndExpect(button("settings"), text("appearance"), "sidebar settings row -> page")
+        tapAndExpect(button("settings-section-keys"), any("+ generate"), "settings keys section", scrollToControl: true)
+        tapAndExpect(button("settings-section-known-hosts"), any("export"), "settings known-hosts section", scrollToControl: true)
+        tapAndExpect(button("sidebar-navigation-artifacts"), text("your work, open here"), "sidebar artifacts row")
+        // The artifacts browser leads its address bar with show sidebar, in
+        // place of the floating button and the strip it needs above the bar.
+        tapAndExpect(any("hide sidebar"), button("artifacts-show-sidebar"), "collapse sidebar on artifacts")
+        let showSidebar = button("artifacts-show-sidebar"), address = button("artifacts-address")
+        if showSidebar.exists, address.exists {
+            let top = app.windows.firstMatch.frame.minY
+            if showSidebar.frame.minY - top > 12 || abs(showSidebar.frame.midY - address.frame.midY) > 1 {
+                failures.append("ARTIFACTS BAR BELOW A STRIP: show sidebar \(showSidebar.frame), address \(address.frame)")
+                snapFailure("artifacts bar below a strip")
+            }
+        }
+        tapAndExpect(showSidebar, any("hide sidebar"), "artifacts address bar reveals sidebar")
         tapAndExpect(any("view all hosts"), text("no hosts yet"), "sidebar view-all -> landing")
 
         // Collapse / reveal round-trip.
@@ -2335,7 +2788,7 @@ final class OrientationButtonSweepTests: XCTestCase {
         note("sidebar state after editor cancel")
         tapAndExpect(button("add your first host, ⌘N"), any("cancel"), "empty-state CTA -> editor")
         tapAndExpect(any("cancel"), text("no hosts yet"), "editor cancel -> landing (2)")
-        tapAndExpect(button("generate a key"), any("+ generate"), "empty-state generate-a-key -> keys page")
+        tapEmptyStateKeyAction("empty-state key action")
         note("sidebar state on keys page")
 
         // Sidebar + button (re-reveal first if a prior step collapsed it).
@@ -2354,24 +2807,47 @@ final class OrientationButtonSweepTests: XCTestCase {
         try requireDevice(idiom: .phone)
         launch(orientation)
 
-        expect(app.tabBars.firstMatch, "compact tab bar at launch")
+        expect(app.compactRootTab("hosts"), "compact root tabs at launch")
         tapAndExpect(tab("sessions"), text("no active sessions"), "sessions tab")
-        tapAndExpect(tab("keys"), any("+ generate"), "keys tab")
-        // keys <-> known hosts selector inside the keys tab.
-        tapAndExpect(nonTabButton("known hosts"), any("verified"), "selector -> known hosts")
-        tapAndExpect(nonTabButton("keys"), any("+ generate"), "selector -> keys")
+        tapAndExpect(tab("artifacts"), text("your work, open here"), "artifacts tab")
         tapAndExpect(tab("settings"), text("appearance"), "settings tab")
+        tapAndExpect(button("settings-section-keys"), any("+ generate"), "settings -> keys", scrollToControl: true)
+        tapAndExpect(backButton(), button("settings-section-keys"), "keys -> settings")
+        tapAndExpect(button("settings-section-known-hosts"), any("verified"), "settings -> known hosts", scrollToControl: true)
+        tapAndExpect(backButton(), button("settings-section-known-hosts"), "known hosts -> settings")
         tapAndExpect(tab("hosts"), text("no hosts yet"), "hosts tab")
 
         // Landing CTAs (phone labels carry no ⌘N chip).
         tapAndExpect(button("add your first host"), any("cancel"), "empty-state CTA -> editor")
         tapAndExpect(any("cancel"), text("no hosts yet"), "editor cancel -> landing")
-        tapAndExpect(button("generate a key"), any("+ generate"), "generate-a-key -> keys tab")
+        tapEmptyStateKeyAction("empty-state key action")
 
         finish(orientation)
     }
 
     // MARK: - Helpers
+
+    /// "Set up as new" leaves a device key, so the empty state either opens
+    /// the generator over the keys (no key yet) or shows the keys.
+    private func tapEmptyStateKeyAction(_ step: String) {
+        let generate = button("generate a key"), view = button("view your keys")
+        let either = app.buttons.matching(NSPredicate(format: "label IN %@", ["generate a key", "view your keys"])).firstMatch
+        guard either.waitForExistence(timeout: 6) else {
+            failures.append("CONTROL ABSENT: \(step)")
+            snapFailure(step)
+            return
+        }
+        guard generate.exists else {
+            tapAndExpect(view, any("+ generate"), "\(step): view your keys -> keys page")
+            return
+        }
+        tapAndExpect(generate, text("generate key"), "\(step): generate a key -> generator")
+        tapAndExpect(button("cancel"), any("+ generate"), "\(step): cancel -> keys page")
+        if !text("generate key").waitForNonExistence(timeout: 6) {
+            failures.append("GENERATOR STAYED UP: \(step)")
+            snapFailure(step)
+        }
+    }
 
     private func requireDevice(idiom: UIUserInterfaceIdiom) throws {
         guard UIDevice.current.userInterfaceIdiom == idiom else {
@@ -2386,7 +2862,7 @@ final class OrientationButtonSweepTests: XCTestCase {
         app.launchArguments += [
             "-tessera.nearbyBootstrap.completed.v1", "YES",
             "-tessera.pref.hasSeenWelcome", "YES",
-        ]
+        ] + skipsWhatsNewArguments
         app.launch()
     }
 
@@ -2413,15 +2889,13 @@ final class OrientationButtonSweepTests: XCTestCase {
     }
 
     private func tab(_ label: String) -> XCUIElement {
-        app.tabBars.buttons[label].firstMatch
+        app.compactRootTab(label, timeout: 6)
     }
 
-    private func nonTabButton(_ label: String) -> XCUIElement {
-        app.buttons.matching(
-            NSPredicate(format: "label == %@", label)
-        ).allElementsBoundByIndex.first {
-            !$0.frame.intersects(app.tabBars.firstMatch.frame)
-        } ?? app.buttons[label].firstMatch
+    /// The navigation back button. Phones draw it in the navigation bar;
+    /// iPhone Duo's rail carries it instead, under the same identifier.
+    private func backButton() -> XCUIElement {
+        app.buttons["BackButton"].firstMatch
     }
 
     private func expect(
@@ -2434,8 +2908,10 @@ final class OrientationButtonSweepTests: XCTestCase {
     }
 
     private func tapAndExpect(
-        _ control: XCUIElement, _ outcome: XCUIElement, _ step: String
+        _ control: XCUIElement, _ outcome: XCUIElement, _ step: String,
+        scrollToControl: Bool = false
     ) {
+        if scrollToControl { scrollIntoClearView(control) }
         guard control.waitForExistence(timeout: 6) else {
             failures.append("CONTROL ABSENT: \(step)")
             snapFailure(step)
@@ -2445,6 +2921,29 @@ final class OrientationButtonSweepTests: XCTestCase {
         if !outcome.waitForExistence(timeout: 6) {
             failures.append("DEAD TAP: \(step)")
             snapFailure(step)
+        }
+    }
+
+    /// Drags the list until `control` sits clear of the window's top edge and
+    /// the tab bar. A swipe flings to the end of the list: in landscape on
+    /// iPhone that parked the keys row against the top edge, where its tap
+    /// at y 25 was lost although the row read hittable. Each drag holds
+    /// before lifting so it leaves no momentum. A missed navigation leaves no
+    /// scroll view; the caller records that instead of failing in here.
+    private func scrollIntoClearView(_ control: XCUIElement) {
+        for _ in 0..<12 {
+            let list = app.scrollViews.firstMatch
+            guard list.exists else { return }
+            let tabBar = app.tabBars.firstMatch
+            let bottom = tabBar.exists ? min(list.frame.maxY, tabBar.frame.minY) : list.frame.maxY
+            let clear = CGRect(x: list.frame.minX, y: list.frame.minY + 44,
+                               width: list.frame.width, height: bottom - list.frame.minY - 88)
+            let frame = control.exists ? control.frame : .null
+            if !frame.isNull, control.isHittable, clear.contains(CGPoint(x: frame.midX, y: frame.midY)) { return }
+            let contentUp = frame.isNull || frame.midY >= clear.midY
+            let from = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: contentUp ? 0.6 : 0.3))
+            let to = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: contentUp ? 0.3 : 0.6))
+            from.press(forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.3)
         }
     }
 
@@ -2591,7 +3090,7 @@ final class SoftwareKeyboardDismissalHarnessTests: XCTestCase {
         field.tap()
         field.typeText("local")
         app.buttons["keyboard-refresh"].tap()
-        XCTAssertEqual(field.value as? String, "local")
+        XCTAssertTrue(field.waitForTextValue("local"), "got \(String(describing: field.value))")
         XCTAssertEqual(app.staticTexts["keyboard-intent"].label, "dismissed")
         captureKeyboardMilestone("local-input")
         app.buttons["hardware-key-focus"].tap()
@@ -2658,7 +3157,12 @@ final class SoftwareKeyboardDismissalHarnessTests: XCTestCase {
 final class HardwareKeyChordHarnessTests: XCTestCase {
     private var app: XCUIApplication!
 
-    override func setUpWithError() throws { continueAfterFailure = false }
+    override func setUpWithError() throws {
+        continueAfterFailure = false
+        if isIPhoneDuoSimulator {
+            throw XCTSkip("the iPhone Duo simulator does not deliver typed keys to the app")
+        }
+    }
 
     override func tearDownWithError() throws {
         app?.terminate()
@@ -2691,12 +3195,12 @@ final class HardwareKeyChordHarnessTests: XCTestCase {
         let field = app.textFields["hardware-key-local-input"]
         field.tap()
         app.typeKey("f", modifierFlags: [])
-        XCTAssertEqual(field.value as? String, "f")
+        XCTAssertTrue(field.waitForTextValue("f"), "got \(String(describing: field.value))")
         XCUIDevice.shared.press(.home)
         app.activate()
         Thread.sleep(forTimeInterval: 3)
         app.typeKey("j", modifierFlags: [])
-        XCTAssertEqual(field.value as? String, "fj", "Foreground recovery must not steal local text input")
+        XCTAssertTrue(field.waitForTextValue("fj"), "Foreground recovery must not steal local text input; got \(String(describing: field.value))")
         app.buttons["hardware-key-focus"].tap()
         app.typeKey("g", modifierFlags: [])
         assertSent("67", "Typing after local text entry")
@@ -2754,10 +3258,10 @@ final class HardwareKeyChordHarnessTests: XCTestCase {
         let field = app.textFields["hardware-key-local-input"]
         field.tap()
         app.typeKey("x", modifierFlags: [])
-        XCTAssertEqual(field.value as? String, "x")
+        XCTAssertTrue(field.waitForTextValue("x"), "got \(String(describing: field.value))")
         app.buttons["hardware-key-background-cleanup"].tap()
         app.typeKey("y", modifierFlags: [])
-        XCTAssertEqual(field.value as? String, "xy", "Background cleanup must preserve local text entry too")
+        XCTAssertTrue(field.waitForTextValue("xy"), "Background cleanup must preserve local text entry too; got \(String(describing: field.value))")
         captureKeyboardMilestone("background-cleanup")
     }
 
@@ -2771,19 +3275,18 @@ final class HardwareKeyChordHarnessTests: XCTestCase {
         app.typeKey(XCUIKeyboardKey.upArrow.rawValue, modifierFlags: [])
         assertSent("1B 5B 41", "a bare ↑ must still ride SwiftTerm's own path")
 
-        app.typeKey(XCUIKeyboardKey.upArrow.rawValue, modifierFlags: .shift)
-        assertSent("1B 5B 31 3B 32 41", "⇧↑ must encode CSI 1;2 A, not a bare CSI A")
+        typeChord(XCUIKeyboardKey.upArrow.rawValue, .shift,
+                  sends: "1B 5B 31 3B 32 41", "⇧↑ must encode CSI 1;2 A, not a bare CSI A")
 
-        app.typeKey(XCUIKeyboardKey.leftArrow.rawValue, modifierFlags: .shift)
-        assertSent("1B 5B 31 3B 32 44", "⇧← must encode CSI 1;2 D")
+        typeChord(XCUIKeyboardKey.leftArrow.rawValue, .shift,
+                  sends: "1B 5B 31 3B 32 44", "⇧← must encode CSI 1;2 D")
 
-        app.typeKey(XCUIKeyboardKey.downArrow.rawValue, modifierFlags: [.shift, .control])
-        assertSent("1B 5B 31 3B 36 42", "⇧⌃↓ must carry both modifiers (parameter 6)")
+        typeChord(XCUIKeyboardKey.downArrow.rawValue, [.shift, .control],
+                  sends: "1B 5B 31 3B 36 42", "⇧⌃↓ must carry both modifiers (parameter 6)")
 
         // ⌥← stays meta word-motion: readline binds ESC b, and re-encoding it
         // as CSI 1;3 D would break word jumps in every shell.
-        app.typeKey(XCUIKeyboardKey.leftArrow.rawValue, modifierFlags: .option)
-        assertSent("1B 62", "⌥← must stay ESC b")
+        typeChord(XCUIKeyboardKey.leftArrow.rawValue, .option, sends: "1B 62", "⌥← must stay ESC b")
     }
 
     /// The regression this whole change could plausibly have caused.
@@ -2803,19 +3306,15 @@ final class HardwareKeyChordHarnessTests: XCTestCase {
         app.typeKey("a", modifierFlags: [])
         assertSent("61", "a must send lowercase a")
 
-        app.typeKey("a", modifierFlags: .shift)
-        assertSent("41", "⇧a must send capital A, not a modified sequence")
+        typeChord("a", .shift, sends: "41", "⇧a must send capital A, not a modified sequence")
 
-        app.typeKey("1", modifierFlags: .shift)
-        assertSent("21", "⇧1 must send !")
+        typeChord("1", .shift, sends: "21", "⇧1 must send !")
 
-        app.typeKey("2", modifierFlags: .shift)
-        assertSent("40", "⇧2 must send @")
+        typeChord("2", .shift, sends: "40", "⇧2 must send @")
 
         // ⌃ and ⌥ on a letter are terminal modifiers and keep their own
         // meanings — the fix must not have swallowed those either.
-        app.typeKey("c", modifierFlags: .control)
-        assertSent("03", "⌃C must still be 0x03")
+        typeChord("c", .control, sends: "03", "⌃C must still be 0x03")
     }
 
     private func launchHarness(mouseReporting: Bool = false, blockOnWake: Bool = false) {
@@ -2833,11 +3332,34 @@ final class HardwareKeyChordHarnessTests: XCTestCase {
         Thread.sleep(forTimeInterval: 3)
     }
 
+    /// Types a modified key until `hex` reaches the wire, at most three
+    /// times. The simulator detaches its synthetic keyboard about 1.3 s after
+    /// the last key, and after it attaches again it has dropped a chord's
+    /// modifier press before UIKit dispatched it: the app received one press,
+    /// a bare ↑, where a passing ⇧↑ delivers ⇧ and then ↑. The encoder is
+    /// deterministic, so a broken one still fails every attempt.
+    private func typeChord(
+        _ key: String,
+        _ flags: XCUIElement.KeyModifierFlags,
+        sends hex: String,
+        _ message: String
+    ) {
+        for _ in 0..<2 {
+            app.typeKey(key, modifierFlags: flags)
+            if sentLine(hex).waitForExistence(timeout: 5) { return }
+        }
+        app.typeKey(key, modifierFlags: flags)
+        assertSent(hex, message)
+    }
+
+    private func sentLine(_ hex: String) -> XCUIElement {
+        app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", hex)).firstMatch
+    }
+
     private func assertSent(_ hex: String, _ message: String) {
-        let match = app.staticTexts.containing(
-            NSPredicate(format: "label BEGINSWITH %@", hex)
-        ).firstMatch
-        guard match.waitForExistence(timeout: 5) else {
+        // Generous for a loaded simulator, where one accessibility lookup
+        // has taken over 4 s; a byte that never arrives still fails.
+        guard sentLine(hex).waitForExistence(timeout: 15) else {
             // What actually went on the wire is the whole diagnosis: a bare
             // `CSI A` means SwiftTerm claimed the chord at gate 4, nothing at
             // all means it never reached the app.
@@ -2849,3 +3371,28 @@ final class HardwareKeyChordHarnessTests: XCTestCase {
         }
     }
 }
+
+/// Not a regression test. Run by hand (`TEST_RUNNER_TESSERA_AX_PROBE=1`)
+/// against Tessera already open in the state to inspect: it reads iOS's own
+/// accessibility tree, not a host's bridge of it, and never launches,
+/// relaunches or ends the app.
+final class DuoAccessibilityProbe: XCTestCase, LeavesTheAppRunning {
+    func testDescribeTheOpenApp() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["TESSERA_AX_PROBE"] == "1",
+                          "set TEST_RUNNER_TESSERA_AX_PROBE=1 to probe the open app")
+        let app = XCUIApplication(bundleIdentifier: "com.bambouville.TesseraApp")
+        try XCTSkipIf(app.state == .notRunning, "open Tessera in the state to probe first")
+        // The runner can come forward as it starts; bring the open app back
+        // rather than launching it.
+        if app.state != .runningForeground { app.activate() }
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        let replies = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'duo-agent-reply'"))
+        NSLog("ax-probe keyboard=%d replies=%d", app.keyboards.count, replies.count)
+        for reply in replies.allElementsBoundByIndex {
+            NSLog("ax-probe %@ label=%@ frame=%@ hittable=%d", reply.identifier, reply.label,
+                  NSCoder.string(for: reply.frame), reply.isHittable ? 1 : 0)
+        }
+        NSLog("ax-probe tree\n%@", app.debugDescription)
+    }
+}
+

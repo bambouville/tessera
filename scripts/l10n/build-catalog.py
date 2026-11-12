@@ -6,19 +6,22 @@ syncs it into the .xcstrings source — only the Xcode IDE does that. Rebuilding
 the catalog here keeps it reproducible from the source tree, so a new string in
 Swift shows up as untranslated rather than silently missing.
 
-Translation input lives in l10n/ and is keyed by the English source string, with
-all languages side by side so a key can never drift between files:
+Translation input lives in batch files under l10n/, split by feature area and
+merged per directory (a key in two batches fails). Each is keyed by the English
+source string, with all languages side by side so a key can never drift between
+files:
 
-  translations.json  {"save": {"fr": "enregistrer", "de": "Sichern", …}}
-  plurals.json       {"%lld matches": {"fr": {"one": "…", "other": "…"}, …}}
-  subs.json          {"<key>": {"fr": {"value": "…%#@a@…",
-                                       "subs": {"a": {"argNum": 1,
-                                                      "one": "…", "other": "…"}}}}}
+  strings/*.json  {"save": {"fr": "enregistrer", "de": "Sichern", …}}
+  plurals/*.json  {"%lld matches": {"fr": {"one": "…", "other": "…"}, …}}
+  subs/*.json     {"<key>": {"fr": {"value": "…%#@a@…",
+                                    "subs": {"a": {"argNum": 1,
+                                                   "one": "…", "other": "…"}}}}}
 
 A key with no entry for a language is left out of the catalog for that language,
 so the app falls back to English instead of showing an empty string.
 """
 import json
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -26,7 +29,9 @@ from pathlib import Path
 # Repo root, derived from this file rather than pinned to one checkout: the
 # catalog is rebuilt from whichever tree (main or a worktree) is being built.
 ROOT = Path(__file__).resolve().parents[2]
-BUILD = ROOT / "build/DD/Build/Intermediates.noindex/Tessera.build/Debug-iphonesimulator"
+# `TESSERA_L10N_DERIVED_DATA` reads another build's derived data instead.
+INTERMEDIATES = Path(os.environ.get("TESSERA_L10N_DERIVED_DATA") or ROOT / "build/DD") / "Build/Intermediates.noindex"
+BUILD = INTERMEDIATES / "Tessera.build/Debug-iphonesimulator"
 CATALOG = ROOT / "Tessera/Localizable.xcstrings"
 L10N = ROOT / "l10n"
 ARCH = "arm64"
@@ -41,10 +46,15 @@ SOURCE_LANG = "en"
 
 
 def extracted():
-    """key -> comment, from every .stringsdata Xcode produced for the app."""
+    """key -> comment, from Xcode's app and local-package .stringsdata."""
     keys = {}
-    for target in ("Tessera.build", "TesseraShareExtension.build"):
-        root = BUILD / target / "Objects-normal" / ARCH
+    roots = [BUILD / target / "Objects-normal" / ARCH
+             for target in ("Tessera.build", "TesseraShareExtension.build")]
+    for package in sorted((ROOT / "Packages").iterdir()):
+        if package.is_dir():
+            build = INTERMEDIATES / f"{package.name}.build" / "Debug-iphonesimulator"
+            roots.extend(sorted(build.glob(f"*-t.build/Objects-normal/{ARCH}")))
+    for root in roots:
         if not root.is_dir():
             continue
         for path in sorted(root.glob("*.stringsdata")):
@@ -91,6 +101,10 @@ def unit(value):
 
 def main():
     keys = extracted()
+    if not keys:
+        # Without a build's extraction output every key reads as gone, and the
+        # catalog would be rewritten empty, translations and all.
+        sys.exit(f"build-catalog: no extracted strings under {INTERMEDIATES}; build first (scripts/l10n/README.md)")
     simple, plurals, subs = load("strings"), load("plurals"), load("subs")
 
     strings, stats = {}, defaultdict(int)

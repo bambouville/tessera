@@ -4,14 +4,14 @@ import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.res.Resources
 import android.graphics.Typeface
-import android.app.Activity
-import android.app.KeyguardManager
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.relocation.BringIntoViewRequester
@@ -50,8 +50,6 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Icon
@@ -62,9 +60,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.LongState
+import androidx.compose.runtime.MutableLongState
+import androidx.compose.runtime.NonRestartableComposable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
@@ -78,14 +81,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
@@ -98,8 +106,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.zIndex
+import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
 import androidx.lifecycle.repeatOnLifecycle
@@ -107,6 +117,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.catch
@@ -114,6 +125,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import com.bambouville.tessera.core.bridge.SharedProgramStatusSnapshot
+import com.bambouville.tessera.core.bridge.SharedArtifacts
+import com.bambouville.tessera.core.bridge.SharedArtifactsLinkClass
 import com.bambouville.tessera.core.bridge.SharedProgramStatusTerminal
 import com.bambouville.tessera.core.bridge.SharedTmuxSnapshot
 import com.bambouville.tessera.core.bridge.SharedArmedModifiers
@@ -133,11 +146,14 @@ import com.bambouville.tessera.data.KnownHostsRepository
 import com.bambouville.tessera.data.HostRepository
 import com.bambouville.tessera.data.IdentityRepository
 import com.bambouville.tessera.data.SavedHost
+import com.bambouville.tessera.data.AutomaticTerminalThemeId
+import com.bambouville.tessera.data.resolvedTerminalThemeId
 import com.bambouville.tessera.data.SessionRestoreRepository
 import com.bambouville.tessera.data.continuity.AndroidForegroundRestoreStore
 import com.bambouville.tessera.data.continuity.SessionRestorePresentationPolicy
 import com.bambouville.tessera.data.continuity.SessionRestorePolicy
 import com.bambouville.tessera.agent.platform.AgentSessionIntegrationActionRequest
+import com.bambouville.tessera.agent.platform.AgentEndpointBinding
 import com.bambouville.tessera.agent.platform.AgentSessionIntegrationCoordinator
 import com.bambouville.tessera.agent.platform.AgentSessionIntegrationStatus
 import com.bambouville.tessera.agent.platform.AgentSessionKey
@@ -149,6 +165,7 @@ import com.bambouville.tessera.data.accessoryBarDefaults
 import com.bambouville.tessera.terminal.TermuxTerminalSurface
 import com.bambouville.tessera.terminal.TerminalFont
 import com.bambouville.tessera.terminal.TerminalTheme
+import com.bambouville.tessera.terminal.hideSoftwareKeyboard
 import com.bambouville.tessera.terminal.TerminalCursorStyle
 import com.bambouville.tessera.terminal.TerminalSearchResult
 import com.bambouville.tessera.terminal.TerminalKeyboardViewportPolicy
@@ -161,6 +178,9 @@ import com.bambouville.tessera.files.RemoteFileKind
 import com.bambouville.tessera.files.RemoteFilesController
 import com.bambouville.tessera.files.RemoteFilesScreen
 import com.bambouville.tessera.files.RemoteSelectionPathResolver
+import com.bambouville.tessera.files.SelectedArtifactLinkRoute
+import com.bambouville.tessera.files.SelectedArtifactLinks
+import com.bambouville.tessera.files.SelectedPathIntent
 import com.bambouville.tessera.files.RemoteTerminalPath
 import com.bambouville.tessera.files.RemoteTerminalPathSink
 import com.bambouville.tessera.files.RemoteTransferStrip
@@ -174,16 +194,22 @@ import com.bambouville.tessera.files.ShareUploadFailure
 import com.bambouville.tessera.forwarding.AndroidPortForwardRuleStore
 import com.bambouville.tessera.forwarding.ForwardingChromePresentation
 import com.bambouville.tessera.forwarding.PortForwardingPanel
+import com.bambouville.tessera.forwarding.PortForwardRule
+import com.bambouville.tessera.forwarding.PortForwardingState
 import com.bambouville.tessera.networking.mosh.MoshOutageTiming
 import com.bambouville.tessera.networking.SshHostKeyPolicy
 import com.bambouville.tessera.networking.SshKeyAuthorizationProvider
 import com.bambouville.tessera.networking.SshPasswordProvider
 import com.bambouville.tessera.security.AndroidKeystoreCredentialStore
+import com.bambouville.tessera.security.confirmDeviceOwner
 import com.bambouville.tessera.lifecycle.DiagnosticLogStore
 import com.bambouville.tessera.feature.session.bell.AndroidBellController
 import com.bambouville.tessera.feature.session.bell.BellEvent
 import com.bambouville.tessera.feature.session.bell.BellPreferences
 import com.bambouville.tessera.feature.session.bell.BellSource
+import com.bambouville.tessera.feature.session.bell.BellUnreadState
+import com.bambouville.tessera.feature.session.bell.BellVisualPulse
+import com.bambouville.tessera.design.LocalArtifactOpener
 import com.bambouville.tessera.design.LocalTesseraTokens
 import com.bambouville.tessera.design.TerminalFontCatalog
 import com.bambouville.tessera.design.TesseraBanner
@@ -199,8 +225,71 @@ import com.bambouville.tessera.design.TesseraKicker
 import com.bambouville.tessera.design.TesseraStatusDot
 import com.bambouville.tessera.design.TesseraTextField
 import com.bambouville.tessera.design.TesseraType
+import com.bambouville.tessera.design.text
 import kotlin.math.roundToInt
 import java.text.NumberFormat
+import java.util.UUID
+
+/** Only Open in Artifacts reads a selection as a link; Reveal in Files is always a path. */
+internal fun selectedArtifactLinkRoute(
+    action: TerminalSelectionPathAction,
+    selection: String,
+    hostId: String,
+    sessionHint: String?,
+    openerAvailable: Boolean,
+    classifyLink: (String) -> SharedArtifactsLinkClass = SharedArtifacts::classifyLink,
+): SelectedArtifactLinkRoute {
+    if (action != TerminalSelectionPathAction.QuickOpen) return SelectedArtifactLinkRoute.Default
+    return SelectedArtifactLinks.route(selection, hostId, sessionHint, openerAvailable, classifyLink)
+}
+
+/**
+ * A path selected in an Agent Center transcript, for this session's Files.
+ * [tmuxPaneId] is the bound agent pane; a new [token] is a new request.
+ */
+data class TranscriptSelectionPathRequest(
+    val intent: SelectedPathIntent,
+    val selection: String,
+    val tmuxPaneId: Int?,
+    val token: Long,
+)
+
+/** Where a transcript path's relative reading anchors, before Files resolves it. */
+internal sealed interface TranscriptSelectionDirectory {
+    /** This directory, or none: a relative path then misses with the terminal's message. */
+    data class Known(val directory: String?) : TranscriptSelectionDirectory
+    /** Ask tmux, over its control channel, for the pane's current path; [fallback] if it has none. */
+    data class QueryPane(val paneId: Int, val fallback: String?) : TranscriptSelectionDirectory
+}
+
+/**
+ * The agent's pane, never the focused one. tmux answers for that pane as it
+ * does for the terminal's selection. A plain shell has one cwd, the one it
+ * reported; the terminal's fallback probe dials a side connection, so a
+ * transcript never uses it. A tmux binding on a plain session has no signal.
+ */
+internal fun transcriptSelectionDirectory(
+    selection: String,
+    tmuxOff: Boolean,
+    paneId: Int?,
+    reportedShellDirectory: String?,
+    paneCurrentPath: (Int) -> String?,
+): TranscriptSelectionDirectory = when {
+    selection.trim().startsWith('/') -> TranscriptSelectionDirectory.Known(null)
+    tmuxOff -> TranscriptSelectionDirectory.Known(
+        reportedShellDirectory?.takeIf { paneId == null && it.startsWith('/') && it.none(Char::isISOControl) },
+    )
+    paneId == null -> TranscriptSelectionDirectory.Known(null)
+    else -> TranscriptSelectionDirectory.QueryPane(paneId, paneCurrentPath(paneId))
+}
+
+/** How a [TranscriptSelectionPathRequest] ended; an Artifacts open reports nothing. */
+sealed interface TranscriptSelectionPathOutcome {
+    /** Files is open on this session at the path's directory. */
+    data object Revealed : TranscriptSelectionPathOutcome
+    /** The terminal's own miss message, for the requester to show. */
+    data class Missed(val message: String) : TranscriptSelectionPathOutcome
+}
 
 /** A Hosts-row open starts only an idle transport; active and failed surfaces keep their own controls. */
 internal fun shouldConnectFromHostOpen(state: SshSessionUiState): Boolean =
@@ -268,7 +357,7 @@ fun SshSessionScreen(
     terminalFontId: String = TerminalFontCatalog.DEFAULT_ID,
     scrollbackLines: Int = 10_000,
     resizeTerminalWithKeyboard: Boolean = false,
-    terminalThemeId: String = "void",
+    terminalThemeId: String = resolvedTerminalThemeId(AutomaticTerminalThemeId, isSystemInDarkTheme()),
     terminalCursorStyle: String = "block",
     terminalCursorBlink: Boolean = true,
     /** Raw stored slot IDs; null when the user never edited the bar. */
@@ -290,6 +379,15 @@ fun SshSessionScreen(
     programStatusEnabled: Boolean = true,
     programStatusAgents: ProgramStatusAgentInput = ProgramStatusAgentInput.NONE,
     programStatusFocusRequest: ProgramStatusFocusRequest? = null,
+    /**
+     * A transcript path for this session's Files. The screen takes it once,
+     * reports [onTranscriptSelectionConsumed] straight away, and an outcome
+     * only for a reveal or a miss. It never connects: a session that is not
+     * connected answers with a miss.
+     */
+    transcriptSelectionRequest: TranscriptSelectionPathRequest? = null,
+    onTranscriptSelectionConsumed: (TranscriptSelectionPathRequest) -> Unit = {},
+    onTranscriptSelectionOutcome: (TranscriptSelectionPathRequest, TranscriptSelectionPathOutcome) -> Unit = { _, _ -> },
     onOpenAgentCenter: (() -> Unit)? = null,
     /** Verified providers supplied by app wiring; keyed by exact live carrier and pane. */
     paneAgentProviders: Map<AgentSessionKey, Map<Int, String>> = emptyMap(),
@@ -340,6 +438,142 @@ fun SshSessionScreen(
      */
     restoreReconnectRequest: Long = 0L,
     onTerminalRenderedReady: (String, String?, String?) -> Unit = { _, _, _ -> },
+    onBack: () -> Unit,
+) {
+    SshSessionScreenBody(
+        host = host,
+        hosts = hosts,
+        identities = identities,
+        knownHosts = knownHosts,
+        restore = restore,
+        credentialStore = credentialStore,
+        bellController = bellController,
+        bellPreferences = bellPreferences,
+        agentSessions = agentSessions,
+        agentIntegration = agentIntegration,
+        sessions = sessions,
+        modifier = modifier,
+        liveSessionId = liveSessionId,
+        terminalTextSizeSp = terminalTextSizeSp,
+        terminalFontId = terminalFontId,
+        scrollbackLines = scrollbackLines,
+        resizeTerminalWithKeyboard = resizeTerminalWithKeyboard,
+        terminalThemeId = terminalThemeId,
+        terminalCursorStyle = terminalCursorStyle,
+        terminalCursorBlink = terminalCursorBlink,
+        accessoryBarKeys = accessoryBarKeys,
+        modifierBehavior = modifierBehavior,
+        modifierNotation = modifierNotation,
+        terminalBackgroundUsesImage = terminalBackgroundUsesImage,
+        terminalBackgroundImageId = terminalBackgroundImageId,
+        terminalBackgroundDim = terminalBackgroundDim,
+        terminalBackgroundBlur = terminalBackgroundBlur,
+        terminalBackgroundFillMode = terminalBackgroundFillMode,
+        smoothScrollingEnabled = smoothScrollingEnabled,
+        smoothScrollingSpeed = smoothScrollingSpeed,
+        onTerminalTextSizeChanged = onTerminalTextSizeChanged,
+        isPresented = isPresented,
+        programStatusCenter = programStatusCenter,
+        programStatusEnabled = programStatusEnabled,
+        programStatusAgents = programStatusAgents,
+        programStatusFocusRequest = programStatusFocusRequest,
+        transcriptSelectionRequest = transcriptSelectionRequest,
+        onTranscriptSelectionConsumed = onTranscriptSelectionConsumed,
+        onTranscriptSelectionOutcome = onTranscriptSelectionOutcome,
+        onOpenAgentCenter = onOpenAgentCenter,
+        paneAgentProviders = paneAgentProviders,
+        initialTmuxSelection = initialTmuxSelection,
+        shareUpload = shareUpload,
+        onShareUploadConsumed = onShareUploadConsumed,
+        onTerminalDirectoryChanged = onTerminalDirectoryChanged,
+        onAgentTerminalVisible = onAgentTerminalVisible,
+        onSystemPickerActiveChanged = onSystemPickerActiveChanged,
+        externalUi = externalUi,
+        onEditHost = onEditHost,
+        onContinueOnAnotherDevice = onContinueOnAnotherDevice,
+        switcherSessions = switcherSessions,
+        onSelectSession = onSelectSession,
+        onStateChanged = onStateChanged,
+        onTransportReachableChanged = onTransportReachableChanged,
+        pairingTmuxTarget = pairingTmuxTarget,
+        pairingAttemptId = pairingAttemptId,
+        reconnectOnMount = reconnectOnMount,
+        connectOnOpenRequest = connectOnOpenRequest,
+        restoreReconnectRequest = restoreReconnectRequest,
+        onTerminalRenderedReady = onTerminalRenderedReady,
+        onBack = onBack,
+    )
+}
+
+/**
+ * The body of [SshSessionScreen]. It is non-restartable, so it runs in the
+ * screen's own restart scope and composes exactly as if it were still inline;
+ * it is separate only so neither half reaches ART's 10,000-code-unit limit,
+ * past which the compiler leaves a method interpreted.
+ */
+@Composable
+@NonRestartableComposable
+private fun SshSessionScreenBody(
+    host: SavedHost,
+    hosts: HostRepository,
+    identities: IdentityRepository,
+    knownHosts: KnownHostsRepository,
+    restore: SessionRestoreRepository,
+    credentialStore: AndroidKeystoreCredentialStore,
+    bellController: AndroidBellController,
+    bellPreferences: BellPreferences,
+    agentSessions: LiveAgentSessionRegistry,
+    agentIntegration: AgentSessionIntegrationCoordinator,
+    sessions: LiveSessionStore,
+    modifier: Modifier,
+    liveSessionId: String,
+    terminalTextSizeSp: Int,
+    terminalFontId: String,
+    scrollbackLines: Int,
+    resizeTerminalWithKeyboard: Boolean,
+    terminalThemeId: String,
+    terminalCursorStyle: String,
+    terminalCursorBlink: Boolean,
+    accessoryBarKeys: List<String>?,
+    modifierBehavior: String,
+    modifierNotation: String,
+    terminalBackgroundUsesImage: Boolean,
+    terminalBackgroundImageId: String?,
+    terminalBackgroundDim: Float,
+    terminalBackgroundBlur: Int,
+    terminalBackgroundFillMode: String,
+    smoothScrollingEnabled: Boolean,
+    smoothScrollingSpeed: Float,
+    onTerminalTextSizeChanged: (Int) -> Unit,
+    isPresented: Boolean,
+    programStatusCenter: ProgramStatusCenter?,
+    programStatusEnabled: Boolean,
+    programStatusAgents: ProgramStatusAgentInput,
+    programStatusFocusRequest: ProgramStatusFocusRequest?,
+    transcriptSelectionRequest: TranscriptSelectionPathRequest?,
+    onTranscriptSelectionConsumed: (TranscriptSelectionPathRequest) -> Unit,
+    onTranscriptSelectionOutcome: (TranscriptSelectionPathRequest, TranscriptSelectionPathOutcome) -> Unit,
+    onOpenAgentCenter: (() -> Unit)?,
+    paneAgentProviders: Map<AgentSessionKey, Map<Int, String>>,
+    initialTmuxSelection: String?,
+    shareUpload: PendingShareUpload?,
+    onShareUploadConsumed: () -> Unit,
+    onTerminalDirectoryChanged: (String?) -> Unit,
+    onAgentTerminalVisible: (String, String?) -> Unit,
+    onSystemPickerActiveChanged: (Boolean) -> Unit,
+    externalUi: ExternalUiExcursions?,
+    onEditHost: () -> Unit,
+    onContinueOnAnotherDevice: () -> Unit,
+    switcherSessions: List<SessionSwitcherSession>,
+    onSelectSession: (String) -> Unit,
+    onStateChanged: (SshSessionUiState) -> Unit,
+    onTransportReachableChanged: (Boolean?) -> Unit,
+    pairingTmuxTarget: String?,
+    pairingAttemptId: String?,
+    reconnectOnMount: Boolean,
+    connectOnOpenRequest: Long,
+    restoreReconnectRequest: Long,
+    onTerminalRenderedReady: (String, String?, String?) -> Unit,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -415,25 +649,18 @@ fun SshSessionScreen(
             initialTypeface = terminalTypeface,
         )
     }
-    val paneSurfaces = remember(host.id, pairingTmuxTarget, pairingAttemptId) {
-        mutableStateMapOf<Int, TermuxTerminalSurface>()
-    }
+    val surfaceState = remember(host.id, pairingTmuxTarget, pairingAttemptId) { SessionSurfaceState() }
+    val paneSurfaces = surfaceState.paneSurfaces
     // The screen, rather than the controller's physical-surface registry,
     // owns the presentation set it submits to the render ledger.  Mosh keeps
     // detached overlay terminals parked for each pane in an active split, so
     // visible-overlay state alone is not sufficient to describe that set.
-    val overlaySurfaces = remember(host.id, pairingTmuxTarget, pairingAttemptId) {
-        mutableStateMapOf<Int, TermuxTerminalSurface>()
-    }
-    var primaryTerminalAttached by remember(host.id, pairingTmuxTarget, pairingAttemptId) {
-        mutableStateOf(false)
-    }
+    val overlaySurfaces = surfaceState.overlaySurfaces
+    val primaryTerminalAttached by surfaceState.primaryTerminalAttached
     // A physical Termux surface can be replaced under an unchanged pane ID.
     // Its logical declaration is structurally identical, but it still needs a
     // new SurfaceDeclared/initial repaint after the seam is reattached.
-    var surfaceMountGeneration by remember(host.id, pairingTmuxTarget, pairingAttemptId) {
-        mutableStateOf(0L)
-    }
+    var surfaceMountGeneration by surfaceState.surfaceMountGeneration
     val diagnostics = remember(context) { DiagnosticLogStore(context.applicationContext) }
     val capturedInitialTmuxSelection = remember(host.id) { initialTmuxSelection }
     val capturedInitialTmuxPresentation = remember(host.id) {
@@ -478,6 +705,7 @@ fun SshSessionScreen(
                 initialTmuxGridPresentation = capturedInitialTmuxPresentation,
                 tmuxSessionTargetOverride = pairingTmuxTarget,
                 tmuxDeviceIdentity = tmuxDeviceIdentity(context),
+                ownedGeometryStore = TmuxOwnedGeometryStore.shared(context),
                 scrollbackLines = sessionScrollbackLines,
                 sessionId = liveSessionId,
                 sessionRestorePolicy = combine(
@@ -487,7 +715,6 @@ fun SshSessionScreen(
                         .catch { emit(SessionRestorePolicy.ASK) },
                     sessions.usesCompactShell,
                 ) { stored, compact -> SessionRestorePresentationPolicy.effective(stored, compact) },
-                moshServerLostMessage = { applicationContext.getString(R.string.mosh_server_lost) },
             )
         }
     }
@@ -511,12 +738,19 @@ fun SshSessionScreen(
         heldIntegrationWarningKey == exactAgentBinding?.key &&
         integrationStatus?.showsWarning == true
     val currentState by rememberUpdatedState(state)
-    val currentPresented by rememberUpdatedState(isPresented)
-    var renderedReadyReported by remember(host.id, pairingTmuxTarget, pairingAttemptId) { mutableStateOf(false) }
-    var pairingAutoConnectConsumed by remember(host.id, pairingAttemptId) { mutableStateOf(false) }
-    var reconnectOnMountConsumed by remember(liveSessionId) { mutableStateOf(false) }
-    var consumedConnectOnOpenRequest by remember(liveSessionId) { mutableStateOf(0L) }
-    var consumedRestoreReconnectRequest by remember(liveSessionId) { mutableStateOf(0L) }
+    val presented = rememberUpdatedState(isPresented)
+    val currentPresented by presented
+    var renderedReadyReported by surfaceState.renderedReadyReported
+    // The launch overlay lifts on the first output drawn on screen. An attach
+    // that lands on a split -CC window draws only on the grid's pane surfaces
+    // and never mounts the primary canvas, so a pane's first draw counts too;
+    // waiting for the primary alone left that attach on "attaching pane".
+    val reportRenderedReady = {
+        if (!renderedReadyReported && currentPresented && currentState is SshSessionUiState.Connected) {
+            renderedReadyReported = true
+            onTerminalRenderedReady(host.id, pairingTmuxTarget, pairingAttemptId)
+        }
+    }
     val transportReachable by controller.transportReachable.collectAsState()
     val programStatus by controller.programStatus.collectAsState()
     val programSessions = programStatusCenter?.sessions?.collectAsState()?.value.orEmpty()
@@ -528,69 +762,60 @@ fun SshSessionScreen(
     val tmuxWindowMutationState by controller.tmuxWindowMutationState.collectAsState()
     val bellUnread by bellController.unread.state.collectAsState()
     val bellVisualPulse by bellController.visualPulse.collectAsState()
-    val currentBellPreferences by rememberUpdatedState(bellPreferences)
-    var glowingTmuxWindowId by remember(host.id) { mutableStateOf<Int?>(null) }
-    var terminalTitle by remember(host.id) { mutableStateOf<String?>(null) }
-    val currentTerminalTitle by rememberUpdatedState(terminalTitle)
-    var filesOpen by remember(host.id) { mutableStateOf(false) }
-    var forwardingOpen by remember(host.id) { mutableStateOf(false) }
-    var tmuxSwitcherOpen by remember(host.id) { mutableStateOf(false) }
-    var findOpen by remember(host.id) { mutableStateOf(false) }
-    var findQuery by remember(host.id) { mutableStateOf("") }
-    var findResult by remember(host.id) { mutableStateOf<TerminalSearchResult?>(null) }
+    val hostState = remember(host.id) {
+        SessionHostState(startsInForeground = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+    }
+    val glowingTmuxWindowId by hostState.glowingTmuxWindowId
+    var filesOpen by hostState.filesOpen
+    var forwardingOpen by hostState.forwardingOpen
+    var tmuxSwitcherOpen by hostState.tmuxSwitcherOpen
+    var findOpen by hostState.findOpen
+    var findQuery by hostState.findQuery
+    /** Whether one of this session's Compose editors (Find's field, a panel's) has focus. */
+    val sessionFocus = remember { mutableStateOf(false) }
+    var sessionHoldsFocus by sessionFocus
+    var findResult by hostState.findResult
     // Split mosh paints its live window into the primary surface, but an
     // ordered full-depth capture belongs in the detached focused-pane overlay.
     // Keep both the pending ledger request and the delivered surface explicit
     // so a find never accidentally scans the whole-window live canvas.
-    var moshFindOverlaySurface by remember(host.id) { mutableStateOf<TermuxTerminalSurface?>(null) }
-    var pendingMoshFindSurfaceId by remember(host.id) { mutableStateOf<String?>(null) }
-    var pendingMoshFindAfterDeliveryToken by remember(host.id) { mutableStateOf<Long?>(null) }
-    var pendingMoshFindCanReuseExistingDelivery by remember(host.id) { mutableStateOf(false) }
-    var openMoshFindSurfaceId by remember(host.id) { mutableStateOf<String?>(null) }
+    var moshFindOverlaySurface by hostState.moshFindOverlaySurface
+    var pendingMoshFindSurfaceId by hostState.pendingMoshFindSurfaceId
+    var pendingMoshFindAfterDeliveryToken by hostState.pendingMoshFindAfterDeliveryToken
+    var pendingMoshFindCanReuseExistingDelivery by hostState.pendingMoshFindCanReuseExistingDelivery
+    var openMoshFindSurfaceId by hostState.openMoshFindSurfaceId
     // Split-pane Mosh history is placed asynchronously in a detached
     // Termux view. Find must wait for that exact post callback, just as the
     // shared ledger waits for the controller acknowledgement.
-    var appliedMoshOverlayHistoryDeliveryTokens by remember(host.id) {
-        mutableStateOf<Map<String, Long>>(emptyMap())
-    }
-    var appliedMoshLiveHistoryDeliveryToken by remember(host.id) { mutableStateOf(0L) }
-    var pendingMoshLiveFindAfterDeliveryToken by remember(host.id) { mutableStateOf<Long?>(null) }
-    var pendingMoshLiveFindCanReuseExistingDelivery by remember(host.id) { mutableStateOf(false) }
-    var openMoshLiveFind by remember(host.id) { mutableStateOf(false) }
+    var appliedMoshOverlayHistoryDeliveryTokens by hostState.appliedMoshOverlayHistoryDeliveryTokens
+    var appliedMoshLiveHistoryDeliveryToken by hostState.appliedMoshLiveHistoryDeliveryToken
+    var pendingMoshLiveFindAfterDeliveryToken by hostState.pendingMoshLiveFindAfterDeliveryToken
+    var pendingMoshLiveFindCanReuseExistingDelivery by hostState.pendingMoshLiveFindCanReuseExistingDelivery
+    var openMoshLiveFind by hostState.openMoshLiveFind
     // The accessory bar owns the armed set; the terminal surface applies it to
     // the bytes a typed key produces and reports what survives. Every
     // transition goes through the shared machine
     // (`TesseraInputCore.ModifierArming`) so sticky and one-shot cannot drift
     // between the two platforms.
-    var armedModifiers by remember(host.id) { mutableStateOf(SharedArmedModifiers()) }
-    var plainTerminalDirectory by remember(host.id) { mutableStateOf<String?>(null) }
-    var terminalToast by remember(host.id) { mutableStateOf<String?>(null) }
-    var integrationWarningOpen by remember(liveSessionId) { mutableStateOf(false) }
-    var integrationHelpOpen by remember(liveSessionId) { mutableStateOf(false) }
-    var pendingIntegrationAction by remember(liveSessionId) {
-        mutableStateOf<AgentSessionIntegrationActionRequest?>(null)
-    }
-    // A tmux launch that degraded to a plain shell is silent otherwise: the
-    // session connects and works, just without tmux, and the user is left
-    // wondering where their windows went.
-    val tmuxDegradeNotice by controller.tmuxDegradeNotice.collectAsState()
-    LaunchedEffect(tmuxDegradeNotice) {
-        tmuxDegradeNotice?.let { terminalToast = it }
-    }
-    var selectedPathPresentationActive by remember(host.id) { mutableStateOf(false) }
-    var appForeground by remember(host.id) {
-        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
-    }
-    var locallyFocusedTmuxPaneId by remember(host.id) { mutableStateOf<Int?>(null) }
-    var programStatusNavigationEpoch by remember(controller) { mutableStateOf(0L) }
-    val currentProgramStatusFocusRequest by rememberUpdatedState(programStatusFocusRequest)
-    var consumedProgramStatusFocusToken by remember(liveSessionId) { mutableStateOf<Long?>(null) }
-    LaunchedEffect(controller, programStatusEnabled) {
-        controller.setProgramStatusEnabled(programStatusEnabled)
-    }
-    DisposableEffect(programStatusCenter, host.id, controller) {
-        onDispose { programStatusCenter?.remove(host.id) }
-    }
+    var armedModifiers by hostState.armedModifiers
+    val plainTerminalDirectory by hostState.plainTerminalDirectory
+    var terminalToast by hostState.terminalToast
+    // Callbacks and effects below resolve their toasts through this; composable
+    // bodies use stringResource.
+    val resources = LocalResources.current
+    val integrationPrompts = remember(liveSessionId) { SessionIntegrationPrompts() }
+    TmuxDegradeNoticeEffect(controller = controller, hostState = hostState, resources = resources)
+    var selectedPathPresentationActive by hostState.selectedPathPresentationActive
+    val appForeground by hostState.appForeground
+    var locallyFocusedTmuxPaneId by hostState.locallyFocusedTmuxPaneId
+    val programStatusNavigation = remember(controller) { mutableLongStateOf(0L) }
+    var programStatusNavigationEpoch by programStatusNavigation
+    ProgramStatusRegistration(
+        host = host,
+        controller = controller,
+        programStatusCenter = programStatusCenter,
+        programStatusEnabled = programStatusEnabled,
+    )
     val usesTmuxPaneGrid = host.tmuxMode != TmuxModes.OFF && !compactTmux && !tmuxWindowIsPaintedWhole &&
         tmuxSnapshot?.activeWindow?.let { it.panes.size > 1 && !it.zoomed } == true
     val activeTmuxPaneIds = tmuxSnapshot?.activeWindow?.panes?.mapTo(mutableSetOf()) { it.id } ?: emptySet()
@@ -606,30 +831,15 @@ fun SshSessionScreen(
     // actual CompactTmuxTerminal/TmuxLayout branch below.  Publishing it here
     // makes layout and remount changes facts from the screen, rather than a
     // controller inference from whichever surfaces happen to be registered.
-    SideEffect {
-        controller.setTmuxScreenRenderPresentation(tmuxScreenRenderPresentation)
-    }
-    LaunchedEffect(
-        controller,
-        tmuxScreenRenderPresentation,
-        tmuxSnapshot?.activeWindowId,
-        tmuxSnapshot?.activePaneId,
-        activeTmuxPaneIds,
-        mountedGridPaneIds,
-        mountedOverlayPaneIds,
-        surfaceMountGeneration,
-    ) {
-        controller.declareTmuxRenderSurfaces(
-            tmuxScreenRenderSurfaceDeclarations(
-                presentation = tmuxScreenRenderPresentation,
-                activeWindowId = tmuxSnapshot?.activeWindowId,
-                activePaneId = tmuxSnapshot?.activePaneId,
-                activePaneIds = activeTmuxPaneIds,
-                mountedGridPaneIds = mountedGridPaneIds,
-                mountedOverlayPaneIds = mountedOverlayPaneIds,
-            ),
-        )
-    }
+    TmuxRenderDeclarationEffects(
+        controller = controller,
+        tmuxScreenRenderPresentation = tmuxScreenRenderPresentation,
+        tmuxSnapshot = tmuxSnapshot,
+        activeTmuxPaneIds = activeTmuxPaneIds,
+        mountedGridPaneIds = mountedGridPaneIds,
+        mountedOverlayPaneIds = mountedOverlayPaneIds,
+        surfaceMountGeneration = surfaceMountGeneration,
+    )
     val inputTerminal = if (usesTmuxPaneGrid) {
         (locallyFocusedTmuxPaneId ?: tmuxSnapshot?.activePaneId)?.let(paneSurfaces::get) ?: terminal
     } else {
@@ -646,104 +856,22 @@ fun SshSessionScreen(
     } else {
         inputTerminal
     }
-    LaunchedEffect(
-        pendingMoshFindSurfaceId,
-        pendingMoshFindAfterDeliveryToken,
-        pendingMoshFindCanReuseExistingDelivery,
-        focusedMoshSplitSurfaceId,
-        tmuxRenderHistory,
-        moshFindOverlaySurface,
-        appliedMoshOverlayHistoryDeliveryTokens,
-    ) {
-        val pendingSurfaceId = pendingMoshFindSurfaceId ?: return@LaunchedEffect
-        if (pendingSurfaceId != focusedMoshSplitSurfaceId) {
-            pendingMoshFindSurfaceId = null
-            return@LaunchedEffect
-        }
-        // Delay the find chrome until the controller has delivered full-depth
-        // content *and* the detached pane surface is the one under it. A
-        // previously delivered full-depth capture is equally valid: FindOpened
-        // is intentionally a no-op at that ledger depth.
-        val delivery = tmuxRenderHistory[pendingSurfaceId]
-        val minimumDeliveryToken = pendingMoshFindAfterDeliveryToken ?: Long.MAX_VALUE
-        val canOpen = delivery != null && moshFindCanOpenAfterAppliedDelivery(
-            requestedSurfaceId = pendingSurfaceId,
-            deliveredSurfaceId = delivery.surfaceId,
-            deliveredToken = delivery.deliveryToken,
-            requiredNewerThanToken = minimumDeliveryToken,
-            deliveredDepth = delivery.depth,
-            scrollbackLimit = sessionScrollbackLines,
-            appliedDeliveryToken = appliedMoshOverlayHistoryDeliveryTokens[pendingSurfaceId] ?: 0L,
-            mayReuseExistingDelivery = pendingMoshFindCanReuseExistingDelivery,
-        )
-        if (canOpen && moshFindOverlaySurface != null) {
-            openMoshFindSurfaceId = pendingSurfaceId
-            pendingMoshFindSurfaceId = null
-            pendingMoshFindAfterDeliveryToken = null
-            pendingMoshFindCanReuseExistingDelivery = false
-            findOpen = true
-        }
-    }
-    LaunchedEffect(focusedMoshSplitSurfaceId) {
-        val openSurfaceId = openMoshFindSurfaceId
-        if (openSurfaceId != null && openSurfaceId != focusedMoshSplitSurfaceId) {
-            controller.returnTmuxScrollbackToTail(openSurfaceId)
-            openMoshFindSurfaceId = null
-            findOpen = false
-            findQuery = ""
-            findResult = null
-        }
-        if (pendingMoshFindSurfaceId != null && pendingMoshFindSurfaceId != focusedMoshSplitSurfaceId) {
-            pendingMoshFindSurfaceId = null
-            pendingMoshFindAfterDeliveryToken = null
-            pendingMoshFindCanReuseExistingDelivery = false
-        }
-    }
-    LaunchedEffect(
-        pendingMoshLiveFindAfterDeliveryToken,
-        pendingMoshLiveFindCanReuseExistingDelivery,
-        appliedMoshLiveHistoryDeliveryToken,
-        tmuxRenderHistory,
-        usesMoshLiveFind,
-    ) {
-        val minimumDeliveryToken = pendingMoshLiveFindAfterDeliveryToken ?: return@LaunchedEffect
-        if (!usesMoshLiveFind) return@LaunchedEffect
-        val delivery = tmuxRenderHistory["live"] ?: return@LaunchedEffect
-        val canOpen = moshFindCanOpenAfterAppliedDelivery(
-            requestedSurfaceId = "live",
-            deliveredSurfaceId = delivery.surfaceId,
-            deliveredToken = delivery.deliveryToken,
-            requiredNewerThanToken = minimumDeliveryToken,
-            deliveredDepth = delivery.depth,
-            scrollbackLimit = sessionScrollbackLines,
-            appliedDeliveryToken = appliedMoshLiveHistoryDeliveryToken,
-            mayReuseExistingDelivery = pendingMoshLiveFindCanReuseExistingDelivery,
-        )
-        if (canOpen) {
-            pendingMoshLiveFindAfterDeliveryToken = null
-            pendingMoshLiveFindCanReuseExistingDelivery = false
-            openMoshLiveFind = true
-            findOpen = true
-            findResult = inputTerminal.find(findQuery, forward = true)
-        }
-    }
-    LaunchedEffect(usesMoshLiveFind) {
-        if (!usesMoshLiveFind && (openMoshLiveFind || pendingMoshLiveFindAfterDeliveryToken != null)) {
-            controller.returnTmuxScrollbackToTail("live")
-            openMoshLiveFind = false
-            pendingMoshLiveFindAfterDeliveryToken = null
-            pendingMoshLiveFindCanReuseExistingDelivery = false
-            findOpen = false
-            findQuery = ""
-            findResult = null
-        }
-    }
+    MoshFindEffects(
+        hostState = hostState,
+        controller = controller,
+        focusedMoshSplitSurfaceId = focusedMoshSplitSurfaceId,
+        usesMoshLiveFind = usesMoshLiveFind,
+        tmuxRenderHistory = tmuxRenderHistory,
+        inputTerminal = inputTerminal,
+        sessionScrollbackLines = sessionScrollbackLines,
+    )
     val filesChallengeActive = filesOpen && (
         state is SshSessionUiState.AwaitingCredential ||
             state is SshSessionUiState.AwaitingHostKey ||
             state is SshSessionUiState.AwaitingOwnerAuthorization
         )
-    val filesController = remember(host.id, controller) {
+    val artifactOpener by rememberUpdatedState(LocalArtifactOpener.current)
+    val filesController = remember(host.id, controller, liveSessionId) {
         RemoteFilesController(
             context = context.applicationContext,
             route = controller::fileRouteRequest,
@@ -752,6 +880,9 @@ fun SshSessionScreen(
             keyAuthorizationProvider = SshKeyAuthorizationProvider(controller::fileKeyAuthorization),
             liveConnection = controller::openLiveFileChannel,
             recordDiagnostic = diagnostics::record,
+            hostId = host.id,
+            sessionHint = liveSessionId,
+            artifactOpener = { artifactOpener },
         )
     }
     DisposableEffect(controller, filesController) {
@@ -790,7 +921,7 @@ fun SshSessionScreen(
                 activeUploads += transfer
                 try {
                     com.bambouville.tessera.agent.platform.AgentEndpointResult.Success(
-                        transfer.uploadAttachment(android.net.Uri.parse(uri)),
+                        transfer.uploadAttachment(uri.toUri()),
                     )
                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
                     throw cancelled
@@ -827,7 +958,7 @@ fun SshSessionScreen(
     val currentSystemPickerActiveChanged by rememberUpdatedState(onSystemPickerActiveChanged)
     val excursions = remember(externalUi) { externalUi ?: ExternalUiExcursions() }
     // This screen's pickers, counted on their own for the keep-alive service.
-    val pickerExcursions = remember(host.id) { ExternalUiExcursions() }
+    val pickerExcursions = hostState.pickerExcursions
     fun pickerSlot(): (Boolean) -> Unit {
         val outer = excursions.slot()
         val local = pickerExcursions.slot()
@@ -840,20 +971,32 @@ fun SshSessionScreen(
     val quickOpenExcursion = remember(excursions) { pickerSlot() }
     val filesPickerExcursion = remember(excursions) { pickerSlot() }
     val filesOutboundExcursion = remember(excursions) { pickerSlot() }
-    val ownerAuthorizationExcursion = remember(excursions) { excursions.slot() }
     // A screen disposed while one of its excursions is up (the tab closed,
     // the host switched) never reports its end. Release them, or the count
     // sticks and `isRealBackgroundEdge()` stays false: no hide, no app lock.
-    DisposableEffect(quickOpenExcursion, filesPickerExcursion, filesOutboundExcursion, ownerAuthorizationExcursion) {
+    DisposableEffect(quickOpenExcursion, filesPickerExcursion, filesOutboundExcursion) {
         onDispose {
             quickOpenExcursion(false)
             filesPickerExcursion(false)
             filesOutboundExcursion(false)
-            ownerAuthorizationExcursion(false)
         }
     }
-    val currentSelectionPathAction by rememberUpdatedState<(TerminalSelectionPathAction, String) -> Unit> {
+    val currentSelectionPathAction by rememberUpdatedState<(TerminalSelectionPathAction, String) -> Unit> selectionAction@ {
             action, selection ->
+        val opener = artifactOpener
+        when (val route = selectedArtifactLinkRoute(action, selection, host.id, liveSessionId, opener != null)) {
+            SelectedArtifactLinkRoute.Refused -> {
+                terminalToast = resources.getString(R.string.session_link_not_opened)
+                return@selectionAction
+            }
+            is SelectedArtifactLinkRoute.Page -> {
+                // The toolbar has already ended selection, as for a file open.
+                (paneSurfaces.values + terminal).forEach { it.view.hideSoftwareKeyboard() }
+                opener?.open(route.request)
+                return@selectionAction
+            }
+            SelectedArtifactLinkRoute.Default -> Unit
+        }
         val perform: (String?) -> Unit = { directory ->
             val onFailure: (String) -> Unit = { terminalToast = it }
             when (action) {
@@ -871,6 +1014,7 @@ fun SshSessionScreen(
                     selection = selection,
                     terminalDirectory = directory,
                     onPresentationLaunched = {
+                        // Only the legacy activity/intent takes a picker excursion.
                         selectedPathPresentationActive = true
                         quickOpenExcursion(true)
                     },
@@ -878,119 +1022,67 @@ fun SshSessionScreen(
                 )
             }
         }
-        controller.queryTerminalDirectory(currentTerminalDirectory, currentTerminalPaneId) { freshDirectory ->
-            perform(freshDirectory ?: currentTerminalDirectory)
+        if (selection.trim().startsWith('/')) {
+            perform(currentTerminalDirectory)
+        } else {
+            controller.queryTerminalDirectory(currentTerminalDirectory, currentTerminalPaneId) { freshDirectory ->
+                perform(freshDirectory ?: currentTerminalDirectory)
+            }
         }
     }
+    TranscriptSelectionEffect(
+        transcriptSelectionRequest = transcriptSelectionRequest,
+        onTranscriptSelectionConsumed = onTranscriptSelectionConsumed,
+        onTranscriptSelectionOutcome = onTranscriptSelectionOutcome,
+        host = host,
+        controller = controller,
+        filesController = filesController,
+        hostState = hostState,
+        quickOpenExcursion = quickOpenExcursion,
+    )
     val forwardingRuleStore = remember(context.applicationContext) {
         AndroidPortForwardRuleStore(context.applicationContext)
     }
     val forwardingRules by forwardingRuleStore.observe(host.id).collectAsState(initial = emptyList())
     val forwardingStates by controller.forwardingStates.collectAsState()
-    val ownerAuthorizationLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { result ->
-        ownerAuthorizationExcursion(false)
-        controller.decideOwnerAuthorization(result.resultCode == Activity.RESULT_OK)
-    }
-    LaunchedEffect(transportReachable) {
-        onTransportReachableChanged(transportReachable)
-    }
-    LaunchedEffect(state, isPresented) {
-        onStateChanged(state)
-        if (!renderedReadyReported && currentPresented && currentState is SshSessionUiState.Connected && terminal.hasRenderedOutput) {
-            renderedReadyReported = true
-            onTerminalRenderedReady(host.id, pairingTmuxTarget, pairingAttemptId)
-        }
-    }
-    LaunchedEffect(isPresented, tmuxSnapshot?.activeWindowId) {
-        if (isPresented) {
-            bellController.markSessionRead(host.id)
-            tmuxSnapshot?.activeWindowId?.let { bellController.markTmuxWindowRead(host.id, it) }
-        }
-    }
-    LaunchedEffect(bellVisualPulse, bellPreferences.visualEnabled) {
-        if (!bellPreferences.visualEnabled) {
-            glowingTmuxWindowId = null
-            return@LaunchedEffect
-        }
-        val source = bellVisualPulse?.source as? BellSource.TmuxWindow
-        if (source?.sessionId == host.id) {
-            glowingTmuxWindowId = source.windowId
-            kotlinx.coroutines.delay(600)
-            if (glowingTmuxWindowId == source.windowId) glowingTmuxWindowId = null
-        }
-    }
+    SessionStateEffects(
+        host = host,
+        state = state,
+        isPresented = isPresented,
+        transportReachable = transportReachable,
+        tmuxSnapshot = tmuxSnapshot,
+        terminal = terminal,
+        paneSurfaces = paneSurfaces,
+        bellController = bellController,
+        bellPreferences = bellPreferences,
+        bellVisualPulse = bellVisualPulse,
+        hostState = hostState,
+        reportRenderedReady = reportRenderedReady,
+        onStateChanged = onStateChanged,
+        onTransportReachableChanged = onTransportReachableChanged,
+    )
 
-    DisposableEffect(controller, terminal) {
-        controller.attachTerminal(terminal)
-        primaryTerminalAttached = true
-        surfaceMountGeneration += 1
-        terminal.onSoftwareModifiersConsumed = { surviving -> armedModifiers = surviving }
-        terminal.onFontSizeChanged = onTerminalTextSizeChanged
-        terminal.onTitleChanged = { terminalTitle = it }
-        terminal.onHostDirectoryChanged = { plainTerminalDirectory = it }
-        terminal.isRemotePathSelection = RemoteSelectionPathResolver::isPlausiblePath
-        terminal.onSelectionPathAction = { action, selection ->
-            currentSelectionPathAction(action, selection)
-        }
-        terminal.onSoftwareKeyboardRequested = {
-            terminal.requestSoftwareKeyboard()
-        }
-        terminal.onFirstOutputRendered = {
-            if (!renderedReadyReported && currentPresented && currentState is SshSessionUiState.Connected) {
-                renderedReadyReported = true
-                onTerminalRenderedReady(host.id, pairingTmuxTarget, pairingAttemptId)
-            }
-        }
-        terminal.onBell = {
-            if (host.tmuxMode == TmuxModes.OFF) {
-                bellController.ring(
-                    BellEvent(
-                        source = BellSource.Session(host.id),
-                        originOnScreen = currentPresented,
-                        hostDisplayName = host.displayName,
-                        paneTitle = currentTerminalTitle,
-                    ),
-                    currentBellPreferences,
-                )
-            }
-        }
-        controller.onTmuxBell = { bell ->
-            bellController.ring(
-                BellEvent(
-                    source = BellSource.TmuxWindow(host.id, bell.windowId),
-                    originOnScreen = currentPresented && bell.isActiveWindow,
-                    hostDisplayName = host.displayName,
-                    paneTitle = bell.windowName,
-                ),
-                currentBellPreferences,
-            )
-        }
-        onDispose {
-            terminal.onSoftwareModifiersConsumed = null
-            terminal.onFontSizeChanged = null
-            terminal.onTitleChanged = null
-            terminal.onHostDirectoryChanged = null
-            terminal.isRemotePathSelection = null
-            terminal.onSelectionPathAction = null
-            terminal.onSoftwareKeyboardRequested = null
-            terminal.onFirstOutputRendered = null
-            terminal.onBell = null
-            controller.onTmuxBell = null
-            primaryTerminalAttached = false
-            surfaceMountGeneration += 1
-            // Composition is leaving before a new declaration effect can
-            // run. Retract the exact screen-owned set before closing its
-            // physical surface so a queued ledger callback cannot target it.
-            controller.declareTmuxRenderSurfaces(emptyList())
-            controller.detachTerminal(terminal)
-            terminal.close()
-        }
-    }
-    DisposableEffect(filesController) {
-        onDispose { filesController.close() }
-    }
+    PrimaryTerminalAttachment(
+        host = host,
+        controller = controller,
+        terminal = terminal,
+        surfaceState = surfaceState,
+        hostState = hostState,
+        bellController = bellController,
+        bellPreferences = bellPreferences,
+        presented = presented,
+        currentSelectionPathAction = { action, selection -> currentSelectionPathAction(action, selection) },
+        reportRenderedReady = reportRenderedReady,
+        onTerminalTextSizeChanged = onTerminalTextSizeChanged,
+    )
+    ArtifactLiveRegistrations(
+        host = host,
+        liveSessionId = liveSessionId,
+        controller = controller,
+        filesController = filesController,
+        state = state,
+        forwardingStates = forwardingStates,
+    )
     // No `onDispose { controller.close() }`. A composition ending is a window
     // being rebuilt, not a session being ended — and closing here was
     // indistinguishable from a user disconnect at the record layer, so every
@@ -1005,182 +1097,66 @@ fun SshSessionScreen(
     // re-reveals from its own model; a plain-SSH screen starts empty under a
     // shell that is still exactly where the user left it. Rebuilding that grid
     // means keeping the emulator without its view, which is a separate change.
-    LaunchedEffect(controller, isPresented) {
-        controller.setPresentationActive(isPresented)
-    }
-    LaunchedEffect(forwardingRules) {
-        controller.updateForwardingRules(forwardingRules)
-    }
-    // Forwarded-service liveness is probed only while someone can see it:
-    // this session presented and the activity resumed. Each probe is a
-    // channel on the user's own SSH connection, and a refused one a line in
-    // the host's sshd log. The forwarding panel is not a reason of its own:
-    // it is visible only while presented, and `forwardingOpen` outlives a
-    // switch to another session, which stays composed behind it.
-    val monitorsForwardedServices = forwardingRules.isNotEmpty() && isPresented
-    LaunchedEffect(controller, lifecycleOwner, monitorsForwardedServices) {
-        if (!monitorsForwardedServices) return@LaunchedEffect
-        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            controller.monitorForwardedServices()
-        }
-    }
-    DisposableEffect(controller, lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_START, Lifecycle.Event.ON_RESUME -> {
-                    appForeground = true
-                    controller.setAppForeground(true)
-                    if (event == Lifecycle.Event.ON_RESUME && selectedPathPresentationActive) {
-                        selectedPathPresentationActive = false
-                        quickOpenExcursion(false)
-                    }
-                }
-                Lifecycle.Event.ON_STOP -> {
-                    appForeground = false
-                    controller.setAppForeground(false)
-                }
-                else -> Unit
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        controller.setAppForeground(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            if (selectedPathPresentationActive) {
-                selectedPathPresentationActive = false
-                quickOpenExcursion(false)
-            }
-        }
-    }
-    LaunchedEffect(pairingAttemptId, isPresented) {
-        if (pairingAttemptId != null && isPresented && !pairingAutoConnectConsumed) {
-            pairingAutoConnectConsumed = true
-            diagnostics.record(
-                "pairing_session_connect_start",
-                mapOf("transport" to host.transportKind, "tmux" to (pairingTmuxTarget != null).toString()),
-            )
-            controller.connect()
-        }
-    }
-    // §6.9 show edges. Displayed = presented (which already folds in the app
-    // lock) ∧ the activity is at least STARTED. The pairing continuation no
-    // longer claims here: MainActivity routes it as an explicit open, which
-    // the same rule decides from a fresh authority read.
-    val lifecycleState by lifecycleOwner.lifecycle.currentStateAsState()
-    val displayed = isPresented && lifecycleState.isAtLeast(Lifecycle.State.STARTED)
-    val startEpoch by sessions.startEpoch
-    val explicitOpens = sessions.explicitOpenRequests[host.id] ?: 0L
-    LaunchedEffect(controller, displayed, startEpoch, explicitOpens) {
-        sessions.reportComposedDisplay(host.id, displayed, startEpoch, explicitOpens)
-    }
-    LaunchedEffect(reconnectOnMount) {
-        if (reconnectOnMount && !reconnectOnMountConsumed) {
-            reconnectOnMountConsumed = true
-            diagnostics.record("restore_reconnect_start", mapOf("transport" to host.transportKind))
-            controller.connect()
-        }
-    }
-    LaunchedEffect(restoreReconnectRequest) {
-        if (restoreReconnectRequest > consumedRestoreReconnectRequest) {
-            consumedRestoreReconnectRequest = restoreReconnectRequest
-            diagnostics.record("restore_window_reconnect", mapOf("transport" to host.transportKind))
-            controller.reconnectForRestore()
-        }
-    }
-    LaunchedEffect(connectOnOpenRequest, isPresented) {
-        if (!hasPendingPresentedHostOpen(connectOnOpenRequest, consumedConnectOnOpenRequest, isPresented)) {
-            return@LaunchedEffect
-        }
-        consumedConnectOnOpenRequest = connectOnOpenRequest
-        if (shouldConnectFromHostOpen(state)) {
-            diagnostics.record("host_open_connect_start", mapOf("transport" to host.transportKind))
-            controller.connect()
-        }
-    }
-    LaunchedEffect(compactTmux) {
-        controller.setTmuxGridPresentation(
-            if (compactTmux) SharedTmuxGridPresentation.SINGLE_PANE
-            else SharedTmuxGridPresentation.PANE_GRID,
-        )
-    }
-    LaunchedEffect(tmuxSnapshot?.activePaneId) {
-        locallyFocusedTmuxPaneId = tmuxSnapshot?.activePaneId
-    }
-    val attachedPaneIds = paneSurfaces.keys.toSet()
-    LaunchedEffect(
-        isPresented,
-        appForeground,
-        state,
-        usesTmuxPaneGrid,
-        locallyFocusedTmuxPaneId,
-        attachedPaneIds,
-    ) {
-        val panesVisible = isPresented && appForeground && state == SshSessionUiState.Connected && usesTmuxPaneGrid
-        terminal.setFocused(isPresented && appForeground && state == SshSessionUiState.Connected && !usesTmuxPaneGrid)
-        paneSurfaces.forEach { (paneId, surface) ->
-            surface.setFocused(panesVisible && paneId == locallyFocusedTmuxPaneId)
-        }
-    }
-    LaunchedEffect(terminalTextSizeSp, terminalTypeface) {
-        terminal.setFont(TerminalFont(terminalTextSizeSp.coerceIn(8, 40), terminalTypeface))
-    }
-    LaunchedEffect(terminalTheme) {
-        terminal.setTheme(terminalTheme)
-    }
-    LaunchedEffect(cursorStyle, terminalCursorBlink) {
-        terminal.setCursorAppearance(cursorStyle, terminalCursorBlink)
-    }
-    LaunchedEffect(terminalBackground, attachedPaneIds) {
-        terminalBackground?.let { background ->
-            withContext(Dispatchers.IO) { terminalBackgroundStore.prewarm(listOf(background)) }
-        }
-        terminal.setBackgroundImage(terminalBackground)
-        paneSurfaces.values.forEach { it.setBackgroundImage(terminalBackground) }
-    }
-    LaunchedEffect(smoothScrollingEnabled, smoothScrollingSpeed, attachedPaneIds) {
-        val speed = smoothScrollingSpeed.coerceIn(0.15f, 1.25f)
-        terminal.view.setSmoothScrollingSpeed(speed)
-        terminal.view.setSmoothScrollingEnabled(smoothScrollingEnabled)
-        paneSurfaces.values.forEach { surface ->
-            surface.view.setSmoothScrollingSpeed(speed)
-            surface.view.setSmoothScrollingEnabled(smoothScrollingEnabled)
-        }
-    }
-    LaunchedEffect(armedModifiers, armingBehavior, inputTerminal, attachedPaneIds) {
-        // Only the surface taking input may hold an armed set. A pane that
-        // loses focus mid-chord would otherwise still be holding it when focus
-        // came back, and spend it on a key the user typed much later.
-        (paneSurfaces.values.toList() + terminal).distinct().forEach { surface ->
-            surface.setSoftwareModifiers(
-                if (surface === inputTerminal) armedModifiers else SharedArmedModifiers(),
-                armingBehavior,
-            )
-        }
-    }
-
-    LaunchedEffect(state, isPresented) {
-        if (state == SshSessionUiState.Connected && isPresented) {
-            inputTerminal.requestSoftwareKeyboard()
-        }
-    }
-    LaunchedEffect(state) {
-        if (state == SshSessionUiState.Disconnected || state == SshSessionUiState.Terminated ||
-            state is SshSessionUiState.Failed
-        ) {
-            filesOpen = false
-            forwardingOpen = false
-        }
-    }
+    SessionLifecycleEffects(
+        host = host,
+        controller = controller,
+        terminal = terminal,
+        paneSurfaces = paneSurfaces,
+        isPresented = isPresented,
+        sessionFocus = sessionFocus,
+        forwardingRules = forwardingRules,
+        lifecycleOwner = lifecycleOwner,
+        hostState = hostState,
+        quickOpenExcursion = quickOpenExcursion,
+        pairingTmuxTarget = pairingTmuxTarget,
+        pairingAttemptId = pairingAttemptId,
+        diagnostics = diagnostics,
+    )
+    SessionConnectEffects(
+        host = host,
+        liveSessionId = liveSessionId,
+        controller = controller,
+        sessions = sessions,
+        lifecycleOwner = lifecycleOwner,
+        state = state,
+        isPresented = isPresented,
+        diagnostics = diagnostics,
+        reconnectOnMount = reconnectOnMount,
+        connectOnOpenRequest = connectOnOpenRequest,
+        restoreReconnectRequest = restoreReconnectRequest,
+    )
+    TerminalSurfaceEffects(
+        controller = controller,
+        terminal = terminal,
+        inputTerminal = inputTerminal,
+        paneSurfaces = paneSurfaces,
+        hostState = hostState,
+        state = state,
+        isPresented = isPresented,
+        compactTmux = compactTmux,
+        tmuxSnapshot = tmuxSnapshot,
+        usesTmuxPaneGrid = usesTmuxPaneGrid,
+        terminalTextSizeSp = terminalTextSizeSp,
+        terminalTypeface = terminalTypeface,
+        terminalTheme = terminalTheme,
+        cursorStyle = cursorStyle,
+        terminalCursorBlink = terminalCursorBlink,
+        terminalBackground = terminalBackground,
+        terminalBackgroundStore = terminalBackgroundStore,
+        smoothScrollingEnabled = smoothScrollingEnabled,
+        smoothScrollingSpeed = smoothScrollingSpeed,
+        armingBehavior = armingBehavior,
+    )
 
     // --- Share-in execution -------------------------------------------------
 
-    var shareConflict by remember(host.id) { mutableStateOf<PendingShareConflict?>(null) }
+    var shareConflict by hostState.shareConflict
     // A transfer the user is about to cancel that was going to deliver a path.
-    var shareCancelPrompt by remember(host.id) { mutableStateOf<TransferItem?>(null) }
+    var shareCancelPrompt by hostState.shareCancelPrompt
     // True while an upload that owes this session a pasted path is moving, so
     // cancelling it can say what else is lost. iOS asks the same question from
     // its sheet before cancelling a foreground-paste upload.
-    var pastePathInFlight by remember(host.id) { mutableStateOf(false) }
+    var pastePathInFlight by hostState.pastePathInFlight
     val transfers by filesController.transfers.collectAsState()
     val systemClipboard = remember(context) {
         context.getSystemService(ClipboardManager::class.java)
@@ -1219,7 +1195,7 @@ fun SshSessionScreen(
                     },
                     copyToClipboard = { remotePath ->
                         systemClipboard?.setPrimaryClip(
-                            ClipData.newPlainText("remote path", remotePath),
+                            ClipData.newPlainText(resources.getString(R.string.session_clip_label_remote_path), remotePath),
                         )
                     },
                 )
@@ -1231,8 +1207,8 @@ fun SshSessionScreen(
                     ShareUploadDeliveryOutcome.TERMINAL -> null
                     ShareUploadDeliveryOutcome.CLIPBOARD,
                     ShareUploadDeliveryOutcome.CLIPBOARD_FALLBACK,
-                    -> "uploaded — path copied to the clipboard"
-                    ShareUploadDeliveryOutcome.NONE -> "uploaded to $path"
+                    -> resources.getString(R.string.session_upload_path_copied)
+                    ShareUploadDeliveryOutcome.NONE -> resources.getString(R.string.session_uploaded_to, path)
                 }
             },
             onFailed = { failure ->
@@ -1245,151 +1221,43 @@ fun SshSessionScreen(
             },
         )
     }
+    // One reference for the share effect and the conflict dialog alike.
+    val startShareUpload: (Uri, PendingShareUpload, Boolean) -> Unit = ::runShareUpload
 
-    // Publish this session's cwd so the share ingress sheet can offer "session
-    // cwd" as a destination for a host that is already connected.
-    LaunchedEffect(terminalDirectory, state) {
-        onTerminalDirectoryChanged(terminalDirectory.takeIf { state == SshSessionUiState.Connected })
-    }
-    DisposableEffect(Unit) { onDispose { onTerminalDirectoryChanged(null) } }
-
-    // A reconnect starts a new remote shell. Dropping the last OSC 7 report
-    // keeps a value from the previous shell out of the follow standdown below,
-    // where it would suppress the probe against a shell that never reports.
-    LaunchedEffect(state) {
-        if (state != SshSessionUiState.Connected) plainTerminalDirectory = null
-    }
-
-    // Files follows the terminal. Pushed signals — tmux pane metadata and the
-    // terminal's own OSC 7 — land the moment they change; reports stop while
-    // the browser is closed so a cwd change can never dial SFTP on its own.
-    LaunchedEffect(filesOpen, terminalDirectory, state) {
-        if (!filesOpen || state != SshSessionUiState.Connected) return@LaunchedEffect
-        filesController.terminalReportedDirectory(terminalDirectory)
-    }
-
-    // Zero-setup follow for the transports that report no cwd in band: plain
-    // mosh, where a stock mosh-server drops OSC 7 before it enters the state
-    // sync, and plain SSH before shell integration is installed. Under tmux the
-    // pane-metadata subscription already carries every cd, so the poll stays
-    // out of those sessions entirely; it also rides the file channel the
-    // browser itself opened, so it never authenticates a route of its own.
-    val cwdFollowKey = RemoteCwdProbe.followTaskKey(
-        panelOpen = filesOpen,
-        sessionActive = isPresented && state == SshSessionUiState.Connected,
-        tmuxAttached = host.tmuxMode != TmuxModes.OFF,
-        moshServerPid = controller.cwdProbeMoshServerPid(),
+    TerminalDirectoryEffects(
+        host = host,
+        controller = controller,
+        filesController = filesController,
+        hostState = hostState,
+        state = state,
+        isPresented = isPresented,
+        terminalDirectory = terminalDirectory,
+        onTerminalDirectoryChanged = onTerminalDirectoryChanged,
     )
-    LaunchedEffect(cwdFollowKey) {
-        if (!filesOpen || !isPresented) return@LaunchedEffect
-        if (host.tmuxMode != TmuxModes.OFF || state != SshSessionUiState.Connected) return@LaunchedEffect
-        val command = controller.liveFileCwdProbeCommand()
-        val debounce = RemoteCwdProbe.FollowDebounce()
-        while (true) {
-            val tick = if (plainTerminalDirectory != null) {
-                // OSC 7 is instant and per-shell exact, so the probe stands
-                // down while the shell reports it — this host runs shell
-                // integration, or our mosh fork.
-                RemoteCwdProbe.Tick.OscSignalLive
-            } else {
-                filesController.probeOnLiveChannel(command)
-                    ?.let(RemoteCwdProbe.Tick::Probed)
-                    ?: RemoteCwdProbe.Tick.NotPolled
-            }
-            when (val outcome = debounce.step(tick)) {
-                is RemoteCwdProbe.Outcome.Report -> filesController.terminalReportedDirectory(outcome.path)
-                RemoteCwdProbe.Outcome.ClearFollow -> filesController.terminalReportedDirectory(null)
-                RemoteCwdProbe.Outcome.Hold -> Unit
-            }
-            delay(RemoteCwdProbe.POLL_INTERVAL_MILLIS)
-        }
-    }
 
-    // A share the ingress sheet routed here. It runs exactly once, when the
-    // session is connected: the sheet's decision was made against this host,
-    // and re-running it on a later reconnect would upload the same payload
-    // twice.
-    LaunchedEffect(shareUpload?.hostId, shareUpload?.uris, shareUpload?.text, state, tmuxAuthorityPresentation) {
-        val pending = shareUpload ?: return@LaunchedEffect
-        // A routed share is a one-shot instruction aimed at one session. If
-        // that session gives up or is torn down, drop it — replaying an
-        // hours-old payload on some later reconnect is the worse surprise.
-        if (state is SshSessionUiState.Failed || state == SshSessionUiState.Terminated) {
-            onShareUploadConsumed()
-            terminalToast = "share cancelled — the session didn't connect"
-            return@LaunchedEffect
-        }
-        if (state != SshSessionUiState.Connected) return@LaunchedEffect
-        // A show or take-back is deciding who owns the grid; it resolves in
-        // moments, so the share waits for it rather than racing it.
-        if (pending.isTextPaste && (
-                tmuxAuthorityPresentation is TmuxAuthorityPresentation.Resuming ||
-                    tmuxAuthorityPresentation is TmuxAuthorityPresentation.Reclaiming
-                )
-        ) {
-            return@LaunchedEffect
-        }
-        onShareUploadConsumed()
-        if (pending.isTextPaste) {
-            val text = requireNotNull(pending.text)
-            if (!controller.acceptsTerminalInput()) {
-                // Another device is working in this grid: keep the text, but
-                // never type it under them.
-                systemClipboard?.setPrimaryClip(ClipData.newPlainText("shared text", text))
-                terminalToast = "copied to the clipboard — take back control to paste"
-                return@LaunchedEffect
-            }
-            inputTerminal.sendInput(text.encodeToByteArray())
-            inputTerminal.setFocused(true)
-            return@LaunchedEffect
-        }
-        // Watching a file land in the directory you chose is the point of the
-        // cwd destination; a temp upload exists only to be pasted, so it must
-        // not shove the terminal aside.
-        if (pending.destination is ShareUploadDestination.SessionCwd) filesOpen = true
-        pending.uris.forEach { uri -> runShareUpload(uri, pending, replaceExisting = false) }
-    }
-    LaunchedEffect(terminalToast) {
-        if (terminalToast != null) {
-            delay(4_000)
-            terminalToast = null
-        }
-    }
-    LaunchedEffect(tmuxWindowMutationState) {
-        (tmuxWindowMutationState as? TmuxWindowMutationState.Error)?.message?.let {
-            terminalToast = context.getString(when (it) {
-                "The window order changed. Try again.", "That window move is no longer valid." -> R.string.tmux_order_changed
-                "Window ordering timed out." -> R.string.tmux_order_timeout
-                "Window ordering is not available yet.", "Window ordering is not hydrated yet." -> R.string.tmux_order_unavailable
-                else -> R.string.tmux_order_failed
-            })
-            controller.clearTmuxWindowMutationError()
-        }
-    }
-    LaunchedEffect(integrationWarningVisible) {
-        if (!integrationWarningVisible) integrationWarningOpen = false
-    }
-    LaunchedEffect(isPresented) {
-        if (!isPresented) {
-            integrationWarningOpen = false
-            integrationHelpOpen = false
-            pendingIntegrationAction = null
-        }
-    }
-    LaunchedEffect(
-        (state as? SshSessionUiState.AwaitingOwnerAuthorization)?.challenge?.challengeId,
-        isPresented,
-    ) {
-        if (!isPresented) return@LaunchedEffect
-        val awaiting = state as? SshSessionUiState.AwaitingOwnerAuthorization ?: return@LaunchedEffect
-        val keyguard = context.getSystemService(KeyguardManager::class.java)
-        val intent = keyguard.createConfirmDeviceCredentialIntent("Unlock Tessera key", awaiting.challenge.reason)
-        if (intent != null) {
-            ownerAuthorizationExcursion(true)
-            ownerAuthorizationLauncher.launch(intent)
-        }
-        else controller.decideOwnerAuthorization(false)
-    }
+    ShareUploadEffect(
+        shareUpload = shareUpload,
+        onShareUploadConsumed = onShareUploadConsumed,
+        controller = controller,
+        state = state,
+        tmuxAuthorityPresentation = tmuxAuthorityPresentation,
+        inputTerminal = inputTerminal,
+        hostState = hostState,
+        resources = resources,
+        systemClipboard = systemClipboard,
+        runShareUpload = startShareUpload,
+    )
+    SessionNoticeEffects(
+        controller = controller,
+        state = state,
+        isPresented = isPresented,
+        tmuxWindowMutationState = tmuxWindowMutationState,
+        integrationWarningVisible = integrationWarningVisible,
+        hostState = hostState,
+        integrationPrompts = integrationPrompts,
+        context = context,
+        resources = resources,
+    )
 
     val keyboardLayout = rememberTerminalKeyboardViewportLayout(
         resizeTerminalWithKeyboard = resizeTerminalWithKeyboard,
@@ -1397,7 +1265,7 @@ fun SshSessionScreen(
         caretFollowingEnabled = state == SshSessionUiState.Connected &&
             !filesOpen && !forwardingOpen && !findOpen,
     )
-    val launchFailure = (state as? SshSessionUiState.Failed)?.message
+    val launchFailure = (state as? SshSessionUiState.Failed)?.message?.text()
     val launchPhase = when {
         state == SshSessionUiState.Connected && host.tmuxMode != TmuxModes.OFF && tmuxSnapshot == null ->
             SessionLaunchPhase.STARTING_TMUX
@@ -1441,25 +1309,20 @@ fun SshSessionScreen(
         terminalCovered = filesPanelVisible || forwardingPanelVisible || tmuxSwitcherOpen ||
             showsLaunchOverlay || veilShown,
     )
-    LaunchedEffect(programStatusCenter, controller, host.id, host.displayName,
-        programStatusEnabled, programStatus, tmuxSnapshot, presentedPrograms) {
-        val center = programStatusCenter ?: return@LaunchedEffect
-        // Update visibility before publishing: a newly hidden pane must not be checked by the new snapshot.
-        center.setPresented(host.id, presentedPrograms)
-        center.publish(host.id, ProgramStatusSessionState(
-            hostLabel = host.displayName,
-            snapshot = if (programStatusEnabled) programStatus else SharedProgramStatusSnapshot.EMPTY,
-            locations = tmuxSnapshot?.let(::programStatusPaneLocations).orEmpty(),
-        ), acknowledge = controller::acknowledgeProgramStatus)
-    }
-
-    // Agent Center's own read rule (the focused pane, as on iOS) is unchanged by program status.
-    LaunchedEffect(isPresented, appForeground, state, locallyFocusedTmuxPaneId, tmuxSnapshot?.activePaneId) {
-        while (isPresented && appForeground && state == SshSessionUiState.Connected) {
-            onAgentTerminalVisible(liveSessionId, (locallyFocusedTmuxPaneId ?: tmuxSnapshot?.activePaneId)?.let { "%$it" })
-            kotlinx.coroutines.delay(1_000)
-        }
-    }
+    ProgramStatusEffects(
+        host = host,
+        liveSessionId = liveSessionId,
+        controller = controller,
+        programStatusCenter = programStatusCenter,
+        programStatusEnabled = programStatusEnabled,
+        programStatus = programStatus,
+        tmuxSnapshot = tmuxSnapshot,
+        presentedPrograms = presentedPrograms,
+        state = state,
+        isPresented = isPresented,
+        hostState = hostState,
+        onAgentTerminalVisible = onAgentTerminalVisible,
+    )
 
     /**
      * Close the find chrome and hand back whatever surface it detached.
@@ -1469,7 +1332,7 @@ fun SshSessionScreen(
      * exit has to return that surface to the tail or the pane stays parked in
      * history.
      */
-    fun closeFind() {
+    val closeFind: () -> Unit = {
         val moshSurfaceId = openMoshFindSurfaceId ?: pendingMoshFindSurfaceId ?: when {
             openMoshLiveFind || pendingMoshLiveFindAfterDeliveryToken != null -> "live"
             else -> null
@@ -1491,45 +1354,19 @@ fun SshSessionScreen(
         inputTerminal.setFocused(true)
     }
 
-    LaunchedEffect(controller, isPresented, state, exactAgentBinding?.key,
-        tmuxSnapshot?.sessionName, programStatusNavigationEpoch, programStatusFocusRequest?.token) {
-        val request = programStatusFocusRequest ?: return@LaunchedEffect
-        if (!isPresented || consumedProgramStatusFocusToken == request.token) return@LaunchedEffect
-        consumedProgramStatusFocusToken = request.token
-        filesOpen = false
-        forwardingOpen = false
-        tmuxSwitcherOpen = false
-        if (findOpen || pendingMoshFindSurfaceId != null || pendingMoshLiveFindAfterDeliveryToken != null) closeFind()
-        val windowId = request.windowId ?: return@LaunchedEffect
-        val snapshot = controller.tmuxSnapshot.value ?: return@LaunchedEffect
-        val window = snapshot.windows.firstOrNull { it.id == windowId } ?: return@LaunchedEffect
-        if (request.paneId != null && window.panes.none { it.id == request.paneId }) return@LaunchedEffect
-        val carrier = controller.agentEndpointBinding.value?.key ?: return@LaunchedEffect
-        val navigationEpoch = programStatusNavigationEpoch
-        val sessionName = snapshot.sessionName
-        fun current(selected: SharedTmuxSnapshot?): Boolean =
-            currentPresented && currentProgramStatusFocusRequest?.token == request.token &&
-                programStatusNavigationEpoch == navigationEpoch &&
-                controller.state.value == SshSessionUiState.Connected &&
-                controller.agentEndpointBinding.value?.key == carrier &&
-                controller.transportReachable.value != false && selected != null && selected.sessionName == sessionName &&
-                when (selected.activeWindowId) {
-                    snapshot.activeWindowId -> selected.activePaneId == snapshot.activePaneId
-                    windowId -> true
-                    else -> false
-                }
-        if (!current(snapshot)) return@LaunchedEffect
-        if (snapshot.activeWindowId != windowId) controller.selectTmuxWindow(windowId)
-        val selected = awaitProgramStatusWindow(
-            combine(controller.tmuxSnapshot, controller.state, controller.agentEndpointBinding,
-                controller.transportReachable) { next, sessionState, binding, reachable ->
-                next.takeIf { sessionState == SshSessionUiState.Connected && binding?.key == carrier && reachable != false }
-            }, windowId, ::current,
-        ) ?: return@LaunchedEffect
-        request.paneId?.takeIf { pane -> selected.activeWindow?.panes?.any { it.id == pane } == true }?.let {
-            if (current(controller.tmuxSnapshot.value)) controller.selectTmuxPane(it)
-        }
-    }
+    ProgramStatusFocusEffect(
+        liveSessionId = liveSessionId,
+        controller = controller,
+        programStatusFocusRequest = programStatusFocusRequest,
+        state = state,
+        isPresented = isPresented,
+        exactAgentBinding = exactAgentBinding,
+        tmuxSnapshot = tmuxSnapshot,
+        programStatusNavigation = programStatusNavigation,
+        presented = presented,
+        hostState = hostState,
+        closeFind = closeFind,
+    )
 
     // The system back gesture is this screen's leading chevron, one layer at a
     // time: the panel or find bar covering the terminal first, then out to the
@@ -1546,7 +1383,7 @@ fun SshSessionScreen(
         }
     }
     Scaffold(
-        modifier = modifier,
+        modifier = modifier.onFocusChanged { sessionHoldsFocus = it.hasFocus },
         containerColor = Color.Black,
         // The session owns its own bottom inset. Its bottom-most surface is the
         // accessory bar, whose material has to reach behind the gesture pill,
@@ -1711,13 +1548,15 @@ fun SshSessionScreen(
                     },
                     onPrevious = { findResult = findTerminal.find(findQuery, forward = false) },
                     onNext = { findResult = findTerminal.find(findQuery, forward = true) },
-                    onClose = ::closeFind,
+                    onClose = closeFind,
                     modifier = keyboardLayout.chromeCounterShiftModifier,
                 )
                 }
                 if (state != SshSessionUiState.Connected) SessionStatus(state)
                 if (forwardingPanelVisible) {
                     PortForwardingPanel(
+                        hostId = host.id,
+                        sessionHint = liveSessionId,
                         rules = forwardingRules,
                         states = forwardingStates,
                         onRulesChanged = { updated ->
@@ -1731,6 +1570,7 @@ fun SshSessionScreen(
                 } else if (filesPanelVisible) {
                     RemoteFilesScreen(
                         controller = filesController,
+                        onOpenPath = filesController::quickOpenPath,
                         onSystemPickerActiveChanged = filesPickerExcursion,
                         onOutboundPresentationActiveChanged = filesOutboundExcursion,
                         terminalPathSink = RemoteTerminalPathSink { path ->
@@ -1775,6 +1615,7 @@ fun SshSessionScreen(
                                 programSessions = programSessions,
                                 programHostId = host.id,
                                 programStatusAgents = programStatusAgents,
+                                agentProvider = { paneId -> exactAgentBinding?.key?.let(paneAgentProviders::get)?.get(paneId) },
                                 tmuxRenderHistory = tmuxRenderHistory,
                                 pendingMoshFindPaneId = pendingMoshFindSurfaceId?.substringAfter("overlay:")?.toIntOrNull(),
                                 primaryTerminal = terminal,
@@ -1799,6 +1640,7 @@ fun SshSessionScreen(
                                 onPaneSurfaceChanged = { paneId, surface, attached ->
                                     if (attached) {
                                         paneSurfaces[paneId] = surface
+                                        surface.onFirstOutputRendered = reportRenderedReady
                                         surface.onSoftwareModifiersConsumed = { surviving ->
                                             armedModifiers = surviving
                                         }
@@ -1808,6 +1650,7 @@ fun SshSessionScreen(
                                         }
                                     } else if (paneSurfaces[paneId] === surface) {
                                         paneSurfaces.remove(paneId)
+                                        surface.onFirstOutputRendered = null
                                         surface.onSoftwareModifiersConsumed = null
                                         surface.isRemotePathSelection = null
                                         surface.onSelectionPathAction = null
@@ -2001,6 +1844,1150 @@ fun SshSessionScreen(
         }
     }
 
+    SessionDialogs(
+        controller = controller,
+        filesController = filesController,
+        agentIntegration = agentIntegration,
+        state = state,
+        isPresented = isPresented,
+        integrationStatus = integrationStatus,
+        integrationWarningVisible = integrationWarningVisible,
+        exactAgentBinding = exactAgentBinding,
+        hostState = hostState,
+        integrationPrompts = integrationPrompts,
+        runShareUpload = startShareUpload,
+    )
+
+    if (isPresented && tmuxSwitcherOpen) {
+        SessionTmuxSwitcher(
+            host = host,
+            controller = controller,
+            tmuxSnapshot = tmuxSnapshot,
+            tmuxAuthority = tmuxAuthority,
+            tmuxAuthorityPresentation = tmuxAuthorityPresentation,
+            tmuxWindowMutationState = tmuxWindowMutationState,
+            exactAgentBinding = exactAgentBinding,
+            paneAgentProviders = paneAgentProviders,
+            integrationStatus = integrationStatus,
+            integrationWarningVisible = integrationWarningVisible,
+            switcherSessions = switcherSessions,
+            programStatusCenter = programStatusCenter,
+            programStatusAgents = programStatusAgents,
+            programStatusNavigation = programStatusNavigation,
+            bellPreferences = bellPreferences,
+            bellUnread = bellUnread,
+            hostState = hostState,
+            integrationPrompts = integrationPrompts,
+            onSelectSession = onSelectSession,
+            onBack = onBack,
+        )
+    }
+
+    if (isPresented) (state as? SshSessionUiState.AwaitingHostKey)?.let { awaiting ->
+        HostKeyDialog(
+            challenge = awaiting.challenge,
+            onDecision = controller::decideHostKey,
+        )
+    }
+
+}
+
+/**
+ * The screen state that belongs to one host and resets with it. Each field was
+ * a `remember(host.id)` of its own; one holder keeps the screen under ART's
+ * method-size limit.
+ */
+private class SessionHostState(startsInForeground: Boolean) {
+    val glowingTmuxWindowId = mutableStateOf<Int?>(null)
+    val terminalTitle = mutableStateOf<String?>(null)
+    val filesOpen = mutableStateOf(false)
+    val forwardingOpen = mutableStateOf(false)
+    val tmuxSwitcherOpen = mutableStateOf(false)
+    val findOpen = mutableStateOf(false)
+    val findQuery = mutableStateOf("")
+    val findResult = mutableStateOf<TerminalSearchResult?>(null)
+    val moshFindOverlaySurface = mutableStateOf<TermuxTerminalSurface?>(null)
+    val pendingMoshFindSurfaceId = mutableStateOf<String?>(null)
+    val pendingMoshFindAfterDeliveryToken = mutableStateOf<Long?>(null)
+    val pendingMoshFindCanReuseExistingDelivery = mutableStateOf(false)
+    val openMoshFindSurfaceId = mutableStateOf<String?>(null)
+    val appliedMoshOverlayHistoryDeliveryTokens = mutableStateOf<Map<String, Long>>(emptyMap())
+    val appliedMoshLiveHistoryDeliveryToken = mutableLongStateOf(0L)
+    val pendingMoshLiveFindAfterDeliveryToken = mutableStateOf<Long?>(null)
+    val pendingMoshLiveFindCanReuseExistingDelivery = mutableStateOf(false)
+    val openMoshLiveFind = mutableStateOf(false)
+    val armedModifiers = mutableStateOf(SharedArmedModifiers())
+    val plainTerminalDirectory = mutableStateOf<String?>(null)
+    val terminalToast = mutableStateOf<String?>(null)
+    val selectedPathPresentationActive = mutableStateOf(false)
+    val appForeground = mutableStateOf(startsInForeground)
+    val locallyFocusedTmuxPaneId = mutableStateOf<Int?>(null)
+    val pickerExcursions = ExternalUiExcursions()
+    val shareConflict = mutableStateOf<PendingShareConflict?>(null)
+    val shareCancelPrompt = mutableStateOf<TransferItem?>(null)
+    val pastePathInFlight = mutableStateOf(false)
+}
+
+/** The screen's terminal surfaces and their mount state, reset with the terminal. */
+private class SessionSurfaceState {
+    val paneSurfaces = mutableStateMapOf<Int, TermuxTerminalSurface>()
+    val overlaySurfaces = mutableStateMapOf<Int, TermuxTerminalSurface>()
+    val primaryTerminalAttached = mutableStateOf(false)
+    val surfaceMountGeneration = mutableLongStateOf(0L)
+    val renderedReadyReported = mutableStateOf(false)
+}
+
+/** The integration warning, its help and an action awaiting confirmation, per live session. */
+private class SessionIntegrationPrompts {
+    val integrationWarningOpen = mutableStateOf(false)
+    val integrationHelpOpen = mutableStateOf(false)
+    val pendingIntegrationAction = mutableStateOf<AgentSessionIntegrationActionRequest?>(null)
+}
+
+/**
+ * A tmux launch that degraded to a plain shell is silent otherwise: the
+ * session connects and works, just without tmux, and the user is left
+ * wondering where their windows went.
+ */
+@Composable
+@NonRestartableComposable
+private fun TmuxDegradeNoticeEffect(
+    controller: SshSessionController,
+    hostState: SessionHostState,
+    resources: Resources,
+) {
+    var terminalToast by hostState.terminalToast
+    val tmuxDegradeNotice by controller.tmuxDegradeNotice.collectAsState()
+    LaunchedEffect(tmuxDegradeNotice) {
+        tmuxDegradeNotice?.let { terminalToast = it.resolve(resources) }
+    }
+}
+
+/** Switches program status on and off, and takes this host out of the center when it leaves. */
+@Composable
+@NonRestartableComposable
+private fun ProgramStatusRegistration(
+    host: SavedHost,
+    controller: SshSessionController,
+    programStatusCenter: ProgramStatusCenter?,
+    programStatusEnabled: Boolean,
+) {
+    LaunchedEffect(controller, programStatusEnabled) {
+        controller.setProgramStatusEnabled(programStatusEnabled)
+    }
+    DisposableEffect(programStatusCenter, host.id, controller) {
+        onDispose { programStatusCenter?.remove(host.id) }
+    }
+}
+
+/**
+ * Publishes the presentation the screen chose and the surfaces it mounted for
+ * it to the render ledger.
+ */
+@Composable
+@NonRestartableComposable
+private fun TmuxRenderDeclarationEffects(
+    controller: SshSessionController,
+    tmuxScreenRenderPresentation: TmuxScreenRenderPresentation,
+    tmuxSnapshot: SharedTmuxSnapshot?,
+    activeTmuxPaneIds: Set<Int>,
+    mountedGridPaneIds: Set<Int>,
+    mountedOverlayPaneIds: Set<Int>,
+    surfaceMountGeneration: Long,
+) {
+    SideEffect {
+        controller.setTmuxScreenRenderPresentation(tmuxScreenRenderPresentation)
+    }
+    LaunchedEffect(
+        controller,
+        tmuxScreenRenderPresentation,
+        tmuxSnapshot?.activeWindowId,
+        tmuxSnapshot?.activePaneId,
+        activeTmuxPaneIds,
+        mountedGridPaneIds,
+        mountedOverlayPaneIds,
+        surfaceMountGeneration,
+    ) {
+        controller.declareTmuxRenderSurfaces(
+            tmuxScreenRenderSurfaceDeclarations(
+                presentation = tmuxScreenRenderPresentation,
+                activeWindowId = tmuxSnapshot?.activeWindowId,
+                activePaneId = tmuxSnapshot?.activePaneId,
+                activePaneIds = activeTmuxPaneIds,
+                mountedGridPaneIds = mountedGridPaneIds,
+                mountedOverlayPaneIds = mountedOverlayPaneIds,
+            ),
+        )
+    }
+}
+
+/**
+ * Opens Find once the full-depth mosh capture it waits for has been applied,
+ * and returns a capture to the tail when its pane or live surface stops
+ * being the one Find would search.
+ */
+@Composable
+@NonRestartableComposable
+private fun MoshFindEffects(
+    hostState: SessionHostState,
+    controller: SshSessionController,
+    focusedMoshSplitSurfaceId: String?,
+    usesMoshLiveFind: Boolean,
+    tmuxRenderHistory: Map<String, TmuxRenderHistoryReady>,
+    inputTerminal: TermuxTerminalSurface,
+    sessionScrollbackLines: Int,
+) {
+    var findOpen by hostState.findOpen
+    var findQuery by hostState.findQuery
+    var findResult by hostState.findResult
+    val moshFindOverlaySurface by hostState.moshFindOverlaySurface
+    var pendingMoshFindSurfaceId by hostState.pendingMoshFindSurfaceId
+    var pendingMoshFindAfterDeliveryToken by hostState.pendingMoshFindAfterDeliveryToken
+    var pendingMoshFindCanReuseExistingDelivery by hostState.pendingMoshFindCanReuseExistingDelivery
+    var openMoshFindSurfaceId by hostState.openMoshFindSurfaceId
+    val appliedMoshOverlayHistoryDeliveryTokens by hostState.appliedMoshOverlayHistoryDeliveryTokens
+    val appliedMoshLiveHistoryDeliveryToken by hostState.appliedMoshLiveHistoryDeliveryToken
+    var pendingMoshLiveFindAfterDeliveryToken by hostState.pendingMoshLiveFindAfterDeliveryToken
+    var pendingMoshLiveFindCanReuseExistingDelivery by hostState.pendingMoshLiveFindCanReuseExistingDelivery
+    var openMoshLiveFind by hostState.openMoshLiveFind
+    LaunchedEffect(
+        pendingMoshFindSurfaceId,
+        pendingMoshFindAfterDeliveryToken,
+        pendingMoshFindCanReuseExistingDelivery,
+        focusedMoshSplitSurfaceId,
+        tmuxRenderHistory,
+        moshFindOverlaySurface,
+        appliedMoshOverlayHistoryDeliveryTokens,
+    ) {
+        val pendingSurfaceId = pendingMoshFindSurfaceId ?: return@LaunchedEffect
+        if (pendingSurfaceId != focusedMoshSplitSurfaceId) {
+            pendingMoshFindSurfaceId = null
+            return@LaunchedEffect
+        }
+        // Delay the find chrome until the controller has delivered full-depth
+        // content *and* the detached pane surface is the one under it. A
+        // previously delivered full-depth capture is equally valid: FindOpened
+        // is intentionally a no-op at that ledger depth.
+        val delivery = tmuxRenderHistory[pendingSurfaceId]
+        val minimumDeliveryToken = pendingMoshFindAfterDeliveryToken ?: Long.MAX_VALUE
+        val canOpen = delivery != null && moshFindCanOpenAfterAppliedDelivery(
+            requestedSurfaceId = pendingSurfaceId,
+            deliveredSurfaceId = delivery.surfaceId,
+            deliveredToken = delivery.deliveryToken,
+            requiredNewerThanToken = minimumDeliveryToken,
+            deliveredDepth = delivery.depth,
+            scrollbackLimit = sessionScrollbackLines,
+            appliedDeliveryToken = appliedMoshOverlayHistoryDeliveryTokens[pendingSurfaceId] ?: 0L,
+            mayReuseExistingDelivery = pendingMoshFindCanReuseExistingDelivery,
+        )
+        if (canOpen && moshFindOverlaySurface != null) {
+            openMoshFindSurfaceId = pendingSurfaceId
+            pendingMoshFindSurfaceId = null
+            pendingMoshFindAfterDeliveryToken = null
+            pendingMoshFindCanReuseExistingDelivery = false
+            findOpen = true
+        }
+    }
+    LaunchedEffect(focusedMoshSplitSurfaceId) {
+        val openSurfaceId = openMoshFindSurfaceId
+        if (openSurfaceId != null && openSurfaceId != focusedMoshSplitSurfaceId) {
+            controller.returnTmuxScrollbackToTail(openSurfaceId)
+            openMoshFindSurfaceId = null
+            findOpen = false
+            findQuery = ""
+            findResult = null
+        }
+        if (pendingMoshFindSurfaceId != null && pendingMoshFindSurfaceId != focusedMoshSplitSurfaceId) {
+            pendingMoshFindSurfaceId = null
+            pendingMoshFindAfterDeliveryToken = null
+            pendingMoshFindCanReuseExistingDelivery = false
+        }
+    }
+    LaunchedEffect(
+        pendingMoshLiveFindAfterDeliveryToken,
+        pendingMoshLiveFindCanReuseExistingDelivery,
+        appliedMoshLiveHistoryDeliveryToken,
+        tmuxRenderHistory,
+        usesMoshLiveFind,
+    ) {
+        val minimumDeliveryToken = pendingMoshLiveFindAfterDeliveryToken ?: return@LaunchedEffect
+        if (!usesMoshLiveFind) return@LaunchedEffect
+        val delivery = tmuxRenderHistory["live"] ?: return@LaunchedEffect
+        val canOpen = moshFindCanOpenAfterAppliedDelivery(
+            requestedSurfaceId = "live",
+            deliveredSurfaceId = delivery.surfaceId,
+            deliveredToken = delivery.deliveryToken,
+            requiredNewerThanToken = minimumDeliveryToken,
+            deliveredDepth = delivery.depth,
+            scrollbackLimit = sessionScrollbackLines,
+            appliedDeliveryToken = appliedMoshLiveHistoryDeliveryToken,
+            mayReuseExistingDelivery = pendingMoshLiveFindCanReuseExistingDelivery,
+        )
+        if (canOpen) {
+            pendingMoshLiveFindAfterDeliveryToken = null
+            pendingMoshLiveFindCanReuseExistingDelivery = false
+            openMoshLiveFind = true
+            findOpen = true
+            findResult = inputTerminal.find(findQuery, forward = true)
+        }
+    }
+    LaunchedEffect(usesMoshLiveFind) {
+        if (!usesMoshLiveFind && (openMoshLiveFind || pendingMoshLiveFindAfterDeliveryToken != null)) {
+            controller.returnTmuxScrollbackToTail("live")
+            openMoshLiveFind = false
+            pendingMoshLiveFindAfterDeliveryToken = null
+            pendingMoshLiveFindCanReuseExistingDelivery = false
+            findOpen = false
+            findQuery = ""
+            findResult = null
+        }
+    }
+}
+
+/**
+ * An Agent Center transcript path: the terminal's own Files resolution,
+ * anchored to the agent's pane (see `transcriptSelectionDirectory`).
+ */
+@Composable
+@NonRestartableComposable
+private fun TranscriptSelectionEffect(
+    transcriptSelectionRequest: TranscriptSelectionPathRequest?,
+    onTranscriptSelectionConsumed: (TranscriptSelectionPathRequest) -> Unit,
+    onTranscriptSelectionOutcome: (TranscriptSelectionPathRequest, TranscriptSelectionPathOutcome) -> Unit,
+    host: SavedHost,
+    controller: SshSessionController,
+    filesController: RemoteFilesController,
+    hostState: SessionHostState,
+    quickOpenExcursion: (Boolean) -> Unit,
+) {
+    var filesOpen by hostState.filesOpen
+    var forwardingOpen by hostState.forwardingOpen
+    var findOpen by hostState.findOpen
+    var selectedPathPresentationActive by hostState.selectedPathPresentationActive
+    val plainTerminalDirectory by hostState.plainTerminalDirectory
+    val currentTranscriptSelectionConsumed by rememberUpdatedState(onTranscriptSelectionConsumed)
+    val currentTranscriptSelectionOutcome by rememberUpdatedState(onTranscriptSelectionOutcome)
+    val currentPlainTerminalDirectory by rememberUpdatedState(plainTerminalDirectory)
+    LaunchedEffect(transcriptSelectionRequest?.token) {
+        val request = transcriptSelectionRequest ?: return@LaunchedEffect
+        currentTranscriptSelectionConsumed(request)
+        val missed: (String) -> Unit = { message ->
+            currentTranscriptSelectionOutcome(request, TranscriptSelectionPathOutcome.Missed(message))
+        }
+        if (controller.state.value != SshSessionUiState.Connected || controller.transportReachable.value == false) {
+            // English, as Agent Center keeps its notices; it translates this one as it shows it.
+            missed(TERMINAL_SESSION_NOT_CONNECTED)
+            return@LaunchedEffect
+        }
+        val perform: (String?) -> Unit = { directory ->
+            filesController.openTranscriptSelectedPath(
+                selection = request.selection,
+                paneDirectory = directory,
+                intent = request.intent,
+                onRevealRequested = {
+                    forwardingOpen = false
+                    findOpen = false
+                    filesOpen = true
+                    currentTranscriptSelectionOutcome(request, TranscriptSelectionPathOutcome.Revealed)
+                },
+                onPresentationLaunched = {
+                    selectedPathPresentationActive = true
+                    quickOpenExcursion(true)
+                },
+                onFailure = missed,
+            )
+        }
+        when (val anchor = transcriptSelectionDirectory(
+            selection = request.selection,
+            tmuxOff = host.tmuxMode == TmuxModes.OFF,
+            paneId = request.tmuxPaneId,
+            reportedShellDirectory = currentPlainTerminalDirectory,
+        ) { pane ->
+            controller.tmuxSnapshot.value?.windows
+                ?.firstNotNullOfOrNull { window -> window.panes.firstOrNull { it.id == pane } }?.currentPath
+        }) {
+            is TranscriptSelectionDirectory.Known -> perform(anchor.directory)
+            is TranscriptSelectionDirectory.QueryPane ->
+                controller.queryTerminalDirectory(anchor.fallback, anchor.paneId) { fresh -> perform(fresh ?: anchor.fallback) }
+        }
+    }
+}
+
+/** Reports state and reachability out, and keeps the bell's read marks and glow current. */
+@Composable
+@NonRestartableComposable
+private fun SessionStateEffects(
+    host: SavedHost,
+    state: SshSessionUiState,
+    isPresented: Boolean,
+    transportReachable: Boolean?,
+    tmuxSnapshot: SharedTmuxSnapshot?,
+    terminal: TermuxTerminalSurface,
+    paneSurfaces: Map<Int, TermuxTerminalSurface>,
+    bellController: AndroidBellController,
+    bellPreferences: BellPreferences,
+    bellVisualPulse: BellVisualPulse?,
+    hostState: SessionHostState,
+    reportRenderedReady: () -> Unit,
+    onStateChanged: (SshSessionUiState) -> Unit,
+    onTransportReachableChanged: (Boolean?) -> Unit,
+) {
+    var glowingTmuxWindowId by hostState.glowingTmuxWindowId
+    LaunchedEffect(transportReachable) {
+        onTransportReachableChanged(transportReachable)
+    }
+    LaunchedEffect(state, isPresented) {
+        onStateChanged(state)
+        if (terminal.hasRenderedOutput || paneSurfaces.values.any { it.hasRenderedOutput }) reportRenderedReady()
+    }
+    LaunchedEffect(isPresented, tmuxSnapshot?.activeWindowId) {
+        if (isPresented) {
+            bellController.markSessionRead(host.id)
+            tmuxSnapshot?.activeWindowId?.let { bellController.markTmuxWindowRead(host.id, it) }
+        }
+    }
+    LaunchedEffect(bellVisualPulse, bellPreferences.visualEnabled) {
+        if (!bellPreferences.visualEnabled) {
+            glowingTmuxWindowId = null
+            return@LaunchedEffect
+        }
+        val source = bellVisualPulse?.source as? BellSource.TmuxWindow
+        if (source?.sessionId == host.id) {
+            glowingTmuxWindowId = source.windowId
+            kotlinx.coroutines.delay(600)
+            if (glowingTmuxWindowId == source.windowId) glowingTmuxWindowId = null
+        }
+    }
+}
+
+/**
+ * Attaches the primary terminal to the controller while both last, and routes
+ * its callbacks (modifiers, title, cwd, selection, bell) to the screen.
+ */
+@Composable
+@NonRestartableComposable
+private fun PrimaryTerminalAttachment(
+    host: SavedHost,
+    controller: SshSessionController,
+    terminal: TermuxTerminalSurface,
+    surfaceState: SessionSurfaceState,
+    hostState: SessionHostState,
+    bellController: AndroidBellController,
+    bellPreferences: BellPreferences,
+    presented: State<Boolean>,
+    /** Reads the screen's current action each time it runs. */
+    currentSelectionPathAction: (TerminalSelectionPathAction, String) -> Unit,
+    reportRenderedReady: () -> Unit,
+    onTerminalTextSizeChanged: (Int) -> Unit,
+) {
+    var primaryTerminalAttached by surfaceState.primaryTerminalAttached
+    var surfaceMountGeneration by surfaceState.surfaceMountGeneration
+    var armedModifiers by hostState.armedModifiers
+    var terminalTitle by hostState.terminalTitle
+    var plainTerminalDirectory by hostState.plainTerminalDirectory
+    val currentPresented by presented
+    val currentBellPreferences by rememberUpdatedState(bellPreferences)
+    val currentTerminalTitle by rememberUpdatedState(terminalTitle)
+    DisposableEffect(controller, terminal) {
+        controller.attachTerminal(terminal)
+        primaryTerminalAttached = true
+        surfaceMountGeneration += 1
+        terminal.onSoftwareModifiersConsumed = { surviving -> armedModifiers = surviving }
+        terminal.onFontSizeChanged = onTerminalTextSizeChanged
+        terminal.onTitleChanged = { terminalTitle = it }
+        terminal.onHostDirectoryChanged = { plainTerminalDirectory = it }
+        terminal.isRemotePathSelection = RemoteSelectionPathResolver::isPlausiblePath
+        terminal.onSelectionPathAction = { action, selection ->
+            currentSelectionPathAction(action, selection)
+        }
+        terminal.onSoftwareKeyboardRequested = {
+            terminal.requestSoftwareKeyboard()
+        }
+        terminal.onFirstOutputRendered = reportRenderedReady
+        terminal.onBell = {
+            if (host.tmuxMode == TmuxModes.OFF) {
+                bellController.ring(
+                    BellEvent(
+                        source = BellSource.Session(host.id),
+                        originOnScreen = currentPresented,
+                        hostDisplayName = host.displayName,
+                        paneTitle = currentTerminalTitle,
+                    ),
+                    currentBellPreferences,
+                )
+            }
+        }
+        controller.onTmuxBell = { bell ->
+            bellController.ring(
+                BellEvent(
+                    source = BellSource.TmuxWindow(host.id, bell.windowId),
+                    originOnScreen = currentPresented && bell.isActiveWindow,
+                    hostDisplayName = host.displayName,
+                    paneTitle = bell.windowName,
+                ),
+                currentBellPreferences,
+            )
+        }
+        onDispose {
+            terminal.onSoftwareModifiersConsumed = null
+            terminal.onFontSizeChanged = null
+            terminal.onTitleChanged = null
+            terminal.onHostDirectoryChanged = null
+            terminal.isRemotePathSelection = null
+            terminal.onSelectionPathAction = null
+            terminal.onSoftwareKeyboardRequested = null
+            terminal.onFirstOutputRendered = null
+            terminal.onBell = null
+            controller.onTmuxBell = null
+            primaryTerminalAttached = false
+            surfaceMountGeneration += 1
+            // Composition is leaving before a new declaration effect can
+            // run. Retract the exact screen-owned set before closing its
+            // physical surface so a queued ledger callback cannot target it.
+            controller.declareTmuxRenderSurfaces(emptyList())
+            controller.detachTerminal(terminal)
+            terminal.close()
+        }
+    }
+}
+
+/** Offers this session's Files and forwarding to Artifacts while they are live. */
+@Composable
+@NonRestartableComposable
+private fun ArtifactLiveRegistrations(
+    host: SavedHost,
+    liveSessionId: String,
+    controller: SshSessionController,
+    filesController: RemoteFilesController,
+    state: SshSessionUiState,
+    forwardingStates: Map<UUID, PortForwardingState>,
+) {
+    DisposableEffect(filesController, controller, host.id, liveSessionId) {
+        val registration = com.bambouville.tessera.files.ArtifactLiveFilesRegistry.register(
+            host.id, liveSessionId, filesController,
+            sessionLive = { controller.hasLiveArtifactFilesOwner },
+            channelOpenable = { controller.canOpenArtifactFilesChannel },
+        )
+        onDispose {
+            registration.close()
+            filesController.close()
+        }
+    }
+    LaunchedEffect(filesController) {
+        filesController.state.collect { com.bambouville.tessera.files.ArtifactLiveFilesRegistry.changed() }
+    }
+    DisposableEffect(controller, host.id, liveSessionId) {
+        val registration = com.bambouville.tessera.forwarding.ArtifactLiveForwardingRegistry.register(
+            host.id, liveSessionId, controller.forwardingStates,
+            transportLive = { controller.state.value == SshSessionUiState.Connected },
+        )
+        onDispose { registration.close() }
+    }
+    LaunchedEffect(state, forwardingStates) {
+        com.bambouville.tessera.files.ArtifactLiveFilesRegistry.changed()
+        com.bambouville.tessera.forwarding.ArtifactLiveForwardingRegistry.changed()
+    }
+}
+
+/**
+ * Follows presentation and the activity lifecycle: the keyboard, forwarded
+ * service probes, the foreground, and a pairing session's one connect.
+ */
+@Composable
+@NonRestartableComposable
+private fun SessionLifecycleEffects(
+    host: SavedHost,
+    controller: SshSessionController,
+    terminal: TermuxTerminalSurface,
+    paneSurfaces: Map<Int, TermuxTerminalSurface>,
+    isPresented: Boolean,
+    sessionFocus: State<Boolean>,
+    forwardingRules: List<PortForwardRule>,
+    lifecycleOwner: LifecycleOwner,
+    hostState: SessionHostState,
+    quickOpenExcursion: (Boolean) -> Unit,
+    pairingTmuxTarget: String?,
+    pairingAttemptId: String?,
+    diagnostics: DiagnosticLogStore,
+) {
+    val sessionHoldsFocus by sessionFocus
+    var appForeground by hostState.appForeground
+    var selectedPathPresentationActive by hostState.selectedPathPresentationActive
+    var pairingAutoConnectConsumed by remember(host.id, pairingAttemptId) { mutableStateOf(false) }
+    val sessionView = LocalView.current
+    val focusManager = LocalFocusManager.current
+    LaunchedEffect(controller, isPresented) {
+        // A session leaving the screen takes down the keyboard its own editor
+        // raised (a terminal, or a field such as Find's) while that editor
+        // still has focus. Presentation clears the terminal's focus, and with
+        // nothing focused the window has no editor left to hide, so the
+        // keyboard would stay over the screen that replaces this one. A
+        // destination that has already taken focus keeps its keyboard.
+        if (!isPresented && (sessionHoldsFocus || (paneSurfaces.values + terminal).any { it.view.hasFocus() })) {
+            sessionView.hideSoftwareKeyboard()
+            if (sessionHoldsFocus) focusManager.clearFocus(force = true)
+        }
+        controller.setPresentationActive(isPresented)
+    }
+    LaunchedEffect(forwardingRules) {
+        controller.updateForwardingRules(forwardingRules)
+    }
+    // Forwarded-service liveness is probed only while someone can see it:
+    // this session presented and the activity resumed. Each probe is a
+    // channel on the user's own SSH connection, and a refused one a line in
+    // the host's sshd log. The forwarding panel is not a reason of its own:
+    // it is visible only while presented, and `forwardingOpen` outlives a
+    // switch to another session, which stays composed behind it.
+    val monitorsForwardedServices = forwardingRules.isNotEmpty() && isPresented
+    LaunchedEffect(controller, lifecycleOwner, monitorsForwardedServices) {
+        if (!monitorsForwardedServices) return@LaunchedEffect
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            controller.monitorForwardedServices()
+        }
+    }
+    DisposableEffect(controller, lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START, Lifecycle.Event.ON_RESUME -> {
+                    appForeground = true
+                    controller.setAppForeground(true)
+                    if (event == Lifecycle.Event.ON_RESUME && selectedPathPresentationActive) {
+                        selectedPathPresentationActive = false
+                        quickOpenExcursion(false)
+                    }
+                }
+                Lifecycle.Event.ON_STOP -> {
+                    appForeground = false
+                    controller.setAppForeground(false)
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        controller.setAppForeground(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            if (selectedPathPresentationActive) {
+                selectedPathPresentationActive = false
+                quickOpenExcursion(false)
+            }
+        }
+    }
+    LaunchedEffect(pairingAttemptId, isPresented) {
+        if (pairingAttemptId != null && isPresented && !pairingAutoConnectConsumed) {
+            pairingAutoConnectConsumed = true
+            diagnostics.record(
+                "pairing_session_connect_start",
+                mapOf("transport" to host.transportKind, "tmux" to (pairingTmuxTarget != null).toString()),
+            )
+            controller.connect()
+        }
+    }
+}
+
+/** Reports what is displayed to the session store, and connects once per restore or Hosts-row request. */
+@Composable
+@NonRestartableComposable
+private fun SessionConnectEffects(
+    host: SavedHost,
+    liveSessionId: String,
+    controller: SshSessionController,
+    sessions: LiveSessionStore,
+    lifecycleOwner: LifecycleOwner,
+    state: SshSessionUiState,
+    isPresented: Boolean,
+    diagnostics: DiagnosticLogStore,
+    reconnectOnMount: Boolean,
+    connectOnOpenRequest: Long,
+    restoreReconnectRequest: Long,
+) {
+    var reconnectOnMountConsumed by remember(liveSessionId) { mutableStateOf(false) }
+    var consumedConnectOnOpenRequest by remember(liveSessionId) { mutableLongStateOf(0L) }
+    var consumedRestoreReconnectRequest by remember(liveSessionId) { mutableLongStateOf(0L) }
+    // §6.9 show edges. Displayed = presented (which already folds in the app
+    // lock) ∧ the activity is at least STARTED. The pairing continuation no
+    // longer claims here: MainActivity routes it as an explicit open, which
+    // the same rule decides from a fresh authority read.
+    val lifecycleState by lifecycleOwner.lifecycle.currentStateAsState()
+    val displayed = isPresented && lifecycleState.isAtLeast(Lifecycle.State.STARTED)
+    val startEpoch by sessions.startEpoch
+    val explicitOpens = sessions.explicitOpenRequests[host.id] ?: 0L
+    LaunchedEffect(controller, displayed, startEpoch, explicitOpens) {
+        sessions.reportComposedDisplay(host.id, displayed, startEpoch, explicitOpens)
+    }
+    LaunchedEffect(reconnectOnMount) {
+        if (reconnectOnMount && !reconnectOnMountConsumed) {
+            reconnectOnMountConsumed = true
+            diagnostics.record("restore_reconnect_start", mapOf("transport" to host.transportKind))
+            controller.connect()
+        }
+    }
+    LaunchedEffect(restoreReconnectRequest) {
+        if (restoreReconnectRequest > consumedRestoreReconnectRequest) {
+            consumedRestoreReconnectRequest = restoreReconnectRequest
+            diagnostics.record("restore_window_reconnect", mapOf("transport" to host.transportKind))
+            controller.reconnectForRestore()
+        }
+    }
+    LaunchedEffect(connectOnOpenRequest, isPresented) {
+        if (!hasPendingPresentedHostOpen(connectOnOpenRequest, consumedConnectOnOpenRequest, isPresented)) {
+            return@LaunchedEffect
+        }
+        consumedConnectOnOpenRequest = connectOnOpenRequest
+        if (shouldConnectFromHostOpen(state)) {
+            diagnostics.record("host_open_connect_start", mapOf("transport" to host.transportKind))
+            controller.connect()
+        }
+    }
+}
+
+/**
+ * Keeps the terminal surfaces in step with the screen: grid presentation,
+ * focus, font, theme, cursor, background, scrolling and the armed modifiers.
+ */
+@Composable
+@NonRestartableComposable
+private fun TerminalSurfaceEffects(
+    controller: SshSessionController,
+    terminal: TermuxTerminalSurface,
+    inputTerminal: TermuxTerminalSurface,
+    paneSurfaces: Map<Int, TermuxTerminalSurface>,
+    hostState: SessionHostState,
+    state: SshSessionUiState,
+    isPresented: Boolean,
+    compactTmux: Boolean,
+    tmuxSnapshot: SharedTmuxSnapshot?,
+    usesTmuxPaneGrid: Boolean,
+    terminalTextSizeSp: Int,
+    terminalTypeface: Typeface,
+    terminalTheme: TerminalTheme,
+    cursorStyle: TerminalCursorStyle,
+    terminalCursorBlink: Boolean,
+    terminalBackground: TerminalBackgroundImage?,
+    terminalBackgroundStore: TerminalBackgroundImageStore,
+    smoothScrollingEnabled: Boolean,
+    smoothScrollingSpeed: Float,
+    armingBehavior: SharedModifierBehavior,
+) {
+    var filesOpen by hostState.filesOpen
+    var forwardingOpen by hostState.forwardingOpen
+    val armedModifiers by hostState.armedModifiers
+    val appForeground by hostState.appForeground
+    var locallyFocusedTmuxPaneId by hostState.locallyFocusedTmuxPaneId
+    LaunchedEffect(compactTmux) {
+        controller.setTmuxGridPresentation(
+            if (compactTmux) SharedTmuxGridPresentation.SINGLE_PANE
+            else SharedTmuxGridPresentation.PANE_GRID,
+        )
+    }
+    LaunchedEffect(tmuxSnapshot?.activePaneId) {
+        locallyFocusedTmuxPaneId = tmuxSnapshot?.activePaneId
+    }
+    val attachedPaneIds = paneSurfaces.keys.toSet()
+    LaunchedEffect(
+        isPresented,
+        appForeground,
+        state,
+        usesTmuxPaneGrid,
+        locallyFocusedTmuxPaneId,
+        attachedPaneIds,
+    ) {
+        val panesVisible = isPresented && appForeground && state == SshSessionUiState.Connected && usesTmuxPaneGrid
+        terminal.setFocused(isPresented && appForeground && state == SshSessionUiState.Connected && !usesTmuxPaneGrid)
+        paneSurfaces.forEach { (paneId, surface) ->
+            surface.setFocused(panesVisible && paneId == locallyFocusedTmuxPaneId)
+        }
+    }
+    LaunchedEffect(terminalTextSizeSp, terminalTypeface) {
+        terminal.setFont(TerminalFont(terminalTextSizeSp.coerceIn(8, 40), terminalTypeface))
+    }
+    LaunchedEffect(terminalTheme) {
+        terminal.setTheme(terminalTheme)
+    }
+    LaunchedEffect(cursorStyle, terminalCursorBlink) {
+        terminal.setCursorAppearance(cursorStyle, terminalCursorBlink)
+    }
+    LaunchedEffect(terminalBackground, attachedPaneIds) {
+        terminalBackground?.let { background ->
+            withContext(Dispatchers.IO) { terminalBackgroundStore.prewarm(listOf(background)) }
+        }
+        terminal.setBackgroundImage(terminalBackground)
+        paneSurfaces.values.forEach { it.setBackgroundImage(terminalBackground) }
+    }
+    LaunchedEffect(smoothScrollingEnabled, smoothScrollingSpeed, attachedPaneIds) {
+        val speed = smoothScrollingSpeed.coerceIn(0.15f, 1.25f)
+        terminal.view.setSmoothScrollingSpeed(speed)
+        terminal.view.setSmoothScrollingEnabled(smoothScrollingEnabled)
+        paneSurfaces.values.forEach { surface ->
+            surface.view.setSmoothScrollingSpeed(speed)
+            surface.view.setSmoothScrollingEnabled(smoothScrollingEnabled)
+        }
+    }
+    LaunchedEffect(armedModifiers, armingBehavior, inputTerminal, attachedPaneIds) {
+        // Only the surface taking input may hold an armed set. A pane that
+        // loses focus mid-chord would otherwise still be holding it when focus
+        // came back, and spend it on a key the user typed much later.
+        (paneSurfaces.values.toList() + terminal).distinct().forEach { surface ->
+            surface.setSoftwareModifiers(
+                if (surface === inputTerminal) armedModifiers else SharedArmedModifiers(),
+                armingBehavior,
+            )
+        }
+    }
+
+    LaunchedEffect(state, isPresented) {
+        if (state == SshSessionUiState.Connected && isPresented) {
+            inputTerminal.requestSoftwareKeyboard()
+        }
+    }
+    LaunchedEffect(state) {
+        if (state == SshSessionUiState.Disconnected || state == SshSessionUiState.Terminated ||
+            state is SshSessionUiState.Failed
+        ) {
+            filesOpen = false
+            forwardingOpen = false
+        }
+    }
+}
+
+/** Publishes this session's cwd and keeps Files following it. */
+@Composable
+@NonRestartableComposable
+private fun TerminalDirectoryEffects(
+    host: SavedHost,
+    controller: SshSessionController,
+    filesController: RemoteFilesController,
+    hostState: SessionHostState,
+    state: SshSessionUiState,
+    isPresented: Boolean,
+    terminalDirectory: String?,
+    onTerminalDirectoryChanged: (String?) -> Unit,
+) {
+    val filesOpen by hostState.filesOpen
+    var plainTerminalDirectory by hostState.plainTerminalDirectory
+    // Publish this session's cwd so the share ingress sheet can offer "session
+    // cwd" as a destination for a host that is already connected.
+    LaunchedEffect(terminalDirectory, state) {
+        onTerminalDirectoryChanged(terminalDirectory.takeIf { state == SshSessionUiState.Connected })
+    }
+    DisposableEffect(Unit) { onDispose { onTerminalDirectoryChanged(null) } }
+
+    // A reconnect starts a new remote shell. Dropping the last OSC 7 report
+    // keeps a value from the previous shell out of the follow standdown below,
+    // where it would suppress the probe against a shell that never reports.
+    LaunchedEffect(state) {
+        if (state != SshSessionUiState.Connected) plainTerminalDirectory = null
+    }
+
+    // Files follows the terminal. Pushed signals — tmux pane metadata and the
+    // terminal's own OSC 7 — land the moment they change; reports stop while
+    // the browser is closed so a cwd change can never dial SFTP on its own.
+    LaunchedEffect(filesOpen, terminalDirectory, state) {
+        if (!filesOpen || state != SshSessionUiState.Connected) return@LaunchedEffect
+        filesController.terminalReportedDirectory(terminalDirectory)
+    }
+
+    // Zero-setup follow for the transports that report no cwd in band: plain
+    // mosh, where a stock mosh-server drops OSC 7 before it enters the state
+    // sync, and plain SSH before shell integration is installed. Under tmux the
+    // pane-metadata subscription already carries every cd, so the poll stays
+    // out of those sessions entirely; it also rides the file channel the
+    // browser itself opened, so it never authenticates a route of its own.
+    val cwdFollowKey = RemoteCwdProbe.followTaskKey(
+        panelOpen = filesOpen,
+        sessionActive = isPresented && state == SshSessionUiState.Connected,
+        tmuxAttached = host.tmuxMode != TmuxModes.OFF,
+        moshServerPid = controller.cwdProbeMoshServerPid(),
+    )
+    LaunchedEffect(cwdFollowKey) {
+        if (!filesOpen || !isPresented) return@LaunchedEffect
+        if (host.tmuxMode != TmuxModes.OFF || state != SshSessionUiState.Connected) return@LaunchedEffect
+        val command = controller.liveFileCwdProbeCommand()
+        val debounce = RemoteCwdProbe.FollowDebounce()
+        while (true) {
+            val tick = if (plainTerminalDirectory != null) {
+                // OSC 7 is instant and per-shell exact, so the probe stands
+                // down while the shell reports it — this host runs shell
+                // integration, or our mosh fork.
+                RemoteCwdProbe.Tick.OscSignalLive
+            } else {
+                filesController.probeOnLiveChannel(command)
+                    ?.let(RemoteCwdProbe.Tick::Probed)
+                    ?: RemoteCwdProbe.Tick.NotPolled
+            }
+            when (val outcome = debounce.step(tick)) {
+                is RemoteCwdProbe.Outcome.Report -> filesController.terminalReportedDirectory(outcome.path)
+                RemoteCwdProbe.Outcome.ClearFollow -> filesController.terminalReportedDirectory(null)
+                RemoteCwdProbe.Outcome.Hold -> Unit
+            }
+            delay(RemoteCwdProbe.POLL_INTERVAL_MILLIS)
+        }
+    }
+}
+
+/** Runs a share the ingress sheet routed to this session, once it is connected. */
+@Composable
+@NonRestartableComposable
+private fun ShareUploadEffect(
+    shareUpload: PendingShareUpload?,
+    onShareUploadConsumed: () -> Unit,
+    controller: SshSessionController,
+    state: SshSessionUiState,
+    tmuxAuthorityPresentation: TmuxAuthorityPresentation,
+    inputTerminal: TermuxTerminalSurface,
+    hostState: SessionHostState,
+    resources: Resources,
+    systemClipboard: ClipboardManager?,
+    runShareUpload: (Uri, PendingShareUpload, Boolean) -> Unit,
+) {
+    var filesOpen by hostState.filesOpen
+    var terminalToast by hostState.terminalToast
+    // A share the ingress sheet routed here. It runs exactly once, when the
+    // session is connected: the sheet's decision was made against this host,
+    // and re-running it on a later reconnect would upload the same payload
+    // twice.
+    LaunchedEffect(shareUpload?.hostId, shareUpload?.uris, shareUpload?.text, state, tmuxAuthorityPresentation) {
+        val pending = shareUpload ?: return@LaunchedEffect
+        // A routed share is a one-shot instruction aimed at one session. If
+        // that session gives up or is torn down, drop it — replaying an
+        // hours-old payload on some later reconnect is the worse surprise.
+        if (state is SshSessionUiState.Failed || state == SshSessionUiState.Terminated) {
+            onShareUploadConsumed()
+            terminalToast = resources.getString(R.string.session_share_cancelled)
+            return@LaunchedEffect
+        }
+        if (state != SshSessionUiState.Connected) return@LaunchedEffect
+        // A show or take-back is deciding who owns the grid; it resolves in
+        // moments, so the share waits for it rather than racing it.
+        if (pending.isTextPaste && (
+                tmuxAuthorityPresentation is TmuxAuthorityPresentation.Resuming ||
+                    tmuxAuthorityPresentation is TmuxAuthorityPresentation.Reclaiming
+                )
+        ) {
+            return@LaunchedEffect
+        }
+        onShareUploadConsumed()
+        if (pending.isTextPaste) {
+            val text = requireNotNull(pending.text)
+            if (!controller.acceptsTerminalInput()) {
+                // Another device is working in this grid: keep the text, but
+                // never type it under them.
+                systemClipboard?.setPrimaryClip(
+                    ClipData.newPlainText(resources.getString(R.string.session_clip_label_shared_text), text),
+                )
+                terminalToast = resources.getString(R.string.session_share_copied_take_back)
+                return@LaunchedEffect
+            }
+            inputTerminal.sendInput(text.encodeToByteArray())
+            inputTerminal.setFocused(true)
+            return@LaunchedEffect
+        }
+        // Watching a file land in the directory you chose is the point of the
+        // cwd destination; a temp upload exists only to be pasted, so it must
+        // not shove the terminal aside.
+        if (pending.destination is ShareUploadDestination.SessionCwd) filesOpen = true
+        pending.uris.forEach { uri -> runShareUpload(uri, pending, false) }
+    }
+}
+
+/**
+ * Times the toast out and raises the ones window ordering owes, closes the
+ * integration prompts once they no longer apply, and asks the device owner to
+ * unlock a key the session is waiting on.
+ */
+@Composable
+@NonRestartableComposable
+private fun SessionNoticeEffects(
+    controller: SshSessionController,
+    state: SshSessionUiState,
+    isPresented: Boolean,
+    tmuxWindowMutationState: TmuxWindowMutationState,
+    integrationWarningVisible: Boolean,
+    hostState: SessionHostState,
+    integrationPrompts: SessionIntegrationPrompts,
+    context: Context,
+    resources: Resources,
+) {
+    var terminalToast by hostState.terminalToast
+    var integrationWarningOpen by integrationPrompts.integrationWarningOpen
+    var integrationHelpOpen by integrationPrompts.integrationHelpOpen
+    var pendingIntegrationAction by integrationPrompts.pendingIntegrationAction
+    LaunchedEffect(terminalToast) {
+        if (terminalToast != null) {
+            delay(4_000)
+            terminalToast = null
+        }
+    }
+    LaunchedEffect(tmuxWindowMutationState) {
+        (tmuxWindowMutationState as? TmuxWindowMutationState.Error)?.message?.let {
+            terminalToast = resources.getString(when (it) {
+                "The window order changed. Try again.", "That window move is no longer valid." -> R.string.tmux_order_changed
+                "Window ordering timed out." -> R.string.tmux_order_timeout
+                "Window ordering is not available yet.", "Window ordering is not hydrated yet." -> R.string.tmux_order_unavailable
+                else -> R.string.tmux_order_failed
+            })
+            controller.clearTmuxWindowMutationError()
+        }
+    }
+    LaunchedEffect(integrationWarningVisible) {
+        if (!integrationWarningVisible) integrationWarningOpen = false
+    }
+    LaunchedEffect(isPresented) {
+        if (!isPresented) {
+            integrationWarningOpen = false
+            integrationHelpOpen = false
+            pendingIntegrationAction = null
+        }
+    }
+    LaunchedEffect(
+        (state as? SshSessionUiState.AwaitingOwnerAuthorization)?.challenge?.challengeId,
+        isPresented,
+    ) {
+        if (!isPresented) return@LaunchedEffect
+        val awaiting = state as? SshSessionUiState.AwaitingOwnerAuthorization ?: return@LaunchedEffect
+        controller.decideOwnerAuthorization(
+            confirmDeviceOwner(
+                context,
+                resources.getString(R.string.session_unlock_key_title),
+                awaiting.challenge.reason.resolve(resources),
+            ),
+        )
+    }
+}
+
+/** Publishes this session's program status, and reports the agent terminal on screen. */
+@Composable
+@NonRestartableComposable
+private fun ProgramStatusEffects(
+    host: SavedHost,
+    liveSessionId: String,
+    controller: SshSessionController,
+    programStatusCenter: ProgramStatusCenter?,
+    programStatusEnabled: Boolean,
+    programStatus: SharedProgramStatusSnapshot,
+    tmuxSnapshot: SharedTmuxSnapshot?,
+    presentedPrograms: Set<SharedProgramStatusTerminal>,
+    state: SshSessionUiState,
+    isPresented: Boolean,
+    hostState: SessionHostState,
+    onAgentTerminalVisible: (String, String?) -> Unit,
+) {
+    val appForeground by hostState.appForeground
+    val locallyFocusedTmuxPaneId by hostState.locallyFocusedTmuxPaneId
+    LaunchedEffect(programStatusCenter, controller, host.id, host.displayName,
+        programStatusEnabled, programStatus, tmuxSnapshot, presentedPrograms) {
+        val center = programStatusCenter ?: return@LaunchedEffect
+        // Update visibility before publishing: a newly hidden pane must not be checked by the new snapshot.
+        center.setPresented(host.id, presentedPrograms)
+        center.publish(host.id, ProgramStatusSessionState(
+            hostLabel = host.displayName,
+            snapshot = if (programStatusEnabled) programStatus else SharedProgramStatusSnapshot.EMPTY,
+            locations = tmuxSnapshot?.let(::programStatusPaneLocations).orEmpty(),
+        ), acknowledge = controller::acknowledgeProgramStatus)
+    }
+
+    // Agent Center's own read rule (the focused pane, as on iOS) is unchanged by program status.
+    LaunchedEffect(isPresented, appForeground, state, locallyFocusedTmuxPaneId, tmuxSnapshot?.activePaneId) {
+        while (isPresented && appForeground && state == SshSessionUiState.Connected) {
+            onAgentTerminalVisible(liveSessionId, (locallyFocusedTmuxPaneId ?: tmuxSnapshot?.activePaneId)?.let { "%$it" })
+            kotlinx.coroutines.delay(1_000)
+        }
+    }
+}
+
+/** Takes the screen to the window and pane a program-status request names, once per request. */
+@Composable
+@NonRestartableComposable
+private fun ProgramStatusFocusEffect(
+    liveSessionId: String,
+    controller: SshSessionController,
+    programStatusFocusRequest: ProgramStatusFocusRequest?,
+    state: SshSessionUiState,
+    isPresented: Boolean,
+    exactAgentBinding: AgentEndpointBinding?,
+    tmuxSnapshot: SharedTmuxSnapshot?,
+    programStatusNavigation: LongState,
+    presented: State<Boolean>,
+    hostState: SessionHostState,
+    closeFind: () -> Unit,
+) {
+    var filesOpen by hostState.filesOpen
+    var forwardingOpen by hostState.forwardingOpen
+    var tmuxSwitcherOpen by hostState.tmuxSwitcherOpen
+    val findOpen by hostState.findOpen
+    val pendingMoshFindSurfaceId by hostState.pendingMoshFindSurfaceId
+    val pendingMoshLiveFindAfterDeliveryToken by hostState.pendingMoshLiveFindAfterDeliveryToken
+    val currentPresented by presented
+    val programStatusNavigationEpoch by programStatusNavigation
+    val currentProgramStatusFocusRequest by rememberUpdatedState(programStatusFocusRequest)
+    var consumedProgramStatusFocusToken by remember(liveSessionId) { mutableStateOf<Long?>(null) }
+    LaunchedEffect(controller, isPresented, state, exactAgentBinding?.key,
+        tmuxSnapshot?.sessionName, programStatusNavigationEpoch, programStatusFocusRequest?.token) {
+        val request = programStatusFocusRequest ?: return@LaunchedEffect
+        if (!isPresented || consumedProgramStatusFocusToken == request.token) return@LaunchedEffect
+        consumedProgramStatusFocusToken = request.token
+        filesOpen = false
+        forwardingOpen = false
+        tmuxSwitcherOpen = false
+        if (findOpen || pendingMoshFindSurfaceId != null || pendingMoshLiveFindAfterDeliveryToken != null) closeFind()
+        val windowId = request.windowId ?: return@LaunchedEffect
+        val snapshot = controller.tmuxSnapshot.value ?: return@LaunchedEffect
+        val window = snapshot.windows.firstOrNull { it.id == windowId } ?: return@LaunchedEffect
+        if (request.paneId != null && window.panes.none { it.id == request.paneId }) return@LaunchedEffect
+        val carrier = controller.agentEndpointBinding.value?.key ?: return@LaunchedEffect
+        val navigationEpoch = programStatusNavigationEpoch
+        val sessionName = snapshot.sessionName
+        fun current(selected: SharedTmuxSnapshot?): Boolean =
+            currentPresented && currentProgramStatusFocusRequest?.token == request.token &&
+                programStatusNavigationEpoch == navigationEpoch &&
+                controller.state.value == SshSessionUiState.Connected &&
+                controller.agentEndpointBinding.value?.key == carrier &&
+                controller.transportReachable.value != false && selected != null && selected.sessionName == sessionName &&
+                when (selected.activeWindowId) {
+                    snapshot.activeWindowId -> selected.activePaneId == snapshot.activePaneId
+                    windowId -> true
+                    else -> false
+                }
+        if (!current(snapshot)) return@LaunchedEffect
+        if (snapshot.activeWindowId != windowId) controller.selectTmuxWindow(windowId)
+        val selected = awaitProgramStatusWindow(
+            combine(controller.tmuxSnapshot, controller.state, controller.agentEndpointBinding,
+                controller.transportReachable) { next, sessionState, binding, reachable ->
+                next.takeIf { sessionState == SshSessionUiState.Connected && binding?.key == carrier && reachable != false }
+            }, windowId, ::current,
+        ) ?: return@LaunchedEffect
+        request.paneId?.takeIf { pane -> selected.activeWindow?.panes?.any { it.id == pane } == true }?.let {
+            if (current(controller.tmuxSnapshot.value)) controller.selectTmuxPane(it)
+        }
+    }
+}
+
+/**
+ * The session's dialogs, each while it applies: the integration warning, a
+ * stopped or colliding share upload, an integration action to confirm, the
+ * integration help and a password challenge.
+ */
+@Composable
+@NonRestartableComposable
+private fun SessionDialogs(
+    controller: SshSessionController,
+    filesController: RemoteFilesController,
+    agentIntegration: AgentSessionIntegrationCoordinator,
+    state: SshSessionUiState,
+    isPresented: Boolean,
+    integrationStatus: AgentSessionIntegrationStatus?,
+    integrationWarningVisible: Boolean,
+    exactAgentBinding: AgentEndpointBinding?,
+    hostState: SessionHostState,
+    integrationPrompts: SessionIntegrationPrompts,
+    runShareUpload: (Uri, PendingShareUpload, Boolean) -> Unit,
+) {
+    var integrationWarningOpen by integrationPrompts.integrationWarningOpen
+    var integrationHelpOpen by integrationPrompts.integrationHelpOpen
+    var pendingIntegrationAction by integrationPrompts.pendingIntegrationAction
+    var shareConflict by hostState.shareConflict
+    var shareCancelPrompt by hostState.shareCancelPrompt
+    var pastePathInFlight by hostState.pastePathInFlight
     if (isPresented && integrationWarningOpen) {
         val presentation = integrationStatus?.takeIf { integrationWarningVisible }?.presentation()
         if (presentation != null) {
@@ -2008,9 +2995,9 @@ fun SshSessionScreen(
                 title = presentation.title,
                 onDismissRequest = { integrationWarningOpen = false },
                 actions = {
-                    TesseraButton("Help", onClick = { integrationHelpOpen = true }, compact = true)
+                    TesseraButton(stringResource(R.string.session_help), onClick = { integrationHelpOpen = true }, compact = true)
                     TesseraButton(
-                        "Close",
+                        stringResource(R.string.session_close),
                         onClick = { integrationWarningOpen = false },
                         compact = true,
                         style = TesseraButtonStyle.Primary,
@@ -2051,11 +3038,10 @@ fun SshSessionScreen(
 
     shareCancelPrompt?.let { item ->
         TesseraConfirmDialog(
-            title = "Stop this upload?",
-            body = "${item.displayName} was going to type its remote path into " +
-                "this session. Stopping it drops the upload and the path.",
-            confirmLabel = "Stop upload",
-            cancelLabel = "Keep uploading",
+            title = stringResource(R.string.session_stop_upload_title),
+            body = stringResource(R.string.session_stop_upload_body, item.displayName),
+            confirmLabel = stringResource(R.string.session_stop_upload),
+            cancelLabel = stringResource(R.string.session_keep_uploading),
             destructive = true,
             onConfirm = {
                 filesController.cancel(item.id)
@@ -2070,25 +3056,23 @@ fun SshSessionScreen(
         val name = conflict.failure.name
         if (conflict.failure.kind == RemoteFileKind.FILE) {
             TesseraConfirmDialog(
-                title = "Replace $name?",
-                body = "A remote file with this name already exists in the destination. " +
-                    "Replacing it cannot be undone.",
-                confirmLabel = "Replace",
-                cancelLabel = "Skip",
+                title = stringResource(R.string.session_replace_title, name),
+                body = stringResource(R.string.session_replace_body),
+                confirmLabel = stringResource(R.string.session_replace),
+                cancelLabel = stringResource(R.string.session_skip),
                 destructive = true,
                 onConfirm = {
                     shareConflict = null
-                    runShareUpload(conflict.uri, conflict.pending, replaceExisting = true)
+                    runShareUpload(conflict.uri, conflict.pending, true)
                 },
                 onDismiss = { shareConflict = null },
             )
         } else {
             TesseraConfirmDialog(
-                title = "Can't replace $name",
-                body = "A remote folder or link already uses this name. " +
-                    "Rename it on the host, or upload to the temp directory instead.",
-                confirmLabel = "OK",
-                cancelLabel = "OK",
+                title = stringResource(R.string.session_cannot_replace_title, name),
+                body = stringResource(R.string.session_cannot_replace_body),
+                confirmLabel = stringResource(R.string.session_ok),
+                cancelLabel = stringResource(R.string.session_ok),
                 onConfirm = { shareConflict = null },
                 onDismiss = { shareConflict = null },
             )
@@ -2101,7 +3085,7 @@ fun SshSessionScreen(
             title = action.confirmationTitle(),
             body = action.confirmationMessage(),
             confirmLabel = action.confirmationLabel(),
-            cancelLabel = "Cancel",
+            cancelLabel = stringResource(R.string.session_cancel),
             onConfirm = {
                 agentIntegration.requestAction(request)
                 pendingIntegrationAction = null
@@ -2112,11 +3096,11 @@ fun SshSessionScreen(
 
     if (isPresented && integrationHelpOpen) {
         TesseraDialog(
-            title = "Agent integration",
+            title = stringResource(R.string.session_integration_help_title),
             onDismissRequest = { integrationHelpOpen = false },
             actions = {
                 TesseraButton(
-                    "Done",
+                    stringResource(R.string.session_done),
                     onClick = { integrationHelpOpen = false },
                     compact = true,
                     style = TesseraButtonStyle.Primary,
@@ -2124,7 +3108,7 @@ fun SshSessionScreen(
             },
         ) {
             Text(
-                "Integration health belongs to this terminal session. Tessera checks and repairs only this live shell; Agent Center uses the resulting lifecycle reports without changing another host or pane.",
+                stringResource(R.string.session_integration_help_body),
                 color = LocalTesseraTokens.current.fgMuted,
                 style = TesseraType.body,
             )
@@ -2139,98 +3123,120 @@ fun SshSessionScreen(
             onCancel = controller::cancelChallenge,
         )
     }
+}
 
-    if (isPresented && tmuxSwitcherOpen) {
-        val switcherNotice = integrationStatus?.takeIf { integrationWarningVisible }?.presentation()
-        SessionSwitcherSheet(
-            windows = tmuxSnapshot?.switcherWindows { paneId ->
-                exactAgentBinding?.key?.let(paneAgentProviders::get)?.get(paneId)
-            }.orEmpty(),
-            activeWindowId = tmuxSnapshot?.activeWindowId,
-            activePaneId = locallyFocusedTmuxPaneId ?: tmuxSnapshot?.activePaneId,
-            // The screen knows its own tmux window label; the other sessions are
-            // mounted but unobserved from here, so they carry only their endpoint.
-            sessions = switcherSessions.map { session ->
-                if (session.hostId == host.id) {
-                    session.copy(paneTitle = tmuxSnapshot?.activeWindow?.namedLabel)
-                } else {
-                    session
-                }
-            },
-            currentSessionTitle = host.displayName,
-            programStatusCenter = programStatusCenter,
-            programHostId = host.id,
-            programStatusAgents = programStatusAgents,
-            unreadWindowIds = if (bellPreferences.visualEnabled) {
-                bellUnread.tmuxWindowIdsBySession[host.id].orEmpty()
-            } else emptySet(),
-            glowingWindowId = glowingTmuxWindowId.takeIf { bellPreferences.visualEnabled },
-            // A peer device holding the grid may not be issued window or pane
-            // commands, nor may this one while a show or take-back is still
-            // resolving; nothing is mutable before the snapshot hydrates.
-            allowsTmuxMutation = tmuxSnapshot != null &&
-                tmuxAuthority !is SharedTmuxGridAuthoritySnapshot.Peer &&
-                !tmuxAuthorityPresentation.gatesInput &&
-                tmuxWindowMutationState == TmuxWindowMutationState.Available,
-            tmuxMutationContextValid = tmuxSnapshot != null &&
-                tmuxAuthority !is SharedTmuxGridAuthoritySnapshot.Peer &&
-                !tmuxAuthorityPresentation.gatesInput &&
-                (tmuxWindowMutationState == TmuxWindowMutationState.Available ||
-                    tmuxWindowMutationState == TmuxWindowMutationState.Pending),
-            reorderContextKey = tmuxSnapshot?.sessionName to tmuxAuthority,
-            notice = switcherNotice?.let {
-                SessionSwitcherNotice(
-                    title = it.title,
-                    message = it.message,
-                    actionLabel = it.actionLabel,
-                )
-            },
-            onNoticeAction = {
-                tmuxSwitcherOpen = false
-                val action = switcherNotice?.action
-                val binding = exactAgentBinding
-                if (action != null && binding != null) {
-                    pendingIntegrationAction = AgentSessionIntegrationActionRequest(binding, action)
-                } else {
-                    integrationWarningOpen = true
-                }
-            },
-            onNoticeDetails = {
-                tmuxSwitcherOpen = false
+/** The tmux switcher sheet, carrying the integration notice while one holds. */
+@Composable
+@NonRestartableComposable
+private fun SessionTmuxSwitcher(
+    host: SavedHost,
+    controller: SshSessionController,
+    tmuxSnapshot: SharedTmuxSnapshot?,
+    tmuxAuthority: SharedTmuxGridAuthoritySnapshot,
+    tmuxAuthorityPresentation: TmuxAuthorityPresentation,
+    tmuxWindowMutationState: TmuxWindowMutationState,
+    exactAgentBinding: AgentEndpointBinding?,
+    paneAgentProviders: Map<AgentSessionKey, Map<Int, String>>,
+    integrationStatus: AgentSessionIntegrationStatus?,
+    integrationWarningVisible: Boolean,
+    switcherSessions: List<SessionSwitcherSession>,
+    programStatusCenter: ProgramStatusCenter?,
+    programStatusAgents: ProgramStatusAgentInput,
+    programStatusNavigation: MutableLongState,
+    bellPreferences: BellPreferences,
+    bellUnread: BellUnreadState,
+    hostState: SessionHostState,
+    integrationPrompts: SessionIntegrationPrompts,
+    onSelectSession: (String) -> Unit,
+    onBack: () -> Unit,
+) {
+    var tmuxSwitcherOpen by hostState.tmuxSwitcherOpen
+    var locallyFocusedTmuxPaneId by hostState.locallyFocusedTmuxPaneId
+    val glowingTmuxWindowId by hostState.glowingTmuxWindowId
+    var integrationWarningOpen by integrationPrompts.integrationWarningOpen
+    var pendingIntegrationAction by integrationPrompts.pendingIntegrationAction
+    var programStatusNavigationEpoch by programStatusNavigation
+    val switcherNotice = integrationStatus?.takeIf { integrationWarningVisible }?.presentation()
+    SessionSwitcherSheet(
+        windows = tmuxSnapshot?.switcherWindows { paneId ->
+            exactAgentBinding?.key?.let(paneAgentProviders::get)?.get(paneId)
+        }.orEmpty(),
+        activeWindowId = tmuxSnapshot?.activeWindowId,
+        activePaneId = locallyFocusedTmuxPaneId ?: tmuxSnapshot?.activePaneId,
+        // The screen knows its own tmux window label; the other sessions are
+        // mounted but unobserved from here, so they carry only their endpoint.
+        sessions = switcherSessions.map { session ->
+            if (session.hostId == host.id) {
+                session.copy(paneTitle = tmuxSnapshot?.activeWindow?.namedLabel)
+            } else {
+                session
+            }
+        },
+        currentSessionTitle = host.displayName,
+        programStatusCenter = programStatusCenter,
+        programHostId = host.id,
+        programStatusAgents = programStatusAgents,
+        unreadWindowIds = if (bellPreferences.visualEnabled) {
+            bellUnread.tmuxWindowIdsBySession[host.id].orEmpty()
+        } else emptySet(),
+        glowingWindowId = glowingTmuxWindowId.takeIf { bellPreferences.visualEnabled },
+        // A peer device holding the grid may not be issued window or pane
+        // commands, nor may this one while a show or take-back is still
+        // resolving; nothing is mutable before the snapshot hydrates.
+        allowsTmuxMutation = tmuxSnapshot != null &&
+            tmuxAuthority !is SharedTmuxGridAuthoritySnapshot.Peer &&
+            !tmuxAuthorityPresentation.gatesInput &&
+            tmuxWindowMutationState == TmuxWindowMutationState.Available,
+        tmuxMutationContextValid = tmuxSnapshot != null &&
+            tmuxAuthority !is SharedTmuxGridAuthoritySnapshot.Peer &&
+            !tmuxAuthorityPresentation.gatesInput &&
+            (tmuxWindowMutationState == TmuxWindowMutationState.Available ||
+                tmuxWindowMutationState == TmuxWindowMutationState.Pending),
+        reorderContextKey = tmuxSnapshot?.sessionName to tmuxAuthority,
+        notice = switcherNotice?.let {
+            SessionSwitcherNotice(
+                title = it.title,
+                message = it.message,
+                actionLabel = it.actionLabel,
+            )
+        },
+        onNoticeAction = {
+            tmuxSwitcherOpen = false
+            val action = switcherNotice?.action
+            val binding = exactAgentBinding
+            if (action != null && binding != null) {
+                pendingIntegrationAction = AgentSessionIntegrationActionRequest(binding, action)
+            } else {
                 integrationWarningOpen = true
-            },
-            onHome = { tmuxSwitcherOpen = false; onBack() },
-            onSelectSession = { hostId ->
-                tmuxSwitcherOpen = false
-                if (hostId != host.id) onSelectSession(hostId)
-            },
-            onSelectWindow = { programStatusNavigationEpoch += 1; controller.selectTmuxWindow(it); tmuxSwitcherOpen = false },
-            onSelectPane = {
-                programStatusNavigationEpoch += 1
-                locallyFocusedTmuxPaneId = it
-                controller.selectTmuxPane(it)
-                tmuxSwitcherOpen = false
-            },
-            onNewWindow = { programStatusNavigationEpoch += 1; controller.createTmuxWindow() },
-            onRenameWindow = controller::renameTmuxWindow,
-            onCloseWindow = controller::closeTmuxWindow,
-            onMoveWindow = controller::moveTmuxWindow,
-            onRenumberWindows = controller::renumberTmuxWindows,
-            onSplitWindow = controller::splitTmuxWindow,
-            onSplitPane = controller::splitTmuxPane,
-            onSetPaneZoomed = controller::setTmuxZoomed,
-            onClosePane = controller::closeTmuxPane,
-            onDismiss = { tmuxSwitcherOpen = false },
-        )
-    }
-
-    if (isPresented) (state as? SshSessionUiState.AwaitingHostKey)?.let { awaiting ->
-        HostKeyDialog(
-            challenge = awaiting.challenge,
-            onDecision = controller::decideHostKey,
-        )
-    }
-
+            }
+        },
+        onNoticeDetails = {
+            tmuxSwitcherOpen = false
+            integrationWarningOpen = true
+        },
+        onHome = { tmuxSwitcherOpen = false; onBack() },
+        onSelectSession = { hostId ->
+            tmuxSwitcherOpen = false
+            if (hostId != host.id) onSelectSession(hostId)
+        },
+        onSelectWindow = { programStatusNavigationEpoch += 1; controller.selectTmuxWindow(it); tmuxSwitcherOpen = false },
+        onSelectPane = {
+            programStatusNavigationEpoch += 1
+            locallyFocusedTmuxPaneId = it
+            controller.selectTmuxPane(it)
+            tmuxSwitcherOpen = false
+        },
+        onNewWindow = { programStatusNavigationEpoch += 1; controller.createTmuxWindow() },
+        onRenameWindow = controller::renameTmuxWindow,
+        onCloseWindow = controller::closeTmuxWindow,
+        onMoveWindow = controller::moveTmuxWindow,
+        onRenumberWindows = controller::renumberTmuxWindows,
+        onSplitWindow = controller::splitTmuxWindow,
+        onSplitPane = controller::splitTmuxPane,
+        onSetPaneZoomed = controller::setTmuxZoomed,
+        onClosePane = controller::closeTmuxPane,
+        onDismiss = { tmuxSwitcherOpen = false },
+    )
 }
 
 /** A share upload paused on a name collision, awaiting the user's answer. */
@@ -2360,8 +3366,11 @@ internal fun rememberTerminalKeyboardViewportLayout(
         terminalCounterShiftModifier = Modifier.offset {
             IntOffset(0, terminalCounterShift)
         },
+        // Chrome held in place overlaps the lifted terminal, which is placed
+        // after it and would otherwise draw over it and take its taps (iOS
+        // raises `KeyboardLiftExemptChrome` the same way).
         chromeCounterShiftModifier = if (!resizeTerminalWithKeyboard) {
-            Modifier.offset { IntOffset(0, imeBottom) }
+            Modifier.offset { IntOffset(0, imeBottom) }.zIndex(1f)
         } else {
             Modifier
         },
@@ -2458,7 +3467,9 @@ internal fun TerminalSoftwareAccessory(
                 AccessoryKey(
                     id = "keyboard",
                     label = "⌨",
-                    accessibilityLabel = if (keyboardVisible) "Hide keyboard" else "Show keyboard",
+                    accessibilityLabel = stringResource(
+                        if (keyboardVisible) R.string.session_hide_keyboard else R.string.session_show_keyboard,
+                    ),
                     onClick = onKeyboard,
                     modifier = Modifier.padding(start = 4.dp, end = 8.dp),
                 )
@@ -2558,8 +3569,8 @@ internal fun SessionChrome(
         integrationStatus?.showsWarning == true &&
         state == SshSessionUiState.Connected
     val switcherLabel = integrationStatus?.takeIf { integrationAttention }?.presentation()?.let {
-        "$SESSION_SWITCHER_LABEL. ${it.title}"
-    } ?: SESSION_SWITCHER_LABEL
+        stringResource(R.string.session_switcher_label_with_notice, it.title)
+    } ?: stringResource(R.string.session_switcher_label)
     // Green only while something answers behind a tunnel; a listener that is
     // merely up, unconfirmed, or refused keeps the plain glyph colour. The
     // selected highlight is the open panel alone.
@@ -2607,8 +3618,10 @@ internal fun SessionChrome(
                         TesseraIcons.Power, stringResource(R.string.session_connect), onConnect, selected = true,
                     )
                     SshSessionUiState.Connected -> {
-                        if (tmuxEnabled) SessionIconButton(TesseraIcons.Plus, "New tmux window", onNewTmuxWindow)
-                        SessionIconButton(TesseraIcons.Search, "Find in terminal", onSearch)
+                        if (tmuxEnabled) {
+                            SessionIconButton(TesseraIcons.Plus, stringResource(R.string.session_new_tmux_window), onNewTmuxWindow)
+                        }
+                        SessionIconButton(TesseraIcons.Search, stringResource(R.string.session_find_in_terminal), onSearch)
                         SessionIconButton(
                             TesseraIcons.Folder,
                             if (filesOpen) stringResource(R.string.session_terminal) else stringResource(R.string.session_files),
@@ -2618,14 +3631,18 @@ internal fun SessionChrome(
                         if (forwarding.visible) {
                             SessionIconButton(
                                 TesseraIcons.Tunnels,
-                                forwarding.accessibilityLabel,
+                                forwarding.localizedAccessibilityLabel(),
                                 onToggleForwarding,
                                 modifier = Modifier.testTag("session-forwarding-button"),
                                 selected = forwardingOpen,
                                 tint = forwardingGlyphTint,
                             )
                         }
-                        SessionIconButton(TesseraIcons.Copy, "Continue on another device", onContinueOnAnotherDevice)
+                        SessionIconButton(
+                            TesseraIcons.Copy,
+                            stringResource(R.string.session_continue_on_another_device),
+                            onContinueOnAnotherDevice,
+                        )
                         SessionIconButton(TesseraIcons.Close, stringResource(R.string.session_disconnect), onCloseSession, danger = true)
                     }
                     else -> Unit
@@ -2683,16 +3700,16 @@ internal fun SessionChrome(
                     TesseraIconButton(
                         icon = TesseraIcons.Share,
                         contentDescription = if (host.tmuxMode == TmuxModes.OFF) {
-                            "reconnect on another device"
+                            stringResource(R.string.session_reconnect_on_another_device)
                         } else {
-                            "continue on another device"
+                            stringResource(R.string.session_continue_on_another_device_lower)
                         },
                         onClick = onContinueOnAnotherDevice,
                     )
                     if (!filesOpen) {
                         TesseraIconButton(
                             icon = TesseraIcons.Search,
-                            contentDescription = "Find in terminal",
+                            contentDescription = stringResource(R.string.session_find_in_terminal),
                             onClick = onSearch,
                         )
                         TesseraIconButton(
@@ -2714,7 +3731,7 @@ internal fun SessionChrome(
                     if (forwarding.visible) {
                         TesseraIconButton(
                             icon = TesseraIcons.Tunnels,
-                            contentDescription = forwarding.accessibilityLabel,
+                            contentDescription = forwarding.localizedAccessibilityLabel(),
                             onClick = onToggleForwarding,
                             modifier = Modifier.testTag("session-forwarding-button"),
                             selected = forwardingOpen,
@@ -2734,6 +3751,7 @@ internal fun SessionChrome(
     }
 }
 
+/** The English of `R.string.session_switcher_label`, which instrumented tests match on. */
 internal const val SESSION_SWITCHER_LABEL = "Switch session, window, or pane"
 internal const val SESSION_STATUS_ATTENTION_RING_TAG = "session-status-attention-ring"
 
@@ -2971,7 +3989,7 @@ private fun RowScope.SessionSwitcherTarget(
 }
 
 @Composable
-private fun TerminalFindBar(
+internal fun TerminalFindBar(
     query: String,
     result: TerminalSearchResult?,
     onQueryChange: (String) -> Unit,
@@ -2981,6 +3999,10 @@ private fun TerminalFindBar(
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalTesseraTokens.current
+    // The field takes focus when the bar appears, as on iOS. Otherwise the
+    // terminal keeps it, and the query and Search's Enter go to the shell.
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
     Surface(modifier = modifier, color = tokens.panelBg) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
@@ -2989,9 +4011,11 @@ private fun TerminalFindBar(
             TesseraTextField(
                 value = query,
                 onValueChange = onQueryChange,
-                placeholder = "find",
+                placeholder = stringResource(R.string.session_find_placeholder),
                 leading = TesseraIcons.Search,
                 modifier = Modifier.weight(1f),
+                inputModifier = Modifier.focusRequester(focusRequester),
+                inputTestTag = "terminal-find-field",
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { onNext() }),
             )
@@ -3001,9 +4025,9 @@ private fun TerminalFindBar(
                 style = TesseraType.rowMeta,
                 modifier = Modifier.padding(horizontal = 6.dp),
             )
-            SessionIconButton(TesseraIcons.ChevronLeft, "Previous match", onPrevious)
-            SessionIconButton(TesseraIcons.ChevronRight, "Next match", onNext)
-            SessionIconButton(TesseraIcons.Close, "Close find", onClose)
+            SessionIconButton(TesseraIcons.ChevronLeft, stringResource(R.string.session_previous_match), onPrevious)
+            SessionIconButton(TesseraIcons.ChevronRight, stringResource(R.string.session_next_match), onNext)
+            SessionIconButton(TesseraIcons.Close, stringResource(R.string.session_close_find), onClose)
         }
     }
 }
@@ -3038,6 +4062,21 @@ private fun SessionIconButton(
     }
 }
 
+/**
+ * Speaks a Mosh outage the terminal cannot show: a polite live region
+ * beside the banner, so a screen reader hears it once while the banner's
+ * ticking seconds stay quiet. It is there only while the claimed outage
+ * lasts, with [text].
+ */
+@Composable
+internal fun MoshOutageAnnouncement(text: String?, modifier: Modifier = Modifier) {
+    if (text == null) return
+    Box(modifier.size(1.dp).testTag("mosh-outage-announcement").semantics {
+        liveRegion = LiveRegionMode.Polite
+        contentDescription = text
+    })
+}
+
 @Composable
 @SuppressLint("ModifierParameter")
 private fun TmuxPresentation(
@@ -3045,6 +4084,7 @@ private fun TmuxPresentation(
     programSessions: Map<String, ProgramStatusSessionState>,
     programHostId: String,
     programStatusAgents: ProgramStatusAgentInput,
+    agentProvider: (Int) -> String?,
     tmuxRenderHistory: Map<String, TmuxRenderHistoryReady>,
     pendingMoshFindPaneId: Int?,
     primaryTerminal: TermuxTerminalSurface,
@@ -3085,7 +4125,6 @@ private fun TmuxPresentation(
     val moshLiveHistoryDelivery = tmuxRenderHistory["live"]
     val outageTiming by controller.moshOutageTiming.collectAsState()
     val moshPrimaryHistoryVisible by controller.moshPrimaryHistoryVisible.collectAsState()
-    val outageView = LocalView.current
     var moshHistoryCoversNotification by remember(controller) { mutableStateOf(false) }
     val layout = activeWindow?.layout
     var moshPaneContentRects by remember(controller, activeWindow?.id) {
@@ -3102,19 +4141,20 @@ private fun TmuxPresentation(
             }
         }
     }
-    val focus = layout?.findPaneForPresentation(snapshot?.activePaneId)
+    val focus = layout?.findPaneForPresentation(snapshot.activePaneId)
     val moshNotificationCropped = layout != null && moshCanvasSize != null && focus != null &&
         layout.width == moshCanvasSize?.columns && layout.height == moshCanvasSize?.rows &&
         (focus.x != 0 || focus.y != 0 || focus.width != layout.width || focus.height != layout.height)
     val needsNativeOutageBanner = tmuxWindowIsPaintedWhole &&
         (moshNotificationCropped || moshHistoryCoversNotification || moshPrimaryHistoryVisible)
     val outageAnnouncement = stringResource(R.string.mosh_outage_announcement)
+    var spokenOutageStart by remember(controller) { mutableStateOf<Long?>(null) }
     LaunchedEffect(needsNativeOutageBanner, outageTiming?.startedAtMillis, terminalDrawingEnabled) {
         val startedAt = outageTiming?.startedAtMillis
         if (needsNativeOutageBanner && terminalDrawingEnabled && startedAt != null &&
             controller.claimMoshOutageAnnouncement(startedAt)
         ) {
-            outageView.announceForAccessibility(outageAnnouncement)
+            spokenOutageStart = startedAt
         }
     }
     val inlineTmuxHistory by controller.tmuxInlineHistory.collectAsState()
@@ -3127,6 +4167,7 @@ private fun TmuxPresentation(
             programSessions = programSessions,
             programHostId = programHostId,
             programStatusAgents = programStatusAgents,
+            agentProvider = agentProvider,
             activeWindowId = snapshot?.activeWindowId,
             activeWindow = activeWindow,
             unreadWindowIds = unreadWindowIds,
@@ -3234,6 +4275,7 @@ private fun TmuxPresentation(
                         terminal = primaryTerminal,
                         controller = controller,
                         paintsWholeWindow = tmuxWindowIsPaintedWhole,
+                        panToFocusedPane = compact,
                         moshCanvas = moshCanvasSize,
                         drawingEnabled = terminalDrawingEnabled,
                         modifier = Modifier
@@ -3276,8 +4318,8 @@ private fun TmuxPresentation(
                     onFindRequested = controller::openTmuxFind,
                     onReturnedToLiveTail = controller::returnTmuxScrollbackToTail,
                     onAltScreenScroll = { paneId, rowsDown ->
-                        val pane = activeWindow?.panes?.firstOrNull { it.id == paneId }
-                        val rect = activeWindow?.layout?.findPaneForPresentation(paneId)
+                        val pane = activeWindow.panes.firstOrNull { it.id == paneId }
+                        val rect = activeWindow.layout?.findPaneForPresentation(paneId)
                         val contentRect = moshPaneContentRects[paneId]
                         if (pane?.isMouseReporting == true && rect != null) {
                             val button = if (rowsDown < 0) 64 else 65
@@ -3351,6 +4393,12 @@ private fun TmuxPresentation(
                     )
                 }
             }
+            // Outside the banner, so a banner that comes back within the
+            // same outage does not speak it again.
+            MoshOutageAnnouncement(
+                outageAnnouncement.takeIf { spokenOutageStart != null && spokenOutageStart == outageTiming?.startedAtMillis },
+                Modifier.align(Alignment.TopCenter).then(outageBannerModifier),
+            )
         }
     }
     renameWindow?.let { window ->
@@ -3362,14 +4410,14 @@ private fun TmuxPresentation(
     }
     closeWindow?.let { window ->
         TmuxCloseDialog(
-            title = "Close ${window.displayName}?",
+            title = stringResource(R.string.session_tmux_close_window_title, window.displayName),
             onDismiss = { closeWindow = null },
             onConfirm = { controller.closeTmuxWindow(window.id); closeWindow = null },
         )
     }
     closePane?.let { paneId ->
         TmuxCloseDialog(
-            title = "Close pane %$paneId?",
+            title = stringResource(R.string.session_tmux_close_pane_title, "%$paneId"),
             onDismiss = { closePane = null },
             onConfirm = { controller.closeTmuxPane(paneId); closePane = null },
         )
@@ -3381,10 +4429,11 @@ private fun TmuxPresentation(
  *
  * What the surface is measured at depends on what the transport paints into
  * it, not on the form factor. Mosh streams the whole window, so the terminal
- * must be laid out at the window grid and panned until the focused pane fills
- * the screen; the inline `-CC` path is fed the focused pane's capture, so the
- * window and focus rects are the same and the transform degenerates to
- * centring that pane. iOS draws the line in the same place.
+ * must be laid out at the window grid; on a compact screen it is then panned
+ * until the focused pane fills the screen, while a wide one shows the whole
+ * window, as the iPad does. The inline `-CC` path is fed the focused pane's
+ * capture, so the window and focus rects are the same and the transform
+ * degenerates to centring that pane. iOS draws the line in the same place.
  */
 @Composable
 private fun CompactTmuxTerminal(
@@ -3392,6 +4441,7 @@ private fun CompactTmuxTerminal(
     terminal: TermuxTerminalSurface,
     controller: SshSessionController,
     paintsWholeWindow: Boolean,
+    panToFocusedPane: Boolean,
     moshCanvas: com.bambouville.tessera.core.bridge.SharedTmuxGridSize?,
     drawingEnabled: Boolean,
     modifier: Modifier = Modifier,
@@ -3413,11 +4463,11 @@ private fun CompactTmuxTerminal(
         // of it. Laying the terminal out at the layout then measured it at
         // the peer's grid, scaled the whole thing down to fit, and left the
         // PTY's content as a tiny block in the corner. Pan to the focused
-        // pane only when the layout really is this canvas.
+        // pane only when the layout really is this canvas. A wide screen
+        // already fits the canvas: centring the focused pane there pushed
+        // the window sideways, blank on one side and its other panes cut off.
         windowRect = moshCanvas?.let { SharedTmuxCellRect(columns = it.columns, rows = it.rows, x = 0, y = 0) }
-        val layoutIsThisCanvas = layout != null && moshCanvas != null &&
-            layout.width == moshCanvas.columns && layout.height == moshCanvas.rows
-        focusRect = if (layoutIsThisCanvas) paneRect ?: windowRect else windowRect
+        focusRect = moshCanvasFocusRect(windowRect, layout, paneRect, panToFocusedPane)
     } else {
         windowRect = paneRect
         focusRect = paneRect
@@ -3432,6 +4482,18 @@ private fun CompactTmuxTerminal(
         },
         modifier = modifier,
     )
+}
+
+/** What a Mosh canvas frames: its focused pane when panning, otherwise all of it. */
+internal fun moshCanvasFocusRect(
+    canvas: SharedTmuxCellRect?,
+    layout: SharedTmuxLayoutNode?,
+    pane: SharedTmuxCellRect?,
+    panToFocusedPane: Boolean,
+): SharedTmuxCellRect? {
+    val layoutIsThisCanvas = layout != null && canvas != null &&
+        layout.width == canvas.columns && layout.height == canvas.rows
+    return if (panToFocusedPane && layoutIsThisCanvas) pane ?: canvas else canvas
 }
 
 internal fun SharedTmuxLayoutNode.findPaneForPresentation(paneId: Int?): SharedTmuxLayoutNode.Leaf? =
@@ -3459,6 +4521,7 @@ internal fun TmuxChrome(
     programSessions: Map<String, ProgramStatusSessionState> = emptyMap(),
     programHostId: String = "",
     programStatusAgents: ProgramStatusAgentInput = ProgramStatusAgentInput.NONE,
+    agentProvider: (Int) -> String? = { null },
     unreadWindowIds: Set<Int> = emptySet(),
     glowingWindowId: Int? = null,
     onSelectWindow: (Int) -> Unit,
@@ -3586,9 +4649,10 @@ internal fun TmuxChrome(
                     val status = ProgramStatusQueries.windowStatus(programSessions, programHostId, window.id, programStatusAgents)
                     val statusText = status?.let { programStatusWordsLine(it) }
                     val position = index + 1
+                    val windowLabel = window.agentDisplayName(agentProvider)
                     val accessibilityLabel = if (window.index != null && window.index != position)
-                        stringResource(R.string.tmux_window_index_label, position, window.displayName, window.index!!)
-                    else stringResource(R.string.tmux_window_label, position, window.displayName)
+                        stringResource(R.string.tmux_window_index_label, position, windowLabel, window.index!!)
+                    else stringResource(R.string.tmux_window_label, position, windowLabel)
                     val moveActions = TmuxWindowMoveAction.entries.mapNotNull { action ->
                         if (!allowsWindowOrdering ||
                             tmuxWindowMoveDestination(orderedIds, window.id, action) == null
@@ -3611,7 +4675,7 @@ internal fun TmuxChrome(
                         } else null
                     val splitActions = tmuxWindowSplitAccessibilityActions(splitWindow)
                     TmuxChip(
-                        label = "$position:${window.displayName}",
+                        label = "$position:$windowLabel",
                         selected = window.id == activeWindowId,
                         unread = window.id in unreadWindowIds,
                         glowing = window.id == glowingWindowId,
@@ -3645,7 +4709,7 @@ internal fun TmuxChrome(
         }
         TesseraIconButton(
             icon = TesseraIcons.Plus,
-            contentDescription = "New tmux window",
+            contentDescription = stringResource(R.string.session_new_tmux_window),
             onClick = onNewWindow,
         )
     }
@@ -3659,30 +4723,33 @@ internal fun TmuxChrome(
         ) {
             TesseraIconButton(
                 icon = TesseraIcons.Pencil,
-                contentDescription = "Rename window",
+                contentDescription = stringResource(R.string.session_tmux_rename_window_description),
                 onClick = { onRenameWindow(window.id) },
             )
             activePane?.let { paneId ->
                 TesseraIconButton(
                     icon = TesseraIcons.SplitHorizontal,
-                    contentDescription = "Split pane left and right",
+                    contentDescription = stringResource(R.string.session_tmux_split_left_right_description),
                     onClick = { onSplit(paneId, false) },
                 )
                 TesseraIconButton(
                     icon = TesseraIcons.SplitVertical,
-                    contentDescription = "Split pane top and bottom",
+                    contentDescription = stringResource(R.string.session_tmux_split_top_bottom_description),
                     onClick = { onSplit(paneId, true) },
                 )
                 TesseraIconButton(
                     icon = if (window.zoomed) TesseraIcons.Minimize else TesseraIcons.Maximize,
-                    contentDescription = if (window.zoomed) "Unzoom pane" else "Zoom pane",
+                    contentDescription = stringResource(
+                        if (window.zoomed) R.string.session_tmux_unzoom_pane_description
+                        else R.string.session_tmux_zoom_pane_description,
+                    ),
                     onClick = { onZoom(paneId, !window.zoomed) },
                     selected = window.zoomed,
                 )
             }
             if (window.panes.size > 1) {
                 Box(Modifier.padding(horizontal = 4.dp)) {
-                    TesseraKicker("panes")
+                    TesseraKicker(stringResource(R.string.session_tmux_panes_kicker))
                 }
                 window.panes.forEachIndexed { index, pane ->
                     val status = ProgramStatusQueries.paneStatus(programSessions, programHostId, pane.id, programStatusAgents)
@@ -3702,7 +4769,7 @@ internal fun TmuxChrome(
                 activePane?.let { paneId ->
                     TesseraIconButton(
                         icon = TesseraIcons.Close,
-                        contentDescription = "Close pane",
+                        contentDescription = stringResource(R.string.session_tmux_close_pane_description),
                         onClick = { onClosePane(paneId) },
                         danger = true,
                     )
@@ -3710,7 +4777,7 @@ internal fun TmuxChrome(
             }
             TesseraIconButton(
                 icon = TesseraIcons.Trash,
-                contentDescription = "Close window",
+                contentDescription = stringResource(R.string.session_tmux_close_window_description),
                 onClick = { onCloseWindow(window.id) },
                 danger = true,
             )
@@ -3735,7 +4802,7 @@ private fun TmuxWindowChipMenu(
     val tokens = LocalTesseraTokens.current
     DropdownMenu(expanded = expanded && enabled, onDismissRequest = onDismiss) {
         if (onSplit != null) TmuxWindowSplitMenuItems { option -> onDismiss(); onSplit(option) }
-        DropdownMenuItem(text = { Text("rename") }, onClick = { onDismiss(); onRename() })
+        DropdownMenuItem(text = { Text(stringResource(R.string.session_tmux_rename)) }, onClick = { onDismiss(); onRename() })
         TmuxWindowMoveAction.entries.forEach { action ->
             val destination = tmuxWindowMoveDestination(orderedIds, window.id, action)
             val label = when (action) {
@@ -3756,7 +4823,7 @@ private fun TmuxWindowChipMenu(
             onClick = { onDismiss(); onTidy() },
         )
         DropdownMenuItem(
-            text = { Text("close window", color = tokens.red) },
+            text = { Text(stringResource(R.string.session_tmux_close_window_menu), color = tokens.red) },
             onClick = { onDismiss(); onClose() },
         )
     }
@@ -4005,12 +5072,12 @@ internal fun TmuxRenameDialog(
 ) {
     var value by remember(initial) { mutableStateOf(initial) }
     TesseraDialog(
-        title = "rename window",
+        title = stringResource(R.string.session_tmux_rename_window_title),
         onDismissRequest = onDismiss,
         actions = {
-            TesseraButton(text = "Cancel", onClick = onDismiss, compact = true)
+            TesseraButton(text = stringResource(R.string.session_cancel), onClick = onDismiss, compact = true)
             TesseraButton(
-                text = "Rename",
+                text = stringResource(R.string.session_tmux_rename_confirm),
                 onClick = { onConfirm(value) },
                 style = TesseraButtonStyle.Primary,
                 enabled = value.isNotBlank(),
@@ -4022,7 +5089,7 @@ internal fun TmuxRenameDialog(
             value = value,
             onValueChange = { value = it.take(100) },
             modifier = Modifier.fillMaxWidth(),
-            label = "Window name",
+            label = stringResource(R.string.session_tmux_window_name),
         )
     }
 }
@@ -4031,9 +5098,9 @@ internal fun TmuxRenameDialog(
 internal fun TmuxCloseDialog(title: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
     TesseraConfirmDialog(
         title = title,
-        body = "The remote tmux process in this target will be terminated.",
-        confirmLabel = "Close",
-        cancelLabel = "Cancel",
+        body = stringResource(R.string.session_tmux_close_body),
+        confirmLabel = stringResource(R.string.session_close),
+        cancelLabel = stringResource(R.string.session_cancel),
         destructive = true,
         onConfirm = onConfirm,
         onDismiss = onDismiss,

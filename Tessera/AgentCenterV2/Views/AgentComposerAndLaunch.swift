@@ -11,7 +11,10 @@ struct AgentComposerView: View {
     @Environment(\.designTokens) private var T
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.duoDeckPlacement) private var deckPlacement
+    @Environment(AgentThreadPresentationStore.self) private var presentationStore: AgentThreadPresentationStore?
     @State private var composerFocused = false
+    @State private var composerOwner = UUID()
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 4) {
@@ -54,7 +57,21 @@ struct AgentComposerView: View {
                 fontSize: composerFontSize,
                 textColor: UIColor(T.fg),
                 tintColor: UIColor(T.accent),
-                onSend: { if hasDraft { model.sendDraft(for: thread) } }
+                onSend: { if hasDraft { model.sendDraft(for: thread) } },
+                presentationStore: presentationStore,
+                presentationOwner: composerOwner,
+                isSelectedThread: { model.selectedThreadID == thread.summary.id },
+                onMount: { model.setComposerMounted(true, for: thread.summary.id) },
+                onUnmount: {
+                    model.setComposerMounted(false, for: thread.summary.id)
+                    if model.selectedThreadID == nil || model.selectedThreadID == thread.summary.id,
+                       model.keyboardFocus == .composer { model.keyboardFocus = .none }
+                },
+                onRestoreFocus: { model.requestComposerFocus(for: thread.summary.id) },
+                onFocusChange: { focused in
+                    if focused { model.keyboardFocus = .composer }
+                    else if model.keyboardFocus == .composer { model.keyboardFocus = .none }
+                }
             )
             .frame(maxWidth: .infinity)
             .overlay(alignment: .topLeading) {
@@ -68,9 +85,19 @@ struct AgentComposerView: View {
                 }
             }
             .padding(.vertical, 13)
-            .onChange(of: composerFocused) { _, focused in
-                if focused { model.keyboardFocus = .composer }
-                else if model.keyboardFocus == .composer { model.keyboardFocus = .none }
+            // A laptop-folded Duo types into the top half with the keyboard
+            // over the desk; iPhone keyboards have no key to put it away.
+            if deckPlacement?.keyboardUp == true {
+                Button(action: Self.hideKeyboard) {
+                    Image(systemName: "keyboard.chevron.compact.down")
+                        .font(.system(size: 17, weight: .regular))
+                        .foregroundStyle(T.fgMuted)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(AgentComposerButtonStyle())
+                .accessibilityIdentifier("agent-center-v2-hide-keyboard")
+                .accessibilityLabel("Hide keyboard")
             }
             Button {
                 if hasDraft { model.sendDraft(for: thread) }
@@ -119,11 +146,11 @@ struct AgentComposerView: View {
         .background(T.panelBg)
         .overlay(alignment: .top) { Rectangle().fill(T.border).frame(height: 1) }
         .onAppear { model.setComposerMounted(true, for: thread.summary.id) }
-        .onChange(of: thread.summary.id) { oldID, newID in
-            model.setComposerMounted(false, for: oldID)
-            model.setComposerMounted(true, for: newID)
+        .onDisappear {
+            if presentationStore?.isCurrentComposer(for: thread.summary.id, owner: composerOwner) ?? true {
+                model.setComposerMounted(false, for: thread.summary.id)
+            }
         }
-        .onDisappear { model.setComposerMounted(false, for: thread.summary.id) }
     }
 
     private var isSending: Bool { model.pendingSends[thread.summary.id] != nil }
@@ -140,7 +167,12 @@ struct AgentComposerView: View {
             compatibleWith: UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(dynamicTypeSize))
         )
     }
+    static func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
     private var placeholder: String {
+        // "answer above" points at the conversation's prompt card.
         switch thread.summary.status {
         case .waitingForInput: return String(localized: "answer above, or type to redirect")
         case .working: return String(localized: "message \(thread.summary.providerName)…")
@@ -189,6 +221,13 @@ struct AgentComposerTextView: UIViewRepresentable {
     let textColor: UIColor
     let tintColor: UIColor
     let onSend: () -> Void
+    var presentationStore: AgentThreadPresentationStore? = nil
+    var presentationOwner = UUID()
+    var isSelectedThread: () -> Bool = { true }
+    var onMount: () -> Void = {}
+    var onUnmount: () -> Void = {}
+    var onRestoreFocus: () -> Void = {}
+    var onFocusChange: (Bool) -> Void = { _ in }
     private static let maximumLines: CGFloat = 5
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -205,6 +244,9 @@ struct AgentComposerTextView: UIViewRepresentable {
         view.accessibilityIdentifier = "agent-center-v2-composer"
         view.setContentHuggingPriority(.defaultLow, for: .horizontal)
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let coordinator = context.coordinator
+        view.onWindowChange = { [weak coordinator] view in coordinator?.windowChanged(view) }
+        coordinator.mount(view)
         return view
     }
 
@@ -213,6 +255,7 @@ struct AgentComposerTextView: UIViewRepresentable {
         // An unfinished composition belongs to the old thread's draft: commit
         // it while the coordinator still writes through that draft's binding.
         if switchedThread, view.markedTextRange != nil { view.unmarkText() }
+        if switchedThread { context.coordinator.unmount() }
         context.coordinator.parent = self
         view.onSend = onSend
         if view.font?.pointSize != fontSize { view.font = .systemFont(ofSize: fontSize) }
@@ -222,6 +265,7 @@ struct AgentComposerTextView: UIViewRepresentable {
         if switchedThread {
             context.coordinator.threadID = threadID
             view.text = text
+            context.coordinator.mount(view)
         } else if view.text != text, view.markedTextRange == nil {
             // Never rewrite the text under an IME composition or a matching
             // edit; either would reset the caret.
@@ -233,12 +277,21 @@ struct AgentComposerTextView: UIViewRepresentable {
             DispatchQueue.main.async { [weak view] in
                 guard coordinator.threadID == request.threadID,
                       coordinator.lastFocusRequestID != request.id,
+                      coordinator.isMounted,
+                      coordinator.isCurrent,
                       let view, view.window != nil,
                       coordinator.parent.consumeFocusRequest(request) else { return }
                 coordinator.lastFocusRequestID = request.id
                 view.becomeFirstResponder()
             }
         }
+    }
+
+    static func dismantleUIView(_ view: ComposerTextView, coordinator: Coordinator) {
+        if view.markedTextRange != nil { view.unmarkText() }
+        coordinator.unmount()
+        view.onWindowChange = nil
+        view.delegate = nil
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: ComposerTextView, context: Context) -> CGSize? {
@@ -252,20 +305,83 @@ struct AgentComposerTextView: UIViewRepresentable {
         var parent: AgentComposerTextView
         var threadID: AgentThreadID
         var lastFocusRequestID: UUID?
+        private let owner: UUID
+        private(set) var isMounted = false
+        private var restoresFocus = false
         init(_ parent: AgentComposerTextView) {
             self.parent = parent
             threadID = parent.threadID
+            owner = parent.presentationOwner
+        }
+
+        var isCurrent: Bool { parent.presentationStore?.isCurrentComposer(for: threadID, owner: owner) ?? true }
+
+        func mount(_ view: ComposerTextView) {
+            isMounted = true
+            let selected = parent.isSelectedThread
+            restoresFocus = parent.presentationStore?.mountComposer(for: threadID, owner: owner,
+                snapshot: { [weak view] in selected() && view?.retainsFocus == true }) ?? false
+            parent.onMount()
+            if view.isFirstResponder { parent.isFocused = true; parent.onFocusChange(true) }
+            windowChanged(view)
+        }
+
+        func unmount() {
+            guard isMounted else { return }
+            isMounted = false
+            restoresFocus = false
+            if parent.presentationStore?.unmountComposer(for: threadID, owner: owner) ?? true {
+                parent.onUnmount()
+            }
+        }
+
+        func windowChanged(_ view: ComposerTextView) {
+            guard view.window != nil, restoresFocus else { return }
+            restoresFocus = false
+            let expectedThread = threadID
+            DispatchQueue.main.async { [weak self, weak view] in
+                guard let self, self.isMounted, self.isCurrent, self.threadID == expectedThread,
+                      view?.window != nil, self.parent.isSelectedThread() else { return }
+                // Use the existing one-shot, selection-checked focus request.
+                self.parent.onRestoreFocus()
+            }
         }
 
         func textViewDidChange(_ textView: UITextView) {
             if parent.text != textView.text { parent.text = textView.text }
         }
-        func textViewDidBeginEditing(_ textView: UITextView) { parent.isFocused = true }
-        func textViewDidEndEditing(_ textView: UITextView) { parent.isFocused = false }
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            parent.isFocused = true
+            if isMounted && isCurrent { parent.onFocusChange(true) }
+        }
+        func textViewDidEndEditing(_ textView: UITextView) {
+            parent.isFocused = false
+            if isMounted && isCurrent { parent.onFocusChange(false) }
+        }
     }
 
     final class ComposerTextView: UITextView {
         var onSend: (() -> Void)?
+        var onWindowChange: ((ComposerTextView) -> Void)?
+        private var focusBeforeRemoval = false
+        private var leavingWindow = false
+
+        var retainsFocus: Bool { leavingWindow ? focusBeforeRemoval : isFirstResponder }
+
+        override func willMove(toWindow newWindow: UIWindow?) {
+            if newWindow == nil, window != nil {
+                focusBeforeRemoval = isFirstResponder
+                leavingWindow = true
+            } else if newWindow != nil {
+                leavingWindow = false
+            }
+            super.willMove(toWindow: newWindow)
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            onWindowChange?(self)
+        }
 
         override var keyCommands: [UIKeyCommand]? {
             let send = [UIKeyModifierFlags.command, .control].map { modifiers in
@@ -513,7 +629,7 @@ struct AgentLaunchSheet: View {
                 }
             }
         }
-        .presentationDetents(isCompact ? [.medium, .large] : [.large])
+        .laptopSheetDetents(isCompact ? [.medium, .large] : [.large])
         .presentationDragIndicator(.visible)
     }
 
@@ -535,7 +651,7 @@ struct AgentLaunchSheet: View {
     }
 
     @ViewBuilder
-    private func field<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
+    private func field<Content: View>(_ label: LocalizedStringKey, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(label).font(Typography.kicker).foregroundStyle(T.fgDim)
             content()

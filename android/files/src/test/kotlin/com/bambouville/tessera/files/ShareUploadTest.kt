@@ -111,48 +111,48 @@ class ShareUploadTest {
     @Test
     fun `status text distinguishes every row state`() {
         assertEquals(
-            "connected · active session",
+            R.string.files_share_status_active_session,
             ShareUploadPolicy.status(target("a", connected = true, active = true)),
         )
-        assertEquals("connected", ShareUploadPolicy.status(target("a", connected = true)))
-        assertEquals("connecting…", ShareUploadPolicy.status(target("a", connecting = true)))
-        assertEquals("reconnect failed", ShareUploadPolicy.status(target("a", failed = true)))
-        assertEquals("connect on upload…", ShareUploadPolicy.status(target("a")))
+        assertEquals(R.string.files_share_status_connected, ShareUploadPolicy.status(target("a", connected = true)))
+        assertEquals(R.string.files_connecting, ShareUploadPolicy.status(target("a", connecting = true)))
+        assertEquals(R.string.files_share_status_reconnect_failed, ShareUploadPolicy.status(target("a", failed = true)))
+        assertEquals(R.string.files_share_status_connect_on_upload, ShareUploadPolicy.status(target("a")))
         assertEquals(
-            "connect on paste…",
+            R.string.files_share_status_connect_on_paste,
             ShareUploadPolicy.status(target("a"), ShareTextMode.PasteIntoSession),
         )
         // A live row reads the same either way — the state is the story there.
         assertEquals(
-            "connected",
+            R.string.files_share_status_connected,
             ShareUploadPolicy.status(target("a", connected = true), ShareTextMode.PasteIntoSession),
         )
     }
 
     @Test
     fun `the button admits when it has to open a session first`() {
-        assertEquals("Upload", ShareUploadPolicy.ctaTitle(target("a", connected = true)))
-        assertEquals("Upload", ShareUploadPolicy.ctaTitle(target("a", connecting = true)))
-        assertEquals("Connect & upload", ShareUploadPolicy.ctaTitle(target("a")))
-        assertEquals("Connect & upload", ShareUploadPolicy.ctaTitle(target("a", failed = true)))
+        assertEquals(R.string.files_upload, ShareUploadPolicy.ctaTitle(target("a", connected = true)))
+        assertEquals(R.string.files_upload, ShareUploadPolicy.ctaTitle(target("a", connecting = true)))
+        assertEquals(R.string.files_share_connect_and_upload, ShareUploadPolicy.ctaTitle(target("a")))
+        assertEquals(R.string.files_share_connect_and_upload, ShareUploadPolicy.ctaTitle(target("a", failed = true)))
         assertEquals(
-            "Paste",
+            R.string.files_share_paste,
             ShareUploadPolicy.ctaTitle(target("a", connected = true), ShareTextMode.PasteIntoSession),
         )
         assertEquals(
-            "Paste",
+            R.string.files_share_paste,
             ShareUploadPolicy.ctaTitle(target("a", connecting = true), ShareTextMode.PasteIntoSession),
         )
         assertEquals(
-            "Connect & paste",
+            R.string.files_share_connect_and_paste,
             ShareUploadPolicy.ctaTitle(target("a"), ShareTextMode.PasteIntoSession),
         )
         assertEquals(
-            "Connect & paste",
+            R.string.files_share_connect_and_paste,
             ShareUploadPolicy.ctaTitle(target("a", failed = true), ShareTextMode.PasteIntoSession),
         )
-        assertEquals("Paste", ShareUploadPolicy.ctaTitle(null, ShareTextMode.PasteIntoSession))
-        assertEquals("Upload", ShareUploadPolicy.ctaTitle(null))
+        assertEquals(R.string.files_share_paste, ShareUploadPolicy.ctaTitle(null, ShareTextMode.PasteIntoSession))
+        assertEquals(R.string.files_upload, ShareUploadPolicy.ctaTitle(null))
     }
 
     @Test

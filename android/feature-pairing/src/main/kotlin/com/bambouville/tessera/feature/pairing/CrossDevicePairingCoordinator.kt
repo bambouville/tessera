@@ -3,6 +3,7 @@ package com.bambouville.tessera.feature.pairing
 import android.content.Context
 import android.os.Build
 import android.util.Base64
+import androidx.annotation.StringRes
 import com.bambouville.tessera.core.bridge.SharedSetupFlow
 import com.bambouville.tessera.core.bridge.SharedSetupFlow.Phase
 import com.bambouville.tessera.core.bridge.CoreCallResult
@@ -20,6 +21,7 @@ import com.bambouville.tessera.core.bridge.SharedBootstrapTransactionVersions
 import com.bambouville.tessera.core.bridge.SharedPairingQrDecode
 import com.bambouville.tessera.core.bridge.SharedPairingQrRejection
 import com.bambouville.tessera.core.bridge.SharedTrustPolicy
+import com.bambouville.tessera.design.DisplayText
 import com.bambouville.tessera.design.TerminalFontCatalog
 import com.bambouville.tessera.data.AndroidCrossDeviceReceiptRepository
 import com.bambouville.tessera.data.CredentialKinds
@@ -30,6 +32,7 @@ import com.bambouville.tessera.data.continuity.AndroidPendingContinuationRecover
 import com.bambouville.tessera.data.continuity.PendingContinuationRecovery
 import com.bambouville.tessera.data.continuity.isFreshAt
 import com.bambouville.tessera.data.AndroidAppPreferences
+import com.bambouville.tessera.data.knownTerminalTheme
 import com.bambouville.tessera.forwarding.AndroidPortForwardRuleStore
 import com.bambouville.tessera.forwarding.PortForwardDirection
 import com.bambouville.tessera.forwarding.PortForwardEndpoint
@@ -85,7 +88,7 @@ sealed interface PairingUiState {
     data class AwaitingPeerSas(val digits: String) : PairingUiState
     data object AwaitingSetupChoice : PairingUiState
     data class AwaitingOwnerApproval(
-        val summary: String,
+        val summary: DisplayText,
         val hosts: List<PairingHostSummary> = emptyList(),
         val selectedHostIds: Set<String> = emptySet(),
         val selectedOptionalTransfers: Set<String> = emptySet(),
@@ -94,12 +97,33 @@ sealed interface PairingUiState {
     ) : PairingUiState
     data class AwaitingRecipientImport(val hosts: List<PairingHostSummary>) : PairingUiState
     data class AwaitingSourcePassword(val hostName: String, val username: String) : PairingUiState
-    data class Working(val message: String, val phase: Phase) : PairingUiState
+    data class Working(val message: DisplayText, val phase: Phase) : PairingUiState
     data class AwaitingConnection(val hostId: String, val transport: String, val tmuxTarget: String?) : PairingUiState
-    data class Completed(val message: String, val hosts: List<PairingReceiptHost> = emptyList()) : PairingUiState
-    data class Failed(val message: String, val title: String = "Pairing stopped", val step: Int = 0,
+    data class Completed(val message: DisplayText, val hosts: List<PairingReceiptHost> = emptyList()) : PairingUiState
+    /** A null [title] shows the default "Pairing stopped" heading (`pairing_stopped_title`). */
+    data class Failed(val message: DisplayText, val title: DisplayText? = null, val step: Int = 0,
         val hosts: List<PairingReceiptHost> = emptyList()) : PairingUiState
 }
+
+/**
+ * A refusal in the pairing screen's own words. [text] is resolved where it is
+ * shown, so it follows the current locale; the message stays English.
+ */
+internal class PairingRefusalException(message: String, val text: DisplayText, cause: Throwable? = null) :
+    IllegalArgumentException(message, cause)
+
+/**
+ * A failure's diagnostic code. Release builds rename the app's own classes,
+ * so a refusal reports the platform type it was thrown as before it had one.
+ */
+internal fun pairingFailureCode(failure: Throwable): String =
+    if (failure is PairingRefusalException) "IllegalArgumentException" else failure::class.java.simpleName
+
+/** What [failure] tells the user: a refusal's own words, the system's message as it came, or [fallback]. */
+internal fun pairingFailureText(failure: Throwable, @StringRes fallback: Int): DisplayText =
+    (failure as? PairingRefusalException)?.text
+        ?: failure.message?.let(DisplayText::Verbatim)
+        ?: DisplayText.Resource(fallback)
 
 data class PairingReceiptHost(val id: String, val name: String, val outcome: SharedSetupFlow.Outcome)
 
@@ -203,7 +227,14 @@ class CrossDevicePairingCoordinator private constructor(
     private val pendingContinuationRecovery = AndroidPendingContinuationRecoveryStore(context.applicationContext)
     private val forwardingRules = AndroidPortForwardRuleStore(context.applicationContext)
     private val appPreferences = AndroidAppPreferences(context.applicationContext)
-    private val nativeContext = context.applicationContext
+    /**
+     * User-visible copy, resolved where it is shown so it follows the current
+     * locale; diagnostics, wire fields and invariant messages stay inline English.
+     */
+    private fun text(@StringRes id: Int, vararg formatArgs: Any): DisplayText = DisplayText.Resource(id, formatArgs.toList())
+    /** A refusal the screen shows as [id]; [english] is its message for logs. */
+    private fun refusal(english: String, @StringRes id: Int, vararg formatArgs: Any, cause: Throwable? = null) =
+        PairingRefusalException(english, text(id, *formatArgs), cause)
     private var runtime: CrossDeviceRuntime? = null
     private var rendezvous: PairingTcpRendezvous? = null
     private var generation = 0L
@@ -364,7 +395,8 @@ class CrossDevicePairingCoordinator private constructor(
         isOrigin = false
         recordDiagnostic("pairing_begin", mapOf("role" to "recipient", "purpose" to checkNotNull(purpose).wire))
         if (purpose == PairingPurpose.Enroll) {
-            enrollmentTargetHost = requireNotNull(enrollmentHost) { "Choose the host that will receive this device key." }
+            enrollmentTargetHost = enrollmentHost
+                ?: throw refusal("Choose the host that will receive this device key.", R.string.pairing_choose_enrollment_host)
         }
         pendingEndpointCandidates = tcpEndpointCandidates(offer)
         createRuntime()
@@ -384,7 +416,7 @@ class CrossDevicePairingCoordinator private constructor(
 
     fun decideSas(matches: Boolean) {
         val sas = mutableState.value as? PairingUiState.Sas ?: return
-        mutableState.value = if (matches) PairingUiState.AwaitingPeerSas(sas.digits) else PairingUiState.Working("Stopping the mismatched pairing…", Phase.rejecting)
+        mutableState.value = if (matches) PairingUiState.AwaitingPeerSas(sas.digits) else PairingUiState.Working(text(R.string.pairing_working_stopping_mismatch), Phase.rejecting)
         recordDiagnostic("pairing_sas_decision", mapOf("result" to if (matches) "match" else "mismatch", "phase" to "waiting_peer"))
         submit("decideSAS", mapOf("matches" to CanonicalCrossDeviceJson.JsonValue.Boolean(matches)))
     }
@@ -395,7 +427,7 @@ class CrossDevicePairingCoordinator private constructor(
         val expectedGeneration = generation
         pendingImportManifest = null
         pendingImportAttemptId = null
-        mutableState.value = PairingUiState.Working("Importing approved setup with this device's own key…", Phase.importing)
+        mutableState.value = PairingUiState.Working(text(R.string.pairing_working_importing), Phase.importing)
         recordDiagnostic("pairing_import_approved", mapOf("hosts" to manifest.optJSONArray("hosts")?.length().toString()))
         scope.launch {
             runCatching { importBootstrap(manifest, attemptId, expectedGeneration) }
@@ -403,11 +435,11 @@ class CrossDevicePairingCoordinator private constructor(
                     if (failure !is CancellationException && pairingGenerationIsCurrent(expectedGeneration)) {
                         recordDiagnostic(
                             "pairing_adapter_failed",
-                            mapOf("code" to failure::class.java.simpleName, "phase" to "bootstrap_import"),
+                            mapOf("code" to pairingFailureCode(failure), "phase" to "bootstrap_import"),
                         )
                         submit("cancel")
                         closePairingTransport()
-                        mutableState.value = PairingUiState.Failed(failure.message ?: "Setup import failed")
+                        mutableState.value = PairingUiState.Failed(pairingFailureText(failure, R.string.pairing_failed_import))
                     }
                 }
         }
@@ -433,12 +465,12 @@ class CrossDevicePairingCoordinator private constructor(
         val action = pendingOwnerAction ?: return
         if (!approved) return
         if (runtime == null || token.generation != generation || token.policyGeneration != policyGeneration || token.attemptId != action.attemptId) return
-        mutableState.value = PairingUiState.Working("Revalidating the authorized route…", Phase.authorizing)
+        mutableState.value = PairingUiState.Working(text(R.string.pairing_working_revalidating), Phase.authorizing)
         scope.launch {
             if (runtime == null || token.generation != generation || token.policyGeneration != policyGeneration || pendingOwnerAction != action) return@launch
             val currentFingerprint = runCatching { sourcePolicyFingerprint(action.sourceHostIds) }.getOrNull()
             if (currentFingerprint != action.sourcePolicyFingerprint) {
-                invalidateSourcePolicy("The source host, credential, or trust policy changed during authorization. Start again.")
+                invalidateSourcePolicy(text(R.string.pairing_failed_policy_changed))
                 return@launch
             }
             authorizedSourcePolicyFingerprint = action.sourcePolicyFingerprint
@@ -446,7 +478,7 @@ class CrossDevicePairingCoordinator private constructor(
             pendingOwnerAction = null
             pendingManifest = null
             val now = System.currentTimeMillis()
-            mutableState.value = PairingUiState.Working("Applying the authorized change…", Phase.transferring)
+            mutableState.value = PairingUiState.Working(text(R.string.pairing_working_applying), Phase.transferring)
             when (action) {
                 is PendingOwnerAction.Bootstrap -> submit(
                     "approveBootstrapManifest",
@@ -526,7 +558,7 @@ class CrossDevicePairingCoordinator private constructor(
         if (password.isEmpty()) return
         val characters = password.toCharArray()
         if (passwordDecision?.complete(characters) != true) characters.fill('\u0000')
-        else mutableState.value = PairingUiState.Working("Verifying source-host access…", Phase.granting)
+        else mutableState.value = PairingUiState.Working(text(R.string.pairing_working_verifying_source), Phase.granting)
     }
 
     /** Interrupted protocol secrets cannot be resumed; a fresh verified attempt is required. */
@@ -560,7 +592,7 @@ class CrossDevicePairingCoordinator private constructor(
             // state. A recovered terminal is useful, but it must not claim to
             // complete the old authenticated transaction.
             mutableState.value = PairingUiState.Completed(
-                "Destination session recovered. Start a new pairing attempt to notify the other device.",
+                text(R.string.pairing_completed_recovered),
             )
             recordDiagnostic("pairing_continuation_recovered", mapOf("result" to "destination_rendered"))
         }
@@ -705,13 +737,13 @@ class CrossDevicePairingCoordinator private constructor(
             recordDiagnostic("pairing_transport_failed", mapOf("code" to error::class.java.simpleName, "phase" to "local_tcp"))
             submit("cancel")
             closePairingTransport()
-            mutableState.value = PairingUiState.Failed(error.message ?: "Local pairing connection closed")
+            mutableState.value = PairingUiState.Failed(pairingFailureText(error, R.string.pairing_failed_connection_closed))
         },
     ).also { rendezvous = it }
 
     private fun onCoreEvent(event: CoreEvent) {
         if (coreEvents.trySend(event).isFailure && mutableState.value != PairingUiState.Idle) {
-            mutableState.value = PairingUiState.Failed("Pairing event processor is unavailable")
+            mutableState.value = PairingUiState.Failed(text(R.string.pairing_failed_processor_unavailable))
         }
     }
 
@@ -720,10 +752,10 @@ class CrossDevicePairingCoordinator private constructor(
         runCatching { processCoreEvent(JSONObject(event.bytes.decodeToString())) }
             .onFailure {
                 if (it is CancellationException || !pairingGenerationIsCurrent(expectedGeneration)) return
-                recordDiagnostic("pairing_adapter_failed", mapOf("code" to it::class.java.simpleName, "phase" to purpose?.wire.orEmpty()))
+                recordDiagnostic("pairing_adapter_failed", mapOf("code" to pairingFailureCode(it), "phase" to purpose?.wire.orEmpty()))
                 submit("cancel")
                 closePairingTransport()
-                mutableState.value = PairingUiState.Failed(it.message ?: "Pairing failed")
+                mutableState.value = PairingUiState.Failed(pairingFailureText(it, R.string.pairing_failed_generic))
             }
     }
 
@@ -749,7 +781,7 @@ class CrossDevicePairingCoordinator private constructor(
                 recordDiagnostic("pairing_phase", mapOf("phase" to "approved", "role" to if (isOrigin) "origin" else "recipient"))
                 mutableState.value = if (purpose == PairingPurpose.Bootstrap || purpose == PairingPurpose.SetupAndContinue) {
                     PairingUiState.AwaitingSetupChoice
-                } else PairingUiState.Working("The code is confirmed on both devices…", Phase.transferring)
+                } else PairingUiState.Working(text(R.string.pairing_working_code_confirmed), Phase.transferring)
                 if (purpose == PairingPurpose.Continue || purpose == PairingPurpose.SetupAndContinue) {
                     if (isOrigin) originDescriptor?.let { submit("provideContinuationDescriptor", mapOf("descriptor" to CanonicalCrossDeviceJson.JsonValue.String(CanonicalCrossDeviceJson.base64(it)))) }
                 }
@@ -781,7 +813,7 @@ class CrossDevicePairingCoordinator private constructor(
                 val recipientKey = event.payloadObject().optJSONObject("recipientKey")
                 recordDiagnostic("pairing_source_review", mapOf("hosts" to summaries.size.toString()))
                 mutableState.value = PairingUiState.AwaitingOwnerApproval(
-                    "Choose what to copy. Tessera installs and verifies only the recipient's public key; passwords and private keys never leave this device.",
+                    text(R.string.pairing_owner_review_summary),
                     summaries,
                     selectedHostIds = originSelectedHostIds,
                     selectedOptionalTransfers = originSelectedOptionalTransfers,
@@ -828,7 +860,10 @@ class CrossDevicePairingCoordinator private constructor(
                 if (!pairingGenerationIsCurrent(expectedGeneration)) return
                 for (hostId in installed) {
                     val staged = pending[hostId] ?: continue
-                    val host = hosts.host(hostId) ?: error("Imported host disappeared before access was recorded")
+                    val host = hosts.host(hostId) ?: throw refusal(
+                        "Imported host disappeared before access was recorded",
+                        R.string.pairing_failed_imported_host_missing,
+                    )
                     if (!pairingGenerationIsCurrent(expectedGeneration)) return
                     hosts.save(host.asDraft(identityId = staged.identityId))
                     if (!pairingGenerationIsCurrent(expectedGeneration)) return
@@ -850,30 +885,30 @@ class CrossDevicePairingCoordinator private constructor(
                 val retainedId = retainedDescriptor?.optString("hostID")?.let(UUID::fromString)?.toString()
                 if (failedGrantHostIds.isNotEmpty()) {
                     mutableState.value = PairingUiState.Failed(
-                        "Your host setup was copied. Access still needs attention on ${failedGrantHostIds.size} host(s). No unverified device key was linked, and no session was opened. You can review the hosts or start a fresh pairing.",
-                        title = "Setup copied · access incomplete", step = 3, hosts = setupReceipt(),
+                        DisplayText.Plural(R.plurals.pairing_failed_access_incomplete, failedGrantHostIds.size),
+                        title = text(R.string.pairing_failed_access_incomplete_title), step = 3, hosts = setupReceipt(),
                     )
                     closePairingTransport()
                 } else if (retainedDescriptor != null && retainedId !in verifiedGrantHostIds && retainedId !in passwordBootstrapHostIds) {
-                    mutableState.value = PairingUiState.Failed("The continuation host did not verify an authorized_keys grant.")
+                    mutableState.value = PairingUiState.Failed(text(R.string.pairing_failed_continuation_grant))
                 } else {
                     val retained = retainedDescriptor
                     if (retained != null) {
                         if (!descriptorMatchesLocal(retained)) {
                             submit("cancel")
-                            mutableState.value = PairingUiState.Failed("The imported route does not match the authenticated continuation descriptor.")
+                            mutableState.value = PairingUiState.Failed(text(R.string.pairing_failed_descriptor_mismatch))
                         } else {
                             acceptRetainedDescriptor(retained, event.attemptId())
                             // The queued connection-required event will show
                             // AwaitingConnection; setup is not completion.
-                            mutableState.value = PairingUiState.Working("Setup copied. Preparing continuation…", Phase.awaitingConnection)
+                            mutableState.value = PairingUiState.Working(text(R.string.pairing_working_preparing_continuation), Phase.awaitingConnection)
                         }
                     } else {
                         mutableState.value = if (purpose == PairingPurpose.SetupAndContinue) {
-                            PairingUiState.Working("Setup copied. Waiting for the other device to connect…", Phase.awaitingConnection)
+                            PairingUiState.Working(text(R.string.pairing_working_waiting_connect), Phase.awaitingConnection)
                         } else PairingUiState.Completed(if (passwordBootstrapHostIds.isEmpty())
-                            "Bootstrap host access was imported and verified."
-                        else "Host setup was copied. Password hosts will ask for their password when you connect.", hosts = setupReceipt())
+                            text(R.string.pairing_completed_bootstrap_verified)
+                        else text(R.string.pairing_completed_password_hosts), hosts = setupReceipt())
                         if (purpose == PairingPurpose.Bootstrap) closePairingTransport()
                     }
                     recordDiagnostic("pairing_complete", mapOf("purpose" to purpose?.wire.orEmpty(), "result" to "success"))
@@ -887,11 +922,11 @@ class CrossDevicePairingCoordinator private constructor(
                 val enrollmentId = UUID.fromString(payload.getString("enrollmentID")).toString()
                 receipts.record(CrossDeviceReceipt(event.attemptId(), "enrollment-completed", listOf(enrollmentId), System.currentTimeMillis()))
                 generatedIdentityRetained = true
-                mutableState.value = PairingUiState.Completed("This Android device key is enrolled for the selected host.")
+                mutableState.value = PairingUiState.Completed(text(R.string.pairing_completed_enrolled))
                 closePairingTransport()
             }
             "continuationCompleted" -> {
-                mutableState.value = PairingUiState.Completed("Cross-device continuation completed.", hosts = setupReceipt())
+                mutableState.value = PairingUiState.Completed(text(R.string.pairing_completed_continuation), hosts = setupReceipt())
                 closePairingTransport()
             }
             "terminal", "commandRejected" -> {
@@ -903,7 +938,7 @@ class CrossDevicePairingCoordinator private constructor(
                 if (mutableState.value !is PairingUiState.Failed) {
                     val projection = SharedSetupFlow.project(presentationPurpose.wire, Phase.failed,
                         failureCode = event.optString("code", "failed"))
-                    mutableState.value = PairingUiState.Failed(pairingFailureMessage(nativeContext, projection.failureReason))
+                    mutableState.value = PairingUiState.Failed(pairingFailureMessage(projection.failureReason))
                 }
             }
         }
@@ -921,12 +956,12 @@ class CrossDevicePairingCoordinator private constructor(
         val local = hosts.host(hostId)
         if (local == null) {
             submit("cancel")
-            mutableState.value = PairingUiState.Failed("This device needs setup before it can use this host.")
+            mutableState.value = PairingUiState.Failed(text(R.string.pairing_failed_needs_setup))
             return
         }
         if (!descriptorMatchesLocal(descriptor)) {
             submit("cancel")
-            mutableState.value = PairingUiState.Failed("The continuation route no longer matches this device's saved jump-host route.")
+            mutableState.value = PairingUiState.Failed(text(R.string.pairing_failed_route_changed))
             return
         }
         acceptRetainedDescriptor(descriptor, attemptId)
@@ -1049,7 +1084,7 @@ class CrossDevicePairingCoordinator private constructor(
         receipts.stagePendingAccess(PendingCrossDeviceAccess(attemptId, target.id, identityId, System.currentTimeMillis()))
         generatedIdentityRetained = true
         submit("beginEnrollment", mapOf("enrollmentRequest" to CanonicalCrossDeviceJson.JsonValue.Raw(request)))
-        mutableState.value = PairingUiState.Working("Waiting for the source device to approve enrollment…", Phase.waitingForSelection)
+        mutableState.value = PairingUiState.Working(text(R.string.pairing_working_waiting_enrollment), Phase.waitingForSelection)
     }
 
     private suspend fun generateIdentity(saveImmediately: Boolean): GeneratedIdentity {
@@ -1085,7 +1120,9 @@ class CrossDevicePairingCoordinator private constructor(
         val pending = byId.keys.toMutableSet()
         while (pending.isNotEmpty()) {
             val ready = pending.filter { parent[it] == null || parent[it] in accepted }
-            require(ready.isNotEmpty()) { "Bootstrap manifest has a cyclic or missing jump host" }
+            if (ready.isEmpty()) {
+                throw refusal("Bootstrap manifest has a cyclic or missing jump host", R.string.pairing_failed_bootstrap_cyclic_routes)
+            }
             for (id in ready) {
                 if (!pairingGenerationIsCurrent(expectedGeneration)) return
                 val source = checkNotNull(byId[id])
@@ -1115,10 +1152,11 @@ class CrossDevicePairingCoordinator private constructor(
                 )
                 val existing = hosts.host(normalizedId)
                 if (!pairingGenerationIsCurrent(expectedGeneration)) return
-                if (existing != null) {
-                    require(existing.matchesImportedHost(draft)) {
-                        "Saved host $normalizedId conflicts with the authenticated bootstrap manifest"
-                    }
+                if (existing != null && !existing.matchesImportedHost(draft)) {
+                    throw refusal(
+                        "Saved host $normalizedId conflicts with the authenticated bootstrap manifest",
+                        R.string.pairing_failed_host_conflict, normalizedId,
+                    )
                 }
                 if (source.optString("authenticationHint") == "password" && existing?.identityId == null) {
                     passwordBootstrapHostIds += normalizedId
@@ -1201,6 +1239,10 @@ class CrossDevicePairingCoordinator private constructor(
             // something this device can actually render.
             appearance.optString("monospacedFontName").takeIf { it.isNotEmpty() }
                 ?.let { appPreferences.updateTerminalFontId(TerminalFontCatalog.resolve(it)) }
+            // A theme this build lacks, or a legacy "default", follows the
+            // system appearance as an unset choice does.
+            appearance.optString("terminalThemeID").takeIf { it.isNotEmpty() }
+                ?.let { appPreferences.updateTerminalThemeId(knownTerminalTheme(it)) }
         }
         manifest.optJSONObject("settings")?.let { settings ->
             BootstrapAgentCenterSetting.importedValue(settings.opt("agentCenterEnabled"))
@@ -1225,7 +1267,7 @@ class CrossDevicePairingCoordinator private constructor(
         generatedIdentityRetained = accepted.any { it !in passwordBootstrapHostIds }
         recordDiagnostic("pairing_import_recorded", mapOf("hosts" to accepted.size.toString(), "result" to "staged"))
         mutableState.value = PairingUiState.Working(
-            "Setup copied. Waiting for the sender to authorize and verify this device’s key…", Phase.waitingForGrant,
+            text(R.string.pairing_working_waiting_grant), Phase.waitingForGrant,
         )
         submit(
             "bootstrapImportDurablyApplied",
@@ -1250,7 +1292,7 @@ class CrossDevicePairingCoordinator private constructor(
         val results = mutableListOf<CanonicalCrossDeviceJson.JsonValue.Raw>()
         verifiedGrantHostIds.clear()
         failedGrantHostIds.clear()
-        mutableState.value = PairingUiState.Working("Installing and verifying the recipient key on source hosts…", Phase.granting)
+        mutableState.value = PairingUiState.Working(text(R.string.pairing_working_installing_grants), Phase.granting)
         val sourceHosts = manifest.getJSONArray("hosts")
         setupReceiptNames = manifestSummaries(manifest).associate { it.id to it.name }
         for (index in 0 until sourceHosts.length()) {
@@ -1309,7 +1351,7 @@ class CrossDevicePairingCoordinator private constructor(
             ),
         )
         if (failedGrantHostIds.isNotEmpty()) {
-            mutableState.value = PairingUiState.Failed("One or more source hosts did not verify the recipient public-key grant.")
+            mutableState.value = PairingUiState.Failed(text(R.string.pairing_failed_grants))
         }
     }
 
@@ -1378,7 +1420,7 @@ class CrossDevicePairingCoordinator private constructor(
             sourcePolicyFingerprint(),
         )
         mutableState.value = PairingUiState.AwaitingOwnerApproval(
-            "Enroll ${request.getString("requestingDeviceName")} for ${request.getString("hostName")}.",
+            text(R.string.pairing_enroll_summary, request.getString("requestingDeviceName"), request.getString("hostName")),
         )
     }
 
@@ -1400,7 +1442,7 @@ class CrossDevicePairingCoordinator private constructor(
                 "routeIdentity" to CanonicalCrossDeviceJson.JsonValue.String(routeIdentity),
             ),
         )
-        mutableState.value = PairingUiState.Working("The key was verified; waiting for the recipient to record access…", Phase.recordingAccess)
+        mutableState.value = PairingUiState.Working(text(R.string.pairing_working_key_verified), Phase.recordingAccess)
     }
 
     private suspend fun recordEnrollment(request: JSONObject, attemptId: String) {
@@ -1426,7 +1468,7 @@ class CrossDevicePairingCoordinator private constructor(
                 "publicKeyFingerprint" to CanonicalCrossDeviceJson.JsonValue.String(generated.fingerprint),
             ),
         )
-        mutableState.value = PairingUiState.Working("Access is recorded; waiting for the source acknowledgement…", Phase.recordingAccess)
+        mutableState.value = PairingUiState.Working(text(R.string.pairing_working_access_recorded), Phase.recordingAccess)
     }
 
     /**
@@ -1451,14 +1493,14 @@ class CrossDevicePairingCoordinator private constructor(
                 "pairing_command_rejected",
                 mapOf("kind" to kind, "code" to rejection::class.java.simpleName),
             )
-            mutableState.value = PairingUiState.Failed("Rejected pairing command")
+            mutableState.value = PairingUiState.Failed(text(R.string.pairing_failed_rejected_command))
             closePairingTransport()
             return
         }
         when (bridge.sendCanonical(canonical)) {
             CoreCallResult.Accepted -> Unit
-            CoreCallResult.StaleHandle -> mutableState.value = PairingUiState.Failed("Pairing attempt is no longer active")
-            CoreCallResult.InvalidArguments -> mutableState.value = PairingUiState.Failed("Rejected pairing command")
+            CoreCallResult.StaleHandle -> mutableState.value = PairingUiState.Failed(text(R.string.pairing_failed_attempt_inactive))
+            CoreCallResult.InvalidArguments -> mutableState.value = PairingUiState.Failed(text(R.string.pairing_failed_rejected_command))
         }
     }
 
@@ -1468,7 +1510,7 @@ class CrossDevicePairingCoordinator private constructor(
         pendingEndpointCandidates = null
     }
 
-    private fun invalidateSourcePolicy(message: String) {
+    private fun invalidateSourcePolicy(message: DisplayText) {
         operationRetired = true
         policyGeneration += 1
         issuedOwnerToken = null
@@ -1576,7 +1618,7 @@ class CrossDevicePairingCoordinator private constructor(
 
     private suspend fun buildManifestForAllHosts(peerSupportsAgentCenterEnabled: Boolean = false): String {
         val route = allHostsInRouteOrder()
-        require(route.isNotEmpty()) { "No saved hosts are available to bootstrap" }
+        if (route.isEmpty()) throw refusal("No saved hosts are available to bootstrap", R.string.pairing_failed_no_hosts)
         val portableForwards = route.associate { host ->
             host.id to forwardingRules.observe(host.id).first().filter {
                 it.direction == PortForwardDirection.LOCAL
@@ -1643,7 +1685,7 @@ class CrossDevicePairingCoordinator private constructor(
                     TerminalFontCatalog.resolve(preferences.terminalFontId),
                 ),
                 "terminalFontSize" to CanonicalCrossDeviceJson.JsonValue.Number(preferences.terminalTextSizeSp.toLong()),
-                "terminalThemeID" to CanonicalCrossDeviceJson.JsonValue.String("default"),
+                "terminalThemeID" to CanonicalCrossDeviceJson.JsonValue.String(preferences.terminalThemeId),
             ))),
             "hosts" to CanonicalCrossDeviceJson.JsonValue.Array(hostItems),
             "identities" to CanonicalCrossDeviceJson.JsonValue.Array(emptyList()), "jumpChains" to CanonicalCrossDeviceJson.JsonValue.Array(jumpLinks), "knownHosts" to CanonicalCrossDeviceJson.JsonValue.Array(knownHostItems),
@@ -1667,7 +1709,9 @@ class CrossDevicePairingCoordinator private constructor(
         val included = mutableSetOf<String>()
         while (pending.isNotEmpty()) {
             val ready = pending.values.filter { it.jumpHostId == null || it.jumpHostId in included }
-            require(ready.isNotEmpty()) { "Saved hosts contain a cyclic or missing jump-host route" }
+            if (ready.isEmpty()) {
+                throw refusal("Saved hosts contain a cyclic or missing jump-host route", R.string.pairing_failed_cyclic_routes)
+            }
             ready.forEach { host ->
                 ordered += host
                 included += host.id
@@ -1724,38 +1768,43 @@ class CrossDevicePairingCoordinator private constructor(
      * say — comes back through the bridge as a plain argument failure
      * carrying an internal message. That message is not something to show a
      * user, so it becomes the same generic answer the pairing screen already
-     * gives. `UnsatisfiedLinkError` is an `Error`, not an exception, and
-     * deliberately keeps propagating: a missing core is not a bad QR code.
+     * gives (`pairing_code_unusable`), so a scan never differs in voice
+     * depending on which layer refused it. `UnsatisfiedLinkError` is an
+     * `Error`, not an exception, and deliberately keeps propagating: a missing
+     * core is not a bad QR code.
      */
     private fun decodeOffer(qrText: String): SharedPairingOffer {
-        require(qrText.isNotEmpty()) { "This is not a Tessera pairing QR code." }
+        if (qrText.isEmpty()) throw notTesseraCode()
         val outcome = try {
             SharedPairingQR.decodeOffer(qrText)
         } catch (rejected: IllegalArgumentException) {
-            throw IllegalArgumentException(UNUSABLE_PAIRING_CODE, rejected)
+            throw unusableCode(rejected)
         } catch (rejected: IllegalStateException) {
-            throw IllegalArgumentException(UNUSABLE_PAIRING_CODE, rejected)
+            throw unusableCode(rejected)
         }
         return when (outcome) {
             is SharedPairingQrDecode.Decoded -> outcome.offer
-            is SharedPairingQrDecode.Rejected -> throw IllegalArgumentException(
-                when (outcome.reason) {
-                    SharedPairingQrRejection.InvalidFormat ->
-                        "This is not a Tessera pairing QR code."
-                    SharedPairingQrRejection.InvalidBase64Url ->
-                        "This pairing code is damaged. Show the code again and rescan it."
-                    SharedPairingQrRejection.TooLarge ->
-                        "This pairing code is too large to be a Tessera offer."
-                    SharedPairingQrRejection.NonCanonical ->
-                        "This pairing code was re-encoded on the way here. Scan the original."
-                },
-            )
+            is SharedPairingQrDecode.Rejected -> throw when (outcome.reason) {
+                SharedPairingQrRejection.InvalidFormat -> notTesseraCode()
+                SharedPairingQrRejection.InvalidBase64Url ->
+                    refusal("This pairing code is damaged. Show the code again and rescan it.", R.string.pairing_code_damaged)
+                SharedPairingQrRejection.TooLarge ->
+                    refusal("This pairing code is too large to be a Tessera offer.", R.string.pairing_code_too_large)
+                SharedPairingQrRejection.NonCanonical ->
+                    refusal("This pairing code was re-encoded on the way here. Scan the original.", R.string.pairing_code_reencoded)
+            }
         }
     }
 
+    private fun notTesseraCode() = refusal("This is not a Tessera pairing QR code.", R.string.pairing_code_not_tessera)
+
+    private fun unusableCode(cause: Throwable) =
+        refusal("Invalid, expired, or unsupported Tessera pairing code.", R.string.pairing_code_unusable, cause = cause)
+
     /** The offer's wire purpose as this adapter's presentation enum. */
     private fun SharedPairingOffer.pairingPurpose(): PairingPurpose =
-        PairingPurpose.entries.firstOrNull { it.wire == purpose } ?: error("Unsupported pairing purpose")
+        PairingPurpose.entries.firstOrNull { it.wire == purpose }
+            ?: throw refusal("Unsupported pairing purpose", R.string.pairing_code_unsupported_purpose)
 
     /**
      * The locally dialable endpoints inside an already-validated offer.
@@ -1774,7 +1823,7 @@ class CrossDevicePairingCoordinator private constructor(
                     add(PairingTcpRendezvous.Endpoint(candidate.getString("host"), candidate.getInt("port")))
                 }
             }
-        }.also { require(it.isNotEmpty()) { "No supported TCP endpoint candidates" } }
+        }.also { if (it.isEmpty()) throw refusal("No supported TCP endpoint candidates", R.string.pairing_code_no_tcp_endpoint) }
     }
 
     private fun JSONObject.payloadBytes(): ByteArray = Base64.decode(getString("payload"), Base64.NO_WRAP)
@@ -1784,13 +1833,6 @@ class CrossDevicePairingCoordinator private constructor(
     private companion object {
         const val OFFER_LIFETIME_SECONDS = 10 * 60L
         const val OWNER_AUTHORIZATION_MILLISECONDS = 10_000L
-
-        /**
-         * The generic answer for a code this device cannot use, worded exactly
-         * as the pairing screen's own fallback so a scan never differs in
-         * voice depending on which layer refused it.
-         */
-        const val UNUSABLE_PAIRING_CODE = "Invalid, expired, or unsupported Tessera pairing code."
     }
 
     private sealed interface PendingOwnerAction {

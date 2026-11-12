@@ -1,0 +1,514 @@
+{
+  "This conversation has ended. Open its terminal to start or resume a conversation. Your draft is kept.": {
+    "de": "Diese Konversation ist beendet. Öffne ihr Terminal, um eine Konversation zu starten oder fortzusetzen. Dein Entwurf bleibt erhalten.",
+    "es": "Esta conversación ha terminado. Abre su terminal para iniciar o reanudar una conversación. Tu borrador se conserva.",
+    "fr": "Cette conversation est terminée. Ouvrez son terminal pour démarrer ou reprendre une conversation. Votre brouillon est conservé.",
+    "ja": "この会話は終了しました。会話を開始または再開するには、この会話のターミナルを開いてください。下書きは保持されています。",
+    "zh-Hans": "此对话已结束。打开其终端以开始或恢复对话。草稿已保留。",
+    "zh-Hant": "此對話已結束。開啟其終端機以開始或繼續對話。草稿已保留。"
+  },
+  "This action is unavailable for the current terminal.": {
+    "de": "Diese Aktion ist für das aktuelle Terminal nicht verfügbar.",
+    "es": "Esta acción no está disponible para el terminal actual.",
+    "fr": "Cette action n'est pas disponible pour le terminal actuel.",
+    "ja": "現在のターミナルではこの操作を利用できません。",
+    "zh-Hans": "当前终端无法执行此操作。",
+    "zh-Hant": "目前的終端機無法執行此操作。"
+  },
+  "An action is already in progress for this thread.": {
+    "de": "Für diesen Thread wird bereits eine Aktion ausgeführt.",
+    "es": "Ya hay una acción en curso para este hilo.",
+    "fr": "Une action est déjà en cours pour ce fil.",
+    "ja": "このスレッドではすでに操作が進行中です。",
+    "zh-Hans": "此对话已有一项操作正在进行。",
+    "zh-Hant": "此對話已有一項操作正在進行。"
+  },
+  "The terminal changed before the action could be completed.": {
+    "de": "Das Terminal hat sich geändert, bevor die Aktion abgeschlossen werden konnte.",
+    "es": "El terminal cambió antes de que se pudiera completar la acción.",
+    "fr": "Le terminal a changé avant que l'action ait pu être terminée.",
+    "ja": "操作が完了する前にターミナルが変わりました。",
+    "zh-Hans": "操作完成前终端已更改。",
+    "zh-Hant": "操作完成前終端機已變更。"
+  },
+  "The requested launch configuration is invalid.": {
+    "de": "Die angeforderte Startkonfiguration ist ungültig.",
+    "es": "La configuración de inicio solicitada no es válida.",
+    "fr": "La configuration de lancement demandée n'est pas valide.",
+    "ja": "指定された起動設定が無効です。",
+    "zh-Hans": "请求的启动配置无效。",
+    "zh-Hant": "要求的啟動設定無效。"
+  },
+  "That prompt has changed; review the current terminal state.": {
+    "de": "Diese Abfrage hat sich geändert; prüfe den aktuellen Zustand des Terminals.",
+    "es": "Ese prompt ha cambiado; revisa el estado actual del terminal.",
+    "fr": "Cette invite a changé ; vérifiez l'état actuel du terminal.",
+    "ja": "そのプロンプトは変更されています。現在のターミナルの状態を確認してください。",
+    "zh-Hans": "该提示已更改；请查看终端的当前状态。",
+    "zh-Hant": "該提示已變更；請查看終端機目前的狀態。"
+  },
+  "Tessera could not verify the terminal action.": {
+    "de": "Tessera konnte die Terminalaktion nicht überprüfen.",
+    "es": "Tessera no pudo verificar la acción del terminal.",
+    "fr": "Tessera n'a pas pu vérifier l'action du terminal.",
+    "ja": "Tessera はターミナルの操作を確認できませんでした。",
+    "zh-Hans": "Tessera 无法验证终端操作。",
+    "zh-Hant": "Tessera 無法驗證終端機操作。"
+  },
+  "The terminal action was cancelled.": {
+    "de": "Die Terminalaktion wurde abgebrochen.",
+    "es": "La acción del terminal se ha cancelado.",
+    "fr": "L'action du terminal a été annulée.",
+    "ja": "ターミナルの操作がキャンセルされました。",
+    "zh-Hans": "终端操作已取消。",
+    "zh-Hant": "終端機操作已取消。"
+  },
+  "The agent's input wasn't ready, so nothing was typed into the terminal.": {
+    "de": "Die Eingabe des Agenten war nicht bereit, daher wurde nichts ins Terminal eingegeben.",
+    "es": "La entrada del agente no estaba lista, por lo que no se ha escrito nada en el terminal.",
+    "fr": "La saisie de l'agent n'était pas prête, donc rien n'a été saisi dans le terminal.",
+    "ja": "エージェントの入力準備ができていなかったため、ターミナルには何も入力されていません。",
+    "zh-Hans": "智能体的输入尚未就绪，因此未向终端输入任何内容。",
+    "zh-Hant": "智慧體的輸入尚未就緒，因此未向終端機輸入任何內容。"
+  },
+  "The question's text field in the terminal already has text. Clear it there before answering.": {
+    "de": "Das Textfeld der Frage im Terminal enthält bereits Text. Leere es dort, bevor du antwortest.",
+    "es": "El campo de texto de la pregunta en el terminal ya contiene texto. Bórralo allí antes de responder.",
+    "fr": "Le champ de texte de la question dans le terminal contient déjà du texte. Effacez-le dans le terminal avant de répondre.",
+    "ja": "ターミナル内の質問のテキスト欄にはすでにテキストがあります。回答する前にターミナルで消去してください。",
+    "zh-Hans": "终端中该问题的文本框已有文本。请先在终端中清空，再回答。",
+    "zh-Hant": "終端機中該問題的文字欄位已有文字。請先在終端機中清空，再回答。"
+  },
+  "The terminal's prompt already has unsent text, so nothing was typed. Clear it in the terminal first.": {
+    "de": "Die Eingabeaufforderung im Terminal enthält bereits ungesendeten Text, daher wurde nichts eingegeben. Lösche ihn zuerst im Terminal.",
+    "es": "El prompt del terminal ya contiene texto sin enviar, por lo que no se ha escrito nada. Bórralo primero en el terminal.",
+    "fr": "L'invite du terminal contient déjà du texte non envoyé, donc rien n'a été saisi. Effacez-le d'abord dans le terminal.",
+    "ja": "ターミナルのプロンプトにはすでに未送信のテキストがあるため、何も入力されていません。先にターミナルで消去してください。",
+    "zh-Hans": "终端提示框已有未发送的文本，因此未输入任何内容。请先在终端中清空。",
+    "zh-Hant": "終端機提示框已有未傳送的文字，因此未輸入任何內容。請先在終端機中清空。"
+  },
+  "Not sent — this message can't be typed into %@'s prompt from here. Nothing was typed; your message is back in the box.": {
+    "de": "Nicht gesendet — diese Nachricht kann von hier aus nicht in die Eingabeaufforderung von %@ eingegeben werden. Es wurde nichts eingegeben; deine Nachricht steht wieder im Eingabefeld.",
+    "es": "No se ha enviado — este mensaje no se puede escribir desde aquí en el prompt de %@. No se ha escrito nada; tu mensaje vuelve a estar en el cuadro de texto.",
+    "fr": "Non envoyé — ce message ne peut pas être saisi d'ici dans l'invite de %@. Rien n'a été saisi ; votre message est de nouveau dans le champ de saisie.",
+    "ja": "未送信 — ここから %@ のプロンプトにこのメッセージを入力することはできません。何も入力されていません。メッセージは入力欄に戻されています。",
+    "zh-Hans": "未发送——无法从这里将此消息输入 %@ 的提示框。未输入任何内容；消息已放回输入框。",
+    "zh-Hant": "未傳送——無法從這裡將此訊息輸入 %@ 的提示框。未輸入任何內容；訊息已放回輸入框。"
+  },
+  "Not sent — this message can't be typed into the agent's prompt from here. Nothing was typed; your message is back in the box.": {
+    "de": "Nicht gesendet — diese Nachricht kann von hier aus nicht in die Eingabeaufforderung des Agenten eingegeben werden. Es wurde nichts eingegeben; deine Nachricht steht wieder im Eingabefeld.",
+    "es": "No se ha enviado — este mensaje no se puede escribir desde aquí en el prompt del agente. No se ha escrito nada; tu mensaje vuelve a estar en el cuadro de texto.",
+    "fr": "Non envoyé — ce message ne peut pas être saisi d'ici dans l'invite de l'agent. Rien n'a été saisi ; votre message est de nouveau dans le champ de saisie.",
+    "ja": "未送信 — ここからエージェントのプロンプトにこのメッセージを入力することはできません。何も入力されていません。メッセージは入力欄に戻されています。",
+    "zh-Hans": "未发送——无法从这里将此消息输入智能体的提示框。未输入任何内容；消息已放回输入框。",
+    "zh-Hant": "未傳送——無法從這裡將此訊息輸入智慧體的提示框。未輸入任何內容；訊息已放回輸入框。"
+  },
+  "Not sent — this message can't be typed into %@'s prompt from here. Nothing was typed; your message is back in the box above what you typed since.": {
+    "de": "Nicht gesendet — diese Nachricht kann von hier aus nicht in die Eingabeaufforderung von %@ eingegeben werden. Es wurde nichts eingegeben; deine Nachricht steht wieder im Eingabefeld über dem Text, den du seitdem eingegeben hast.",
+    "es": "No se ha enviado — este mensaje no se puede escribir desde aquí en el prompt de %@. No se ha escrito nada; tu mensaje vuelve a estar en el cuadro de texto, por encima de lo que has escrito desde entonces.",
+    "fr": "Non envoyé — ce message ne peut pas être saisi d'ici dans l'invite de %@. Rien n'a été saisi ; votre message est de nouveau dans le champ de saisie, au-dessus du texte saisi depuis.",
+    "ja": "未送信 — ここから %@ のプロンプトにこのメッセージを入力することはできません。何も入力されていません。メッセージは入力欄に戻され、その後に入力したテキストの上にあります。",
+    "zh-Hans": "未发送——无法从这里将此消息输入 %@ 的提示框。未输入任何内容；消息已放回输入框，位于你之后输入的内容上方。",
+    "zh-Hant": "未傳送——無法從這裡將此訊息輸入 %@ 的提示框。未輸入任何內容；訊息已放回輸入框，位於你之後輸入的內容上方。"
+  },
+  "Not sent — this message can't be typed into the agent's prompt from here. Nothing was typed; your message is back in the box above what you typed since.": {
+    "de": "Nicht gesendet — diese Nachricht kann von hier aus nicht in die Eingabeaufforderung des Agenten eingegeben werden. Es wurde nichts eingegeben; deine Nachricht steht wieder im Eingabefeld über dem Text, den du seitdem eingegeben hast.",
+    "es": "No se ha enviado — este mensaje no se puede escribir desde aquí en el prompt del agente. No se ha escrito nada; tu mensaje vuelve a estar en el cuadro de texto, por encima de lo que has escrito desde entonces.",
+    "fr": "Non envoyé — ce message ne peut pas être saisi d'ici dans l'invite de l'agent. Rien n'a été saisi ; votre message est de nouveau dans le champ de saisie, au-dessus du texte saisi depuis.",
+    "ja": "未送信 — ここからエージェントのプロンプトにこのメッセージを入力することはできません。何も入力されていません。メッセージは入力欄に戻され、その後に入力したテキストの上にあります。",
+    "zh-Hans": "未发送——无法从这里将此消息输入智能体的提示框。未输入任何内容；消息已放回输入框，位于你之后输入的内容上方。",
+    "zh-Hant": "未傳送——無法從這裡將此訊息輸入智慧體的提示框。未輸入任何內容；訊息已放回輸入框，位於你之後輸入的內容上方。"
+  },
+  "Not sent — the send was cancelled. Nothing was typed; your message is back in the box.": {
+    "de": "Nicht gesendet — der Versand wurde abgebrochen. Es wurde nichts eingegeben; deine Nachricht steht wieder im Eingabefeld.",
+    "es": "No se ha enviado — el envío se ha cancelado. No se ha escrito nada; tu mensaje vuelve a estar en el cuadro de texto.",
+    "fr": "Non envoyé — l'envoi a été annulé. Rien n'a été saisi ; votre message est de nouveau dans le champ de saisie.",
+    "ja": "未送信 — 送信がキャンセルされました。何も入力されていません。メッセージは入力欄に戻されています。",
+    "zh-Hans": "未发送——发送已取消。未输入任何内容；消息已放回输入框。",
+    "zh-Hant": "未傳送——傳送已取消。未輸入任何內容；訊息已放回輸入框。"
+  },
+  "Not sent — the send was cancelled. Nothing was typed; your message is back in the box above what you typed since.": {
+    "de": "Nicht gesendet — der Versand wurde abgebrochen. Es wurde nichts eingegeben; deine Nachricht steht wieder im Eingabefeld über dem Text, den du seitdem eingegeben hast.",
+    "es": "No se ha enviado — el envío se ha cancelado. No se ha escrito nada; tu mensaje vuelve a estar en el cuadro de texto, por encima de lo que has escrito desde entonces.",
+    "fr": "Non envoyé — l'envoi a été annulé. Rien n'a été saisi ; votre message est de nouveau dans le champ de saisie, au-dessus du texte saisi depuis.",
+    "ja": "未送信 — 送信がキャンセルされました。何も入力されていません。メッセージは入力欄に戻され、その後に入力したテキストの上にあります。",
+    "zh-Hans": "未发送——发送已取消。未输入任何内容；消息已放回输入框，位于你之后输入的内容上方。",
+    "zh-Hant": "未傳送——傳送已取消。未輸入任何內容；訊息已放回輸入框，位於你之後輸入的內容上方。"
+  },
+  "Not sent — delivery tracking couldn't start. Nothing was typed; your message is back in the box.": {
+    "de": "Nicht gesendet — die Zustellverfolgung konnte nicht gestartet werden. Es wurde nichts eingegeben; deine Nachricht steht wieder im Eingabefeld.",
+    "es": "No se ha enviado — no se pudo iniciar el seguimiento de la entrega. No se ha escrito nada; tu mensaje vuelve a estar en el cuadro de texto.",
+    "fr": "Non envoyé — le suivi de livraison n'a pas pu démarrer. Rien n'a été saisi ; votre message est de nouveau dans le champ de saisie.",
+    "ja": "未送信 — 配信状況の追跡を開始できませんでした。何も入力されていません。メッセージは入力欄に戻されています。",
+    "zh-Hans": "未发送——无法启动发送跟踪。未输入任何内容；消息已放回输入框。",
+    "zh-Hant": "未傳送——無法啟動傳送追蹤。未輸入任何內容；訊息已放回輸入框。"
+  },
+  "Not sent — delivery tracking couldn't start. Nothing was typed; your message is back in the box above what you typed since.": {
+    "de": "Nicht gesendet — die Zustellverfolgung konnte nicht gestartet werden. Es wurde nichts eingegeben; deine Nachricht steht wieder im Eingabefeld über dem Text, den du seitdem eingegeben hast.",
+    "es": "No se ha enviado — no se pudo iniciar el seguimiento de la entrega. No se ha escrito nada; tu mensaje vuelve a estar en el cuadro de texto, por encima de lo que has escrito desde entonces.",
+    "fr": "Non envoyé — le suivi de livraison n'a pas pu démarrer. Rien n'a été saisi ; votre message est de nouveau dans le champ de saisie, au-dessus du texte saisi depuis.",
+    "ja": "未送信 — 配信状況の追跡を開始できませんでした。何も入力されていません。メッセージは入力欄に戻され、その後に入力したテキストの上にあります。",
+    "zh-Hans": "未发送——无法启动发送跟踪。未输入任何内容；消息已放回输入框，位于你之后输入的内容上方。",
+    "zh-Hant": "未傳送——無法啟動傳送追蹤。未輸入任何內容；訊息已放回輸入框，位於你之後輸入的內容上方。"
+  },
+  "Not sent — %@'s input wasn't ready. Nothing was typed; your message is back in the box.": {
+    "de": "Nicht gesendet — die Eingabe für %@ war nicht bereit. Es wurde nichts eingegeben; deine Nachricht steht wieder im Eingabefeld.",
+    "es": "No se ha enviado — la entrada de %@ no estaba lista. No se ha escrito nada; tu mensaje vuelve a estar en el cuadro de texto.",
+    "fr": "Non envoyé — la saisie de %@ n'était pas prête. Rien n'a été saisi ; votre message est de nouveau dans le champ de saisie.",
+    "ja": "未送信 — %@ の入力準備ができていませんでした。何も入力されていません。メッセージは入力欄に戻されています。",
+    "zh-Hans": "未发送——%@ 的输入尚未就绪。未输入任何内容；消息已放回输入框。",
+    "zh-Hant": "未傳送——%@ 的輸入尚未就緒。未輸入任何內容；訊息已放回輸入框。"
+  },
+  "Not sent — the agent's input wasn't ready. Nothing was typed; your message is back in the box.": {
+    "de": "Nicht gesendet — die Eingabe des Agenten war nicht bereit. Es wurde nichts eingegeben; deine Nachricht steht wieder im Eingabefeld.",
+    "es": "No se ha enviado — la entrada del agente no estaba lista. No se ha escrito nada; tu mensaje vuelve a estar en el cuadro de texto.",
+    "fr": "Non envoyé — la saisie de l'agent n'était pas prête. Rien n'a été saisi ; votre message est de nouveau dans le champ de saisie.",
+    "ja": "未送信 — エージェントの入力準備ができていませんでした。何も入力されていません。メッセージは入力欄に戻されています。",
+    "zh-Hans": "未发送——智能体的输入尚未就绪。未输入任何内容；消息已放回输入框。",
+    "zh-Hant": "未傳送——智慧體的輸入尚未就緒。未輸入任何內容；訊息已放回輸入框。"
+  },
+  "Not sent — %@'s input wasn't ready. Nothing was typed; your message is back in the box above what you typed since.": {
+    "de": "Nicht gesendet — die Eingabe für %@ war nicht bereit. Es wurde nichts eingegeben; deine Nachricht steht wieder im Eingabefeld über dem Text, den du seitdem eingegeben hast.",
+    "es": "No se ha enviado — la entrada de %@ no estaba lista. No se ha escrito nada; tu mensaje vuelve a estar en el cuadro de texto, por encima de lo que has escrito desde entonces.",
+    "fr": "Non envoyé — la saisie de %@ n'était pas prête. Rien n'a été saisi ; votre message est de nouveau dans le champ de saisie, au-dessus du texte saisi depuis.",
+    "ja": "未送信 — %@ の入力準備ができていませんでした。何も入力されていません。メッセージは入力欄に戻され、その後に入力したテキストの上にあります。",
+    "zh-Hans": "未发送——%@ 的输入尚未就绪。未输入任何内容；消息已放回输入框，位于你之后输入的内容上方。",
+    "zh-Hant": "未傳送——%@ 的輸入尚未就緒。未輸入任何內容；訊息已放回輸入框，位於你之後輸入的內容上方。"
+  },
+  "Not sent — the agent's input wasn't ready. Nothing was typed; your message is back in the box above what you typed since.": {
+    "de": "Nicht gesendet — die Eingabe des Agenten war nicht bereit. Es wurde nichts eingegeben; deine Nachricht steht wieder im Eingabefeld über dem Text, den du seitdem eingegeben hast.",
+    "es": "No se ha enviado — la entrada del agente no estaba lista. No se ha escrito nada; tu mensaje vuelve a estar en el cuadro de texto, por encima de lo que has escrito desde entonces.",
+    "fr": "Non envoyé — la saisie de l'agent n'était pas prête. Rien n'a été saisi ; votre message est de nouveau dans le champ de saisie, au-dessus du texte saisi depuis.",
+    "ja": "未送信 — エージェントの入力準備ができていませんでした。何も入力されていません。メッセージは入力欄に戻され、その後に入力したテキストの上にあります。",
+    "zh-Hans": "未发送——智能体的输入尚未就绪。未输入任何内容；消息已放回输入框，位于你之后输入的内容上方。",
+    "zh-Hant": "未傳送——智慧體的輸入尚未就緒。未輸入任何內容；訊息已放回輸入框，位於你之後輸入的內容上方。"
+  },
+  "Not sent — the terminal already has unsent text in %@'s prompt. Nothing was typed; your message is back in the box.": {
+    "de": "Nicht gesendet — das Terminal enthält bereits ungesendeten Text in der Eingabeaufforderung von %@. Es wurde nichts eingegeben; deine Nachricht steht wieder im Eingabefeld.",
+    "es": "No se ha enviado — el terminal ya contiene texto sin enviar en el prompt de %@. No se ha escrito nada; tu mensaje vuelve a estar en el cuadro de texto.",
+    "fr": "Non envoyé — le terminal contient déjà du texte non envoyé dans l'invite de %@. Rien n'a été saisi ; votre message est de nouveau dans le champ de saisie.",
+    "ja": "未送信 — ターミナル内の %@ のプロンプトにはすでに未送信のテキストがあります。何も入力されていません。メッセージは入力欄に戻されています。",
+    "zh-Hans": "未发送——终端中 %@ 的提示框已有未发送的文本。未输入任何内容；消息已放回输入框。",
+    "zh-Hant": "未傳送——終端機中 %@ 的提示框已有未傳送的文字。未輸入任何內容；訊息已放回輸入框。"
+  },
+  "Not sent — the terminal already has unsent text in the agent's prompt. Nothing was typed; your message is back in the box.": {
+    "de": "Nicht gesendet — das Terminal enthält bereits ungesendeten Text in der Eingabeaufforderung des Agenten. Es wurde nichts eingegeben; deine Nachricht steht wieder im Eingabefeld.",
+    "es": "No se ha enviado — el terminal ya contiene texto sin enviar en el prompt del agente. No se ha escrito nada; tu mensaje vuelve a estar en el cuadro de texto.",
+    "fr": "Non envoyé — le terminal contient déjà du texte non envoyé dans l'invite de l'agent. Rien n'a été saisi ; votre message est de nouveau dans le champ de saisie.",
+    "ja": "未送信 — ターミナル内のエージェントのプロンプトにはすでに未送信のテキストがあります。何も入力されていません。メッセージは入力欄に戻されています。",
+    "zh-Hans": "未发送——终端中智能体的提示框已有未发送的文本。未输入任何内容；消息已放回输入框。",
+    "zh-Hant": "未傳送——終端機中智慧體的提示框已有未傳送的文字。未輸入任何內容；訊息已放回輸入框。"
+  },
+  "Not sent — the terminal already has unsent text in %@'s prompt. Nothing was typed; your message is back in the box above what you typed since.": {
+    "de": "Nicht gesendet — das Terminal enthält bereits ungesendeten Text in der Eingabeaufforderung von %@. Es wurde nichts eingegeben; deine Nachricht steht wieder im Eingabefeld über dem Text, den du seitdem eingegeben hast.",
+    "es": "No se ha enviado — el terminal ya contiene texto sin enviar en el prompt de %@. No se ha escrito nada; tu mensaje vuelve a estar en el cuadro de texto, por encima de lo que has escrito desde entonces.",
+    "fr": "Non envoyé — le terminal contient déjà du texte non envoyé dans l'invite de %@. Rien n'a été saisi ; votre message est de nouveau dans le champ de saisie, au-dessus du texte saisi depuis.",
+    "ja": "未送信 — ターミナル内の %@ のプロンプトにはすでに未送信のテキストがあります。何も入力されていません。メッセージは入力欄に戻され、その後に入力したテキストの上にあります。",
+    "zh-Hans": "未发送——终端中 %@ 的提示框已有未发送的文本。未输入任何内容；消息已放回输入框，位于你之后输入的内容上方。",
+    "zh-Hant": "未傳送——終端機中 %@ 的提示框已有未傳送的文字。未輸入任何內容；訊息已放回輸入框，位於你之後輸入的內容上方。"
+  },
+  "Not sent — the terminal already has unsent text in the agent's prompt. Nothing was typed; your message is back in the box above what you typed since.": {
+    "de": "Nicht gesendet — das Terminal enthält bereits ungesendeten Text in der Eingabeaufforderung des Agenten. Es wurde nichts eingegeben; deine Nachricht steht wieder im Eingabefeld über dem Text, den du seitdem eingegeben hast.",
+    "es": "No se ha enviado — el terminal ya contiene texto sin enviar en el prompt del agente. No se ha escrito nada; tu mensaje vuelve a estar en el cuadro de texto, por encima de lo que has escrito desde entonces.",
+    "fr": "Non envoyé — le terminal contient déjà du texte non envoyé dans l'invite de l'agent. Rien n'a été saisi ; votre message est de nouveau dans le champ de saisie, au-dessus du texte saisi depuis.",
+    "ja": "未送信 — ターミナル内のエージェントのプロンプトにはすでに未送信のテキストがあります。何も入力されていません。メッセージは入力欄に戻され、その後に入力したテキストの上にあります。",
+    "zh-Hans": "未发送——终端中智能体的提示框已有未发送的文本。未输入任何内容；消息已放回输入框，位于你之后输入的内容上方。",
+    "zh-Hant": "未傳送——終端機中智慧體的提示框已有未傳送的文字。未輸入任何內容；訊息已放回輸入框，位於你之後輸入的內容上方。"
+  },
+  "Not sent — the terminal changed. Nothing was typed; your message is back in the box.": {
+    "de": "Nicht gesendet — das Terminal hat sich geändert. Es wurde nichts eingegeben; deine Nachricht steht wieder im Eingabefeld.",
+    "es": "No se ha enviado — el terminal ha cambiado. No se ha escrito nada; tu mensaje vuelve a estar en el cuadro de texto.",
+    "fr": "Non envoyé — le terminal a changé. Rien n'a été saisi ; votre message est de nouveau dans le champ de saisie.",
+    "ja": "未送信 — ターミナルが変わりました。何も入力されていません。メッセージは入力欄に戻されています。",
+    "zh-Hans": "未发送——终端已更改。未输入任何内容；消息已放回输入框。",
+    "zh-Hant": "未傳送——終端機已變更。未輸入任何內容；訊息已放回輸入框。"
+  },
+  "Not sent — the terminal changed. Nothing was typed; your message is back in the box above what you typed since.": {
+    "de": "Nicht gesendet — das Terminal hat sich geändert. Es wurde nichts eingegeben; deine Nachricht steht wieder im Eingabefeld über dem Text, den du seitdem eingegeben hast.",
+    "es": "No se ha enviado — el terminal ha cambiado. No se ha escrito nada; tu mensaje vuelve a estar en el cuadro de texto, por encima de lo que has escrito desde entonces.",
+    "fr": "Non envoyé — le terminal a changé. Rien n'a été saisi ; votre message est de nouveau dans le champ de saisie, au-dessus du texte saisi depuis.",
+    "ja": "未送信 — ターミナルが変わりました。何も入力されていません。メッセージは入力欄に戻され、その後に入力したテキストの上にあります。",
+    "zh-Hans": "未发送——终端已更改。未输入任何内容；消息已放回输入框，位于你之后输入的内容上方。",
+    "zh-Hant": "未傳送——終端機已變更。未輸入任何內容；訊息已放回輸入框，位於你之後輸入的內容上方。"
+  },
+  "Not sent — this terminal can't take verified input right now. Nothing was typed; your message is back in the box.": {
+    "de": "Nicht gesendet — dieses Terminal kann gerade keine überprüften Eingaben annehmen. Es wurde nichts eingegeben; deine Nachricht steht wieder im Eingabefeld.",
+    "es": "No se ha enviado — este terminal no puede recibir entradas verificadas ahora mismo. No se ha escrito nada; tu mensaje vuelve a estar en el cuadro de texto.",
+    "fr": "Non envoyé — ce terminal ne peut pas recevoir de saisie vérifiée pour le moment. Rien n'a été saisi ; votre message est de nouveau dans le champ de saisie.",
+    "ja": "未送信 — 現在、このターミナルでは検証済みの入力を受け付けられません。何も入力されていません。メッセージは入力欄に戻されています。",
+    "zh-Hans": "未发送——此终端目前无法接收经过验证的输入。未输入任何内容；消息已放回输入框。",
+    "zh-Hant": "未傳送——此終端機目前無法接收經過驗證的輸入。未輸入任何內容；訊息已放回輸入框。"
+  },
+  "Not sent — this terminal can't take verified input right now. Nothing was typed; your message is back in the box above what you typed since.": {
+    "de": "Nicht gesendet — dieses Terminal kann gerade keine überprüften Eingaben annehmen. Es wurde nichts eingegeben; deine Nachricht steht wieder im Eingabefeld über dem Text, den du seitdem eingegeben hast.",
+    "es": "No se ha enviado — este terminal no puede recibir entradas verificadas ahora mismo. No se ha escrito nada; tu mensaje vuelve a estar en el cuadro de texto, por encima de lo que has escrito desde entonces.",
+    "fr": "Non envoyé — ce terminal ne peut pas recevoir de saisie vérifiée pour le moment. Rien n'a été saisi ; votre message est de nouveau dans le champ de saisie, au-dessus du texte saisi depuis.",
+    "ja": "未送信 — 現在、このターミナルでは検証済みの入力を受け付けられません。何も入力されていません。メッセージは入力欄に戻され、その後に入力したテキストの上にあります。",
+    "zh-Hans": "未发送——此终端目前无法接收经过验证的输入。未输入任何内容；消息已放回输入框，位于你之后输入的内容上方。",
+    "zh-Hant": "未傳送——此終端機目前無法接收經過驗證的輸入。未輸入任何內容；訊息已放回輸入框，位於你之後輸入的內容上方。"
+  },
+  "Not sent — the terminal wasn't ready. Nothing was typed; your message is back in the box.": {
+    "de": "Nicht gesendet — das Terminal war nicht bereit. Es wurde nichts eingegeben; deine Nachricht steht wieder im Eingabefeld.",
+    "es": "No se ha enviado — el terminal no estaba listo. No se ha escrito nada; tu mensaje vuelve a estar en el cuadro de texto.",
+    "fr": "Non envoyé — le terminal n'était pas prêt. Rien n'a été saisi ; votre message est de nouveau dans le champ de saisie.",
+    "ja": "未送信 — ターミナルの準備ができていませんでした。何も入力されていません。メッセージは入力欄に戻されています。",
+    "zh-Hans": "未发送——终端尚未就绪。未输入任何内容；消息已放回输入框。",
+    "zh-Hant": "未傳送——終端機尚未就緒。未輸入任何內容；訊息已放回輸入框。"
+  },
+  "Not sent — the terminal wasn't ready. Nothing was typed; your message is back in the box above what you typed since.": {
+    "de": "Nicht gesendet — das Terminal war nicht bereit. Es wurde nichts eingegeben; deine Nachricht steht wieder im Eingabefeld über dem Text, den du seitdem eingegeben hast.",
+    "es": "No se ha enviado — el terminal no estaba listo. No se ha escrito nada; tu mensaje vuelve a estar en el cuadro de texto, por encima de lo que has escrito desde entonces.",
+    "fr": "Non envoyé — le terminal n'était pas prêt. Rien n'a été saisi ; votre message est de nouveau dans le champ de saisie, au-dessus du texte saisi depuis.",
+    "ja": "未送信 — ターミナルの準備ができていませんでした。何も入力されていません。メッセージは入力欄に戻され、その後に入力したテキストの上にあります。",
+    "zh-Hans": "未发送——终端尚未就绪。未输入任何内容；消息已放回输入框，位于你之后输入的内容上方。",
+    "zh-Hant": "未傳送——終端機尚未就緒。未輸入任何內容；訊息已放回輸入框，位於你之後輸入的內容上方。"
+  },
+  "Sending is unavailable because this terminal is no longer live.": {
+    "de": "Senden ist nicht verfügbar, da dieses Terminal nicht mehr aktiv ist.",
+    "es": "No se puede enviar porque este terminal ya no está activo.",
+    "fr": "L'envoi est indisponible car ce terminal n'est plus actif.",
+    "ja": "このターミナルは現在稼働していないため、送信できません。",
+    "zh-Hans": "此终端已不再运行，无法发送。",
+    "zh-Hant": "此終端機已不再執行，無法傳送。"
+  },
+  "The original upload terminal is unavailable.": {
+    "de": "Das ursprüngliche Upload-Terminal ist nicht verfügbar.",
+    "es": "El terminal original de la carga no está disponible.",
+    "fr": "Le terminal d'origine du téléversement est indisponible.",
+    "ja": "アップロード元のターミナルを利用できません。",
+    "zh-Hans": "原上传终端不可用。",
+    "zh-Hant": "原上傳終端機無法使用。"
+  },
+  "Photo attachment failed: %@": {
+    "de": "Foto konnte nicht angehängt werden: %@",
+    "es": "No se pudo adjuntar la foto: %@",
+    "fr": "Impossible de joindre la photo : %@",
+    "ja": "写真を添付できませんでした: %@",
+    "zh-Hans": "照片附加失败：%@",
+    "zh-Hant": "照片附加失敗：%@"
+  },
+  "Agent Center launches new agents in a connected tmux session where it already follows an agent. Start Claude Code or Codex in tmux first, or update the host's agent integration if Tessera asks.": {
+    "de": "Agent Center startet neue Agenten in einer verbundenen tmux-Sitzung, in der es bereits einem Agenten folgt. Starte zuerst Claude Code oder Codex in tmux oder aktualisiere die Agentenintegration des Hosts, wenn Tessera dich dazu auffordert.",
+    "es": "Agent Center inicia nuevos agentes en una sesión tmux conectada en la que ya sigue a un agente. Inicia primero Claude Code o Codex en tmux, o actualiza la integración de agentes del host si Tessera te lo pide.",
+    "fr": "Agent Center lance de nouveaux agents dans une session tmux connectée où il suit déjà un agent. Démarrez d'abord Claude Code ou Codex dans tmux, ou mettez à jour l'intégration des agents de l'hôte si Tessera vous le demande.",
+    "ja": "Agent Center は、すでにエージェントを追跡している接続済みの tmux セッションで新しいエージェントを起動します。先に tmux で Claude Code または Codex を起動するか、Tessera に求められた場合はホストのエージェント連携を更新してください。",
+    "zh-Hans": "Agent Center 会在已连接且正在跟踪某个智能体的 tmux 会话中启动新智能体。请先在 tmux 中启动 Claude Code 或 Codex，或在 Tessera 提示时更新主机的智能体集成。",
+    "zh-Hant": "Agent Center 會在已連線且正在追蹤某個智慧體的 tmux 工作階段中啟動新智慧體。請先在 tmux 中啟動 Claude Code 或 Codex，或在 Tessera 提示時更新主機的智慧體整合。"
+  },
+  "Forking requires the source agent's tmux pane to be connected.": {
+    "de": "Zum Abzweigen muss der tmux-Bereich des ursprünglichen Agenten verbunden sein.",
+    "es": "Para bifurcar, el panel tmux del agente de origen debe estar conectado.",
+    "fr": "Pour créer une bifurcation, le volet tmux de l'agent d'origine doit être connecté.",
+    "ja": "分岐するには、元のエージェントの tmux ペインに接続している必要があります。",
+    "zh-Hans": "创建分支需要连接源智能体的 tmux 窗格。",
+    "zh-Hant": "建立分支需要連線至來源智慧體的 tmux 窗格。"
+  },
+  "Agent Center is disabled in Experimental Settings.": {
+    "de": "Agent Center ist in den experimentellen Einstellungen deaktiviert.",
+    "es": "Agent Center está desactivado en los ajustes experimentales.",
+    "fr": "Agent Center est désactivé dans les réglages expérimentaux.",
+    "ja": "実験的機能の設定で Agent Center が無効になっています。",
+    "zh-Hans": "Agent Center 已在实验性功能设置中停用。",
+    "zh-Hant": "Agent Center 已在實驗性功能設定中停用。"
+  },
+  "The draft changed before sending. Review it and send again.": {
+    "de": "Der Entwurf hat sich vor dem Senden geändert. Prüfe ihn und sende erneut.",
+    "es": "El borrador cambió antes del envío. Revísalo y vuelve a enviarlo.",
+    "fr": "Le brouillon a changé avant l'envoi. Vérifiez-le et envoyez-le à nouveau.",
+    "ja": "送信前に下書きが変更されました。内容を確認して、もう一度送信してください。",
+    "zh-Hans": "草稿在发送前已更改。请检查后重新发送。",
+    "zh-Hant": "草稿在傳送前已變更。請檢查後重新傳送。"
+  },
+  "This prompt is no longer available on its original terminal.": {
+    "de": "Diese Abfrage ist in ihrem ursprünglichen Terminal nicht mehr verfügbar.",
+    "es": "Este prompt ya no está disponible en su terminal original.",
+    "fr": "Cette invite n'est plus disponible dans son terminal d'origine.",
+    "ja": "このプロンプトは元のターミナルでは利用できなくなりました。",
+    "zh-Hans": "此提示在原终端中已不可用。",
+    "zh-Hant": "此提示在原終端機中已無法使用。"
+  },
+  "Interrupt is unavailable because this terminal is no longer live.": {
+    "de": "Unterbrechen ist nicht verfügbar, da dieses Terminal nicht mehr aktiv ist.",
+    "es": "No se puede interrumpir porque este terminal ya no está activo.",
+    "fr": "L'interruption est indisponible car ce terminal n'est plus actif.",
+    "ja": "このターミナルは現在稼働していないため、中断できません。",
+    "zh-Hans": "此终端已不再运行，无法中断。",
+    "zh-Hant": "此終端機已不再執行，無法中斷。"
+  },
+  "The original terminal is unavailable.": {
+    "de": "Das ursprüngliche Terminal ist nicht verfügbar.",
+    "es": "El terminal original no está disponible.",
+    "fr": "Le terminal d'origine est indisponible.",
+    "ja": "元のターミナルを利用できません。",
+    "zh-Hans": "原终端不可用。",
+    "zh-Hant": "原終端機無法使用。"
+  },
+  "Dictation is unavailable in this app context.": {
+    "de": "Die Diktierfunktion ist in diesem App-Kontext nicht verfügbar.",
+    "es": "El dictado no está disponible en este contexto de la app.",
+    "fr": "La dictée n'est pas disponible dans ce contexte de l'app.",
+    "ja": "このアプリの使用状況では音声入力を利用できません。",
+    "zh-Hans": "当前应用环境中无法使用听写。",
+    "zh-Hant": "目前的 App 環境中無法使用聽寫。"
+  },
+  "On-device dictation is unavailable.": {
+    "de": "Die Diktierfunktion auf dem Gerät ist nicht verfügbar.",
+    "es": "El dictado en el dispositivo no está disponible.",
+    "fr": "La dictée sur l'appareil est indisponible.",
+    "ja": "デバイス上の音声入力を利用できません。",
+    "zh-Hans": "设备端听写不可用。",
+    "zh-Hant": "裝置端聽寫無法使用。"
+  },
+  "Dictation is already in use.": {
+    "de": "Die Diktierfunktion wird bereits verwendet.",
+    "es": "El dictado ya está en uso.",
+    "fr": "La dictée est déjà en cours d'utilisation.",
+    "ja": "音声入力はすでに使用中です。",
+    "zh-Hans": "听写正在使用中。",
+    "zh-Hant": "聽寫正在使用中。"
+  },
+  "That tmux session is no longer connected. Choose another session to launch in.": {
+    "de": "Diese tmux-Sitzung ist nicht mehr verbunden. Wähle zum Starten eine andere Sitzung.",
+    "es": "Esa sesión tmux ya no está conectada. Elige otra sesión para iniciar el agente.",
+    "fr": "Cette session tmux n'est plus connectée. Choisissez une autre session pour y lancer l'agent.",
+    "ja": "その tmux セッションは接続されていません。起動先として別のセッションを選択してください。",
+    "zh-Hans": "该 tmux 会话已断开连接。请选择另一个会话来启动智能体。",
+    "zh-Hant": "該 tmux 工作階段已中斷連線。請選擇另一個工作階段來啟動智慧體。"
+  },
+  "Choose a current directory from a live tmux pane before launching.": {
+    "de": "Wähle vor dem Start das aktuelle Verzeichnis eines aktiven tmux-Bereichs.",
+    "es": "Antes de iniciar, elige el directorio actual de un panel tmux activo.",
+    "fr": "Avant le lancement, choisissez le répertoire courant d'un volet tmux actif.",
+    "ja": "起動する前に、稼働中の tmux ペインから現在のディレクトリを選択してください。",
+    "zh-Hans": "启动前，请从运行中的 tmux 窗格选择当前目录。",
+    "zh-Hant": "啟動前，請從執行中的 tmux 窗格選擇目前的目錄。"
+  },
+  "Forking requires the original agent provider and its connected tmux pane.": {
+    "de": "Zum Abzweigen sind der ursprüngliche Agentenanbieter und dessen verbundener tmux-Bereich erforderlich.",
+    "es": "Para bifurcar, se necesitan el proveedor de agentes original y su panel tmux conectado.",
+    "fr": "Pour créer une bifurcation, le fournisseur d'agents d'origine et son volet tmux connecté sont nécessaires.",
+    "ja": "分岐するには、元のエージェントプロバイダと、その接続済みの tmux ペインが必要です。",
+    "zh-Hans": "创建分支需要使用原智能体提供方及其已连接的 tmux 窗格。",
+    "zh-Hant": "建立分支需要使用原智慧體提供者及其已連線的 tmux 窗格。"
+  },
+  "The tmux pane or window was created, but Tessera could not find the new agent. Check the new pane.": {
+    "de": "Der tmux-Bereich oder das tmux-Fenster wurde erstellt, aber Tessera konnte den neuen Agenten nicht finden. Prüfe den neuen Bereich.",
+    "es": "Se ha creado el panel o la ventana tmux, pero Tessera no pudo encontrar al nuevo agente. Revisa el nuevo panel.",
+    "fr": "Le volet ou la fenêtre tmux a été créé, mais Tessera n'a pas pu trouver le nouvel agent. Vérifiez le nouveau volet.",
+    "ja": "tmux のペインまたはウインドウは作成されましたが、Tessera は新しいエージェントを見つけられませんでした。新しいペインを確認してください。",
+    "zh-Hans": "tmux 窗格或窗口已创建，但 Tessera 未能找到新智能体。请检查新窗格。",
+    "zh-Hant": "tmux 窗格或視窗已建立，但 Tessera 未能找到新智慧體。請檢查新窗格。"
+  },
+  "The agent launched successfully, but Tessera could not save its launch details.": {
+    "de": "Der Agent wurde erfolgreich gestartet, aber Tessera konnte seine Startdetails nicht speichern.",
+    "es": "El agente se ha iniciado correctamente, pero Tessera no pudo guardar los detalles del inicio.",
+    "fr": "L'agent a bien été lancé, mais Tessera n'a pas pu enregistrer les détails de son lancement.",
+    "ja": "エージェントは正常に起動しましたが、Tessera は起動の詳細を保存できませんでした。",
+    "zh-Hans": "智能体已成功启动，但 Tessera 无法保存其启动详情。",
+    "zh-Hant": "智慧體已成功啟動，但 Tessera 無法儲存其啟動詳細資訊。"
+  },
+  "Attachment cancelled: the original terminal changed.": {
+    "de": "Anhängen abgebrochen: Das ursprüngliche Terminal hat sich geändert.",
+    "es": "Se ha cancelado el adjunto: el terminal original ha cambiado.",
+    "fr": "Ajout de la pièce jointe annulé : le terminal d'origine a changé.",
+    "ja": "添付がキャンセルされました: 元のターミナルが変わりました。",
+    "zh-Hans": "已取消附加：原终端已更改。",
+    "zh-Hant": "已取消附加：原終端機已變更。"
+  },
+  "Upload stopped: the original terminal changed.": {
+    "de": "Upload gestoppt: Das ursprüngliche Terminal hat sich geändert.",
+    "es": "Se ha detenido la carga: el terminal original ha cambiado.",
+    "fr": "Téléversement arrêté : le terminal d'origine a changé.",
+    "ja": "アップロードが停止しました: 元のターミナルが変わりました。",
+    "zh-Hans": "上传已停止：原终端已更改。",
+    "zh-Hant": "上傳已停止：原終端機已變更。"
+  },
+  "The upload returned an unsupported file path.": {
+    "de": "Der Upload hat einen nicht unterstützten Dateipfad zurückgegeben.",
+    "es": "La carga ha devuelto una ruta de archivo no compatible.",
+    "fr": "Le téléversement a renvoyé un chemin de fichier non pris en charge.",
+    "ja": "アップロードにより、対応していないファイルパスが返されました。",
+    "zh-Hans": "上传返回了不受支持的文件路径。",
+    "zh-Hant": "上傳傳回了不支援的檔案路徑。"
+  },
+  "File uploaded to %@; the terminal changed, so no draft was changed.": {
+    "de": "Datei nach %@ hochgeladen; das Terminal hat sich geändert, daher wurde kein Entwurf geändert.",
+    "es": "El archivo se ha cargado en %@; el terminal ha cambiado, por lo que no se ha modificado ningún borrador.",
+    "fr": "Fichier téléversé vers %@ ; le terminal a changé, donc aucun brouillon n'a été modifié.",
+    "ja": "ファイルは %@ にアップロードされましたが、ターミナルが変わったため、下書きは変更されていません。",
+    "zh-Hans": "文件已上传至 %@；终端已更改，因此未修改任何草稿。",
+    "zh-Hant": "檔案已上傳至 %@；終端機已變更，因此未修改任何草稿。"
+  },
+  "File upload failed: %@": {
+    "de": "Datei-Upload fehlgeschlagen: %@",
+    "es": "No se pudo cargar el archivo: %@",
+    "fr": "Échec du téléversement du fichier : %@",
+    "ja": "ファイルのアップロードに失敗しました: %@",
+    "zh-Hans": "文件上传失败：%@",
+    "zh-Hant": "檔案上傳失敗：%@"
+  },
+  "The selected photo could not be loaded.": {
+    "de": "Das ausgewählte Foto konnte nicht geladen werden.",
+    "es": "No se pudo cargar la foto seleccionada.",
+    "fr": "La photo sélectionnée n'a pas pu être chargée.",
+    "ja": "選択した写真を読み込めませんでした。",
+    "zh-Hans": "无法加载所选照片。",
+    "zh-Hant": "無法載入所選照片。"
+  },
+  "Not found": {
+    "de": "Nicht gefunden",
+    "es": "No se encontró",
+    "fr": "Introuvable",
+    "ja": "見つかりません",
+    "zh-Hans": "未找到",
+    "zh-Hant": "找不到"
+  },
+  "Not found: %@": {
+    "de": "Nicht gefunden: %@",
+    "es": "No se encontró: %@",
+    "fr": "Introuvable : %@",
+    "ja": "見つかりません: %@",
+    "zh-Hans": "未找到：%@",
+    "zh-Hant": "找不到：%@"
+  },
+  "Unsupported file type: %@": {
+    "de": "Nicht unterstützter Dateityp: %@",
+    "es": "Tipo de archivo no compatible: %@",
+    "fr": "Type de fichier non pris en charge : %@",
+    "ja": "サポートされていないファイルの種類: %@",
+    "zh-Hans": "不支持的文件类型：%@",
+    "zh-Hant": "不支援的檔案類型：%@"
+  },
+  "Several files match %@ — open it from the Files panel.": {
+    "de": "Mehrere Dateien passen zu %@ – öffne sie im Dateibereich.",
+    "es": "Varios archivos coinciden con %@: ábrelo desde el panel de archivos.",
+    "fr": "Plusieurs fichiers correspondent à %@ : ouvrez-le depuis le panneau de fichiers.",
+    "ja": "%@ に一致するファイルが複数あります。ファイルパネルから開いてください。",
+    "zh-Hans": "有多个文件与 %@ 匹配，请从文件面板打开。",
+    "zh-Hant": "有多個檔案與 %@ 相符，請從檔案面板開啟。"
+  },
+  "Cancelled.": {
+    "de": "Abgebrochen.",
+    "es": "Cancelado.",
+    "fr": "Annulé.",
+    "ja": "キャンセルしました。",
+    "zh-Hans": "已取消。",
+    "zh-Hant": "已取消。"
+  },
+  "Installs Tessera's Agent Center helpers on this host. Plain mosh cannot carry agent status; agents in this terminal show without it.": {
+    "de": "Installiert die Agent Center-Helfer von Tessera auf diesem Host. Reines mosh kann keinen Agentenstatus übertragen; Agenten in diesem Terminal werden ohne ihn angezeigt.",
+    "es": "Instala los componentes auxiliares de Agent Center de Tessera en este host. Mosh sin tmux no puede transmitir el estado de los agentes; los agentes de este terminal se muestran sin él.",
+    "fr": "Installe les utilitaires Agent Center de Tessera sur cet hôte. Le mosh simple ne peut pas transmettre l'état des agents ; les agents de ce terminal s'affichent sans lui.",
+    "ja": "このホストに Tessera の Agent Center ヘルパーをインストールします。素の mosh ではエージェントの状態を送れないため、このターミナルのエージェントは状態なしで表示されます。",
+    "zh-Hans": "在此主机上安装 Tessera 的 Agent Center 辅助程序。纯 mosh 无法传递智能体状态，此终端中的智能体将不显示状态。",
+    "zh-Hant": "在此主機上安裝 Tessera 的 Agent Center 輔助程式。純 mosh 無法傳遞智慧體狀態，此終端機中的智慧體將不顯示狀態。"
+  },
+  "Updates Tessera's Agent Center helpers on this host. Plain mosh cannot carry agent status; agents in this terminal show without it.": {
+    "de": "Aktualisiert die Agent Center-Helfer von Tessera auf diesem Host. Reines mosh kann keinen Agentenstatus übertragen; Agenten in diesem Terminal werden ohne ihn angezeigt.",
+    "es": "Actualiza los componentes auxiliares de Agent Center de Tessera en este host. Mosh sin tmux no puede transmitir el estado de los agentes; los agentes de este terminal se muestran sin él.",
+    "fr": "Met à jour les utilitaires Agent Center de Tessera sur cet hôte. Le mosh simple ne peut pas transmettre l'état des agents ; les agents de ce terminal s'affichent sans lui.",
+    "ja": "このホストの Tessera の Agent Center ヘルパーを更新します。素の mosh ではエージェントの状態を送れないため、このターミナルのエージェントは状態なしで表示されます。",
+    "zh-Hans": "更新此主机上 Tessera 的 Agent Center 辅助程序。纯 mosh 无法传递智能体状态，此终端中的智能体将不显示状态。",
+    "zh-Hant": "更新此主機上 Tessera 的 Agent Center 輔助程式。純 mosh 無法傳遞智慧體狀態，此終端機中的智慧體將不顯示狀態。"
+  }
+}

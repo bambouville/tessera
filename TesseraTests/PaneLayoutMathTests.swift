@@ -2,6 +2,7 @@ import XCTest
 import CoreGraphics
 import UIKit
 import SwiftUI
+import SwiftTerm
 import TmuxControl
 @testable import Tessera
 
@@ -947,5 +948,241 @@ final class GeometryNeutralTmuxCanvasModifierTests: XCTestCase {
         controller.rootView = Host(windowRect: nil, mounts: mounts)
         XCTAssertTrue(settle(controller) { frameInWindow() == plain }, "the plain viewport never returned")
         XCTAssertEqual(mounts.count, 1, "losing the layout must not remount the surface")
+    }
+}
+
+/// A font change inside a geometry-neutral canvas keeps the grid tmux chose.
+@MainActor
+final class GeometryNeutralCanvasFontChangeTests: XCTestCase {
+    private final class Record {
+        var sizes: [String] = []
+        /// Grids the compact viewport measured, in the font of the moment.
+        var viewports: [String] = []
+        weak var terminal: TerminalView?
+    }
+
+    private struct Host: View {
+        let appearance: AppearancePreferences
+        let shortcuts: ShortcutStore
+        let record: Record
+        /// Nil lays the terminal out at the host's bounds instead.
+        let window: CellRect?
+
+        var body: some View {
+            let font = TerminalFontResolver.uiFont(id: appearance.terminalFontID, size: CGFloat(appearance.fontSize))
+            let cellSize = TerminalCellMetrics.cellSize(font: font, scale: UIScreen.main.scale)
+            TerminalSurfaceBound(
+                // Scrollback, then a full-screen program's cursor keys, which a
+                // soft reset turns off.
+                initialData: Array(((0..<200).map { "history \($0)\r\n" }.joined() + "\u{1b}[?1h").utf8),
+                onMade: { record.terminal = $0 },
+                onReady: {},
+                onSend: { _ in },
+                onResize: { record.sizes.append("\($0)x\($1)") },
+                onTitle: { _ in },
+                onUserActivity: nil,
+                onBell: nil,
+                mouseReportingImpliesAltScreen: false,
+                suppressDirectColorQueryResponses: true,
+                tmuxShortcutsEnabled: false,
+                onTmuxShortcut: { _ in },
+                onFindShortcut: nil,
+                onSwitcherShortcut: nil,
+                onOpenSettings: nil,
+                suppressFirstResponderReclaim: true,
+                onHardwareKey: nil
+            )
+            .modifier(GeometryNeutralTmuxCanvasModifier(
+                windowRect: window,
+                focusRect: window,
+                cellSize: cellSize,
+                onViewportSize: window == nil ? nil : { size in
+                    guard let cells = CompactTmuxClientSizing.viewportCells(for: size, cellSize: cellSize) else { return }
+                    record.viewports.append("\(cells.cols)x\(cells.rows)")
+                }
+            ))
+            .environment(appearance)
+            .environment(shortcuts)
+        }
+    }
+
+    private func settle(_ controller: UIViewController, for seconds: TimeInterval) {
+        let deadline = Date().addingTimeInterval(seconds)
+        repeat {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            controller.view.layoutIfNeeded()
+        } while Date() < deadline
+    }
+
+    /// Mounts the host at 13 pt, changes the font to 18 pt, and returns the
+    /// grids sent before and after the change.
+    private func changeFont(window grid: CellRect?) throws -> (
+        terminal: TerminalView, before: [String], after: [String], viewportsBefore: [String], viewportsAfter: [String]
+    ) {
+        let key = "tessera.pref.fontSize"
+        let stored = UserDefaults.standard.object(forKey: key)
+        let appearance = AppearancePreferences()
+        defer {
+            if let stored { UserDefaults.standard.set(stored, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        appearance.fontSize = 13
+        let record = Record()
+        let controller = UIHostingController(rootView: Host(
+            appearance: appearance, shortcuts: ShortcutStore(), record: record, window: grid
+        ))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 600)
+        window.rootViewController = controller
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        settle(controller, for: 1)
+        let terminal = try XCTUnwrap(record.terminal)
+        XCTAssertTrue(terminal.getTerminal().applicationCursor)
+        // The scroller is measured in whole rows, with the reader at the live tail.
+        func assertReaderAtTheTailInRows(_ message: String) {
+            let grid = terminal.getOptimalFrameSize().height
+            let rows = terminal.contentSize.height / (grid / CGFloat(terminal.getTerminal().rows))
+            XCTAssertEqual(rows, rows.rounded(), accuracy: 0.01, message)
+            XCTAssertEqual(terminal.contentOffset.y + grid, terminal.contentSize.height, accuracy: 1, message)
+        }
+        XCTAssertGreaterThan(terminal.contentSize.height, terminal.bounds.height * 2, "no scrollback to keep")
+        assertReaderAtTheTailInRows("before the font change")
+        let before = record.sizes
+        record.sizes.removeAll()
+        let viewportsBefore = record.viewports
+        record.viewports.removeAll()
+
+        appearance.fontSize = 18
+        settle(controller, for: 1)
+        XCTAssertEqual(terminal.font.pointSize, 18, accuracy: 0.5, "the font never applied")
+        XCTAssertTrue(terminal.getTerminal().applicationCursor, "a font change soft-reset the terminal")
+        assertReaderAtTheTailInRows("the scroller kept the old row height")
+        return (terminal, before, record.sizes, viewportsBefore, record.viewports)
+    }
+
+    /// SwiftTerm refitted its grid to the old frame as soon as the font
+    /// changed, before SwiftUI laid the canvas out in the new cells.
+    func test_aFontChangeNeverSendsAGridTmuxDidNotChoose() throws {
+        let (terminal, before, after, _, _) = try changeFont(window: CellRect(width: 60, height: 24, x: 0, y: 0))
+        XCTAssertEqual(before.last, "60x24")
+        XCTAssertEqual(terminal.getTerminal().cols, 60)
+        XCTAssertEqual(terminal.getTerminal().rows, 24)
+        XCTAssertEqual(after.filter { $0 != "60x24" }, [], "a grid tmux did not choose went out")
+    }
+
+    /// A compact session asks tmux for the grid its viewport holds. A new
+    /// font changes that grid on the same frame: measured only on a new size,
+    /// 20 to 13 pt on a closed Duo never reached tmux, and the canvas scaled
+    /// the old 31x20 grid back up to fill the screen until the app came back
+    /// to the foreground.
+    func test_aFontChangeMeasuresTheCompactViewportAgain() throws {
+        let (_, _, _, viewportsBefore, viewportsAfter) = try changeFont(window: CellRect(width: 60, height: 24, x: 0, y: 0))
+        let before = try XCTUnwrap(viewportsBefore.last, "the viewport was never measured")
+        let after = try XCTUnwrap(viewportsAfter.last, "the font change never measured the viewport")
+        XCTAssertNotEqual(after, before, "the bigger font should hold fewer cells")
+    }
+
+    func test_aFontChangeRefitsAGridThatFollowsTheBounds() throws {
+        let (terminal, before, after, _, _) = try changeFont(window: nil)
+        let grid = "\(terminal.getTerminal().cols)x\(terminal.getTerminal().rows)"
+        XCTAssertNotEqual(before.last, grid, "the bigger font kept the grid")
+        XCTAssertEqual(after, [grid], "the refit went out once, at its final grid")
+    }
+}
+
+/// A compact viewport advertises a grid that holds, not every frame of a
+/// pose change (T-02, T-09: one resize closing a Duo).
+@MainActor
+final class CompactViewportSettleTests: XCTestCase {
+    private func recorder() -> (apply: @MainActor ((cols: Int, rows: Int)) -> Void, applied: () -> [String]) {
+        var applied: [String] = []
+        return ({ applied.append("\($0.cols)x\($0.rows)") }, { applied })
+    }
+
+    func testOnlyAGridThatHoldsIsAdvertised() async throws {
+        let settle = CompactViewportSettle(settleSeconds: 0.05)
+        let (apply, applied) = recorder()
+        settle.note((82, 21), apply: apply)
+        XCTAssertEqual(applied(), ["82x21"], "the first grid goes at once")
+        // Measured closing a Duo from laptop: its rail came and went.
+        for grid in [(82, 44), (83, 17), (73, 17), (72, 16), (73, 19)] { settle.note(grid, apply: apply) }
+        XCTAssertEqual(applied(), ["82x21"])
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(applied(), ["82x21", "73x19"])
+        settle.note((83, 19), apply: apply)
+        settle.note((73, 19), apply: apply)
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(applied(), ["82x21", "73x19", "73x19"],
+                       "a frame back on the applied grid is judged at once; the one between never goes")
+    }
+
+    func testARepeatedGridKeepsItsWait() async throws {
+        let settle = CompactViewportSettle(settleSeconds: 0.2)
+        let (apply, applied) = recorder()
+        settle.note((40, 20), apply: apply)
+        settle.note((40, 10), apply: apply)
+        for _ in 0..<8 {
+            try await Task.sleep(for: .milliseconds(60))
+            settle.note((40, 10), apply: apply)
+        }
+        // Restarted by each repeat, the wait would end only after the last.
+        XCTAssertEqual(Array(applied().prefix(2)), ["40x20", "40x10"], "sub-cell frames of the held grid did not hold it back")
+        XCTAssertEqual(Set(applied().dropFirst()), ["40x10"], "once it holds, a repeat is judged again at once, as the same grid")
+    }
+
+    /// The session became active or hidden while a grid waited: the view
+    /// that measured it judged activity as it was, so its delivery never
+    /// runs. The grid is the session's size now, and counts as applied.
+    func testAGridTakenWhileItWaitsIsNeverDeliveredLate() async throws {
+        let settle = CompactViewportSettle(settleSeconds: 0.05)
+        let (apply, applied) = recorder()
+        XCTAssertNil(settle.takePending(), "nothing waits before the first grid")
+        settle.note((82, 21), apply: apply)
+        XCTAssertNil(settle.takePending(), "the first grid went at once")
+        settle.note((73, 19), apply: apply)
+        let taken = try XCTUnwrap(settle.takePending())
+        XCTAssertEqual("\(taken.cols)x\(taken.rows)", "73x19")
+        XCTAssertNil(settle.takePending(), "taken once")
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(applied(), ["82x21"], "the taken grid's own delivery never ran")
+        settle.note((73, 19), apply: apply)
+        XCTAssertEqual(applied(), ["82x21", "73x19"], "the taken grid is the applied one: measured again, it goes at once")
+    }
+
+    /// A view leaving the screen drops what it measured: appearing again
+    /// measures afresh.
+    func testACancelledGridIsNeverDelivered() async throws {
+        let settle = CompactViewportSettle(settleSeconds: 0.05)
+        let (apply, applied) = recorder()
+        settle.note((82, 21), apply: apply)
+        settle.note((73, 19), apply: apply)
+        settle.cancel()
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(applied(), ["82x21"])
+        XCTAssertNil(settle.takePending())
+    }
+
+    /// An iPad widened out of compact keeps its session mounted: the regular
+    /// pane grid sizes tmux, and the compact grid still waiting never lands
+    /// on top of it. Back in compact, the first grid goes at once, whatever
+    /// compact last applied.
+    func testAPresentationChangeDropsTheWaitAndStartsAfresh() async throws {
+        let settle = CompactViewportSettle(settleSeconds: 0.05)
+        let (apply, applied) = recorder()
+        settle.note((82, 21), apply: apply)
+        settle.note((73, 19), apply: apply)
+        settle.reset()
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(applied(), ["82x21"], "the waiting compact grid never went")
+        XCTAssertNil(settle.takePending())
+        settle.note((60, 30), apply: apply)
+        XCTAssertEqual(applied(), ["82x21", "60x30"], "a first grid again, not one judged against the old")
+        settle.reset()
+        settle.note((82, 21), apply: apply)
+        XCTAssertEqual(applied(), ["82x21", "60x30", "82x21"])
     }
 }

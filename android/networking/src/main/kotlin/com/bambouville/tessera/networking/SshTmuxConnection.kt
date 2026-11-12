@@ -7,9 +7,7 @@ import java.security.KeyStore
 import java.security.PrivateKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
 import com.bambouville.tessera.core.bridge.SharedTargetValidation
@@ -84,58 +82,58 @@ suspend fun AndroidSshBackend.connectTmux(
 ): SshTmuxConnection = acquireSshResource {
     require(request.hops.isNotEmpty() && request.hops.size <= 8)
     require(SharedTargetValidation.isValidTmuxSessionName(sessionTarget))
-    val resources = mutableListOf<Closeable>()
-    var previousClient: SSHClient? = null
-    try {
-        for (hop in request.hops) {
-            val client = SshjClientFactory { observation ->
-                runBlocking { withTimeout(120_000L) { hostKeyPolicy.verify(observation) } }
-            }.create()
-            resources += client
-            val parent = previousClient
-            if (parent == null) client.connect(hop.endpoint.host, hop.endpoint.port)
-            else {
-                val tunnel = parent.newDirectConnection(hop.endpoint.host, hop.endpoint.port)
-                resources += tunnel
-                client.connectVia(tunnel)
-            }
-            ensureActive()
-            when (val auth = hop.authentication) {
-                SshAuthentication.Password -> {
-                    val password = passwordProvider.passwordFor(hop)
-                    try { client.authPassword(hop.username, password) }
-                    finally { password.fill('\u0000') }
+    withSshHostKeyApproval(hostKeyPolicy) { verifyHostKey ->
+        val resources = mutableListOf<Closeable>()
+        var previousClient: SSHClient? = null
+        try {
+            for (hop in request.hops) {
+                val client = SshjClientFactory(hostKeyPolicy = verifyHostKey).create()
+                resources += client
+                val parent = previousClient
+                if (parent == null) client.connect(hop.endpoint.host, hop.endpoint.port)
+                else {
+                    val tunnel = parent.newDirectConnection(hop.endpoint.host, hop.endpoint.port)
+                    resources += tunnel
+                    client.connectVia(tunnel)
                 }
-                is SshAuthentication.AndroidKeystoreP256 -> {
-                    keyAuthorizationProvider.authorize(hop)
-                    val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-                    val privateKey = store.getKey(auth.alias, null) as? PrivateKey
-                        ?: error("Android Keystore credential is unavailable")
-                    val publicKey = store.getCertificate(auth.alias)?.publicKey
-                        ?: error("Android Keystore public certificate is unavailable")
-                    client.authPublickey(hop.username, client.loadKeys(KeyPair(publicKey, privateKey)))
+                ensureActive()
+                when (val auth = hop.authentication) {
+                    SshAuthentication.Password -> {
+                        val password = passwordProvider.passwordFor(hop)
+                        try { client.authPassword(hop.username, password) }
+                        finally { password.fill('\u0000') }
+                    }
+                    is SshAuthentication.AndroidKeystoreP256 -> {
+                        keyAuthorizationProvider.authorize(hop)
+                        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                        val privateKey = store.getKey(auth.alias, null) as? PrivateKey
+                            ?: error("Android Keystore credential is unavailable")
+                        val publicKey = store.getCertificate(auth.alias)?.publicKey
+                            ?: error("Android Keystore public certificate is unavailable")
+                        client.authPublickey(hop.username, client.loadKeys(KeyPair(publicKey, privateKey)))
+                    }
                 }
+                ensureActive()
+                previousClient = client
             }
-            ensureActive()
-            previousClient = client
+            val session = checkNotNull(previousClient).startSession()
+            resources += session
+            // tmux -CC still calls tcgetattr and refuses to enter control mode without a PTY.
+            // Visible sizing is subsequently owned by refresh-client -C through the shared core.
+            session.allocatePTY("xterm-256color", 80, 24, 0, 0, emptyMap<PTYMode, Int>())
+            val command = session.exec(
+                tmuxControlCommand(sessionTarget, preserveInitialGeometry, moshViewSession),
+            )
+            resources += command
+            SshTmuxConnection(
+                command,
+                resources,
+                AuthenticatedForwardingRuntimeFactory(checkNotNull(previousClient)),
+            )
+        } catch (failure: Throwable) {
+            resources.asReversed().forEach { runCatching { it.close() } }
+            throw failure
         }
-        val session = checkNotNull(previousClient).startSession()
-        resources += session
-        // tmux -CC still calls tcgetattr and refuses to enter control mode without a PTY.
-        // Visible sizing is subsequently owned by refresh-client -C through the shared core.
-        session.allocatePTY("xterm-256color", 80, 24, 0, 0, emptyMap<PTYMode, Int>())
-        val command = session.exec(
-            tmuxControlCommand(sessionTarget, preserveInitialGeometry, moshViewSession),
-        )
-        resources += command
-        SshTmuxConnection(
-            command,
-            resources,
-            AuthenticatedForwardingRuntimeFactory(checkNotNull(previousClient)),
-        )
-    } catch (failure: Throwable) {
-        resources.asReversed().forEach { runCatching { it.close() } }
-        throw failure
     }
 }
 

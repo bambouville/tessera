@@ -151,6 +151,12 @@ enum SensitiveDataRedactor {
         SensitiveDataRedaction.redactTransportDetail(text)
     }
 
+    /// The shared `endpointIdentifier` stage alone, for the diagnostic file,
+    /// which runs it after its own field rules.
+    static func redactEndpoints(_ text: String) -> String {
+        SensitiveDataRedaction.redact(text, patterns: [.endpointIdentifier])
+    }
+
     static func bootstrapTranscriptSummary(stdout: String, stderr: String) -> String {
         SensitiveDataRedaction.bootstrapTranscriptSummary(
             stdout: stdout,
@@ -401,9 +407,6 @@ enum MoshBootstrap {
         visibleTmuxClientIgnoresSize: Bool,
         gridAuthorityDeviceID: String?
     ) -> String {
-        let visibleClientOption = gridAuthorityDeviceID.map {
-            TmuxController.gridAuthorityVisibleClientOption(identityID: $0)
-        }
         guard preserveTmuxGeometry else {
             // Shared with Android: one builder owns the bytes both platforms
             // send, so the ignore-size gating cannot drift between them again.

@@ -117,6 +117,8 @@ private struct FloatingCardSurface: ViewModifier {
     /// black — glass over a bright picture reads bright, so a black
     /// stand-in would flash on every arm/release.
     let terminalBackground: ResolvedTerminalBackground?
+    /// Docked, the panel is its pane's content: no card, inset or shadow.
+    var docked = false
 
     /// With a picture backdrop the card doesn't use a backdrop-sampling
     /// material AT ALL — the blurred image composite IS the surface.
@@ -147,7 +149,16 @@ private struct FloatingCardSurface: ViewModifier {
         Color.black.opacity(T.isLight ? 0.18 : 0.40)
     }
 
+    @ViewBuilder
     func body(content: Content) -> some View {
+        if docked {
+            content.overlay { dropHighlight }
+        } else {
+            card(content)
+        }
+    }
+
+    private func card(_ content: Content) -> some View {
         surfaced(content)
             .clipShape(cardShape)
             .overlay { cardShape.stroke(T.border, lineWidth: 0.5) }
@@ -294,6 +305,9 @@ struct FilesPanelView: View {
     /// feeds the context-menu backstop stand-in so it matches the glass
     /// over the picture; defaults nil for the harness and previews.
     var terminalBackground: ResolvedTerminalBackground? = nil
+    /// Docked in Duo's context pane, which already titles and frames it: the
+    /// panel drops its own header and floating card.
+    var docked = false
     #if DEBUG
     /// Harness hook for capturing compact quick-open without simulator input.
     var initiallyShowingQuickOpen = false
@@ -419,7 +433,11 @@ struct FilesPanelView: View {
 
     private var panelStack: some View {
         VStack(spacing: 0) {
-            header
+            if docked {
+                Color.clear.frame(height: 6)
+            } else {
+                header
+            }
             pathBar
                 .padding(.horizontal, 10)
                 .padding(.bottom, 6)
@@ -454,8 +472,8 @@ struct FilesPanelView: View {
         // much wider terminal. On iPhone the panel already lives in a sheet;
         // let it use that compact surface instead of nesting an iPad-width
         // card inside the phone's limited width.
-        .frame(width: isPhone ? nil : Self.width)
-        .frame(maxWidth: isPhone ? .infinity : nil)
+        .frame(width: isPhone || docked ? nil : Self.width)
+        .frame(maxWidth: isPhone || docked ? .infinity : nil)
         .frame(maxHeight: .infinity)
         // Touch-down sensor for the backstop (see MARK above). Zero
         // minimum distance so it reports at first contact; simultaneous
@@ -471,7 +489,8 @@ struct FilesPanelView: View {
             T: T,
             showDropHighlight: dropTargeted,
             opaqueBackstop: backstopOn,
-            terminalBackground: terminalBackground
+            terminalBackground: terminalBackground,
+            docked: docked
         ))
     }
 
@@ -912,7 +931,7 @@ struct FilesPanelView: View {
     }
 
     /// §4 quick open: anchored popover with one mono path field —
-    /// file → Quick Look, directory → the panel browses there.
+    /// file → Artifacts, directory → the panel browses there.
     @ViewBuilder
     private var quickOpenButton: some View {
         if isPhone {
@@ -1194,7 +1213,7 @@ struct FilesPanelView: View {
     /// never reaches into the controller for it.
     private var menuCapabilities: FileRowView.MenuCapabilities {
         FileRowView.MenuCapabilities(
-            canPreview: controller.onPreviewFile != nil,
+            canPreview: controller.onOpenInArtifacts != nil || controller.onPreviewFile != nil,
             canDownload: controller.onDownloadFile != nil,
             canShare: controller.onShareFile != nil,
             canSendPath: controller.onSendPathToTerminal != nil
@@ -1458,7 +1477,7 @@ struct FilesPanelView: View {
                 pathSuggestions(quickOpenCompletion) { acceptQuickOpenSuggestion($0) }
             }
             HStack(spacing: 10) {
-                Text("⏎ file → Quick Look")
+                Text("⏎ file → Artifacts")
                 Text("dir → browse there")
             }
             .font(Typography.tesseraSans(size: 10))
@@ -1851,7 +1870,7 @@ private struct FileRowView: View, Equatable {
         if entry.kind == .directory {
             controller.toggleExpanded(entry)
         } else if entry.kind != .other {
-            controller.onPreviewFile?(entry)
+            controller.openFile(entry)
         }
     }
 
@@ -1868,8 +1887,8 @@ private struct FileRowView: View, Equatable {
         var primary: [FileRowMenuAction] = []
         if entry.kind != .directory {
             if capabilities.canPreview {
-                primary.append(FileRowMenuAction(title: "Quick Look", systemImage: "eye") {
-                    controller.onPreviewFile?(entry)
+                primary.append(FileRowMenuAction(title: "Open in Artifacts", systemImage: "square.stack.3d.up") {
+                    controller.openFile(entry)
                 })
             }
             if capabilities.canDownload {
@@ -2046,8 +2065,8 @@ private struct FileRowView: View, Equatable {
         let _ = FilesUIDiagnostics.shared.menuBuild()
         if entry.kind != .directory {
             if capabilities.canPreview {
-                Button { controller.onPreviewFile?(entry) } label: {
-                    Label("Quick Look", systemImage: "eye")
+                Button { controller.openFile(entry) } label: {
+                    Label("Open in Artifacts", systemImage: "square.stack.3d.up")
                 }
             }
             if capabilities.canDownload {

@@ -12,6 +12,7 @@ import com.bambouville.tessera.data.SavedIdentity
 import com.bambouville.tessera.networking.AndroidSshBackend
 import com.bambouville.tessera.networking.SshAuthentication
 import com.bambouville.tessera.networking.SshEndpoint
+import com.bambouville.tessera.networking.SshHostKeyApprovalRequired
 import com.bambouville.tessera.networking.SshHostKeyObservation
 import com.bambouville.tessera.networking.SshHostKeyPolicy
 import com.bambouville.tessera.networking.SshKeyAuthorizationProvider
@@ -46,7 +47,8 @@ sealed interface AuthorizedKeyInstallState {
     data class AwaitingOwnerAuthorization(val hop: SshRouteHop, val requestId: UUID) : AuthorizedKeyInstallState
     data object Installing : AuthorizedKeyInstallState
     data object Succeeded : AuthorizedKeyInstallState
-    data class Failed(val message: String) : AuthorizedKeyInstallState
+    /** [messageRes], when set, is the user-facing wording; [message] is the raw failure. */
+    data class Failed(val message: String, val messageRes: Int? = null) : AuthorizedKeyInstallState
 }
 
 class AuthorizedKeyInstallController(
@@ -106,7 +108,7 @@ class AuthorizedKeyInstallController(
                     val output = withTimeout(45_000L) {
                         withContext(Dispatchers.IO) { connection.standardOutput.bufferedReader().readText() }
                     }
-                    check(marker in output) { "The host did not confirm the public-key installation" }
+                    if (marker !in output) throw InstallationNotConfirmed()
                 }
                 hosts.save(
                     HostDraft(
@@ -127,6 +129,11 @@ class AuthorizedKeyInstallController(
                 mutableState.value = AuthorizedKeyInstallState.Succeeded
             } catch (_: CancellationException) {
                 mutableState.value = AuthorizedKeyInstallState.Idle
+            } catch (failure: InstallationNotConfirmed) {
+                mutableState.value = AuthorizedKeyInstallState.Failed(
+                    failure.message.orEmpty(),
+                    R.string.hosts_install_not_confirmed,
+                )
             } catch (failure: Throwable) {
                 mutableState.value = AuthorizedKeyInstallState.Failed(
                     failure.message?.take(240) ?: failure::class.java.simpleName,
@@ -178,31 +185,38 @@ class AuthorizedKeyInstallController(
             observation.canonicalKeyBlob,
         )
         if (evaluation == HostTrustEvaluation.Trusted) return true
-        val decision = CompletableDeferred<Boolean>()
-        hostKeyDecision = decision
-        mutableState.value = AuthorizedKeyInstallState.AwaitingHostKey(
-            observation = observation,
-            fingerprint = observation.canonicalKeyBlob.fingerprint(),
-            changed = evaluation is HostTrustEvaluation.Changed,
-            reverted = evaluation is HostTrustEvaluation.Reverted,
-            previousFingerprint = when (evaluation) {
-                is HostTrustEvaluation.Changed -> evaluation.previousCanonicalKeyBlob.fingerprint()
-                is HostTrustEvaluation.Reverted -> evaluation.currentCanonicalKeyBlob.fingerprint()
-                else -> null
-            },
-        )
-        val accepted = decision.await()
-        hostKeyDecision = null
-        if (accepted) {
-            knownHosts.trust(
-                observation.host,
-                observation.port,
-                observation.algorithm,
-                observation.canonicalKeyBlob,
+        // SSHJ's key exchange cannot wait for a person: the attempt fails, and
+        // the connection asks here before it retries from the first hop.
+        throw SshHostKeyApprovalRequired(observation) {
+            val decision = CompletableDeferred<Boolean>()
+            hostKeyDecision = decision
+            mutableState.value = AuthorizedKeyInstallState.AwaitingHostKey(
+                observation = observation,
+                fingerprint = observation.canonicalKeyBlob.fingerprint(),
+                changed = evaluation is HostTrustEvaluation.Changed,
+                reverted = evaluation is HostTrustEvaluation.Reverted,
+                previousFingerprint = when (evaluation) {
+                    is HostTrustEvaluation.Changed -> evaluation.previousCanonicalKeyBlob.fingerprint()
+                    is HostTrustEvaluation.Reverted -> evaluation.currentCanonicalKeyBlob.fingerprint()
+                    else -> null
+                },
             )
-            mutableState.value = AuthorizedKeyInstallState.Connecting
+            val accepted = try {
+                decision.await()
+            } finally {
+                if (hostKeyDecision === decision) hostKeyDecision = null
+            }
+            if (accepted) {
+                knownHosts.trust(
+                    observation.host,
+                    observation.port,
+                    observation.algorithm,
+                    observation.canonicalKeyBlob,
+                )
+                mutableState.value = AuthorizedKeyInstallState.Connecting
+            }
+            accepted
         }
-        return accepted
     }
 
     private suspend fun requestOwnerAuthorization(hop: SshRouteHop) {
@@ -217,6 +231,9 @@ class AuthorizedKeyInstallController(
         mutableState.value = AuthorizedKeyInstallState.Connecting
     }
 }
+
+private class InstallationNotConfirmed :
+    IllegalStateException("The host did not confirm the public-key installation")
 
 /**
  * Swift authority:

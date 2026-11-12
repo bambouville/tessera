@@ -18,7 +18,6 @@ import com.bambouville.tessera.feature.agentcenter.AgentDeviceMemory
 import com.bambouville.tessera.feature.agentcenter.AgentNotificationIntent
 import com.bambouville.tessera.feature.agentcenter.AgentNotificationContract
 import com.bambouville.tessera.feature.agentcenter.AndroidAgentAttentionNotifier
-import com.bambouville.tessera.feature.agentcenter.OnDeviceAgentTitleGenerator
 import com.bambouville.tessera.lifecycle.DiagnosticLogStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,6 +35,7 @@ class AgentSessionViewModel(application: Application) : AndroidViewModel(applica
         coordinator.directory,
         viewModelScope,
         coordinator,
+        diagnostics = DiagnosticLogStore(application)::record,
     )
     val presenter = AgentCenterPresenter(
         coordinator = coordinator,
@@ -45,10 +45,6 @@ class AgentSessionViewModel(application: Application) : AndroidViewModel(applica
         sessionIntegration = integration,
         attentionNotifier = AndroidAgentAttentionNotifier(application, metadata) { agentNotificationsEnabled.value },
         diagnostics = DiagnosticLogStore(application)::record,
-        // Nothing is downloaded and nothing leaves the device: it is used only
-        // where the model is already present, and every other case falls
-        // through to shared Core clipped opening prompt.
-        titleGenerator = OnDeviceAgentTitleGenerator(application),
         deviceMemory = application.getSystemService(ActivityManager::class.java)?.let { manager ->
             val info = ActivityManager.MemoryInfo().also(manager::getMemoryInfo)
             AgentDeviceMemory(info.totalMem, manager.isLowRamDevice)
@@ -60,7 +56,7 @@ class AgentSessionViewModel(application: Application) : AndroidViewModel(applica
         override fun onTrimMemory(level: Int) = presenter.trimMemory(level)
         override fun onConfigurationChanged(newConfig: Configuration) = Unit
         @Deprecated("Deprecated in Java")
-        override fun onLowMemory() = presenter.trimMemory(ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
+        override fun onLowMemory() = presenter.trimMemory(ComponentCallbacks2.TRIM_MEMORY_BACKGROUND)
     }
 
     init {

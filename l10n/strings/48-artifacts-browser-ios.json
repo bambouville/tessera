@@ -1,0 +1,146 @@
+{
+  "artifacts browser": {
+    "de": "Artefakt-Browser",
+    "es": "navegador de artefactos",
+    "fr": "navigateur d'artefacts",
+    "ja": "成果物ブラウザ",
+    "zh-Hans": "成果浏览器",
+    "zh-Hant": "成果瀏覽器"
+  },
+  "edit address": {
+    "de": "Adresse bearbeiten",
+    "es": "editar dirección",
+    "fr": "modifier l'adresse",
+    "ja": "アドレスを編集",
+    "zh-Hans": "编辑地址",
+    "zh-Hant": "編輯位址"
+  },
+  "edit this tab's address": {
+    "de": "Adresse dieses Tabs bearbeiten",
+    "es": "editar la dirección de esta pestaña",
+    "fr": "modifier l'adresse de cet onglet",
+    "ja": "このタブのアドレスを編集",
+    "zh-Hans": "编辑此标签页的地址",
+    "zh-Hant": "編輯此分頁的位址"
+  },
+  "files with a complete downloaded copy": {
+    "de": "Dateien mit vollständig geladener Kopie",
+    "es": "archivos con una copia descargada completa",
+    "fr": "fichiers dont la copie est entièrement téléchargée",
+    "ja": "ダウンロード済みの完全なコピーがあるファイル",
+    "zh-Hans": "已完整下载副本的文件",
+    "zh-Hant": "已完整下載副本的檔案"
+  },
+  "find in page": {
+    "de": "Auf Seite suchen",
+    "es": "buscar en la página",
+    "fr": "rechercher dans la page",
+    "ja": "ページ内を検索",
+    "zh-Hans": "在页面中查找",
+    "zh-Hant": "在頁面中尋找"
+  },
+  "jump to tab 1–8 / last": {
+    "de": "zu Tab 1–8 / zum letzten Tab",
+    "es": "ir a la pestaña 1–8 / a la última",
+    "fr": "aller à l'onglet 1–8 / au dernier",
+    "ja": "タブ 1–8 / 最後のタブへ移動",
+    "zh-Hans": "跳到标签页 1–8 / 最后一个",
+    "zh-Hant": "跳到分頁 1–8 / 最後一個"
+  },
+  "last tab": {
+    "de": "letzter Tab",
+    "es": "última pestaña",
+    "fr": "dernier onglet",
+    "ja": "最後のタブ",
+    "zh-Hans": "最后一个标签页",
+    "zh-Hant": "最後一個分頁"
+  },
+  "new tab": {
+    "de": "neuer Tab",
+    "es": "pestaña nueva",
+    "fr": "nouvel onglet",
+    "ja": "新規タブ",
+    "zh-Hans": "新建标签页",
+    "zh-Hant": "新增分頁"
+  },
+  "open a path or a port in a new tab": {
+    "de": "Pfad oder Port in neuem Tab öffnen",
+    "es": "abrir una ruta o un puerto en una pestaña nueva",
+    "fr": "ouvrir un chemin ou un port dans un nouvel onglet",
+    "ja": "パスまたはポートを新規タブで開く",
+    "zh-Hans": "在新标签页中打开路径或端口",
+    "zh-Hant": "在新分頁中開啟路徑或連接埠"
+  },
+  "reopen closed tab": {
+    "de": "geschlossenen Tab wieder öffnen",
+    "es": "reabrir pestaña cerrada",
+    "fr": "rouvrir l'onglet fermé",
+    "ja": "閉じたタブを再度開く",
+    "zh-Hans": "重新打开已关闭的标签页",
+    "zh-Hant": "重新開啟已關閉的分頁"
+  },
+  "share file": {
+    "de": "Datei teilen",
+    "es": "compartir archivo",
+    "fr": "partager le fichier",
+    "ja": "ファイルを共有",
+    "zh-Hans": "分享文件",
+    "zh-Hant": "分享檔案"
+  },
+  "switch to tab": {
+    "de": "zum Tab wechseln",
+    "es": "ir a la pestaña",
+    "fr": "aller à l'onglet",
+    "ja": "タブに切り替え",
+    "zh-Hans": "切换到标签页",
+    "zh-Hant": "切換到分頁"
+  },
+  "tab %lld": {
+    "de": "Tab %lld",
+    "es": "pestaña %lld",
+    "fr": "onglet %lld",
+    "ja": "タブ %lld",
+    "zh-Hans": "标签页 %lld",
+    "zh-Hant": "分頁 %lld"
+  },
+  "the artifacts browser can't take this key. try a letter or a punctuation key.": {
+    "de": "der Artefakt-Browser kann diese Taste nicht verwenden. Versuch einen Buchstaben oder ein Satzzeichen.",
+    "es": "el navegador de artefactos no puede usar esta tecla. prueba con una letra o un signo de puntuación.",
+    "fr": "le navigateur d'artefacts ne peut pas utiliser cette touche. essayez une lettre ou un signe de ponctuation.",
+    "ja": "成果物ブラウザではこのキーを使えません。文字キーか記号キーを試してください。",
+    "zh-Hans": "成果浏览器无法使用此按键。请尝试字母或标点键。",
+    "zh-Hant": "成果瀏覽器無法使用此按鍵。請嘗試字母或標點鍵。"
+  },
+  "this file has not been downloaded yet": {
+    "de": "diese Datei wurde noch nicht geladen",
+    "es": "este archivo aún no se ha descargado",
+    "fr": "ce fichier n'a pas encore été téléchargé",
+    "ja": "このファイルはまだダウンロードされていません",
+    "zh-Hans": "此文件尚未下载",
+    "zh-Hant": "此檔案尚未下載"
+  },
+  "this file is still downloading": {
+    "de": "diese Datei wird noch geladen",
+    "es": "este archivo aún se está descargando",
+    "fr": "ce fichier est encore en cours de téléchargement",
+    "ja": "このファイルはまだダウンロード中です",
+    "zh-Hans": "此文件仍在下载",
+    "zh-Hant": "此檔案仍在下載"
+  },
+  "web pages only": {
+    "de": "nur Webseiten",
+    "es": "solo páginas web",
+    "fr": "pages web uniquement",
+    "ja": "Web ページのみ",
+    "zh-Hans": "仅限网页",
+    "zh-Hant": "僅限網頁"
+  },
+  "— live while the artifacts browser has focus": {
+    "de": "— aktiv, solange der Artefakt-Browser den Fokus hat",
+    "es": "— activos mientras el navegador de artefactos tiene el foco",
+    "fr": "— actifs tant que le navigateur d'artefacts a le focus",
+    "ja": "— 成果物ブラウザにフォーカスがある間に有効",
+    "zh-Hans": "— 成果浏览器获得焦点时生效",
+    "zh-Hant": "— 成果瀏覽器取得焦點時生效"
+  }
+}

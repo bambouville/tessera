@@ -16,6 +16,7 @@ import com.bambouville.tessera.data.SavedIdentity
 import com.bambouville.tessera.data.SavedKnownHost
 import com.bambouville.tessera.data.TmuxModes
 import com.bambouville.tessera.data.TransportKinds
+import com.bambouville.tessera.design.DisplayText
 import com.bambouville.tessera.security.AndroidKeystoreCredentialStore
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
@@ -302,7 +303,8 @@ class CrossDeviceBootstrapAdapterInstrumentedTest {
 
             if (failGrants) {
                 val result = recipient.awaitState<PairingUiState.Failed>(30_000)
-                assertEquals("Setup copied · access incomplete", result.title)
+                assertEquals(DisplayText.Resource(R.string.pairing_failed_access_incomplete_title), result.title)
+                assertEquals(DisplayText.Plural(R.plurals.pairing_failed_access_incomplete, 2), result.message)
                 assertEquals(3, result.step)
                 assertEquals(2, recipientHosts.snapshot().size)
                 assertTrue(recipientHosts.snapshot().all { it.identityId == null })

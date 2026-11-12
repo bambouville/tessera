@@ -29,7 +29,11 @@ cleanup_failed_prepare() {
 }
 trap 'fail_closed_trap cleanup_failed_prepare' EXIT
 
+# S12 needs the software keyboard up under its finger taps. A new headless
+# device otherwise behaves as if the Mac keyboard were attached, so ask for it
+# on this run's device instead of relying on Simulator.app's state.
 udid="$(
+  TESSERA_INTEGRATION_SOFTWARE_KEYBOARD=1 \
   TESSERA_INTEGRATION_SIMULATOR_NAME="Tessera Visual Integration Tests" \
   TESSERA_INTEGRATION_SIMULATOR_UDID_FILE="$SIMULATOR_STATE/visual_simulator_udid" \
     "$HERE/ensure-test-simulator.sh" | tail -n 1

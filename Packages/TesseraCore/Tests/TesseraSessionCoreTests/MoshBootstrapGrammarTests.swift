@@ -628,6 +628,103 @@ final class SensitiveDataRedactionTests: XCTestCase {
             ),
             "ssh://<redacted-endpoint>/path"
         )
+        XCTAssertEqual(
+            SensitiveDataRedaction.redact(
+                "connecting to alice@[2001:db8::1]:22 failed",
+                patterns: [.endpointIdentifier]
+            ),
+            "connecting to <redacted-endpoint>:22 failed"
+        )
+        XCTAssertEqual(
+            SensitiveDataRedaction.redact(
+                "user alice+ops@prod.internal",
+                patterns: [.endpointIdentifier]
+            ),
+            "user <redacted-endpoint>"
+        )
+        // An authority trace names windows inside parentheses; with nothing
+        // word-ish before the `@` it is no endpoint either.
+        XCTAssertEqual(
+            SensitiveDataRedaction.redact(
+                "event=windowSizePolicy(@3 f2) fence=f2(@3 ack latest)->none",
+                patterns: [.endpointIdentifier]
+            ),
+            "event=windowSizePolicy(@3 f2) fence=f2(@3 ack latest)->none"
+        )
+        let endpoints: [(String, String)] = [
+            // A pane title in an escaped metadata row.
+            (#"head=%5\t0\t23\talice@devbox:~\tzsh"#, #"head=%5\t0\t23\<redacted-endpoint>:~\tzsh"#),
+            (#"DOMAIN\alice@host"#, "<redacted-endpoint>"),
+            (#"DOMAIN\\alice@host"#, "<redacted-endpoint>"),
+            (#"\\alice@host"#, #"\\<redacted-endpoint>"#),
+            ("alice@2001:db8::1:22", "<redacted-endpoint>"),
+            ("to alice@::1 now", "to <redacted-endpoint> now"),
+            ("alice@fe80::1%en0 x", "<redacted-endpoint> x"),
+            ("head=alice@[2001:db8::1", "head=<redacted-endpoint>"),
+            ("ssh://alice:hunter2@host/x", "ssh://<redacted-endpoint>/x"),
+            ("MACHINE$@host", "<redacted-endpoint>"),
+            ("o'brien@host", "<redacted-endpoint>"),
+            ("it's 'alice@host'", "it's '<redacted-endpoint>'"),
+            ("none->alice@host", "none-><redacted-endpoint>"),
+            ("user@host:22", "<redacted-endpoint>:22"),
+            ("failed(alice@host)", "failed(<redacted-endpoint>)"),
+            // A painted prompt, after a field or an escaped tab.
+            (#"head=\e[32malice\e[39m@\e[34mdevbox\e[39m:~ %"#, "head=<redacted-endpoint>:~ %"),
+            (#"head=%5\t0\t23\t\e[1;32malice@devbox\e[0m:~"#, #"head=%5\t0\t23\t<redacted-endpoint>:~"#),
+            ("head=\u{1b}[32malice\u{1b}[39m@\u{1b}[34mdevbox", "head=<redacted-endpoint>"),
+            // A snippet cut at the host.
+            ("head=alice@…", "head=<redacted-endpoint>"),
+            ("alice@corp.example@winbox:22", "<redacted-endpoint>:22"),
+            (#"CORP\tom@host"#, "<redacted-endpoint>"),
+            (#"CORP\\tom@host"#, "<redacted-endpoint>"),
+            ("alice:pa/ss@host", "<redacted-endpoint>"),
+            ("alice:@host", "<redacted-endpoint>"),
+            ("ssh://alice@prod.internal:22/path", "ssh://<redacted-endpoint>:22/path"),
+            ("[alice@host ~]$", "[<redacted-endpoint> ~]$"),
+            ("id=1;alice@host", "id=1;<redacted-endpoint>"),
+            ("alice@10.0.0.1:22", "<redacted-endpoint>:22"),
+        ]
+        for (text, redacted) in endpoints {
+            XCTAssertEqual(SensitiveDataRedaction.redact(text, patterns: [.endpointIdentifier]), redacted, text)
+        }
+        // Escapes and separators glued to a window id leave it a window id.
+        for text in [
+            #"row\e@3\x1b@4\n@5\r@6\t@7"#, #"row\\e@3 x\\t@7"#, "policy:@3 pane=%5:@3 @1:@2",
+            // A name of digits alone is no host, whatever is glued before it.
+            "%5@3 $1@3 @3-@4 @1@2 trace:f2(@3 x:{@3", #"x\e[1;32m@3 y\e[m@4 \e[1m@3"#,
+        ] {
+            XCTAssertEqual(SensitiveDataRedaction.redact(text, patterns: [.endpointIdentifier]), text)
+        }
+        // A label the key stage replaced first is still part of the endpoint.
+        XCTAssertEqual(
+            SensitiveDataRedaction.redact("alice@abcdefghijklmnopqrstuv.example.com"),
+            "<redacted-endpoint>"
+        )
+        XCTAssertEqual(SensitiveDataRedaction.redact("abcdefghijklmnopqrstuv@prod.internal"), "<redacted-endpoint>")
+    }
+
+    /// Diagnostic lines can carry long remote output; inputs that once made
+    /// the endpoint scan quadratic (minutes at this size) must stay linear.
+    func testEndpointRedactionStaysLinearOnHostileInput() {
+        let inputs = [
+            String(repeating: "1:", count: 50_000),
+            String(repeating: "x'", count: 50_000),
+            String(repeating: "<redacted-key>", count: 10_000),
+            String(repeating: "a:", count: 50_000) + "@",
+            String(repeating: #"a\b"#, count: 50_000),
+            String(repeating: "x@[", count: 30_000),
+            String(repeating: "<redacted-key>'", count: 10_000),
+            String(repeating: #"\e[1m"#, count: 30_000),
+            String(repeating: #"\e[1m'"#, count: 30_000),
+            String(repeating: #"a\e[1m"#, count: 30_000),
+        ]
+        for input in inputs {
+            let clock = ContinuousClock()
+            let elapsed = clock.measure {
+                _ = SensitiveDataRedaction.redact(input, patterns: [.endpointIdentifier])
+            }
+            XCTAssertLessThan(elapsed, .seconds(2), String(input.prefix(16)))
+        }
     }
 
     /// The applied order is the list's, never the caller's argument order —

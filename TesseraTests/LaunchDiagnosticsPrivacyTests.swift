@@ -114,4 +114,45 @@ final class LaunchDiagnosticsPrivacyTests: XCTestCase {
         throw XCTSkip("the sanitizer test hook is DEBUG-only")
         #endif
     }
+
+    // MARK: - Endpoints and window ids
+
+    /// The file runs the shared endpoint stage, not a copy of it. Its own
+    /// `\S+@\S+` copy erased authority traces from `windowSizePolicy(@3` to
+    /// the space and every claim fence's `f2(@3`, though no window id is an
+    /// endpoint; an endpoint must still go, port and URL around it kept.
+    func testWindowIdsSurviveWhileEndpointsAreRedacted() throws {
+        #if DEBUG
+        let trace = "tmux authority event=windowSizePolicy(@3 f2) fence=f2(@3 ack latest)->none window=@3"
+        XCTAssertEqual(DiagnosticLogStore.sanitizedMessageForTesting(trace), trace)
+
+        XCTAssertEqual(
+            DiagnosticLogStore.sanitizedMessageForTesting(
+                "connect to=alice@prod.internal:22 via ssh://bob+ops@[2001:db8::1]/ state=failed"
+            ),
+            "connect to=<redacted-endpoint>:22 via ssh://<redacted-endpoint>/ state=failed"
+        )
+        // A rejected metadata row reaches the file without verbose logging,
+        // and a shell's pane title is often `user@host:dir`.
+        XCTAssertEqual(
+            DiagnosticLogStore.sanitizedMessageForTesting(
+                #"render-ledger side-channel-metadata-rejected head=%5\t0\t23\talice@devbox:~\tzsh"#
+            ),
+            #"render-ledger side-channel-metadata-rejected head=%5\t0\t23\<redacted-endpoint>:~\tzsh"#
+        )
+        // A painted prompt's title, and one the snippet cut at the host.
+        XCTAssertEqual(
+            DiagnosticLogStore.sanitizedMessageForTesting(
+                #"render-ledger side-channel-metadata-rejected head=\e[32malice\e[39m@\e[34mdevbox\e[39m:~ lines=1"#
+            ),
+            "render-ledger side-channel-metadata-rejected head=<redacted-endpoint>:~ lines=1"
+        )
+        XCTAssertEqual(
+            DiagnosticLogStore.sanitizedMessageForTesting("render-ledger side-channel-metadata-rejected head=alice@…"),
+            "render-ledger side-channel-metadata-rejected head=<redacted-endpoint>"
+        )
+        #else
+        throw XCTSkip("the sanitizer test hook is DEBUG-only")
+        #endif
+    }
 }

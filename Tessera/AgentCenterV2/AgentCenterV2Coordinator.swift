@@ -176,6 +176,7 @@ final class AgentCenterV2Coordinator {
     @ObservationIgnored private var speech: AppleAgentSpeechToDraftAdapter?
     @ObservationIgnored private var attachments: AgentComposerAttachments?
     @ObservationIgnored var onUploadAttachment: ((AgentTerminalBinding, URL) async throws -> String)?
+    @ObservationIgnored var onAgentEditObserved: ((UUID, String) -> Void)?
     @ObservationIgnored var terminalAdapters: [AgentThreadID: AppleAgentTerminalAdapter] = [:]
     @ObservationIgnored private var launchPort: (any AgentLaunchPort)?
     @ObservationIgnored var sessionRoutes: [UUID: AppleAgentSessionRoute] = [:] {
@@ -217,6 +218,23 @@ final class AgentCenterV2Coordinator {
     /// Fill requests that waited for the initial prefetch to finish.
     @ObservationIgnored var pendingFillRequests: Set<AgentThreadID> = []
     @ObservationIgnored var pendingLatestRequests: Set<AgentThreadID> = []
+    /// A search match to read around once the thread's current read ends.
+    @ObservationIgnored var pendingSeekRequests: [AgentThreadID: AgentSearchResult] = [:]
+    /// Threads a seek opens on a connection that holds no window for them,
+    /// by the read's token: the newest page it reads first is not shown, so
+    /// the detail keeps its rows (or its loading state) until the match is
+    /// read or refused.
+    @ObservationIgnored var presentationHolds: [AgentThreadID: UUID] = [:]
+    /// A reader's place in history (`readerPlace`), kept from the read that
+    /// opens it until a seek lands there, the host refuses it, or the reader
+    /// moves on: a read cut off in between (the app away again, the
+    /// connection dropped) leaves it to the next, as Core's window by then
+    /// holds the newest page.
+    @ObservationIgnored var readerPlaces: [AgentThreadID: AgentSearchResult] = [:]
+    /// Threads whose place a notification gave up (`openNotificationThread`):
+    /// no read opens it until the thread's next opening read ends, whatever
+    /// row Core is told meanwhile.
+    @ObservationIgnored var readerPlacesGivenUp: Set<AgentThreadID> = []
     /// Receipt reads share the thread's native window with history. The lease
     /// token prevents cleanup from a retired action releasing a new owner's gate.
     @ObservationIgnored var outgoingReceiptLeases: [AgentThreadID: UUID] = [:]
@@ -232,8 +250,20 @@ final class AgentCenterV2Coordinator {
     @ObservationIgnored private var completionSweepPending = true
     @ObservationIgnored private var completionRetries: Set<AgentThreadID> = []
     @ObservationIgnored private var launchTargetsRefreshAfter = Date.distantPast
+    /// A refresh asked for while one runs or inside the throttle, owed for
+    /// when it may run.
+    @ObservationIgnored private var launchTargetsTrailingRefresh: Task<Void, Never>?
+    static let launchTargetsRefreshInterval: TimeInterval = 2
     @ObservationIgnored var projectionTaskIDs: [AgentThreadID: UUID] = [:]
+    /// Where each projection read waits, for the log a slow one writes.
+    @ObservationIgnored var projectionStages: [AgentThreadID: String] = [:]
     @ObservationIgnored private var searchTask: Task<Void, Never>?
+    /// The query whose rows the list shows; another one replaces them at once.
+    @ObservationIgnored private var presentedSearchQuery = ""
+    /// The query's search has not ended. Once none runs (the app or the
+    /// surface went away first), the next finished inventory runs it again.
+    @ObservationIgnored var searchUnfinished = false
+    var searchAwaitsRerun: Bool { searchUnfinished && searchTask == nil }
     @ObservationIgnored var projectionRoutes: [AgentThreadID: AppleAgentProjectionRoute] = [:]
     @ObservationIgnored var initialProjectionRoutes: [AgentThreadID: AppleAgentProjectionRoute] = [:]
     @ObservationIgnored var historicalRoutes: [AgentThreadID: AppleAgentProjectionRoute] = [:]
@@ -241,6 +271,18 @@ final class AgentCenterV2Coordinator {
     @ObservationIgnored var inventoryTaskIDs: [String: UUID] = [:]
     @ObservationIgnored var inventoryRetryAfter: [String: Date] = [:]
     @ObservationIgnored var inventoryRetryTasks: [UUID: Task<Void, Never>] = [:]
+    /// Sessions asked for a native pass while one ran: it may have listed
+    /// past what they asked about, so one more follows it.
+    @ObservationIgnored var inventoryRerunRequests: Set<UUID> = []
+    /// Per session, the unlisted conversations that asked for a pass at their
+    /// first hook and at their first Stop. A refused hook repeats with every
+    /// tool call and must not walk the host each time.
+    @ObservationIgnored var inventoryAskedConversations: [UUID: Set<String>] = [:]
+    /// Per session, whether its last native pass reached the end (true) or
+    /// failed (false); none yet for a session that has not finished one.
+    @ObservationIgnored var nativeInventoryWorked: [UUID: Bool] = [:]
+    /// Sessions whose last pass ended incomplete and was retried once.
+    @ObservationIgnored var inventoryIncompleteRetried: Set<UUID> = []
     /// Tier-C live gates are scoped to the authenticated session that proved
     /// them. The core registry is the union needed to normalize accepted
     /// pages; presentation and mutations still consult the per-session set so
@@ -402,10 +444,11 @@ final class AgentCenterV2Coordinator {
             guard generation == enablementGeneration, isEnabled else { return }
             await runtime.setEnabled(true)
             guard generation == enablementGeneration, isEnabled else { return }
+            let listers = nativeInventoryListers()
             for sessionID in sessionRoutes.keys {
                 scheduleSessionRefresh(sessionID: sessionID)
                 scheduleIntegrationRefresh(sessionID: sessionID)
-                startInventory(sessionID: sessionID)
+                startInventory(sessionID: sessionID, native: listers.contains(sessionID))
             }
             await synchronizePresentation()
             if let route = notificationRouter.consume() { enqueueNotificationRoute(route) }
@@ -427,6 +470,7 @@ final class AgentCenterV2Coordinator {
         livePromptLifecycleSequences.removeAll()
         livePromptFrameTimes.removeAll()
         searchTask?.cancel()
+        cancelTrailingLaunchTargetsRefresh()
         sessionRefreshTasks.removeAll()
         sessionRefreshTaskIDs.removeAll()
         sessionRefreshQueues.removeAll()
@@ -436,10 +480,15 @@ final class AgentCenterV2Coordinator {
         projectionTasks.removeAll()
         if !presentation.loadingTranscriptThreads.isEmpty { presentation.loadingTranscriptThreads.removeAll() }
         projectionTaskIDs.removeAll()
+        projectionStages.removeAll()
         pendingProjectionRefreshes.removeAll()
         pendingHistoryRequests.removeAll()
         pendingFillRequests.removeAll()
         pendingLatestRequests.removeAll()
+        pendingSeekRequests.removeAll()
+        presentationHolds.removeAll()
+        readerPlaces.removeAll()
+        presentation.dropSearchLanding()
         outgoingReceiptLeases.removeAll()
         searchTask = nil
         projectionRoutes.removeAll()
@@ -449,6 +498,8 @@ final class AgentCenterV2Coordinator {
         inventoryTaskIDs.removeAll()
         inventoryRetryAfter.removeAll()
         cancelInventoryRetries()
+        // Each pass outcome stands for its session's proven providers.
+        nativeInventoryWorked.removeAll()
         sessionConformingProviders.removeAll()
         await configureRegistryForLiveGates()
         historicalRoutes.removeAll()
@@ -643,7 +694,7 @@ final class AgentCenterV2Coordinator {
             if case .send(let request) = action { presentation.finishSend(request) }
         }
         guard isEnabled else {
-            presentation.reportUnavailable("Agent Center is disabled in Experimental Settings.")
+            presentation.reportUnavailable(String(localized: "Agent Center is disabled in Experimental Settings."))
             return
         }
         switch action {
@@ -672,6 +723,8 @@ final class AgentCenterV2Coordinator {
             scheduleNativeInterests()
         case .select(let threadID):
             cancelInitialPrefetches(except: threadID)
+            pendingSeekRequests = pendingSeekRequests.filter { $0.key == threadID }
+            readerPlaces = readerPlaces.filter { $0.key == threadID }
             clearNativeReadFailure(threadID)
             await bridge.select(threadID: threadID)
             projectHistoricalIfNeeded(threadID)
@@ -683,6 +736,7 @@ final class AgentCenterV2Coordinator {
 
         case .selectCandidate(let candidateID):
             cancelInitialPrefetches()
+            readerPlaces.removeAll()
             await bridge.select(threadID: nil)
             let sessionID = presentation.listSnapshot.candidates
                 .first(where: { $0.id == candidateID })?
@@ -691,6 +745,9 @@ final class AgentCenterV2Coordinator {
 
         case .search(let query):
             scheduleSearch(query: query)
+
+        case .openSearchResult(let result):
+            openSearchResult(result)
 
         case .setGrouping(let grouping):
             await bridge.setGrouping(grouping)
@@ -717,7 +774,7 @@ final class AgentCenterV2Coordinator {
             if request.composerVerification == .userOverride,
                (presentation.selectedThreadID != request.threadID
                 || presentation.draftBinding(for: request.threadID) != request.draftToReplace) {
-                presentation.reportUnavailable("The draft changed before sending. Review it and send again.")
+                presentation.reportUnavailable(String(localized: "The draft changed before sending. Review it and send again."))
                 return
             }
             await send(request)
@@ -746,8 +803,13 @@ final class AgentCenterV2Coordinator {
         case .retainBridgedRows(let threadID):
             requestNewerPage(threadID, bridge: true)
         case .returnToLatest(let threadID):
+            pendingSeekRequests.removeValue(forKey: threadID)
+            readerPlaces.removeValue(forKey: threadID)
+            presentation.dropSearchLanding(threadID)
             requestNewerPage(threadID, latest: true)
         case .viewportAnchor(let threadID, let recordID):
+            // A reader who follows the newest page has left any kept place.
+            if recordID == nil { readerPlaces.removeValue(forKey: threadID) }
             await runtime.setIngestionViewportAnchor(recordID, for: threadID)
         case .refreshTranscript(let threadID):
             refreshVisibleTranscript(threadID)
@@ -785,6 +847,7 @@ final class AgentCenterV2Coordinator {
                 scheduleLivenessSweep(sessionID: sessionID)
             }
             if hasSurfaceDemand {
+                let listers = nativeInventoryListers()
                 for sessionID in sessionRoutes.keys {
                     // Same reason as `setSurfaceDemand`: a backgrounded app
                     // kept discovering on the unattended floor, and coming back
@@ -792,7 +855,7 @@ final class AgentCenterV2Coordinator {
                     // applying.
                     sessionDiscoveryAfter.removeValue(forKey: sessionID)
                     scheduleSessionRefresh(sessionID: sessionID)
-                    startInventory(sessionID: sessionID)
+                    startInventory(sessionID: sessionID, native: listers.contains(sessionID))
                 }
             }
             for snapshot in presentation.threadSnapshots.values where snapshot.summary.livePromptWatch == true {
@@ -816,16 +879,20 @@ final class AgentCenterV2Coordinator {
         livePromptWatchTasks.removeAll()
         if !presentation.loadingTranscriptThreads.isEmpty { presentation.loadingTranscriptThreads.removeAll() }
         projectionTaskIDs.removeAll()
+        projectionStages.removeAll()
         pendingProjectionRefreshes.removeAll()
         pendingHistoryRequests.removeAll()
         pendingFillRequests.removeAll()
         pendingLatestRequests.removeAll()
+        pendingSeekRequests.removeAll()
+        presentation.dropSearchLanding()
         outgoingReceiptLeases.removeAll()
         searchTask?.cancel()
         searchTask = nil
         searchGeneration &+= 1
         presentation.isSearching = false
         pauseNotificationRouteRetry()
+        cancelTrailingLaunchTargetsRefresh()
     }
 
     func setSurfaceDemand(_ demanded: Bool) {
@@ -835,6 +902,7 @@ final class AgentCenterV2Coordinator {
         if demanded {
             for threadID in ingestionOpenDetails { startLivePromptWatch(threadID) }
             inventoryRetryAfter.removeAll()
+            let listers = nativeInventoryListers()
             for sessionID in sessionRoutes.keys {
                 // A closed surface discovers on a sixty-second floor. Opening
                 // one must not inherit the remainder of that wait: drop each
@@ -842,7 +910,7 @@ final class AgentCenterV2Coordinator {
                 // opened can be a minute out of date before it refreshes.
                 sessionDiscoveryAfter.removeValue(forKey: sessionID)
                 scheduleSessionRefresh(sessionID: sessionID)
-                startInventory(sessionID: sessionID)
+                startInventory(sessionID: sessionID, native: listers.contains(sessionID))
             }
         } else {
             cancelInitialPrefetches()
@@ -856,14 +924,18 @@ final class AgentCenterV2Coordinator {
             projectionTasks.removeAll()
             if !presentation.loadingTranscriptThreads.isEmpty { presentation.loadingTranscriptThreads.removeAll() }
             projectionTaskIDs.removeAll()
+            projectionStages.removeAll()
             pendingProjectionRefreshes.removeAll()
             pendingHistoryRequests.removeAll()
             pendingFillRequests.removeAll()
             pendingLatestRequests.removeAll()
+            pendingSeekRequests.removeAll()
+            presentation.dropSearchLanding()
             outgoingReceiptLeases.removeAll()
             searchTask?.cancel()
             searchTask = nil
             searchGeneration &+= 1
+            presentation.isSearching = false
         }
     }
 
@@ -1236,15 +1308,23 @@ final class AgentCenterV2Coordinator {
         projectionTasks.removeAll()
         if !presentation.loadingTranscriptThreads.isEmpty { presentation.loadingTranscriptThreads.removeAll() }
         projectionTaskIDs.removeAll()
+        projectionStages.removeAll()
         pendingProjectionRefreshes.removeAll()
         pendingHistoryRequests.removeAll()
         pendingFillRequests.removeAll()
         pendingLatestRequests.removeAll()
+        pendingSeekRequests.removeAll()
+        presentation.dropSearchLanding()
         outgoingReceiptLeases.removeAll()
         searchTask?.cancel()
         searchTask = nil
         searchGeneration &+= 1
+        presentation.isSearching = false
+        // At most 400 short excerpts: the rows a reader is looking at stay.
+        // A query typed meanwhile shows its own rows instead.
+        let search = bridge.searchSnapshot, generation = searchGeneration
         await runtime.memoryWarning()
+        if searchGeneration == generation { await bridge.applySearch(search) }
         _ = await runtime.takeIngestionEvictions()
         presentation.discardTranscriptLayoutCache()
         for id in bridge.threadSnapshots.keys {
@@ -1350,6 +1430,7 @@ final class AgentCenterV2Coordinator {
         guard await currentBindingIsProven(threadID: threadID, binding: binding) else {
             return .retry
         }
+        await openNotificationThread(threadID)
         presentation.requestNarrowThreadNavigation(threadID)
         await bridge.select(threadID: threadID)
         await synchronizePresentation()
@@ -1402,18 +1483,19 @@ final class AgentCenterV2Coordinator {
               let terminal = terminalAdapters[threadID],
               let prompt = latestPrompt(in: snapshot), prompt.token == token
         else {
-            presentation.reportUnavailable("This prompt is no longer available on its original terminal.")
+            presentation.reportUnavailable(String(localized: "This prompt is no longer available on its original terminal."))
             return
         }
         do {
-            let observation = try await terminal.observe(binding: binding)
+            let inspection = try await terminal.inspect(binding: binding)
+            let screen = await bridge.answerScreen(inspection, threadID: threadID)
             let optionID: String
             switch goal.kind {
             case .option: optionID = goal.optionID ?? ""
             case .text: optionID = prompt.options.first(where: { $0.acceptsText == true })?.id ?? "text"
             case .control: optionID = goal.control?.rawValue ?? ""
             }
-            guard let signature = observation.prompt?.signature,
+            guard let signature = screen?.signature,
                   token == AgentPromptGrammar.actionToken(for: signature),
                   goal.isValid,
                   let request = AgentPromptAnswerRequest(
@@ -1429,7 +1511,7 @@ final class AgentCenterV2Coordinator {
                 presentation.reportActionError(.stalePrompt)
                 return
             }
-            handle(await bridge.answer(request, observation: observation, terminal: terminal), promptAnswer: true)
+            handle(await bridge.answer(request, observation: inspection.observation, terminal: terminal), promptAnswer: true)
         } catch {
             presentation.reportActionError((error as? AgentActionError) ?? .unavailable, promptAnswer: true)
         }
@@ -1452,7 +1534,7 @@ final class AgentCenterV2Coordinator {
                 composerVerification: composer.composerVerification
               )
         else {
-            presentation.reportUnavailable("Sending is unavailable because this terminal is no longer live.")
+            presentation.reportUnavailable(String(localized: "Sending is unavailable because this terminal is no longer live."))
             return
         }
         var notSent: (refusal: AppleAgentSendNotWritten, draft: AgentCenterV2PresentationModel.NotSentDraft)?
@@ -1499,7 +1581,7 @@ final class AgentCenterV2Coordinator {
               binding.capabilities.contains(.interrupt),
               let terminal = terminalAdapters[threadID]
         else {
-            presentation.reportUnavailable("Interrupt is unavailable because this terminal is no longer live.")
+            presentation.reportUnavailable(String(localized: "Interrupt is unavailable because this terminal is no longer live."))
             return
         }
         handle(await bridge.interrupt(threadID: threadID, binding: binding, terminal: terminal))
@@ -1510,7 +1592,7 @@ final class AgentCenterV2Coordinator {
         guard let binding = presentation.threadSnapshots[threadID]?.binding,
               let terminal = terminalAdapters[threadID]
         else {
-            presentation.reportUnavailable("The original terminal is unavailable.")
+            presentation.reportUnavailable(String(localized: "The original terminal is unavailable."))
             return false
         }
         do {
@@ -1525,15 +1607,15 @@ final class AgentCenterV2Coordinator {
 
     private func beginDictation(for threadID: AgentThreadID) async {
         guard let speech else {
-            presentation.reportUnavailable("Dictation is unavailable in this app context.")
+            presentation.reportUnavailable(String(localized: "Dictation is unavailable in this app context."))
             return
         }
         switch await speech.begin(for: threadID, applyDraft: { [weak self] id, text in
             self?.presentation.setDraft(text, for: id)
         }) {
         case .listening: break
-        case .unavailable: presentation.reportUnavailable("On-device dictation is unavailable.")
-        case .busy: presentation.reportUnavailable("Dictation is already in use.")
+        case .unavailable: presentation.reportUnavailable(String(localized: "On-device dictation is unavailable."))
+        case .busy: presentation.reportUnavailable(String(localized: "Dictation is already in use."))
         }
     }
 
@@ -1559,7 +1641,7 @@ final class AgentCenterV2Coordinator {
                   $0.registrationID == session.source.registrationID && $0.binding == binding
               })
         else {
-            presentation.reportUnavailable("Launching requires a live tmux session route.")
+            presentation.reportUnavailable(String(localized: "That tmux session is no longer connected. Choose another session to launch in."))
             return
         }
         let registrationID = session.source.registrationID
@@ -1578,7 +1660,7 @@ final class AgentCenterV2Coordinator {
               target(freshDirectoryTarget, stillMatches: directoryRoute.profile, binding: directoryAnchor),
               (await directorySource(directoryAnchor)).contains(intent.workingDirectory.value)
         else {
-            presentation.reportUnavailable("Choose a current directory from a live tmux pane before launching.")
+            presentation.reportUnavailable(String(localized: "Choose a current directory from a live tmux pane before launching."))
             return
         }
         guard isLiveRouteCurrent(binding, registrationID: registrationID) else {
@@ -1594,7 +1676,7 @@ final class AgentCenterV2Coordinator {
                   source.threadID.providerID == intent.providerID,
                   AgentProviderRegistry.builtIn.manifest(for: intent.providerID)?.actions.contains(.fork) == true
             else {
-                presentation.reportUnavailable("Forking requires the original provider and live tmux target.")
+                presentation.reportUnavailable(String(localized: "Forking requires the original agent provider and its connected tmux pane."))
                 return
             }
         }
@@ -1629,7 +1711,7 @@ final class AgentCenterV2Coordinator {
                     registrationID: registrationID
                 ) else {
                     presentation.reportUnavailable(
-                        "The tmux placement was created, but no lifecycle-bound agent appeared. Check the new pane."
+                        String(localized: "The tmux pane or window was created, but Tessera could not find the new agent. Check the new pane.")
                     )
                     return
                 }
@@ -1683,7 +1765,7 @@ final class AgentCenterV2Coordinator {
                     }
                 } catch {
                     presentation.reportUnavailable(
-                        "The agent launched successfully, but Tessera could not save its local lineage."
+                        String(localized: "The agent launched successfully, but Tessera could not save its launch details.")
                     )
                 }
                 await synchronizePresentation()
@@ -1754,7 +1836,9 @@ final class AgentCenterV2Coordinator {
         searchGeneration &+= 1
         let generation = searchGeneration
         searchTask?.cancel()
-        presentation.isSearching = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        presentation.isSearching = !trimmed.isEmpty
+        searchUnfinished = !trimmed.isEmpty
         searchTask = Task { @MainActor [weak self] in
             guard let self else { return }
             defer {
@@ -1764,14 +1848,26 @@ final class AgentCenterV2Coordinator {
                 }
             }
             await self.bridge.setFilter(.init(query: query))
-            await self.bridge.search(query: query)
+            let loaded = await self.bridge.loadedMatches(query: query)
+            guard !Task.isCancelled, self.searchGeneration == generation else { return }
+            // A new query replaces the last one's rows at once with what the
+            // loaded messages match; the same query run again keeps its rows
+            // until it ends.
+            if trimmed != self.presentedSearchQuery {
+                self.presentedSearchQuery = trimmed
+                await self.bridge.applySearch(loaded)
+                self.presentation.searchSnapshot = self.bridge.searchSnapshot
+            }
+            // Hosts are searched once typing pauses: each keystroke's search
+            // would otherwise queue on the hosts ahead of transcript reads.
+            try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled,
                   self.isEnabled,
                   self.applicationActive,
                   self.searchGeneration == generation,
                   self.hasSurfaceDemand
             else { return }
-            await self.searchConnectedSources(query: query, generation: generation)
+            await self.searchConnectedSources(query: query, generation: generation, loaded: loaded.results)
             guard !Task.isCancelled, self.searchGeneration == generation else { return }
             await self.synchronizePresentation()
         }
@@ -1789,8 +1885,10 @@ final class AgentCenterV2Coordinator {
         defer { performanceDiagnostics.record("publish", since: started) }
         await bridge.refreshList()
         let applyStarted = Date()
-        let changed = bridge.takePresentationChanges()
+        var changed = bridge.takePresentationChanges()
+        if !presentationHolds.isEmpty { changed.removeAll { presentationHolds[$0.summary.id] != nil } }
         let removals = bridge.takePresentationRemovals()
+        reportArtifactEdits(changed)
         presentation.apply(list: bridge.listSnapshot, changed: changed, removed: removals.removed,
                            successors: removals.successors)
         for snapshot in bridge.threadSnapshots.values where snapshot.summary.livePromptWatch == true {
@@ -1810,6 +1908,42 @@ final class AgentCenterV2Coordinator {
         refreshLiveAttentionCounts()
         await persistCompletionReads(changed)
         if refreshLaunchSuggestions { await refreshLaunchTargets() }
+    }
+
+    /// Ends a held read (see `presentationHolds`), unless a later read holds
+    /// the thread now. What it applied `shows` in this same turn, so the
+    /// read's end decides on the rows the detail shows; the next publish
+    /// finishes the rest of its bookkeeping. Otherwise the rows before stay
+    /// until the thread changes again.
+    func releasePresentationHold(_ threadID: AgentThreadID, _ hold: UUID, shows: Bool) {
+        guard presentationHolds[threadID] == hold else { return }
+        presentationHolds.removeValue(forKey: threadID)
+        guard shows, let snapshot = bridge.threadSnapshots[threadID] else { return }
+        reportArtifactEdits([snapshot])
+        presentation.apply(thread: snapshot)
+        bridge.notePresentationChange(threadID)
+        Task { [weak self] in await self?.synchronizePresentation(refreshLaunchSuggestions: false) }
+    }
+
+    private func reportArtifactEdits(_ changed: [AgentThreadSnapshot]) {
+        guard let onAgentEditObserved else { return }
+        for snapshot in changed {
+            let previous = presentation.threadSnapshots[snapshot.summary.id]
+            let messages = Dictionary((previous?.messages ?? []).map { ($0.recordID, $0) }, uniquingKeysWith: { _, b in b })
+            var reported = Set<String>()
+            for message in snapshot.messages {
+                let oldBlocks = messages[message.recordID]?.blocks ?? []
+                for (index, block) in message.blocks.enumerated() {
+                    guard case let .edit(path?, _) = block,
+                          path.hasPrefix("/"), !path.contains("\0"),
+                          (index >= oldBlocks.count || oldBlocks[index] != block),
+                          reported.insert(path).inserted else { continue }
+                    // Projected snapshots have a host UUID but no authoritative
+                    // cwd. Relative paths cannot safely identify a host file.
+                    onAgentEditObserved(snapshot.summary.id.hostID, path)
+                }
+            }
+        }
     }
 
     /// Persists Core's content-free completion identities, so a relaunch
@@ -1860,16 +1994,28 @@ final class AgentCenterV2Coordinator {
         // Output discoveries can complete many times per second. These
         // read-only directory probes are launch suggestions, not authority:
         // launch revalidates its exact binding/path independently.
-        guard !launchTargetsRefreshing, Date() >= launchTargetsRefreshAfter else { return }
+        // One asked for meanwhile is deferred, not dropped: an idle thread
+        // may publish nothing more, and its Files would stay on the home
+        // directory instead of the agent's cwd (G-02).
+        guard isEnabled else { return }
+        guard !launchTargetsRefreshing, Date() >= launchTargetsRefreshAfter else {
+            scheduleTrailingLaunchTargetsRefresh()
+            return
+        }
+        launchTargetsTrailingRefresh?.cancel()
+        launchTargetsTrailingRefresh = nil
         let started = Date()
+        let generation = enablementGeneration
         launchTargetsRefreshing = true
         defer {
             launchTargetsRefreshing = false
-            launchTargetsRefreshAfter = Date().addingTimeInterval(2)
+            launchTargetsRefreshAfter = Date().addingTimeInterval(Self.launchTargetsRefreshInterval)
             performanceDiagnostics.record("launchDirectories", since: started)
         }
         var targets: [AgentCenterV2PresentationModel.LaunchTarget] = []
         var directoryAnchors: [UUID: [String: AgentTerminalBinding]] = [:]
+        var filesDirectories: [AgentThreadID: AgentCenterV2PresentationModel.ThreadFilesDirectory] = [:]
+        var probes = 0, emptyProbes = 0
         for session in sessionRoutes.values {
             guard session.source.launchAgent != nil,
                   session.source.supportsTmuxLaunch(),
@@ -1890,6 +2036,10 @@ final class AgentCenterV2Coordinator {
             var directories: [String: AgentTerminalBinding] = [:]
             for route in routes {
                 let discovered = await directorySource(route.binding)
+                probes += 1
+                // Disabled meanwhile: cleanup already ran, and nothing here
+                // may publish or probe after it.
+                guard generation == enablementGeneration, isEnabled else { return }
                 // The source may have been replaced while its control request
                 // was in flight. Keep no directory from a stale owner.
                 guard sessionRoutes[session.source.sessionID]?.source.registrationID == session.source.registrationID else {
@@ -1897,6 +2047,13 @@ final class AgentCenterV2Coordinator {
                 }
                 for directory in discovered where AgentRemotePath(directory) != nil {
                     if directories[directory] == nil { directories[directory] = route.binding }
+                }
+                if !discovered.contains(where: { $0.hasPrefix("/") && AgentRemotePath($0) != nil }) { emptyProbes += 1 }
+                if let path = discovered.first(where: { $0.hasPrefix("/") && AgentRemotePath($0) != nil }) {
+                    for (id, current) in threadRoutes
+                    where current.registrationID == route.registrationID && current.binding == route.binding {
+                        filesDirectories[id] = .init(binding: route.binding, path: path)
+                    }
                 }
             }
             guard !directories.isEmpty else { continue }
@@ -1927,9 +2084,40 @@ final class AgentCenterV2Coordinator {
             ))
         }
         validatedLaunchDirectories = directoryAnchors
+        if presentation.threadFilesDirectories != filesDirectories {
+            presentation.threadFilesDirectories = filesDirectories
+            // A thread's Files take its directory only for the binding its
+            // snapshot shows (G-02); count the ones that would not.
+            let unmatched = filesDirectories.filter { id, known in
+                presentation.threadSnapshots[id].map { $0.binding != known.binding } ?? false
+            }.count
+            DiagnosticLogStore.appendAgentCenter(
+                "thread-files-directories threads=\(filesDirectories.count) probes=\(probes) emptyProbes=\(emptyProbes) bindingMismatches=\(unmatched)"
+            )
+        }
         let sorted = targets.sorted {
             $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
         }
         if presentation.launchTargets != sorted { presentation.launchTargets = sorted }
+    }
+
+    private func scheduleTrailingLaunchTargetsRefresh() {
+        guard isEnabled, launchTargetsTrailingRefresh == nil else { return }
+        // A refresh in flight sets the next window when it ends; check back
+        // then rather than spin.
+        let wait = launchTargetsRefreshing
+            ? Self.launchTargetsRefreshInterval
+            : max(0.05, launchTargetsRefreshAfter.timeIntervalSinceNow)
+        launchTargetsTrailingRefresh = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(wait)) } catch { return }
+            guard let self, self.isEnabled else { return }
+            self.launchTargetsTrailingRefresh = nil
+            await self.refreshLaunchTargets()
+        }
+    }
+
+    private func cancelTrailingLaunchTargetsRefresh() {
+        launchTargetsTrailingRefresh?.cancel()
+        launchTargetsTrailingRefresh = nil
     }
 }

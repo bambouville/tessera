@@ -33,6 +33,7 @@ final class FilesPanelController {
     // MARK: - Handlers installed by later packets
 
     /// All optional: nil hides the corresponding action in the UI.
+    var onOpenInArtifacts: ((RemoteFileEntry) -> Void)?
     var onPreviewFile: ((RemoteFileEntry) -> Void)?
     var onDownloadFile: ((RemoteFileEntry) -> Void)?
     var onShareFile: ((RemoteFileEntry) -> Void)?
@@ -77,9 +78,12 @@ final class FilesPanelController {
     // MARK: - Visibility
 
     private(set) var isOpen = false
+    /// Counts reveals, which may land on a panel that is already open.
+    private(set) var reveals = 0
 
-    /// Opening is the user gesture that permits the lazy bridge connect
-    /// (the never-auto-connect rule: nothing dials before this).
+    /// Opening permits the lazy bridge connect (the never-auto-connect rule:
+    /// nothing dials before this). It is the user's gesture, or the Duo desk
+    /// showing files over a connected terminal whose route needs no Face ID.
     func open() {
         isOpen = true
         bridge?.suppressIdleTeardown = true
@@ -325,7 +329,17 @@ final class FilesPanelController {
         }
     }
 
-    /// Quick-open commit: file → Quick Look, directory → browse there.
+    /// Row/menu open: artifacts owns fetching when installed; previews keep
+    /// their existing staging path everywhere else.
+    func openFile(_ entry: RemoteFileEntry) {
+        if let onOpenInArtifacts {
+            onOpenInArtifacts(entry)
+        } else {
+            onPreviewFile?(entry)
+        }
+    }
+
+    /// Quick-open commit: file → Artifacts, directory → browse there.
     /// Returns true when the popover should dismiss.
     func quickOpen(_ typed: String) async -> Bool {
         guard let bridge else { return false }
@@ -343,7 +357,7 @@ final class FilesPanelController {
                 followEnabled = false
                 await load(directory: path)
             case .file(let entry):
-                onPreviewFile?(entry)
+                openFile(entry)
             }
             noteRecentQuickOpen(absolute)
             return true
@@ -394,7 +408,7 @@ final class FilesPanelController {
 
     // MARK: - Terminal-initiated open (§3 selection menu)
 
-    enum TerminalPathIntent { case quickLook, reveal }
+    enum TerminalPathIntent { case openInArtifacts, reveal }
 
     /// Selection-menu entry point. The panel may be CLOSED here: misses
     /// surface through `onMiss` (the session view routes it to the
@@ -404,33 +418,25 @@ final class FilesPanelController {
         _ selection: String,
         cwd: String?,
         intent: TerminalPathIntent,
+        openInArtifacts: ((RemoteFileEntry) -> Void)? = nil,
         onMiss: @escaping @MainActor (String) -> Void
     ) {
-        guard let bridge, let queue = transfers else { return }
-        Task { @MainActor in
+        guard let bridge,
+              transfers != nil || openInArtifacts != nil || onOpenInArtifacts != nil else { return }
+        Task { @MainActor [self] in
             do {
                 try await bridge.connect()
-                // Both readings of the selection: the strict token, then
-                // the whitespace-collapsed rejoin for a path an agent's
-                // wrapped TUI output broke across rows.
-                let candidates = RemotePathResolver.pathCandidates(from: selection)
-                guard let candidate = candidates.first else {
-                    onMiss(String(localized: "Selection doesn't look like a path."))
-                    return
-                }
-                let absolutes = candidates.compactMap {
-                    RemotePathResolver.expand(
-                        $0, home: bridge.homeDirectory, cwd: cwd ?? terminalDirectory)
-                }
-                guard !absolutes.isEmpty else {
-                    onMiss(String(
-                        localized: "Can't resolve \(candidate) — no directory signal for relative paths.",
-                        comment: "A relative path could not be resolved; the argument is the text the user selected"
-                    ))
-                    return
-                }
-                switch (try await RemotePathResolver.resolve(anyOf: absolutes, bridge: bridge), intent) {
-                case (.file(let entry), .quickLook):
+                let resolution = try await RemotePathResolver.resolveSelection(
+                    selection, bridge: bridge, cwd: cwd ?? terminalDirectory)
+                switch (resolution, intent) {
+                case (.file(let entry), .openInArtifacts):
+                    // The session supplies a selection-specific origin. Other
+                    // callers can use the same callback as Files row opens.
+                    if let open = openInArtifacts ?? onOpenInArtifacts {
+                        open(entry)
+                        return
+                    }
+                    guard let queue = transfers else { return }
                     stageForPresentation(
                         entry, using: queue, allowClosedPanel: true, onFailure: onMiss
                     ) { [weak self] url in
@@ -450,9 +456,12 @@ final class FilesPanelController {
     /// Open the panel focused on `path` (directory hits / “Reveal”).
     /// A minimal `open()` variant: skips ensureConnectedAndLoad's cwd
     /// targeting so the reveal target can't race the follow signal.
-    private func revealDirectory(_ path: String) {
+    /// Agent Center's transcript "Reveal in Files" lands here too, through
+    /// the session registry's one-shot reveal request.
+    func revealDirectory(_ path: String) {
         followEnabled = false
         isOpen = true
+        reveals &+= 1
         bridge?.suppressIdleTeardown = true
         Task { await load(directory: path) }
     }
@@ -666,7 +675,7 @@ final class FilesPanelController {
                 RemoteFileItemProvider.localDragMarkerTypeIdentifier) else { continue }
             guard let typeID = provider.registeredTypeIdentifiers.first else { continue }
             accepted = true
-            provider.loadFileRepresentation(forTypeIdentifier: typeID) { url, _ in
+            provider.loadFileRepresentation(forTypeIdentifier: typeID) { [weak self] url, _ in
                 guard let url, let staged = try? Self.stageLocalCopy(of: url) else { return }
                 Task { @MainActor [weak self] in
                     self?.enqueueStagedUpload(staged, toDirectory: dir)
@@ -711,6 +720,25 @@ final class FilesPanelController {
                     batch.deliver(index: index, staged: staged)
                 }
             }
+        }
+        return true
+    }
+
+    /// The combined text/file target has already staged these private copies.
+    /// Keep the shipped temp naming, shared transfer queue and ordered injection.
+    @discardableResult
+    static func handleTerminalDrop(
+        stagedURLs: [URL],
+        queue: any TransferQueueing,
+        inject: @escaping @MainActor (String) async -> Void,
+        reportFailure: @escaping @MainActor (String) -> Void
+    ) -> Bool {
+        guard !stagedURLs.isEmpty else { return false }
+        let batch = TerminalDropBatch(
+            count: stagedURLs.count, queue: queue, inject: inject, reportFailure: reportFailure
+        )
+        for (index, url) in stagedURLs.enumerated() {
+            batch.deliver(index: index, staged: url)
         }
         return true
     }
@@ -897,13 +925,14 @@ private final class TerminalDropBatch {
             // The catalog's plural variation covers the single-file case.
             reportFailure(String(localized: "Couldn't read \(unreadable) dropped files."))
         }
-        let items = staged.compactMap { $0 }.map {
-            queue.enqueuePasteUpload(localURL: $0)
+        let items = staged.compactMap { $0 }.map { url in
+            (url, queue.enqueuePasteUpload(localURL: url))
         }
         guard !items.isEmpty else { return }
         Task { @MainActor [inject, reportFailure] in
-            for item in items {
+            for (url, item) in items {
                 await item.awaitFinished()
+                TerminalDropStaging.discard([url])
                 switch item.phase {
                 case .completed:
                     if let path = item.resolvedRemotePath { await inject(path) }

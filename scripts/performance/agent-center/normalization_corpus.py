@@ -29,10 +29,15 @@ from normalization_schema import CLAUDE_BOOKKEEPING, output_issues, source_shape
 
 def projector(source):
     raw = source.read_text()
-    marker = 'exec "$tessera_python" -c \'\n'
+    marker = 'exec "$tessera_python" -I -c \'\n'
     start = raw.index(marker) + len(marker)
     end = raw.index('\ntry:\n    raw = sys.stdin.buffer.read(MAX_REQUEST + 1)', start)
     program = raw[start:end]
+    # The program is one single-quoted sh argument: a quote inside it (an
+    # apostrophe in a comment) ends the argument and breaks the installed
+    # script, though the extracted Python still parses.
+    if "'" in raw[start:raw.index("\n'\n", start)]:
+        raise ValueError('single quote inside the projector program')
     tree = ast.parse(program)
     # Same extraction boundary as the existing hermetic projector tests. Do
     # not execute its stdin dispatcher, discovery, provider or transport paths.

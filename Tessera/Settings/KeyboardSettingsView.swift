@@ -57,6 +57,13 @@ struct KeyboardSettingsView: View {
                 ModifierNotationSegmented()
             }
 
+            ToggleRow(
+                title: "hold \(KeyToken.command.rendered(appearance.modifierNotation)) for shortcuts",
+                subtitle: "with a hardware keyboard, hold \(KeyToken.command.rendered(appearance.modifierNotation)) for a moment to see every shortcut — let go to hide it",
+                isOn: $appearance.shortcutCheatSheetEnabled
+            )
+            .padding(.bottom, 22)
+
             // Was an iPad-only read-only legend. Gated on nothing now: the
             // list is worth reading on iPhone too, and chord *editing* gates on
             // a hardware keyboard being attached rather than on the idiom.
@@ -265,7 +272,7 @@ private struct AccessoryBarEditor: View {
                     resolve: { raw in
                         AccessoryBarItem.resolve(raw) { shortcutStore.customShortcut(withChipRawID: $0) }
                     }
-                ) { item, lifted in
+                ) { item, lifted, _ in
                     ChipLabel(item: item, style: lifted ? .lifted : .preview, accent: T.accent, dim: false)
                 }
                 .padding(.horizontal, 4)

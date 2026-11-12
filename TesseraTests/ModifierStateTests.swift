@@ -146,13 +146,13 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
     func testHardwareAttachmentHidePreservesFocusButLaterManualHideCounts() async throws {
         try await withSurface { state, _, view, _ in
             NotificationCenter.default.post(name: .GCKeyboardDidConnect, object: nil)
-            NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: nil)
+            postSyntheticKeyboard(UIResponder.keyboardWillHideNotification)
             await settle()
             XCTAssertFalse(state.suppressesSoftwareKeyboardReclaim)
             XCTAssertTrue(view.isFirstResponder)
-            NotificationCenter.default.post(name: UIResponder.keyboardWillShowNotification, object: nil)
-            NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: nil)
-            NotificationCenter.default.post(name: UIResponder.keyboardDidHideNotification, object: nil)
+            postSyntheticKeyboard(UIResponder.keyboardWillShowNotification)
+            postSyntheticKeyboard(UIResponder.keyboardWillHideNotification)
+            postSyntheticKeyboard(UIResponder.keyboardDidHideNotification)
             await settle()
             XCTAssertTrue(state.suppressesSoftwareKeyboardReclaim)
             XCTAssertFalse(view.isFirstResponder)
@@ -161,13 +161,13 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
 
     func testHideAfterWindowLosesKeyDoesNotSeedStaleVisibility() async throws {
         try await withSurface(softwareKeyboard: false) { state, _, view, window in
-            NotificationCenter.default.post(name: UIResponder.keyboardWillShowNotification, object: nil)
+            postSyntheticKeyboard(UIResponder.keyboardWillShowNotification)
             let other = UIWindow(windowScene: window.windowScene!)
             other.rootViewController = UIViewController()
             other.makeKeyAndVisible()
             defer { other.isHidden = true }
             XCTAssertFalse(window.isKeyWindow)
-            NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: nil)
+            postSyntheticKeyboard(UIResponder.keyboardWillHideNotification)
             window.makeKey()
             let replacement = makeCoordinator(state: state, view: view)
             XCTAssertTrue(view.becomeFirstResponder())
@@ -183,8 +183,8 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
             // A newly mounted pane can inherit an already presented keyboard.
             // Its coordinator never received the earlier willShow notification.
             let replacement = makeCoordinator(state: state, view: view)
-            NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: nil)
-            NotificationCenter.default.post(name: UIResponder.keyboardDidHideNotification, object: nil)
+            postSyntheticKeyboard(UIResponder.keyboardWillHideNotification)
+            postSyntheticKeyboard(UIResponder.keyboardDidHideNotification)
             XCTAssertFalse(replacement.permitsFirstResponderReclaim)
             await settle()
             XCTAssertTrue(state.suppressesSoftwareKeyboardReclaim)
@@ -194,8 +194,8 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
 
     func testSupersedingShowCancelsKeyboardReconfigurationHide() async throws {
         try await withSurface { state, coordinator, view, _ in
-            NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: nil)
-            NotificationCenter.default.post(name: UIResponder.keyboardWillShowNotification, object: nil)
+            postSyntheticKeyboard(UIResponder.keyboardWillHideNotification)
+            postSyntheticKeyboard(UIResponder.keyboardWillShowNotification)
             await settle()
             XCTAssertFalse(state.suppressesSoftwareKeyboardReclaim)
             XCTAssertTrue(view.isFirstResponder)
@@ -209,7 +209,7 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
             // show event, then delivering the app-owned hide asynchronously.
             view.onWillResignFirstResponder?(true)
             view.onDidResignFirstResponder?(true)
-            NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: nil)
+            postSyntheticKeyboard(UIResponder.keyboardWillHideNotification)
             await settle()
             XCTAssertFalse(state.suppressesSoftwareKeyboardReclaim)
             XCTAssertTrue(view.isFirstResponder)
@@ -218,8 +218,8 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
 
     func testSystemHideThatRetainsFirstResponderStillRequiresAnExplicitRequest() async throws {
         try await withSurface { state, coordinator, view, _ in
-            NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: nil)
-            NotificationCenter.default.post(name: UIResponder.keyboardDidHideNotification, object: nil)
+            postSyntheticKeyboard(UIResponder.keyboardWillHideNotification)
+            postSyntheticKeyboard(UIResponder.keyboardDidHideNotification)
             XCTAssertTrue(view.isFirstResponder, "This UIKit path hides its input view before resigning")
             XCTAssertFalse(coordinator.permitsFirstResponderReclaim)
             await settle()
@@ -247,7 +247,7 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
     func testFocusLossWithoutSoftwareKeyboardRemainsAutomaticallyRecoverable() async throws {
         try await withSurface(softwareKeyboard: false) { state, coordinator, view, window in
             try await Task.sleep(for: .milliseconds(600))
-            NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: nil)
+            postSyntheticKeyboard(UIResponder.keyboardWillHideNotification)
             XCTAssertLessThanOrEqual(window.keyboardLayoutGuide.layoutFrame.height, window.safeAreaInsets.bottom)
             XCTAssertTrue(view.resignFirstResponder())
             await settle()
@@ -402,6 +402,114 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
         }
     }
 
+    private static let syntheticKeyboardKey = "TesseraSyntheticKeyboardNotification"
+
+    /// The host's real keyboard keeps posting while a test runs (its first
+    /// presentation, a resized window's relayout); coordinators here hear
+    /// only these, so a real show cannot land between a test's own.
+    private func postSyntheticKeyboard(_ name: Notification.Name) {
+        NotificationCenter.default.post(name: name, object: nil, userInfo: [Self.syntheticKeyboardKey: true])
+    }
+
+    /// A Duo going from book to laptop turns its window from 951×669 to
+    /// 669×951, and UIKit hides the keyboard for it with the terminal first
+    /// responder; that hide keeps the keyboard's focus. A hide in the size
+    /// the keyboard showed in is the user's and still counts.
+    func testAHideInAResizedWindowKeepsFocusButASameSizeHideCounts() async throws {
+        try await withSurface { state, _, view, window in
+            window.frame = CGRect(x: 0, y: 0, width: 951, height: 669)
+            postSyntheticKeyboard(UIResponder.keyboardWillShowNotification)
+            window.frame = CGRect(x: 0, y: 0, width: 669, height: 951)
+            postSyntheticKeyboard(UIResponder.keyboardWillHideNotification)
+            await settle()
+            XCTAssertFalse(state.suppressesSoftwareKeyboardReclaim)
+            XCTAssertTrue(view.isFirstResponder)
+
+            postSyntheticKeyboard(UIResponder.keyboardWillShowNotification)
+            postSyntheticKeyboard(UIResponder.keyboardWillHideNotification)
+            postSyntheticKeyboard(UIResponder.keyboardDidHideNotification)
+            await settle()
+            XCTAssertTrue(state.suppressesSoftwareKeyboardReclaim)
+            XCTAssertFalse(view.isFirstResponder)
+        }
+    }
+
+    /// A window resized with the keyboard up (Stage Manager) records no new
+    /// show, so a later hide is in other geometry than the keyboard showed
+    /// in. No show follows it as one ends a rotation, so it still counts.
+    func testAHideInAWindowResizedEarlierCountsWhenNoShowFollows() async throws {
+        try await withSurface { state, coordinator, view, window in
+            coordinator.transitionReshowGrace = 0.05
+            window.frame = CGRect(x: 0, y: 0, width: 951, height: 669)
+            postSyntheticKeyboard(UIResponder.keyboardWillShowNotification)
+            window.frame = CGRect(x: 0, y: 0, width: 669, height: 951)
+            postSyntheticKeyboard(UIResponder.keyboardWillHideNotification)
+            postSyntheticKeyboard(UIResponder.keyboardDidHideNotification)
+            await settle()
+            XCTAssertFalse(state.suppressesSoftwareKeyboardReclaim, "a rotation's show may still come")
+            XCTAssertTrue(view.isFirstResponder)
+
+            try await Task.sleep(for: .milliseconds(150))
+            await settle()
+            await settle()
+            XCTAssertTrue(state.suppressesSoftwareKeyboardReclaim)
+            XCTAssertFalse(view.isFirstResponder)
+        }
+    }
+
+    /// A scene still changing when the wait ends is still in its
+    /// transition, so the wait starts again and a late show keeps focus.
+    func testAHideInAStillChangingSceneWaitsAgainForItsShow() async throws {
+        try await withSurface { state, coordinator, view, window in
+            coordinator.transitionReshowGrace = 0.3
+            window.frame = CGRect(x: 0, y: 0, width: 951, height: 669)
+            postSyntheticKeyboard(UIResponder.keyboardWillShowNotification)
+            window.frame = CGRect(x: 0, y: 0, width: 669, height: 951)
+            postSyntheticKeyboard(UIResponder.keyboardWillHideNotification)
+            try await Task.sleep(for: .milliseconds(100))
+            window.frame = CGRect(x: 0, y: 0, width: 594, height: 466)
+            // Past the first wait, inside the second.
+            try await Task.sleep(for: .milliseconds(350))
+            XCTAssertFalse(state.suppressesSoftwareKeyboardReclaim)
+            postSyntheticKeyboard(UIResponder.keyboardWillShowNotification)
+            try await Task.sleep(for: .milliseconds(500))
+            await settle()
+            XCTAssertFalse(state.suppressesSoftwareKeyboardReclaim)
+            XCTAssertTrue(view.isFirstResponder)
+        }
+    }
+
+    /// A pane mounted under a shown keyboard never saw its show, but its
+    /// window recorded the geometry, so a pose change before the next show
+    /// keeps the keyboard's focus there too.
+    func testANewCoordinatorInheritsTheGeometryTheKeyboardShowedIn() async throws {
+        try await withSurface { state, _, view, window in
+            window.frame = CGRect(x: 0, y: 0, width: 951, height: 669)
+            postSyntheticKeyboard(UIResponder.keyboardWillShowNotification)
+            let replacement = makeCoordinator(state: state, view: view)
+            window.frame = CGRect(x: 0, y: 0, width: 669, height: 951)
+            postSyntheticKeyboard(UIResponder.keyboardWillHideNotification)
+            await settle()
+            await settle()
+            XCTAssertFalse(state.suppressesSoftwareKeyboardReclaim)
+            XCTAssertTrue(view.isFirstResponder)
+            // The pose change's own show ends it.
+            postSyntheticKeyboard(UIResponder.keyboardWillShowNotification)
+            withExtendedLifetime(replacement) {}
+        }
+    }
+
+    func testOnlyAHideInOtherSceneGeometryIsATransition() {
+        let book = KeyboardSceneGeometry(orientation: .landscapeRight, windowSize: CGSize(width: 951, height: 669))
+        let laptop = KeyboardSceneGeometry(orientation: .landscapeRight, windowSize: CGSize(width: 669, height: 951))
+        let turned = KeyboardSceneGeometry(orientation: .portrait, windowSize: CGSize(width: 951, height: 669))
+        XCTAssertTrue(KeyboardSceneGeometry.hideIsTransition(shown: book, now: laptop), "a pose change resizes the window")
+        XCTAssertTrue(KeyboardSceneGeometry.hideIsTransition(shown: book, now: turned), "a rotation turns the scene")
+        XCTAssertFalse(KeyboardSceneGeometry.hideIsTransition(shown: book, now: book))
+        XCTAssertFalse(KeyboardSceneGeometry.hideIsTransition(shown: nil, now: book), "no keyboard showed in a window")
+        XCTAssertFalse(KeyboardSceneGeometry.hideIsTransition(shown: book, now: nil), "the terminal left its window")
+    }
+
     private func withSurface(
         softwareKeyboard: Bool = true,
         _ body: (ModifierState, TerminalSurfaceBound.Coordinator, TesseraResponderAwareTerminalView, UIWindow) async throws -> Void
@@ -420,10 +528,11 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
         let coordinator = makeCoordinator(state: state, view: view)
         XCTAssertTrue(view.becomeFirstResponder())
         // Let real UIKit presentation finish before injecting the policy
-        // events below; a delayed willShow would otherwise supersede them.
+        // events below. Coordinators ignore its notifications, but not the
+        // responder and window changes it makes.
         try await Task.sleep(for: .milliseconds(600))
         if softwareKeyboard {
-            NotificationCenter.default.post(name: UIResponder.keyboardWillShowNotification, object: nil)
+            postSyntheticKeyboard(UIResponder.keyboardWillShowNotification)
         }
         try await body(state, coordinator, view, window)
     }
@@ -438,6 +547,7 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
             onHardwareKey: nil, onTerminalScrolled: nil, scrollRetentionID: nil,
             onScrollDiagnostic: nil)
         coordinator.terminalView = view
+        coordinator.admitsKeyboardNotification = { $0.userInfo?[Self.syntheticKeyboardKey] != nil }
         coordinator.noteFocusSuppression(false)
         coordinator.bindKeyboardFocus(to: view)
         coordinator.observeHardwareKeyboard()

@@ -111,6 +111,19 @@ class AgentIntegrationRecoveryInstrumentedTest {
         }
     }
 
+    @Test fun plainMoshAgentShowsNoUnconfirmedLifecycleItCanNeverReceive(): Unit = runBlocking {
+        // mosh-server forwards no lifecycle escape and plain mosh has no pane
+        // option, so a quiet agent there is never "not yet confirmed".
+        withFixture(AgentEndpointTransport.MOSH, agentMode = true) { integration, endpoint ->
+            await { integration.statuses.value[endpoint.key]?.kind == AgentSessionIntegrationKind.Ready }
+            assertTrue(endpoint.discoveredPanes.isNotEmpty())
+        }
+        // Plain SSH carries the escape, so the same silence still warns there.
+        withFixture(AgentEndpointTransport.SSH, agentMode = true) { integration, endpoint ->
+            await { integration.statuses.value[endpoint.key]?.kind == AgentSessionIntegrationKind.InsideAgent }
+        }
+    }
+
     private suspend fun withFixture(
         transport: AgentEndpointTransport,
         agentMode: Boolean = false,
@@ -132,10 +145,11 @@ class AgentIntegrationRecoveryInstrumentedTest {
 
     private class ProbeEndpoint(transport: AgentEndpointTransport, private val agentMode: Boolean) : AgentSessionEndpoint {
         override val key = AgentSessionKey(UUID.randomUUID().toString(), 1)
+        private val paned = agentMode && transport in setOf(AgentEndpointTransport.SSH_TMUX, AgentEndpointTransport.MOSH_TMUX)
         override val binding = MutableStateFlow(AgentEndpointBinding(key, "test-host", transport,
-            tmuxSession = if (agentMode) "fixture" else null,
-            windowID = if (agentMode) "@1" else null,
-            paneID = if (agentMode) "%1" else null))
+            tmuxSession = if (paned) "fixture" else null,
+            windowID = if (paned) "@1" else null,
+            paneID = if (paned) "%1" else null))
         override val capabilities = MutableStateFlow(AgentEndpointCapabilities())
         override val lifecycleFrames = MutableSharedFlow<AgentLifecycleFrame>(replay = 1)
         val retainedFrames = mutableMapOf<String, AgentLifecycleFrame>()

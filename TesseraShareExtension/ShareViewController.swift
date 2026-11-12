@@ -7,6 +7,10 @@ private enum ShareInbox {
     static let folderName = "ShareInbox"
     static let targetsFileName = "upload-targets.json"
     static let metadataFileName = "metadata.json"
+    /// Posted once a queued upload's metadata lands, so a Tessera that stays
+    /// active beside the sharing app, with no foreground edge to sweep on,
+    /// picks it up. Same name as ContentView's `shareInboxQueuedNotification`.
+    static let queuedNotification = "com.bambouville.TesseraApp.share-inbox.queued"
 }
 
 private struct UploadTargetsDocument: Decodable {
@@ -366,6 +370,13 @@ final class ShareViewController: UIViewController {
             let metadataURL = preparedInboxURL
                 .appendingPathComponent(ShareInbox.metadataFileName, isDirectory: false)
             try data.write(to: metadataURL, options: .atomic)
+            CFNotificationCenterPostNotification(
+                CFNotificationCenterGetDarwinNotifyCenter(),
+                CFNotificationName(ShareInbox.queuedNotification as CFString),
+                nil,
+                nil,
+                true
+            )
             #if DEBUG
             NSLog("[TesseraShareExtension] queued upload host=%@", target.id.uuidString)
             #endif

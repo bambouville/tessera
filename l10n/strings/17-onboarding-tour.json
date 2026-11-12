@@ -39,14 +39,6 @@
     "zh-Hans": "密钥，按你的方式保护",
     "zh-Hant": "金鑰，依你的方式保護"
   },
-  "Create recoverable Ed25519 keys or device-bound P-256 keys. Biometrics or passcode are optional, and Tessera can install the public key for you.": {
-    "de": "Erstelle wiederherstellbare Ed25519-Keys oder gerätegebundene P-256-Keys. Biometrie oder Code sind optional, und Tessera kann den Public Key für dich installieren.",
-    "es": "Crea claves Ed25519 recuperables o claves P-256 vinculadas al dispositivo. La biometría o el código son opcionales, y Tessera puede instalar la clave pública por ti.",
-    "fr": "Créez des clés Ed25519 récupérables ou des clés P-256 liées à l'appareil. La biométrie ou le code sont facultatifs, et Tessera peut installer la clé publique pour vous.",
-    "ja": "復元可能な Ed25519 キー、またはデバイスに紐づく P-256 キーを作成できます。生体認証やパスコードは任意で、Tessera が公開鍵のインストールを代行できます。",
-    "zh-Hans": "创建可恢复的 Ed25519 密钥，或绑定设备的 P-256 密钥。生物识别或密码为可选项，Tessera 可以替你安装公钥。",
-    "zh-Hant": "建立可復原的 Ed25519 金鑰，或綁定裝置的 P-256 金鑰。生物辨識或密碼為選用，Tessera 可以替你安裝公鑰。"
-  },
   "tmux windows & panes": {
     "de": "tmux-Fenster & Bereiche",
     "es": "ventanas y paneles de tmux",
@@ -95,14 +87,6 @@
     "zh-Hans": "文件，就在 shell 旁边",
     "zh-Hant": "檔案，就在 shell 旁邊"
   },
-  "A folder glyph up top — or %@ — slides out a panel that tracks your shell's directory. Browse, download, and Quick Look files on the host, over SSH and mosh alike.": {
-    "de": "Ein Ordnersymbol oben — oder %@ — blendet ein Panel ein, das dem Verzeichnis deiner Shell folgt. Durchsuche, lade herunter und öffne Dateien auf dem Host per Quick Look, über SSH wie über mosh.",
-    "es": "Un icono de carpeta arriba —o %@— despliega un panel que sigue el directorio de tu shell. Explora, descarga y usa Vista Rápida con archivos del host, tanto por SSH como por mosh.",
-    "fr": "Une icône de dossier en haut — ou %@ — fait glisser un panneau qui suit le répertoire de votre shell. Parcourez, téléchargez et prévisualisez les fichiers de l'hôte, aussi bien en SSH qu'en mosh.",
-    "ja": "上部のフォルダアイコン、または %@ で、シェルのディレクトリに追従するパネルが開きます。SSH でも mosh でも、ホスト上のファイルを閲覧・ダウンロード・クイックルックできます。",
-    "zh-Hans": "点击顶部的文件夹图标 —— 或按 %@ —— 会滑出一个跟随 shell 当前目录的面板。可在 SSH 与 mosh 下浏览、下载并用快速查看打开主机上的文件。",
-    "zh-Hant": "點擊頂部的資料夾圖示 —— 或按 %@ —— 會滑出一個跟隨 shell 目前目錄的面板。可在 SSH 與 mosh 下瀏覽、下載並用預覽開啟主機上的檔案。"
-  },
   "files from your phone": {
     "de": "Dateien vom Telefon aus",
     "es": "archivos desde tu teléfono",
@@ -110,14 +94,6 @@
     "ja": "iPhone からファイルを",
     "zh-Hans": "在手机上管理文件",
     "zh-Hant": "在手機上管理檔案"
-  },
-  "Open Files from the terminal top bar to browse, download, and Quick Look remote files. SSH, tmux, and mosh sessions share the same file tools.": {
-    "de": "Öffne Dateien über die obere Terminalleiste, um entfernte Dateien zu durchsuchen, herunterzuladen und per Quick Look anzusehen. SSH-, tmux- und mosh-Sitzungen nutzen dieselben Dateiwerkzeuge.",
-    "es": "Abre Archivos desde la barra superior del terminal para explorar, descargar y previsualizar archivos remotos. Las sesiones SSH, tmux y mosh comparten las mismas herramientas de archivos.",
-    "fr": "Ouvrez Fichiers depuis la barre supérieure du terminal pour parcourir, télécharger et prévisualiser des fichiers distants. Les sessions SSH, tmux et mosh partagent les mêmes outils de fichiers.",
-    "ja": "ターミナル上部バーからファイルを開くと、リモートファイルの閲覧・ダウンロード・クイックルックができます。SSH、tmux、mosh のセッションはいずれも同じファイルツールを共有します。",
-    "zh-Hans": "从终端顶栏打开“文件”即可浏览、下载并快速查看远程文件。SSH、tmux 与 mosh 会话共用同一套文件工具。",
-    "zh-Hant": "從終端機頂部列開啟「檔案」即可瀏覽、下載並預覽遠端檔案。SSH、tmux 與 mosh 工作階段共用同一套檔案工具。"
   },
   "share, in and out": {
     "de": "Teilen, in beide Richtungen",

@@ -192,7 +192,8 @@ ffmpeg -hide_banner -loglevel error -i "$VIDEO" \
   -f null - >"$CASE_DIR/signalstats-ffmpeg.log" 2>&1
 python3 - \
   "$CASE_DIR/frame-signalstats.txt" \
-  "$CASE_DIR/video-event-offsets.json" <<'PY'
+  "$CASE_DIR/video-event-offsets.json" \
+  "$CASE_DIR/event-offsets.json" <<'PY'
 import json
 import pathlib
 import re
@@ -226,9 +227,16 @@ for pts in bright_times:
         segments.append([pts, pts])
     else:
         segments[-1][1] = pts
-candidates = [segment for segment in segments if segment[0] > 2 and segment[1] - segment[0] >= 1]
+# Launch and UI-test teardown also show SpringBoard for over a second, each
+# about 20 s from the Home press. Movie PTS drifts from the wall clock by a
+# few seconds, so grade only an interval that begins near the Home press.
+events = json.loads(pathlib.Path(sys.argv[3]).read_text())
+earliest = events["foreground-before-background"] - 5
+latest = events["foreground-activated"] + 5
+candidates = [segment for segment in segments
+              if earliest <= segment[0] <= latest and segment[1] - segment[0] >= 1]
 if not candidates:
-    raise SystemExit("movie does not contain a sustained SpringBoard interval")
+    raise SystemExit("movie does not contain a sustained SpringBoard interval around the Home press")
 springboard_start, springboard_end = candidates[-1]
 
 returned = None

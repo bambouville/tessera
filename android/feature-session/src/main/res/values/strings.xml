@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="session_back">Back</string>
     <string name="session_disconnect">Close session</string>
     <string name="session_files">Files</string>
@@ -12,8 +12,6 @@
     <string name="session_owner_authorization">Waiting for device authentication</string>
     <string name="session_connected">Connected</string>
     <string name="session_failed">Connection failed</string>
-    <string name="session_retry">Retry</string>
-    <string name="session_close">Close</string>
     <string name="session_password_title">Password for %1$s on %2$s</string>
     <string name="session_password_not_saved">The password is used for this connection only.</string>
     <string name="session_password">Password</string>
@@ -23,15 +21,173 @@
     <string name="host_key_changed">Host key changed</string>
     <string name="host_key_reverted">Host key reverted</string>
     <string name="host_key_endpoint" translatable="false">%1$s:%2$d</string>
-    <string name="host_key_previous">Previously trusted: %1$s</string>
     <string name="host_key_changed_warning">Do not replace this key unless you independently verified the server change.</string>
     <string name="host_key_reverted_warning">This server returned the previously trusted key after a replacement. Verify the server before restoring it.</string>
     <string name="host_key_trust">Trust and connect</string>
     <string name="host_key_replace">Replace trusted key</string>
-    <string name="session_open_keys">Open keys</string>
     <string name="host_key_endpoint_label">endpoint</string>
     <string name="host_key_algorithm_label">algorithm</string>
     <string name="host_key_fingerprint_label">fingerprint</string>
     <string name="host_key_previous_label">previously trusted</string>
     <string name="host_key_unknown_body">Compare this fingerprint with the one printed on the server before trusting it.</string>
+    <string name="bell_channel_name">Terminal bells</string>
+    <string name="bell_channel_description">Background terminal bell alerts</string>
+    <string name="bell_notification_body">rang a bell that needs attention</string>
+
+    <!-- Launch and recovery overlay (SessionLaunchOverlay) -->
+    <string name="session_launch_connecting">connecting</string>
+    <string name="session_launch_starting_tmux">starting tmux</string>
+    <string name="session_launch_attaching_tmux">attaching tmux</string>
+    <string name="session_launch_attaching_pane">attaching pane</string>
+    <string name="session_launch_stalled_connecting">Still connecting. This stage has not completed; you can retry without force-closing Tessera.</string>
+    <string name="session_launch_stalled_starting_tmux">Still starting tmux. This stage has not completed; you can retry without force-closing Tessera.</string>
+    <string name="session_launch_stalled_attaching_tmux">Still attaching tmux. This stage has not completed; you can retry without force-closing Tessera.</string>
+    <string name="session_launch_stalled_attaching_pane">Still attaching pane. This stage has not completed; you can retry without force-closing Tessera.</string>
+    <string name="session_launch_connection_failed">connection failed</string>
+    <string name="session_launch_edit_host">edit host</string>
+    <string name="session_launch_retry">retry</string>
+    <string name="session_launch_back">back</string>
+
+    <!-- Shared tmux grid held by another device (ContinuedElsewhereOverlay, TmuxResumingIndicator) -->
+    <string name="session_authority_takes_control_when_reconnected">takes control when reconnected</string>
+    <string name="session_authority_taking_back">taking back control…</string>
+    <string name="session_authority_continued_elsewhere">continued elsewhere</string>
+    <string name="session_authority_continued_on">continued on %1$s</string>
+    <string name="session_authority_cancel_pending" tools:ignore="ButtonCase">cancel</string>
+    <string name="session_authority_controlled_elsewhere">This session is being controlled from another device.</string>
+    <string name="session_authority_take_back">take back control</string>
+    <string name="session_authority_resuming">Resuming…</string>
+
+    <!-- Session switcher (SessionSwitcherSheet) -->
+    <string name="session_switcher_placeholder">switch session, window or pane</string>
+    <string name="session_switcher_clear_search">Clear switcher search</string>
+    <string name="session_switcher_no_sessions">no active sessions</string>
+    <string name="session_switcher_no_matches">no matches</string>
+    <string name="session_switcher_hosts_home">hosts home</string>
+    <string name="session_switcher_home_subtitle">back to the tab bar · session keeps running</string>
+    <string name="session_switcher_windows_header">windows · %1$s</string>
+    <string name="session_switcher_sessions_header">sessions</string>
+    <string name="session_switcher_tidy_numbers">tidy numbers</string>
+    <string name="session_switcher_dismiss">Dismiss switcher</string>
+    <string name="session_switcher_show_details">Show details</string>
+    <string name="session_switcher_tmux_window">tmux window</string>
+    <string name="session_switcher_window_actions">Actions for %1$s</string>
+    <string name="session_switcher_pane_actions">Actions for pane %1$s</string>
+    <string name="session_switcher_switch_to">switch to</string>
+    <string name="session_switcher_split_left_right">split left / right</string>
+    <string name="session_switcher_split_top_bottom">split top / bottom</string>
+    <string name="session_switcher_close_pane_menu">close pane</string>
+    <string name="session_switcher_label">Switch session, window, or pane</string>
+    <string name="session_switcher_label_with_notice">Switch session, window, or pane. %1$s</string>
+
+    <!-- Agent integration status, actions and confirmations (AgentSessionIntegrationPresentation) -->
+    <string name="session_integration_checking_title">Checking agent integration</string>
+    <string name="session_integration_checking_message">Reading the integration state for this terminal.</string>
+    <string name="session_integration_ready_title">Agent integration ready</string>
+    <string name="session_integration_ready_message">Lifecycle status is available for this terminal.</string>
+    <string name="session_integration_missing_title">Agent integration not installed</string>
+    <string name="session_integration_install_message_agent_relaunch">Installs Tessera\'s helpers now. If this agent has not loaded the lifecycle hooks, relaunch it to enable status reporting.</string>
+    <string name="session_integration_install_message_agent_center">Installs Tessera\'s Agent Center helpers. OpenCode or Pi inventory refreshes automatically when installation completes.</string>
+    <string name="session_integration_install_message_plain_mosh">Installs Tessera\'s Agent Center helpers on this host. Plain mosh cannot carry agent status; agents in this terminal show without it.</string>
+    <string name="session_integration_install_message_apply">Installs Tessera\'s local hook files and PATH shims, then loads them here so future agents report accurate status.</string>
+    <string name="session_integration_install_message_return_to_shell">Installs Tessera\'s local hook files. Return to a bash or zsh prompt afterward to enable this terminal.</string>
+    <string name="session_integration_install_and_enable">Install and enable</string>
+    <string name="session_integration_install">Install integration</string>
+    <string name="session_integration_outdated_title">Agent integration needs an update</string>
+    <string name="session_integration_update_message_agent_relaunch">Updates Tessera\'s helpers immediately without interrupting this agent. Existing hooks use the new scripts on their next event. If lifecycle status remains unavailable, relaunch the agent to load its hooks.</string>
+    <string name="session_integration_update_message_agent_center">Updates Tessera\'s Agent Center helpers. OpenCode or Pi inventory refreshes automatically when installation completes.</string>
+    <string name="session_integration_update_message_plain_mosh">Updates Tessera\'s Agent Center helpers on this host. Plain mosh cannot carry agent status; agents in this terminal show without it.</string>
+    <string name="session_integration_update_message_apply">Updates Tessera\'s local hook files and PATH shims, then loads them here so future agents report accurate status.</string>
+    <string name="session_integration_update_message_return_to_shell">Updates Tessera\'s local hook files. Return to a bash or zsh prompt afterward to enable this terminal.</string>
+    <string name="session_integration_update_and_enable">Update and enable</string>
+    <string name="session_integration_update">Update integration</string>
+    <string name="session_integration_inactive_title">Agent integration inactive here</string>
+    <string name="session_integration_inactive_message">Loads Tessera\'s shell marker here. Enable automatically also saves the guarded activation line in this shell\'s startup file for future windows.</string>
+    <string name="session_integration_enable_in_shell">Enable in this shell</string>
+    <string name="session_integration_enable_automatically">Enable automatically</string>
+    <string name="session_integration_inside_agent_title">Agent lifecycle not yet confirmed</string>
+    <string name="session_integration_inside_agent_message">The helpers are installed, but no trusted lifecycle event has arrived from this agent yet. Tessera rechecks as you use it. If status remains unavailable, relaunch the agent to load its hooks.</string>
+    <string name="session_integration_away_title">Return to this terminal to enable integration</string>
+    <string name="session_integration_away_message">Tessera will recheck this exact session when its shell is visible again.</string>
+    <string name="session_integration_unsupported_shell_title">Open bash or zsh to enable integration</string>
+    <string name="session_integration_unsupported_shell_message">Tessera preserves other shell configurations and only sources its provider shims into bash or zsh.</string>
+    <string name="session_integration_busy_title">Integration check paused</string>
+    <string name="session_integration_busy_message">Tessera will recheck when the foreground program returns to its shell.</string>
+    <string name="session_integration_manual_check_title">Check agent integration</string>
+    <string name="session_integration_manual_check_message">This transport needs a secondary read-only check before Tessera can verify the shell integration.</string>
+    <string name="session_integration_check_now">Check now</string>
+    <string name="session_integration_repairing_title">Fixing agent integration</string>
+    <string name="session_integration_repairing_message">This keeps future agent status accurate in Agent Center.</string>
+    <string name="session_integration_unavailable_title">Could not verify agent integration</string>
+    <string name="session_integration_unavailable_message">The terminal-specific check failed. Tessera will retry after the next command.</string>
+    <string name="session_integration_retry">Retry</string>
+    <string name="session_integration_app_update_title">Update Tessera for this host</string>
+    <string name="session_integration_app_update_message">This host\'s Agent Center integration comes from a newer Tessera. Update this app to keep agent status accurate.</string>
+    <string name="session_integration_confirm_install_and_apply_title">Install or update and enable integration?</string>
+    <string name="session_integration_confirm_install_only_title">Install or update integration?</string>
+    <string name="session_integration_confirm_apply_title">Enable integration here?</string>
+    <string name="session_integration_confirm_persist_title">Enable integration automatically?</string>
+    <string name="session_integration_confirm_check_title">Check agent integration?</string>
+    <string name="session_integration_confirm_retry_title">Retry integration check?</string>
+    <string name="session_integration_confirm_install_and_apply_message">Writes Tessera hook files and provider shims, then loads them when this exact terminal is at an empty bash or zsh prompt. It never types into a running agent or another program.</string>
+    <string name="session_integration_confirm_install_only_message">Writes Tessera hook files and provider shims without typing into the running foreground program. Helper updates take effect immediately. Relaunch is only needed if the agent has not loaded its lifecycle hooks.</string>
+    <string name="session_integration_confirm_apply_message">Types one guarded source command so agents launched here report precise status. Continue only at an empty bash or zsh prompt.</string>
+    <string name="session_integration_confirm_persist_message">Adds one guarded activation line to this exact shell\'s startup file, then loads it here. Continue only at an empty bash or zsh prompt.</string>
+    <string name="session_integration_confirm_check_message">Runs a read-only host check to verify the integration state for this terminal.</string>
+    <string name="session_integration_enable_here">Enable here</string>
+    <string name="session_integration_check">Check</string>
+    <string name="session_integration_help_title">Agent integration</string>
+    <string name="session_integration_help_body">Integration health belongs to this terminal session. Tessera checks and repairs only this live shell; Agent Center uses the resulting lifecycle reports without changing another host or pane.</string>
+
+    <!-- Session screen chrome, dialogs and toasts (SshSessionScreen) -->
+    <string name="session_help">Help</string>
+    <string name="session_close">Close</string>
+    <string name="session_done">Done</string>
+    <string name="session_ok">OK</string>
+    <string name="session_link_not_opened">this link could not be opened</string>
+    <string name="session_upload_path_copied">uploaded — path copied to the clipboard</string>
+    <string name="session_uploaded_to">uploaded to %1$s</string>
+    <string name="session_share_cancelled">share cancelled — the session didn\'t connect</string>
+    <string name="session_share_copied_take_back">copied to the clipboard — take back control to paste</string>
+    <string name="session_clip_label_remote_path">remote path</string>
+    <string name="session_clip_label_shared_text">shared text</string>
+    <string name="session_unlock_key_title">Unlock Tessera key</string>
+    <string name="session_unlock_key_reason">Use %1$s@%2$s key</string>
+    <string name="session_stop_upload_title">Stop this upload?</string>
+    <string name="session_stop_upload_body">%1$s was going to type its remote path into this session. Stopping it drops the upload and the path.</string>
+    <string name="session_stop_upload">Stop upload</string>
+    <string name="session_keep_uploading">Keep uploading</string>
+    <string name="session_replace_title">Replace %1$s?</string>
+    <string name="session_replace_body">A remote file with this name already exists in the destination. Replacing it cannot be undone.</string>
+    <string name="session_replace">Replace</string>
+    <string name="session_skip">Skip</string>
+    <string name="session_cannot_replace_title">Can\'t replace %1$s</string>
+    <string name="session_cannot_replace_body">A remote folder or link already uses this name. Rename it on the host, or upload to the temp directory instead.</string>
+    <string name="session_hide_keyboard">Hide keyboard</string>
+    <string name="session_show_keyboard">Show keyboard</string>
+    <string name="session_find_in_terminal">Find in terminal</string>
+    <string name="session_continue_on_another_device">Continue on another device</string>
+    <string name="session_continue_on_another_device_lower">continue on another device</string>
+    <string name="session_reconnect_on_another_device">reconnect on another device</string>
+    <string name="session_find_placeholder">find</string>
+    <string name="session_previous_match">Previous match</string>
+    <string name="session_next_match">Next match</string>
+    <string name="session_close_find">Close find</string>
+
+    <!-- Connection failures and notices built by SshSessionController -->
+    <string name="session_connection_interrupted">Connection interrupted. Check the network and retry.</string>
+    <string name="session_command_rejected">Session command rejected: %1$s</string>
+    <string name="session_tmux_degraded_unavailable">tmux isn\'t on this host\'s PATH — opened a plain shell instead.</string>
+    <string name="session_tmux_degraded_nested">This host is already inside tmux — opened a plain shell instead.</string>
+    <string name="session_tmux_degraded_start_failed">tmux couldn\'t start a session — opened a plain shell instead.</string>
+    <string name="session_mosh_preconnect_overflow">Mosh produced too much terminal output before becoming ready</string>
+    <string name="session_mosh_transport_failed">native Mosh transport failed</string>
+    <string name="session_mosh_ended_before_ready">Mosh ended before the terminal became ready</string>
+    <string name="session_mosh_cleanup_unverified">remote mosh-server cleanup could not be verified</string>
+    <string name="session_tmux_control_writer_unavailable">tmux control writer is unavailable</string>
+    <string name="session_forwarding_side_channel_unavailable">Forwarding side channel is unavailable: %1$s</string>
+    <string name="session_forwarding_side_channel_host_key_not_trusted">Forwarding side channel is unavailable: The server\'s host key was not trusted</string>
+    <string name="session_forwarding_side_channel_keystore_key_invalidated">Forwarding side channel is unavailable: Android Keystore key was invalidated; generate and select a replacement key</string>
+    <string name="session_host_key_not_trusted">The server\'s host key was not trusted</string>
+    <string name="session_keystore_key_invalidated">Android Keystore key was invalidated; generate and select a replacement key</string>
 </resources>

@@ -229,6 +229,7 @@ class SessionSwitcherTest {
                     ),
                     zoomed = true,
                     layout = SharedTmuxLayoutNode.Leaf(paneId = 70, width = 80, height = 24),
+                    activePaneTitle = "cargo watch",
                     displayName = "cargo watch",
                 ),
             ),
@@ -268,7 +269,7 @@ class SessionSwitcherTest {
     }
 
     @Test
-    fun `window label uses explicit active title then active provider then display name`() {
+    fun `window label uses the shared tab rule and leaves rename seeds raw`() {
         val window = agentWindow()
         val snapshot = SharedTmuxSnapshot(
             sessionName = "session", activeWindowId = 7, windows = listOf(window),
@@ -278,21 +279,21 @@ class SessionSwitcherTest {
         val projected = snapshot.switcherWindows { if (it == 70) "claude" else null }.single()
         assertEquals("1:claude", projected.title)
         assertEquals("claude", projected.panes.single().title)
-        assertEquals("shell", projected.renameSeed)
-        assertEquals("1:shell", snapshot.switcherWindows { null }.single().title)
+        assertEquals("sh", projected.renameSeed)
+        assertEquals("1:sh", snapshot.switcherWindows { null }.single().title)
         assertEquals("1:Custom", snapshot.copy(windows = listOf(window.copy(
             activePaneTitle = "  Custom  ", activePaneTitleIsDefault = false,
         ))).switcherWindows { "claude" }.single().title)
         assertEquals("1:codex", snapshot.copy(windows = listOf(window.copy(
             activePaneId = null, activePaneTitle = " ", activePaneTitleIsDefault = false,
         ))).switcherWindows { "codex" }.single().title)
-        assertEquals("1:shell", snapshot.copy(windows = listOf(window.copy(
+        assertEquals("1:sh", snapshot.copy(windows = listOf(window.copy(
             activePaneId = null, panes = listOf(window.panes.single().copy(active = false)),
         ))).switcherWindows { "claude" }.single().title)
     }
 
     private fun agentWindow() = SharedTmuxWindow(
-        id = 7, index = 3, name = "shell", activePaneId = 70,
+        id = 7, index = 3, name = "sh", activePaneId = 70,
         panes = listOf(SharedTmuxPane(
             id = 70, title = "relay.example.net", titleIsDefault = true,
             currentCommand = "sh", active = true,

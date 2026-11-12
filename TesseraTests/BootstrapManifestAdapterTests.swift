@@ -1319,7 +1319,7 @@ final class BootstrapManifestAdapterTests: XCTestCase {
         appearance.chromeMaterial = .solid
         appearance.cursorStyle = .bar
         appearance.cursorBlink = false
-        appearance.terminalThemeID = "paper"
+        appearance.terminalThemeSelection = "paper"
         appearance.scrollbackLines = 22_000
         appearance.modifierBehavior = "sticky"
         appearance.bellSoundEnabled = true
@@ -1361,7 +1361,7 @@ private struct PortableAppearanceSnapshot {
         chromeMaterial = appearance.chromeMaterial
         cursorStyle = appearance.cursorStyle
         cursorBlink = appearance.cursorBlink
-        terminalThemeID = appearance.terminalThemeID
+        terminalThemeID = appearance.terminalThemeSelection
         scrollbackLines = appearance.scrollbackLines
         modifierBehavior = appearance.modifierBehavior
         bellSoundEnabled = appearance.bellSoundEnabled
@@ -1382,7 +1382,7 @@ private struct PortableAppearanceSnapshot {
         appearance.chromeMaterial = chromeMaterial
         appearance.cursorStyle = cursorStyle
         appearance.cursorBlink = cursorBlink
-        appearance.terminalThemeID = terminalThemeID
+        appearance.terminalThemeSelection = terminalThemeID
         appearance.scrollbackLines = scrollbackLines
         appearance.modifierBehavior = modifierBehavior
         appearance.bellSoundEnabled = bellSoundEnabled

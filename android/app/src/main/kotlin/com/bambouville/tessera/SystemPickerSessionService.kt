@@ -8,7 +8,6 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.content.ContextCompat
@@ -38,10 +37,15 @@ class SystemPickerSessionService : Service() {
     private fun startForegroundNotification(sessionCount: Int) {
         val notification = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_upload)
-            .setContentTitle(if (sessionCount > 0) "Tessera terminal active" else getString(R.string.system_picker_session_title))
+            .setContentTitle(
+                getString(if (sessionCount > 0) R.string.app_session_service_title else R.string.system_picker_session_title),
+            )
             .setContentText(
-                if (sessionCount > 0) "$sessionCount session${if (sessionCount == 1) "" else "s"} kept connected"
-                else getString(R.string.system_picker_session_body),
+                if (sessionCount > 0) {
+                    resources.getQuantityString(R.plurals.app_session_service_kept_connected, sessionCount, sessionCount)
+                } else {
+                    getString(R.string.system_picker_session_body)
+                },
             )
             .setCategory(Notification.CATEGORY_SERVICE)
             .setOngoing(true)
@@ -54,15 +58,7 @@ class SystemPickerSessionService : Service() {
                 ),
             )
             .build()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
+        startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

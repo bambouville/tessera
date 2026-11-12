@@ -44,8 +44,25 @@ final class ChordCaptureUIView: UIView {
     private var heldModifiers: Set<KeyToken> = []
     private var modifiersDownAt: Date?
     private var capturedThisPress = false
+    private var suppressesCheatSheet = false
 
     override var canBecomeFirstResponder: Bool { true }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil, !suppressesCheatSheet {
+            suppressesCheatSheet = true
+            ShortcutCheatSheetController.shared.beginSuppression()
+        } else if window == nil {
+            endCheatSheetSuppression()
+        }
+    }
+
+    fileprivate func endCheatSheetSuppression() {
+        guard suppressesCheatSheet else { return }
+        suppressesCheatSheet = false
+        ShortcutCheatSheetController.shared.endSuppression()
+    }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         for press in presses {
@@ -123,6 +140,10 @@ struct ChordCaptureRepresentable: UIViewRepresentable {
         if !uiView.isFirstResponder {
             DispatchQueue.main.async { _ = uiView.becomeFirstResponder() }
         }
+    }
+
+    static func dismantleUIView(_ uiView: ChordCaptureUIView, coordinator: ()) {
+        uiView.endCheatSheetSuppression()
     }
 }
 
@@ -276,8 +297,8 @@ struct ChordRecorderSheet: View {
 
     private func bigChord(_ binding: KeyBinding, tint: Color) -> some View {
         HStack(spacing: 4) {
-            ForEach(binding.chord.tokens, id: \.self) { token in
-                bigCap(token.rendered(appearance.modifierNotation), tint: tint)
+            ForEach(binding.renderedParts(appearance.modifierNotation), id: \.self) { part in
+                bigCap(part, tint: tint)
             }
         }
     }
@@ -336,9 +357,28 @@ struct ChordRecorderSheet: View {
             if state == .listening { state = .nothingArrived }
 
         case .captured(let binding, let produced):
-            // The action being rebound must not conflict with itself.
+            // The action being rebound must not conflict with itself, and
+            // chords only conflict where both can be live: the browser's ⌘T
+            // and tmux's ⌘T never are (`ShortcutSurface`). Custom shortcuts
+            // live on the terminal.
             var existing = store.allBindings
-            if case .action(let action) = target { existing.removeValue(forKey: action) }
+            let surface: ShortcutSurface
+            if case .action(let action) = target {
+                existing.removeValue(forKey: action)
+                surface = action.surface
+            } else {
+                surface = .terminal
+            }
+            existing = existing.filter { $0.key.surface.overlaps(surface) }
+
+            // The browser's chords ride SwiftUI's keyboard shortcuts, which
+            // have no function, Delete, Home, End or page keys.
+            if surface == .browser, binding.keyEquivalent == nil {
+                state = .rejected(binding, .notCapturable(String(
+                    localized: "the artifacts browser can't take this key. try a letter or a punctuation key."
+                )))
+                return
+            }
 
             switch binding.validate(producedCharacters: produced, existing: existing) {
             case .ok:
@@ -351,7 +391,7 @@ struct ChordRecorderSheet: View {
                         comment: "Chord conflict; the argument is another custom shortcut's name"
                     )))
                 } else if let clash = store.customShortcut(matching: binding),
-                          case .action = target {
+                          case .action = target, surface.overlaps(.terminal) {
                     state = .rejected(binding, .reservedBySystem(String(
                         localized: "\"\(clash.name)\" already uses this chord.",
                         comment: "Chord conflict; the argument is another custom shortcut's name"

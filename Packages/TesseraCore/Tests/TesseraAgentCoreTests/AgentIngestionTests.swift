@@ -146,6 +146,26 @@ final class AgentIngestionTests: XCTestCase {
         XCTAssertEqual(page.ingestion?.window?.version, 1)
     }
 
+    func testAPageRecordKeepsTheSeekTokenItCarries() throws {
+        func decode(_ token: Any?) throws -> AgentProjectionRecord? {
+            var decoder = try AgentIngestionPageDecoder(epoch: "epoch")
+            _ = try decoder.accept(begin())
+            var fields: [String: Any] = ["kind": "page.record", "id": "read", "thread": "thread", "serviceEpoch": "epoch",
+                "order": 900, "recordID": "record-900", "revision": 1, "record": ["type": "assistant", "text": "Hello"]]
+            if let token { fields["seekToken"] = token }
+            _ = try decoder.accept(data(fields))
+            return try decoder.accept(end())?.page.records.first
+        }
+        XCTAssertEqual(try decode("0123456789abcdef:u-900")?.seekToken, "0123456789abcdef:u-900")
+        XCTAssertNil(try decode(nil)?.seekToken)
+        // Advisory: a token the app could not send back leaves the record.
+        for unusable: Any in [7, "", "has space"] {
+            let record = try decode(unusable)
+            XCTAssertEqual(record?.recordID, "record-900", "\(unusable)")
+            XCTAssertNil(record?.seekToken, "\(unusable)")
+        }
+    }
+
     func testReceiptOffsetAcceptsOnlyCanonicalDecimalStringsOrIntegers() throws {
         func decode(_ offset: Any) throws -> UInt64? {
             var decoder = try AgentIngestionPageDecoder(epoch: "epoch")

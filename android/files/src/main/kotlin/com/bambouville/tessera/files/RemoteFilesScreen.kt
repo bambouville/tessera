@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +24,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -39,11 +42,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -65,6 +75,7 @@ import com.bambouville.tessera.design.TesseraRowGlyph
 import com.bambouville.tessera.design.TesseraTag
 import com.bambouville.tessera.design.TesseraTextField
 import com.bambouville.tessera.design.TesseraType
+import com.bambouville.tessera.design.text
 import java.util.Locale
 
 private data class PendingUploadConflict(
@@ -79,6 +90,7 @@ fun RemoteFilesScreen(
     onSystemPickerActiveChanged: (Boolean) -> Unit = {},
     terminalPathSink: RemoteTerminalPathSink? = null,
     onOutboundPresentationActiveChanged: (Boolean) -> Unit = {},
+    onOpenPath: ((String) -> Unit)? = null,
 ) {
     val state by controller.state.collectAsState()
     val transfers by controller.transfers.collectAsState()
@@ -211,19 +223,19 @@ fun RemoteFilesScreen(
     }
 
     if (creatingDirectory) NameDialog(
-        title = "new folder",
-        label = "Folder name",
+        title = stringResource(R.string.files_new_folder_title),
+        label = stringResource(R.string.files_folder_name),
         initial = "",
-        confirmLabel = "Create",
+        confirmLabel = stringResource(R.string.files_create),
         onDismiss = { creatingDirectory = false },
         onConfirm = { controller.createDirectory(it); creatingDirectory = false },
     )
     renameEntry?.let { entry ->
         NameDialog(
-            title = "rename",
-            label = "New name for ${entry.name}",
+            title = stringResource(R.string.files_rename_title),
+            label = stringResource(R.string.files_rename_label, entry.name),
             initial = entry.name,
-            confirmLabel = "Rename",
+            confirmLabel = stringResource(R.string.files_rename),
             onDismiss = { renameEntry = null },
             onConfirm = { controller.rename(entry, it); renameEntry = null },
         )
@@ -234,17 +246,19 @@ fun RemoteFilesScreen(
         initialFilter = filterQuery,
         onDismiss = { browserToolsOpen = false },
         onOpenPath = { value ->
-            RemoteFilesBrowser.requestedPath(value, state.homePath)?.let(controller::navigate)
             browserToolsOpen = false
+            RemoteFilesBrowser.requestedPath(value, state.homePath)?.let { path ->
+                if (onOpenPath != null) onOpenPath(path) else controller.navigate(path)
+            }
         },
         onFilterChange = { filterQuery = it },
     )
     deleteEntry?.let { entry ->
         TesseraConfirmDialog(
-            title = "Delete ${entry.name}?",
-            body = "This permanently removes the remote item. Non-empty folders are never deleted recursively.",
-            confirmLabel = "Delete",
-            cancelLabel = "Cancel",
+            title = stringResource(R.string.files_delete_title, entry.name),
+            body = stringResource(R.string.files_delete_body),
+            confirmLabel = stringResource(R.string.files_delete),
+            cancelLabel = stringResource(R.string.files_cancel),
             destructive = true,
             onConfirm = { controller.delete(entry); deleteEntry = null },
             onDismiss = { deleteEntry = null },
@@ -257,10 +271,10 @@ fun RemoteFilesScreen(
         val displayName = controller.displayName(conflict.uri)
         if (conflict.existingKind == RemoteFileKind.FILE) {
             TesseraConfirmDialog(
-                title = "Replace $displayName?",
-                body = "A remote file with this name already exists. Replacing it cannot be undone.",
-                confirmLabel = "Replace",
-                cancelLabel = "Skip",
+                title = stringResource(R.string.files_replace_title, displayName),
+                body = stringResource(R.string.files_replace_body),
+                confirmLabel = stringResource(R.string.files_replace),
+                cancelLabel = stringResource(R.string.files_skip),
                 destructive = true,
                 onConfirm = {
                     controller.enqueueUpload(conflict.uri, replaceExisting = true)
@@ -270,11 +284,11 @@ fun RemoteFilesScreen(
             )
         } else {
             TesseraDialog(
-                title = "Can't replace $displayName",
+                title = stringResource(R.string.files_cannot_replace_title, displayName),
                 onDismissRequest = ::resolveConflict,
                 actions = {
                     TesseraButton(
-                        text = "OK",
+                        text = stringResource(R.string.files_ok),
                         onClick = ::resolveConflict,
                         style = TesseraButtonStyle.Primary,
                         compact = true,
@@ -282,7 +296,14 @@ fun RemoteFilesScreen(
                 },
             ) {
                 Text(
-                    "A remote ${conflict.existingKind.name.lowercase()} already uses this name. Tessera only replaces regular files.",
+                    stringResource(
+                        when (conflict.existingKind) {
+                            RemoteFileKind.DIRECTORY -> R.string.files_cannot_replace_directory
+                            RemoteFileKind.SYMLINK -> R.string.files_cannot_replace_symlink
+                            // FILE takes the replace dialog above.
+                            RemoteFileKind.FILE, RemoteFileKind.OTHER -> R.string.files_cannot_replace_other
+                        },
+                    ),
                     style = TesseraType.body,
                     color = LocalTesseraTokens.current.fgMuted,
                 )
@@ -317,30 +338,34 @@ private fun BrowserPane(
             .remoteFileDropTarget(enabled = state.currentPath != null, onDropped = onDroppedUris)
             .background(tokens.bg),
     ) {
-        TesseraPageHeader("files") {
+        TesseraPageHeader(stringResource(R.string.files_title)) {
             TesseraIconButton(
                 icon = TesseraIcons.ArrowUp,
-                contentDescription = "Parent folder",
+                contentDescription = stringResource(R.string.files_parent_folder),
                 onClick = onParent,
                 enabled = state.currentPath != null && state.currentPath != "/",
             )
-            TesseraIconButton(icon = TesseraIcons.Refresh, contentDescription = "Refresh", onClick = onRefresh)
+            TesseraIconButton(
+                icon = TesseraIcons.Refresh,
+                contentDescription = stringResource(R.string.files_refresh),
+                onClick = onRefresh,
+            )
             TesseraIconButton(
                 icon = TesseraIcons.Search,
-                contentDescription = "Quick open and filter",
+                contentDescription = stringResource(R.string.files_quick_open_and_filter),
                 onClick = onBrowserTools,
                 enabled = state.currentPath != null,
                 selected = filterQuery.isNotBlank(),
             )
             TesseraIconButton(
                 icon = TesseraIcons.FolderPlus,
-                contentDescription = "New folder",
+                contentDescription = stringResource(R.string.files_new_folder),
                 onClick = onCreateDirectory,
                 enabled = state.currentPath != null,
             )
             TesseraIconButton(
                 icon = TesseraIcons.Upload,
-                contentDescription = "Upload",
+                contentDescription = stringResource(R.string.files_upload),
                 onClick = onUpload,
                 enabled = state.currentPath != null,
                 prominent = true,
@@ -354,7 +379,7 @@ private fun BrowserPane(
         ) {
             FollowTerminalToggle(state.followState, onToggleFollow)
             Text(
-                state.currentPath ?: "connecting…",
+                state.currentPath ?: stringResource(R.string.files_connecting),
                 modifier = Modifier.weight(1f),
                 color = tokens.fgMuted,
                 style = TesseraType.code,
@@ -377,7 +402,7 @@ private fun BrowserPane(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "filter: $filterQuery",
+                    stringResource(R.string.files_filter_summary, filterQuery),
                     modifier = Modifier.weight(1f),
                     style = TesseraType.rowMeta,
                     color = tokens.fgMuted,
@@ -393,7 +418,7 @@ private fun BrowserPane(
             TesseraHairline()
         }
         state.error?.let {
-            TesseraBanner(text = it, modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp))
+            TesseraBanner(text = it.text(), modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp))
         }
         when {
             state.loading && state.entries.isEmpty() -> Column(
@@ -407,21 +432,21 @@ private fun BrowserPane(
                     strokeWidth = 2.dp,
                 )
                 Text(
-                    "loading directory…",
+                    stringResource(R.string.files_loading_directory),
                     modifier = Modifier.padding(top = 14.dp),
                     style = TesseraType.body,
                     color = tokens.fgMuted,
                 )
             }
             state.entries.isEmpty() && state.error == null -> TesseraEmptyState(
-                title = "empty folder",
-                body = "Nothing is stored here yet. Upload a file, or move up to the parent folder.",
+                title = stringResource(R.string.files_empty_folder_title),
+                body = stringResource(R.string.files_empty_folder_body),
                 icon = TesseraIcons.Folder,
                 modifier = Modifier.fillMaxSize(),
             )
             filteredEntries.isEmpty() && state.error == null -> TesseraEmptyState(
-                title = "no matching files",
-                body = "Change the filter from quick open to show the rest of this folder.",
+                title = stringResource(R.string.files_no_matches_title),
+                body = stringResource(R.string.files_no_matches_body),
                 icon = TesseraIcons.Search,
                 modifier = Modifier.fillMaxSize(),
             )
@@ -465,8 +490,8 @@ private fun RemoteFileRow(
             .clickable(
                 enabled = tap != RemoteFileRowTap.NONE,
                 onClickLabel = when (tap) {
-                    RemoteFileRowTap.NAVIGATE -> "Open directory"
-                    RemoteFileRowTap.QUICK_VIEW -> "Quick view"
+                    RemoteFileRowTap.NAVIGATE -> stringResource(R.string.files_open_directory)
+                    RemoteFileRowTap.QUICK_VIEW -> stringResource(R.string.files_open_in_artifacts)
                     RemoteFileRowTap.NONE -> null
                 },
                 onClick = {
@@ -493,7 +518,7 @@ private fun RemoteFileRow(
                 overflow = TextOverflow.MiddleEllipsis,
             )
             Text(
-                entry.size?.let(::formatBytes) ?: entry.kind.name.lowercase(Locale.US),
+                entry.size?.let(::formatBytes) ?: stringResource(kindLabel(entry.kind)),
                 color = tokens.fgMuted,
                 style = TesseraType.rowMeta,
                 maxLines = 1,
@@ -501,9 +526,10 @@ private fun RemoteFileRow(
         }
         Box {
             if (isPreparing) {
+                val preparingDescription = stringResource(R.string.files_preparing_file)
                 Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp).semantics { contentDescription = "Preparing file" },
+                        modifier = Modifier.size(16.dp).semantics { contentDescription = preparingDescription },
                         color = tokens.fgMuted,
                         strokeWidth = 1.5.dp,
                     )
@@ -511,31 +537,37 @@ private fun RemoteFileRow(
             } else {
                 TesseraIconButton(
                     icon = TesseraIcons.MoreVertical,
-                    contentDescription = "Actions for ${entry.name}",
+                    contentDescription = stringResource(R.string.files_actions_for, entry.name),
                     onClick = { menuOpen = true },
                 )
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 if (entry.kind == RemoteFileKind.FILE) {
-                    DropdownMenuItem(text = { Text("Quick open") }, onClick = {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.files_open_in_artifacts)) }, onClick = {
                         menuOpen = false
                         onPresent(entry, RemoteFilePresentationAction.OPEN)
                     })
-                    DropdownMenuItem(text = { Text("Share…") }, enabled = !isPreparing, onClick = {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.files_share_menu)) }, enabled = !isPreparing, onClick = {
                         menuOpen = false
                         onPresent(entry, RemoteFilePresentationAction.SHARE)
                     })
-                    DropdownMenuItem(text = { Text("Download") }, onClick = { menuOpen = false; onDownload(entry) })
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.files_download)) },
+                        onClick = { menuOpen = false; onDownload(entry) },
+                    )
                 }
                 onInsertTerminalPath?.let { insert ->
-                    DropdownMenuItem(text = { Text("Insert path in terminal") }, onClick = {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.files_insert_path)) }, onClick = {
                         menuOpen = false
                         insert(entry)
                     })
                 }
-                DropdownMenuItem(text = { Text("Rename") }, onClick = { menuOpen = false; onRename(entry) })
                 DropdownMenuItem(
-                    text = { Text("Delete", color = tokens.red) },
+                    text = { Text(stringResource(R.string.files_rename)) },
+                    onClick = { menuOpen = false; onRename(entry) },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.files_delete), color = tokens.red) },
                     onClick = { menuOpen = false; onDelete(entry) },
                 )
             }
@@ -566,11 +598,13 @@ private fun FollowTerminalToggle(state: RemoteFilesFollowState, onToggle: () -> 
         RemoteFilesFollowState.MANUAL -> tokens.inputBgSoft
         RemoteFilesFollowState.UNAVAILABLE -> tokens.amber.copy(alpha = 0.14f)
     }
-    val description = when (state) {
-        RemoteFilesFollowState.FOLLOWING -> "following the terminal directory — tap to browse freely"
-        RemoteFilesFollowState.MANUAL -> "not following — tap to sync to the terminal directory"
-        RemoteFilesFollowState.UNAVAILABLE -> "no directory signal from this session"
-    }
+    val description = stringResource(
+        when (state) {
+            RemoteFilesFollowState.FOLLOWING -> R.string.files_follow_following
+            RemoteFilesFollowState.MANUAL -> R.string.files_follow_manual
+            RemoteFilesFollowState.UNAVAILABLE -> R.string.files_follow_unavailable
+        },
+    )
     Box(
         Modifier
             .size(width = 34.dp, height = 28.dp)
@@ -601,9 +635,9 @@ private fun TransferPane(
             Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(start = 18.dp, end = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TesseraKicker("transfers", Modifier.weight(1f))
+            TesseraKicker(stringResource(R.string.files_transfers), Modifier.weight(1f))
             TesseraButton(
-                text = "clear",
+                text = stringResource(R.string.files_clear),
                 onClick = controller::clearFinished,
                 compact = true,
             )
@@ -629,7 +663,7 @@ private fun TransferPane(
                             maxLines = 1,
                             overflow = TextOverflow.MiddleEllipsis,
                         )
-                        TesseraTag(item.phase.name.lowercase(Locale.US), tone = tone)
+                        TesseraTag(stringResource(phaseLabel(item.phase)), tone = tone)
                     }
                     Spacer(Modifier.height(8.dp))
                     if (item.phase == TransferPhase.RUNNING || item.phase == TransferPhase.QUEUED) {
@@ -654,12 +688,12 @@ private fun TransferPane(
                         )
                         when (item.phase) {
                             TransferPhase.RUNNING, TransferPhase.QUEUED -> TesseraButton(
-                                text = "cancel",
+                                text = stringResource(R.string.files_transfer_cancel),
                                 onClick = { controller.cancel(item.id) },
                                 compact = true,
                             )
                             TransferPhase.FAILED, TransferPhase.CANCELLED -> TesseraButton(
-                                text = "retry",
+                                text = stringResource(R.string.files_transfer_retry),
                                 onClick = { controller.retry(item.id) },
                                 compact = true,
                             )
@@ -667,13 +701,33 @@ private fun TransferPane(
                         }
                     }
                     item.error?.let {
-                        TesseraBanner(text = it, modifier = Modifier.padding(top = 8.dp))
+                        TesseraBanner(text = it.text(), modifier = Modifier.padding(top = 8.dp))
                     }
                 }
                 TesseraHairline(Modifier.padding(start = 18.dp))
             }
         }
     }
+}
+
+/** A remote entry's type, shown in place of a size. */
+@StringRes
+private fun kindLabel(kind: RemoteFileKind): Int = when (kind) {
+    RemoteFileKind.FILE -> R.string.files_kind_file
+    RemoteFileKind.DIRECTORY -> R.string.files_kind_directory
+    RemoteFileKind.SYMLINK -> R.string.files_kind_symlink
+    RemoteFileKind.OTHER -> R.string.files_kind_other
+}
+
+/** A transfer row's state tag. */
+@StringRes
+private fun phaseLabel(phase: TransferPhase): Int = when (phase) {
+    TransferPhase.QUEUED -> R.string.files_phase_queued
+    TransferPhase.RUNNING -> R.string.files_phase_running
+    TransferPhase.CANCELLING -> R.string.files_phase_cancelling
+    TransferPhase.COMPLETED -> R.string.files_phase_completed
+    TransferPhase.FAILED -> R.string.files_phase_failed
+    TransferPhase.CANCELLED -> R.string.files_phase_cancelled
 }
 
 /** Direction marker for a transfer row: up for uploads, down for downloads. */
@@ -701,7 +755,7 @@ private fun NameDialog(
         title = title,
         onDismissRequest = onDismiss,
         actions = {
-            TesseraButton(text = "Cancel", onClick = onDismiss, compact = true)
+            TesseraButton(text = stringResource(R.string.files_cancel), onClick = onDismiss, compact = true)
             TesseraButton(
                 text = confirmLabel,
                 onClick = { onConfirm(value) },
@@ -731,14 +785,17 @@ private fun BrowserToolsDialog(
 ) {
     var path by remember(currentPath) { mutableStateOf(currentPath) }
     var filter by remember(initialFilter) { mutableStateOf(initialFilter) }
+    val openPath: () -> Unit = {
+        if (RemoteFilesBrowser.requestedPath(path, homePath) != null) onOpenPath(path)
+    }
     TesseraDialog(
-        title = "quick open",
+        title = stringResource(R.string.files_quick_open_title),
         onDismissRequest = onDismiss,
         actions = {
-            TesseraButton(text = "Cancel", onClick = onDismiss, compact = true)
+            TesseraButton(text = stringResource(R.string.files_cancel), onClick = onDismiss, compact = true)
             TesseraButton(
-                text = "Open",
-                onClick = { onOpenPath(path) },
+                text = stringResource(R.string.files_open),
+                onClick = openPath,
                 style = TesseraButtonStyle.Primary,
                 enabled = RemoteFilesBrowser.requestedPath(path, homePath) != null,
                 compact = true,
@@ -750,9 +807,17 @@ private fun BrowserToolsDialog(
                 value = path,
                 onValueChange = { path = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = "Remote path",
-                supporting = "Enter an absolute path, ~, or . to navigate directly.",
+                inputModifier = Modifier.onPreviewKeyEvent { event ->
+                    if (event.key == Key.Enter || event.key == Key.NumPadEnter) {
+                        if (event.type == KeyEventType.KeyUp) openPath()
+                        true
+                    } else false
+                },
+                label = stringResource(R.string.files_remote_path),
+                supporting = stringResource(R.string.files_remote_path_supporting),
                 inputTestTag = "files-quick-open-path",
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                keyboardActions = KeyboardActions(onGo = { openPath() }),
             )
             TesseraTextField(
                 value = filter,
@@ -761,8 +826,8 @@ private fun BrowserToolsDialog(
                     onFilterChange(value)
                 },
                 modifier = Modifier.fillMaxWidth(),
-                label = "Filter this folder",
-                supporting = "Matches file and folder names without changing the remote directory.",
+                label = stringResource(R.string.files_filter_folder),
+                supporting = stringResource(R.string.files_filter_folder_supporting),
                 inputTestTag = "files-filter",
                 leading = TesseraIcons.Search,
             )

@@ -13,9 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
 import com.bambouville.tessera.forwarding.ForwardingTransport
@@ -63,6 +61,7 @@ class SshPasswordRequest(
     val initialRows: Int = 24,
 )
 
+/** Local trust evaluation only; throw [SshHostKeyApprovalRequired] to defer a decision. */
 fun interface SshHostKeyPolicy {
     suspend fun verify(observation: SshHostKeyObservation): Boolean
 }
@@ -84,63 +83,59 @@ class AndroidSshBackend {
         require(request.hops.isNotEmpty() && request.hops.size <= MAX_ROUTE_HOPS)
         require(commandText.isNotBlank() && commandText.length <= MAX_BOOTSTRAP_COMMAND_BYTES)
 
-        val resources = mutableListOf<Closeable>()
-        var previousClient: SSHClient? = null
-        try {
-            for (hop in request.hops) {
-                require(hop.endpoint.host.isNotBlank())
-                require(hop.endpoint.port in 1..65535)
-                require(hop.username.isNotBlank())
-                val client = SshjClientFactory { observation ->
-                    runBlocking {
-                        withTimeout(HOST_KEY_DECISION_TIMEOUT_MILLISECONDS) {
-                            hostKeyPolicy.verify(observation)
-                        }
+        withSshHostKeyApproval(hostKeyPolicy) { verifyHostKey ->
+            val resources = mutableListOf<Closeable>()
+            var previousClient: SSHClient? = null
+            try {
+                for (hop in request.hops) {
+                    require(hop.endpoint.host.isNotBlank())
+                    require(hop.endpoint.port in 1..65535)
+                    require(hop.username.isNotBlank())
+                    val client = SshjClientFactory(hostKeyPolicy = verifyHostKey).create()
+                    resources += client
+                    val parent = previousClient
+                    if (parent == null) client.connect(hop.endpoint.host, hop.endpoint.port)
+                    else {
+                        val tunnel = parent.newDirectConnection(hop.endpoint.host, hop.endpoint.port)
+                        resources += tunnel
+                        client.connectVia(tunnel)
                     }
-                }.create()
-                resources += client
-                val parent = previousClient
-                if (parent == null) client.connect(hop.endpoint.host, hop.endpoint.port)
-                else {
-                    val tunnel = parent.newDirectConnection(hop.endpoint.host, hop.endpoint.port)
-                    resources += tunnel
-                    client.connectVia(tunnel)
+                    ensureActive()
+                    authenticateRouteHop(client, hop, passwordProvider, keyAuthorizationProvider)
+                    ensureActive()
+                    previousClient = client
                 }
-                ensureActive()
-                authenticateRouteHop(client, hop, passwordProvider, keyAuthorizationProvider)
-                ensureActive()
-                previousClient = client
+                val session = checkNotNull(previousClient).startSession()
+                resources += session
+                val command = session.exec(commandText)
+                resources += command
+                coroutineScope {
+                    // SSH channels can block command completion when either pipe
+                    // fills. Drain both concurrently, retaining only the bounded
+                    // diagnostic prefix, before inspecting the exit status.
+                    val standardOutput = async(Dispatchers.IO) { command.inputStream.readBoundedUtf8() }
+                    val standardError = async(Dispatchers.IO) { command.errorStream.readBoundedUtf8() }
+                    command.join(BOOTSTRAP_COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    if (command.exitStatus == null) {
+                        command.close()
+                        standardOutput.await()
+                        standardError.await()
+                        error("SSH bootstrap command timed out")
+                    }
+                    val output = standardOutput.await()
+                    val error = standardError.await()
+                    check(!output.overflowed && !error.overflowed) {
+                        "SSH bootstrap transcript exceeds limit"
+                    }
+                    SshCommandTranscript(
+                        standardOutput = output.text,
+                        standardError = error.text,
+                        exitStatus = command.exitStatus,
+                    )
+                }
+            } finally {
+                resources.asReversed().forEach { runCatching { it.close() } }
             }
-            val session = checkNotNull(previousClient).startSession()
-            resources += session
-            val command = session.exec(commandText)
-            resources += command
-            coroutineScope {
-                // SSH channels can block command completion when either pipe
-                // fills. Drain both concurrently, retaining only the bounded
-                // diagnostic prefix, before inspecting the exit status.
-                val standardOutput = async(Dispatchers.IO) { command.inputStream.readBoundedUtf8() }
-                val standardError = async(Dispatchers.IO) { command.errorStream.readBoundedUtf8() }
-                command.join(BOOTSTRAP_COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                if (command.exitStatus == null) {
-                    command.close()
-                    standardOutput.await()
-                    standardError.await()
-                    error("SSH bootstrap command timed out")
-                }
-                val output = standardOutput.await()
-                val error = standardError.await()
-                check(!output.overflowed && !error.overflowed) {
-                    "SSH bootstrap transcript exceeds limit"
-                }
-                SshCommandTranscript(
-                    standardOutput = output.text,
-                    standardError = error.text,
-                    exitStatus = command.exitStatus,
-                )
-            }
-        } finally {
-            resources.asReversed().forEach { runCatching { it.close() } }
         }
     }
 
@@ -160,64 +155,62 @@ class AndroidSshBackend {
         require(request.hops.map(SshRouteHop::id).distinct().size == request.hops.size)
         require(request.initialColumns >= 4 && request.initialRows >= 4)
 
-        val resources = mutableListOf<Closeable>()
-        var previousClient: SSHClient? = null
-        // The key the final hop was trusted with, which ties the route's
-        // identity to that machine rather than to whatever answers its address.
-        val trustedHostKey = AtomicReference<SshHostKeyObservation?>()
-        try {
-            for (hop in request.hops) {
-                require(hop.endpoint.host.isNotBlank())
-                require(hop.endpoint.port in 1..65535)
-                require(hop.username.isNotBlank())
-                trustedHostKey.set(null)
-                val client = SshjClientFactory(socketFactory = construction?.socketFactory()) { observation ->
-                    runBlocking {
-                        withTimeout(HOST_KEY_DECISION_TIMEOUT_MILLISECONDS) {
-                            hostKeyPolicy.verify(observation)
+        withSshHostKeyApproval(hostKeyPolicy) { verifyHostKey ->
+            val resources = mutableListOf<Closeable>()
+            var previousClient: SSHClient? = null
+            // The key the final hop was trusted with, which ties the route's
+            // identity to that machine rather than to whatever answers its address.
+            val trustedHostKey = AtomicReference<SshHostKeyObservation?>()
+            try {
+                for (hop in request.hops) {
+                    require(hop.endpoint.host.isNotBlank())
+                    require(hop.endpoint.port in 1..65535)
+                    require(hop.username.isNotBlank())
+                    trustedHostKey.set(null)
+                    val client = SshjClientFactory(socketFactory = construction?.socketFactory()) { observation ->
+                        verifyHostKey(observation).also { trusted -> if (trusted) trustedHostKey.set(observation) }
+                    }.create()
+                    resources += client
+                    construction?.adopt(client)
+                    val parent = previousClient
+                    if (parent == null) {
+                        client.connect(hop.endpoint.host, hop.endpoint.port)
+                    } else {
+                        val tunnel = parent.newDirectConnection(hop.endpoint.host, hop.endpoint.port)
+                        resources += tunnel
+                        construction?.adopt(tunnel)
+                        client.connectVia(tunnel)
+                    }
+                    ensureActive()
+                    when (val authentication = hop.authentication) {
+                        SshAuthentication.Password -> {
+                            val password = passwordProvider.passwordFor(hop)
+                            try {
+                                client.authPassword(hop.username, password)
+                            } finally {
+                                password.fill('\u0000')
+                            }
                         }
-                    }.also { trusted -> if (trusted) trustedHostKey.set(observation) }
-                }.create()
-                resources += client
-                construction?.adopt(client)
-                val parent = previousClient
-                if (parent == null) {
-                    client.connect(hop.endpoint.host, hop.endpoint.port)
-                } else {
-                    val tunnel = parent.newDirectConnection(hop.endpoint.host, hop.endpoint.port)
-                    resources += tunnel
-                    construction?.adopt(tunnel)
-                    client.connectVia(tunnel)
-                }
-                ensureActive()
-                when (val authentication = hop.authentication) {
-                    SshAuthentication.Password -> {
-                        val password = passwordProvider.passwordFor(hop)
-                        try {
-                            client.authPassword(hop.username, password)
-                        } finally {
-                            password.fill('\u0000')
+                        is SshAuthentication.AndroidKeystoreP256 -> {
+                            keyAuthorizationProvider.authorize(hop)
+                            val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                            val privateKey = keyStore.getKey(authentication.alias, null) as? PrivateKey
+                                ?: error("Android Keystore credential is unavailable")
+                            val publicKey = keyStore.getCertificate(authentication.alias)?.publicKey
+                                ?: error("Android Keystore public certificate is unavailable")
+                            client.authPublickey(hop.username, client.loadKeys(KeyPair(publicKey, privateKey)))
                         }
                     }
-                    is SshAuthentication.AndroidKeystoreP256 -> {
-                        keyAuthorizationProvider.authorize(hop)
-                        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-                        val privateKey = keyStore.getKey(authentication.alias, null) as? PrivateKey
-                            ?: error("Android Keystore credential is unavailable")
-                        val publicKey = keyStore.getCertificate(authentication.alias)?.publicKey
-                            ?: error("Android Keystore public certificate is unavailable")
-                        client.authPublickey(hop.username, client.loadKeys(KeyPair(publicKey, privateKey)))
-                    }
+                    ensureActive()
+                    previousClient = client
                 }
-                ensureActive()
-                previousClient = client
-            }
 
-            SshRouteOwner(checkNotNull(previousClient), resources, routeIdentity(request.hops, trustedHostKey.get()))
-                .also { construction?.release() }
-        } catch (failure: Throwable) {
-            resources.asReversed().forEach { runCatching { it.close() } }
-            throw failure
+                SshRouteOwner(checkNotNull(previousClient), resources, routeIdentity(request.hops, trustedHostKey.get()))
+                    .also { construction?.release() }
+            } catch (failure: Throwable) {
+                resources.asReversed().forEach { runCatching { it.close() } }
+                throw failure
+            }
         }
     }
 
@@ -232,62 +225,58 @@ class AndroidSshBackend {
         require(request.hops.map(SshRouteHop::id).distinct().size == request.hops.size)
         require(request.initialColumns >= 4 && request.initialRows >= 4)
 
-        val resources = mutableListOf<Closeable>()
-        var previousClient: SSHClient? = null
-        try {
-            for (hop in request.hops) {
-                require(hop.endpoint.host.isNotBlank())
-                require(hop.endpoint.port in 1..65535)
-                require(hop.username.isNotBlank())
-                val client = SshjClientFactory { observation ->
-                    runBlocking {
-                        withTimeout(HOST_KEY_DECISION_TIMEOUT_MILLISECONDS) {
-                            hostKeyPolicy.verify(observation)
-                        }
-                    }
-                }.create()
-                resources += client
-                val parent = previousClient
-                if (parent == null) client.connect(hop.endpoint.host, hop.endpoint.port)
-                else {
-                    val tunnel = parent.newDirectConnection(hop.endpoint.host, hop.endpoint.port)
-                    resources += tunnel
-                    client.connectVia(tunnel)
-                }
-                ensureActive()
-                authenticateRouteHop(client, hop, passwordProvider, keyAuthorizationProvider)
-                ensureActive()
-                previousClient = client
-            }
-
-            val finalClient = checkNotNull(previousClient)
-            val session = finalClient.startSession()
-            resources += session
+        withSshHostKeyApproval(hostKeyPolicy) { verifyHostKey ->
+            val resources = mutableListOf<Closeable>()
+            var previousClient: SSHClient? = null
             try {
-                session.allocatePTY(
-                    "xterm-256color",
-                    request.initialColumns,
-                    request.initialRows,
-                    0,
-                    0,
-                    emptyMap<PTYMode, Int>(),
-                )
-                val shell = session.startShell()
-                resources += shell
-                ensureActive()
-                SshTerminalConnection(
-                    session = session,
-                    shell = shell,
-                    resources = resources,
-                    forwardingRuntimeFactory = AuthenticatedForwardingRuntimeFactory(finalClient),
-                )
+                for (hop in request.hops) {
+                    require(hop.endpoint.host.isNotBlank())
+                    require(hop.endpoint.port in 1..65535)
+                    require(hop.username.isNotBlank())
+                    val client = SshjClientFactory(hostKeyPolicy = verifyHostKey).create()
+                    resources += client
+                    val parent = previousClient
+                    if (parent == null) client.connect(hop.endpoint.host, hop.endpoint.port)
+                    else {
+                        val tunnel = parent.newDirectConnection(hop.endpoint.host, hop.endpoint.port)
+                        resources += tunnel
+                        client.connectVia(tunnel)
+                    }
+                    ensureActive()
+                    authenticateRouteHop(client, hop, passwordProvider, keyAuthorizationProvider)
+                    ensureActive()
+                    previousClient = client
+                }
+
+                val finalClient = checkNotNull(previousClient)
+                val session = finalClient.startSession()
+                resources += session
+                try {
+                    session.allocatePTY(
+                        "xterm-256color",
+                        request.initialColumns,
+                        request.initialRows,
+                        0,
+                        0,
+                        emptyMap<PTYMode, Int>(),
+                    )
+                    val shell = session.startShell()
+                    resources += shell
+                    ensureActive()
+                    SshTerminalConnection(
+                        session = session,
+                        shell = shell,
+                        resources = resources,
+                        forwardingRuntimeFactory = AuthenticatedForwardingRuntimeFactory(finalClient),
+                    )
+                } catch (failure: Throwable) {
+                    resources.asReversed().forEach { runCatching { it.close() } }
+                    throw failure
+                }
             } catch (failure: Throwable) {
                 resources.asReversed().forEach { runCatching { it.close() } }
                 throw failure
             }
-        } catch (failure: Throwable) {
-            resources.asReversed().forEach { runCatching { it.close() } }
-            throw failure
         }
     }
 
@@ -331,37 +320,33 @@ class AndroidSshBackend {
         require(request.hops.isNotEmpty() && request.hops.size <= MAX_ROUTE_HOPS)
         require(request.hops.map(SshRouteHop::id).distinct().size == request.hops.size)
 
-        val resources = mutableListOf<Closeable>()
-        var previousClient: SSHClient? = null
-        try {
-            for (hop in request.hops) {
-                require(hop.endpoint.host.isNotBlank())
-                require(hop.endpoint.port in 1..65535)
-                require(hop.username.isNotBlank())
-                val client = SshjClientFactory { observation ->
-                    runBlocking {
-                        withTimeout(HOST_KEY_DECISION_TIMEOUT_MILLISECONDS) {
-                            hostKeyPolicy.verify(observation)
-                        }
+        withSshHostKeyApproval(hostKeyPolicy) { verifyHostKey ->
+            val resources = mutableListOf<Closeable>()
+            var previousClient: SSHClient? = null
+            try {
+                for (hop in request.hops) {
+                    require(hop.endpoint.host.isNotBlank())
+                    require(hop.endpoint.port in 1..65535)
+                    require(hop.username.isNotBlank())
+                    val client = SshjClientFactory(hostKeyPolicy = verifyHostKey).create()
+                    resources += client
+                    val parent = previousClient
+                    if (parent == null) client.connect(hop.endpoint.host, hop.endpoint.port)
+                    else {
+                        val tunnel = parent.newDirectConnection(hop.endpoint.host, hop.endpoint.port)
+                        resources += tunnel
+                        client.connectVia(tunnel)
                     }
-                }.create()
-                resources += client
-                val parent = previousClient
-                if (parent == null) client.connect(hop.endpoint.host, hop.endpoint.port)
-                else {
-                    val tunnel = parent.newDirectConnection(hop.endpoint.host, hop.endpoint.port)
-                    resources += tunnel
-                    client.connectVia(tunnel)
+                    ensureActive()
+                    authenticateRouteHop(client, hop, passwordProvider, keyAuthorizationProvider)
+                    ensureActive()
+                    previousClient = client
                 }
-                ensureActive()
-                authenticateRouteHop(client, hop, passwordProvider, keyAuthorizationProvider)
-                ensureActive()
-                previousClient = client
+                AuthenticatedForwardingSideChannel(checkNotNull(previousClient), resources)
+            } catch (failure: Throwable) {
+                resources.asReversed().forEach { runCatching { it.close() } }
+                throw failure
             }
-            AuthenticatedForwardingSideChannel(checkNotNull(previousClient), resources)
-        } catch (failure: Throwable) {
-            resources.asReversed().forEach { runCatching { it.close() } }
-            throw failure
         }
     }
 

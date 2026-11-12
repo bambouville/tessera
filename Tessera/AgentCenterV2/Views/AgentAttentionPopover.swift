@@ -386,9 +386,8 @@ struct AgentAttentionPopover: View {
                     localized: "window \(label.position) “\(label.name)”",
                     comment: "Agent location: tmux window number and its name"
                 ))
-        } else if let windowID = binding.windowID.flatMap(Int.init) {
-            parts.append(String(localized: "window \(windowID)", comment: "Agent location: tmux window number"))
         }
+        // Without its position, a window shows nothing: tmux's window ID is no window number.
         // `%21` is tmux's own pane identifier syntax, not prose.
         if let paneID = binding.paneID {
             let identifier = "%" + paneID

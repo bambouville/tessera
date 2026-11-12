@@ -271,7 +271,7 @@ class TmuxCompactSizingControllerTest {
 
         fun compactSizeRole(name: String): Any {
             val type = Class.forName("com.bambouville.tessera.feature.session.SshSessionController\$CompactSizeRole")
-            return type.enumConstants.single { (it as Enum<*>).name == name }
+            return checkNotNull(type.enumConstants).single { (it as Enum<*>).name == name }
         }
 
         fun memo(word: Long) = SharedTmuxCompactReprojectionMemo(word, 0L)

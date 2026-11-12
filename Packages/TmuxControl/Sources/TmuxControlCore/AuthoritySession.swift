@@ -165,6 +165,11 @@ public struct TmuxGridAuthoritySession: Equatable, Sendable {
         /// This device's stamp identity changed; set `localDeviceID` first.
         /// The old identity's claim, held reply and ownership end with it.
         case identityChanged
+        /// The owned-grid records the adapter kept from earlier processes
+        /// (`ownedGeometryRecord`), sent before the first attach. The first
+        /// read or live stamp naming this device adopts the record for its
+        /// generation and drops the rest; a peer's stamp drops them all.
+        case restoreOwnedGeometry([TmuxOwnedGeometryRecord])
         /// Whether the attached control channel can carry a command now (a
         /// mosh side-channel gap the adapter knows about before it resets).
         case channelLiveness(Bool)
@@ -367,6 +372,9 @@ public struct TmuxGridAuthoritySession: Equatable, Sendable {
     public private(set) var reducer = Reducer()
     public private(set) var query = QueryTracker()
     public private(set) var evidence = TmuxAuthorityGeometryEvidence()
+    /// Records from `restoreOwnedGeometry`, newest generation first, until
+    /// a stamp read decides which (if any) still speaks for the server.
+    public private(set) var restoredOwnedGeometry: [TmuxOwnedGeometryRecord] = []
     /// The live claim's latest fence; nil outside a claim's geometry phase
     /// before its first fence.
     public private(set) var claimFence: ClaimFence?
@@ -414,6 +422,10 @@ public struct TmuxGridAuthoritySession: Equatable, Sendable {
     public private(set) var gatesTyping = false
     public private(set) var mutationRefusal: TmuxGridAuthorityPresentation.MutationRefusal?
     public private(set) var geometryHold: GeometryHold = .withheld
+    /// What the adapter keeps across a process death: the grids owned under
+    /// our standing stamp. Nil when no stamp of ours stands or nothing is
+    /// owned yet; a nil says nothing about a record already kept.
+    public private(set) var ownedGeometryRecord: TmuxOwnedGeometryRecord?
     /// When `tick` next has something to decide; nil when nothing is pending.
     public private(set) var nextDeadline: Int64?
 
@@ -638,6 +650,7 @@ public struct TmuxGridAuthoritySession: Equatable, Sendable {
             dropOwnWriteContinuation()
             query.held = nil
             query.current = nil
+            restoredOwnedGeometry = []
             if let claim = reducer.claim {
                 reduceLifecycle(now: now, into: &effects) { $0.abortClaim(generation: claim.generation, reason: .superseded) }
             }
@@ -651,6 +664,26 @@ public struct TmuxGridAuthoritySession: Equatable, Sendable {
             }
             requestRead(now: now, into: &effects)
 
+        case .restoreOwnedGeometry(let records):
+            restoredOwnedGeometry = Array(records
+                .filter { !$0.sizes.isEmpty }
+                .sorted { $0.generation > $1.generation }
+                .prefix(TmuxOwnedGeometryRecord.restoreLimit))
+            // A restore that lands after our stamp was read adopts at once,
+            // and an own-stamp reply held for evidence is judged again: the
+            // held reply is the newer word on the server.
+            let standing: UInt64?
+            if let held = query.held, case .mine(let generation) = held.observed {
+                standing = generation
+            } else if case .mine(let generation) = reducer.authority {
+                standing = generation
+            } else {
+                standing = nil
+            }
+            if let standing, adoptRestoredOwnedGeometry(generation: standing) {
+                evidenceChanged(now: now, into: &effects)
+            }
+
         case .foregrounded:
             inBackground = false
             reduceLifecycle(now: now, into: &effects) { $0.foregrounded() }
@@ -662,6 +695,7 @@ public struct TmuxGridAuthoritySession: Equatable, Sendable {
             break // Prepared and classified once by reduce, above.
 
         case .observedAuthority(let observed):
+            let adopted = noteStampForRestoredOwnedGeometry(observed)
             if let held = query.held, observed != .unknown, observed != held.observed {
                 // A newer write landed while an own-stamp reply waited for
                 // evidence: that reply no longer describes the server.
@@ -669,6 +703,7 @@ public struct TmuxGridAuthoritySession: Equatable, Sendable {
                 requestRead(now: now, into: &effects)
             }
             reduceLifecycle(now: now, into: &effects) { $0.observedAuthority(observed) }
+            if adopted { evidenceChanged(now: now, into: &effects) }
 
         case .ownStampObserved(let generation):
             // Its continuation is a fresh fence: never into a hidden or
@@ -748,6 +783,7 @@ public struct TmuxGridAuthoritySession: Equatable, Sendable {
             // peer. The adapter attaches again, after resolving the new
             // session's scope, and that attach reads (§6.18).
             evidence.owned.removeAll()
+            restoredOwnedGeometry = []
             handle(.resetTransport(preservingPeer: false), now: now, into: &effects)
 
         case .claimFenceSent(let generation, let windowID):
@@ -920,6 +956,9 @@ public struct TmuxGridAuthoritySession: Equatable, Sendable {
             requestRead(now: now, into: &effects)
             return
         }
+        // Before the geometry is judged: a relaunch's record is that evidence.
+        // An unstamped server holds no stamp a record could belong to.
+        if value.isEmpty { restoredOwnedGeometry = [] } else { noteStampForRestoredOwnedGeometry(observed) }
         if case .mine = observed {
             guard let geometry = classifyReadGeometry(final: false, readHadIntent: read.intentToken != nil) else {
                 query.held = .init(
@@ -1106,6 +1145,34 @@ public struct TmuxGridAuthoritySession: Equatable, Sendable {
     private mutating func evidenceChanged(now: Int64, into effects: inout [Effect]) {
         if query.held != nil { releaseHeldReply(final: false, now: now, into: &effects) }
         runStamplessJudge(now: now, into: &effects)
+    }
+
+    /// A stamp read or edge decides the restored records: ours adopts the
+    /// record for its generation, a peer's leaves none standing. True when
+    /// a record joined the owned history.
+    @discardableResult
+    private mutating func noteStampForRestoredOwnedGeometry(_ observed: TmuxGridAuthoritySnapshot) -> Bool {
+        switch observed {
+        case .mine(let generation):
+            return adoptRestoredOwnedGeometry(generation: generation)
+        case .peer:
+            restoredOwnedGeometry = []
+            return false
+        case .unknown:
+            return false
+        }
+    }
+
+    /// Our stamp's generation is known: the record kept for it joins the
+    /// owned history as its oldest grids. The others belong to stamps that
+    /// no longer stand, so none is kept.
+    private mutating func adoptRestoredOwnedGeometry(generation: UInt64) -> Bool {
+        guard !restoredOwnedGeometry.isEmpty else { return false }
+        let record = restoredOwnedGeometry.first { $0.generation == generation }
+        restoredOwnedGeometry = []
+        guard let record else { return false }
+        evidence.owned.adoptOlder(record.sizes)
+        return true
     }
 
     // MARK: - Stamp-less peer
@@ -1455,6 +1522,19 @@ public struct TmuxGridAuthoritySession: Equatable, Sendable {
         }
         geometryHold = hold
 
+        var record: TmuxOwnedGeometryRecord?
+        if let claim = reducer.claim, let target = claim.targetGrid,
+           claim.phase == .awaitingStampCommit || claim.phase == .awaitingSettlement {
+            // The commit may stand on the server before its reply settles
+            // the claim; a process that dies in between relaunches under it.
+            var owned = evidence.owned
+            owned.record(TmuxGridSize(columns: target.columns, rows: target.rows))
+            record = TmuxOwnedGeometryRecord(generation: claim.generation, sizes: owned.sizes)
+        } else if case .mine(let generation) = reducer.authority, !evidence.owned.sizes.isEmpty {
+            record = TmuxOwnedGeometryRecord(generation: generation, sizes: evidence.owned.sizes)
+        }
+        if record != ownedGeometryRecord { ownedGeometryRecord = record }
+
         var deadline = intentClock.deadline
         func consider(_ candidate: Int64?) {
             guard let candidate else { return }
@@ -1552,6 +1632,7 @@ public extension TmuxGridAuthoritySession {
         transition("read", before.query.traceLabel, after.query.traceLabel)
         transition("fence", before.claimFence.traceLabel, after.claimFence.traceLabel)
         transition("replay", before.replay.traceLabel, after.replay.traceLabel)
+        transition("restored", "\(before.restoredOwnedGeometry.count)", "\(after.restoredOwnedGeometry.count)")
         if before.intentClockPaused != after.intentClockPaused {
             parts.append("clock=\(after.intentClockPaused ? "paused" : "running")")
         }
@@ -1578,6 +1659,10 @@ public extension TmuxGridAuthoritySession.Event {
         case .attached: return "attached"
         case .resetTransport(let preserving): return "resetTransport(preservingPeer=\(preserving))"
         case .identityChanged: return "identityChanged"
+        case .restoreOwnedGeometry(let records):
+            let newest = records.map(\.generation).sorted(by: >)
+            let shown = newest.prefix(3).map { "g\($0)" }.joined(separator: " ")
+            return "restoreOwnedGeometry(\(newest.count > 3 ? "\(shown) +\(newest.count - 3)" : shown))"
         case .channelLiveness(let live): return "channelLiveness(\(live))"
         case .shown(let source, _): return "shown(\(source.rawValue))"
         case .adoptShown: return "adoptShown"

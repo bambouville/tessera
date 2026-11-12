@@ -81,13 +81,29 @@ struct DesignTokens: Equatable {
     let border: Color
     let borderStrong: Color
     let isLight: Bool
+    /// A background picture lies under this surface: see `overPicture()`.
+    var picturesBehind = false
 
     /// Opaque canvas for full-screen presentations layered above existing
     /// content. The normal light-mode `bg` is intentionally clear so the app's
     /// root system background can show through, but using that token for a
     /// modal overlay leaves the underlying page visible and unreadable.
     var presentationBg: Color {
-        isLight ? .white : bg
+        picturesBehind ? .clear : (isLight ? .white : bg)
+    }
+
+    /// These tokens for a surface laid over the session's background picture,
+    /// such as Duo's docked context: canvases go clear so the picture shows,
+    /// while ink, hairlines and states keep the theme's colours, which the
+    /// picture's theme-coloured scrim keeps legible.
+    func overPicture() -> DesignTokens {
+        DesignTokens(
+            bg: .clear, sidebarBg: sidebarBg, sidebarBorder: sidebarBorder, panelBg: .clear,
+            inputBg: inputBg, inputBgSoft: inputBgSoft, fg: fg, fgMuted: fgMuted, fgDim: fgDim,
+            fgFaint: fgFaint, accent: accent, accentSoft: accentSoft, green: green, red: red,
+            amber: amber, border: border, borderStrong: borderStrong, isLight: isLight,
+            picturesBehind: true
+        )
     }
 
     /// `customColor` is consulted only when `accent == .custom`. It overrides

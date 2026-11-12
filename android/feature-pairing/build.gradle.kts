@@ -25,8 +25,8 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
     implementation(libs.androidx.lifecycle.runtime.compose)
-    implementation(libs.mlkit.barcode.scanning)
-    implementation(libs.zxing.core)
+    implementation(libs.zxing.core) // draws offers
+    implementation(libs.zxing.cpp.android) // reads them
     val composeBom = platform(libs.androidx.compose.bom)
     implementation(composeBom)
     implementation(libs.androidx.compose.foundation)
@@ -36,4 +36,7 @@ dependencies {
     testImplementation(libs.json) // JVM tests exercise the real coordinator event reader.
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(composeBom)
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

@@ -53,6 +53,19 @@ cleanup() {
       "$adb" -s "$serial" pull \
         /sdcard/Pictures/tessera-window-ordering \
         "$TESSERA_ANDROID_RUNTIME_CAPTURE_DIR/" >/dev/null 2>&1 || true
+      if [[ "${runtime_focus:-}" == forwarding && -z "${runtime_test_filter:-}" ]]; then
+        if ! "$adb" -s "$serial" pull /sdcard/Pictures/tessera-forwarding \
+            "$TESSERA_ANDROID_RUNTIME_CAPTURE_DIR/" >/dev/null 2>&1; then
+          echo "failed to export forwarding screenshots" >&2
+          status=1
+        fi
+        for image in runtime-unavailable runtime-restored; do
+          if [[ ! -s "$TESSERA_ANDROID_RUNTIME_CAPTURE_DIR/tessera-forwarding/$image.png" ]]; then
+            echo "missing forwarding screenshot: $image" >&2
+            status=1
+          fi
+        done
+      fi
     fi
     "$adb" -s "$serial" emu kill >/dev/null 2>&1 || true
   fi
@@ -64,7 +77,7 @@ cleanup() {
     "${TMPDIR:-/tmp}"/tessera-android-runtime.*) rm -rf -- "$run_root" ;;
     *) echo "refusing to remove unexpected runtime directory: $run_root" >&2 ;;
   esac
-  return "$status"
+  exit "$status"
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
@@ -174,6 +187,16 @@ case "$runtime_focus" in
     if [[ -z "$runtime_test_filter" ]]; then
       runtime_test_filter="com.bambouville.tessera.feature.session.AgentSessionIntegrationChromeInstrumentedTest,com.bambouville.tessera.feature.session.TmuxWindowOrderingUiInstrumentedTest"
     fi
+    ;;
+  forwarding)
+    test_tasks=(
+      :port-forwarding:connectedDebugAndroidTest
+      :feature-session:connectedDebugAndroidTest
+    )
+    test_filters=(
+      "com.bambouville.tessera.forwarding.PortForwardingManagerInstrumentedTest,com.bambouville.tessera.forwarding.PortForwardingServiceStatusInstrumentedTest"
+      "com.bambouville.tessera.feature.session.SessionForwardingChromeInstrumentedTest"
+    )
     ;;
   *)
     echo "unknown TESSERA_ANDROID_RUNTIME_FOCUS: $runtime_focus" >&2

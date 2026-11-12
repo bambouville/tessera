@@ -10,6 +10,7 @@ import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.RectF
 import android.graphics.drawable.Drawable
+import androidx.annotation.AnyThread
 import androidx.annotation.WorkerThread
 import androidx.core.graphics.drawable.toDrawable
 import androidx.core.graphics.scale
@@ -17,6 +18,8 @@ import androidx.core.graphics.withClip
 import java.io.File
 import java.nio.ByteBuffer
 import java.util.UUID
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -193,16 +196,36 @@ class TerminalBackgroundImageStore(context: Context) {
     }
 
     /** Creates an independent drawable for a terminal surface or its enclosing tmux viewport. */
-    fun drawable(themeBackgroundArgb: Int, background: TerminalBackgroundImage?): Drawable {
-        if (background == null) return themeBackgroundArgb.toDrawable()
-        val bitmap = image(background.imageId, background.blurRadiusDp)
-            ?: return themeBackgroundArgb.toDrawable()
-        return TerminalBackgroundDrawable(
-            bitmap = bitmap,
-            baseColor = themeBackgroundArgb,
-            dim = background.dim,
-            fillMode = background.fillMode,
-        )
+    @WorkerThread
+    fun drawable(themeBackgroundArgb: Int, background: TerminalBackgroundImage?): Drawable =
+        backdrop(themeBackgroundArgb, background, background?.let { image(it.imageId, it.blurRadiusDp) })
+
+    /** [drawable] from a picture [image] already decoded, or the theme colour without one. */
+    @AnyThread
+    fun backdrop(themeBackgroundArgb: Int, background: TerminalBackgroundImage?, bitmap: Bitmap?): Drawable =
+        if (background == null || bitmap == null) {
+            themeBackgroundArgb.toDrawable()
+        } else {
+            TerminalBackgroundDrawable(
+                bitmap = bitmap,
+                baseColor = themeBackgroundArgb,
+                dim = background.dim,
+                fillMode = background.fillMode,
+            )
+        }
+
+    /** [background]'s picture if it is already in memory; never decodes. */
+    @AnyThread
+    fun cachedImage(background: TerminalBackgroundImage): Bitmap? =
+        cacheGet(blurKey(background.imageId, background.blurRadiusDp))
+
+    /** Decodes [background]'s picture off the main thread, then hands it to [done] on it. */
+    @AnyThread
+    fun decode(background: TerminalBackgroundImage, done: (Bitmap?) -> Unit) {
+        decoder.execute {
+            val bitmap = image(background.imageId, background.blurRadiusDp)
+            appContext.mainExecutor.execute { done(bitmap) }
+        }
     }
 
     private fun decodeImportedBitmap(data: ByteArray): Bitmap? = try {
@@ -254,6 +277,9 @@ class TerminalBackgroundImageStore(context: Context) {
         const val BLUR_MAX_PIXEL_SIZE = 1366
         const val JPEG_QUALITY = 85
         val IMAGE_ID_PATTERN = Regex("[0-9a-fA-F-]{36}\\.jpg")
+        val decoder: Executor = Executors.newSingleThreadExecutor { task ->
+            Thread(task, "terminal-background").apply { isDaemon = true }
+        }
         val memoryCache = object : LinkedHashMap<String, Bitmap>(8, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Bitmap>?): Boolean = size > 8
         }

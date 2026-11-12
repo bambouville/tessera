@@ -9,8 +9,11 @@ final class KeysPagePresentationState {
     var showImportModal = false
     let generateDraft = GenerateKeyDraft()
 
+    /// The hosts empty state opens this from another tab, where an import
+    /// left open on the keys page would still sit on top of it.
     func presentGenerator(initialProtection: Bool) {
         generateDraft.reset(initialProtection: initialProtection)
+        showImportModal = false
         showGenerateModal = true
     }
 
@@ -42,6 +45,7 @@ struct PublicKeySharePayload: Equatable {
 struct KeysPageView: View {
     @Bindable var presentation: KeysPagePresentationState
     @Environment(\.designTokens) private var T
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.modelContext) private var modelContext
     @Environment(AppearancePreferences.self) private var appearance
     @Environment(ConnectionActivityStore.self) private var connectionActivity
@@ -80,7 +84,7 @@ struct KeysPageView: View {
     }
 
     private var isPhone: Bool {
-        UIDevice.current.userInterfaceIdiom == .phone
+        CompactLayout.isPhone(horizontalSizeClass)
     }
 
     private func presentGenerator() {
@@ -112,10 +116,16 @@ struct KeysPageView: View {
     }
 
     var body: some View {
+        GeometryReader { geometry in
+            pageContent(isCompact: isPhone || geometry.size.width < 720)
+        }
+    }
+
+    private func pageContent(isCompact: Bool) -> some View {
         ZStack {
             T.bg.ignoresSafeArea()
 
-            if isPhone {
+            if isCompact {
                 phoneContent
             } else {
                 HStack(spacing: 0) {
@@ -225,7 +235,7 @@ struct KeysPageView: View {
             }
         }
         .onAppear {
-            if !isPhone {
+            if !isCompact {
                 applyInitialSelectionIfNeeded()
             }
             refreshIntegrityReport()
@@ -270,7 +280,7 @@ struct KeysPageView: View {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(T.accent)
-                            .frame(width: 36, height: 44)
+                            .frame(width: 44, height: 44)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)

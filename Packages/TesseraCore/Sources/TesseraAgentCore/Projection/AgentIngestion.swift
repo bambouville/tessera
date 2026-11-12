@@ -25,7 +25,7 @@ public struct AgentIngestionRange: Equatable, Codable, Sendable {
         self.sourceEnd = sourceEnd
         if let window {
             guard (operation == .bootstrap) == (window.lane == .bootstrap),
-                  (operation == .history) == (window.lane == .before || window.lane == .after) else { return nil }
+                  (operation == .history) == [.before, .after, .seek].contains(window.lane) else { return nil }
         }
         self.window = window
     }
@@ -345,7 +345,8 @@ public struct AgentIngestionPageDecoder: Sendable {
                   let record = AgentProjectionRecord(sequence: order, recordID: recordID, record: body,
                     sourceOffset: Self.unsigned(object["sourceOffset"]), revision: revision,
                     receiptSourceIdentity: object["receiptSourceIdentity"]?.stringValue,
-                    receiptSourceOffset: Self.receiptOffset(object["receiptSourceOffset"])),
+                    receiptSourceOffset: Self.receiptOffset(object["receiptSourceOffset"]),
+                    seekToken: object["seekToken"]?.stringValue),
                   !transaction.records.contains(where: { $0.recordID == recordID || $0.sequence == order }),
                   transaction.records.last.map({ $0.sequence < order }) ?? true else { throw AgentIngestionError.malformedFrame }
             transaction.records.append(record); pending[id] = transaction; return nil
@@ -403,13 +404,13 @@ public struct AgentIngestionPageDecoder: Sendable {
     /// The host sends a receipt offset as a canonical decimal string, as it
     /// sends `receipt.frontier`'s `sourceEnd`, to which it is compared. A JSON
     /// integer is accepted too; "007", "+7" or "7.0" are not.
-    private static func receiptOffset(_ value: AgentJSONValue?) -> UInt64? {
+    static func receiptOffset(_ value: AgentJSONValue?) -> UInt64? {
         guard let text = value?.stringValue else { return unsigned(value) }
         guard let offset = UInt64(text), String(offset) == text else { return nil }
         return offset
     }
 
-    private static func unsigned(_ value: AgentJSONValue?) -> UInt64? {
+    static func unsigned(_ value: AgentJSONValue?) -> UInt64? {
         guard let number = value?.numberValue, number >= 0, number <= Decimal(UInt64.max) else { return nil }
         let result = NSDecimalNumber(decimal: number).uint64Value
         return Decimal(result) == number ? result : nil

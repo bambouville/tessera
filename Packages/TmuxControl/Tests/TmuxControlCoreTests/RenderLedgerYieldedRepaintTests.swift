@@ -161,6 +161,7 @@ final class RenderLedgerYieldedRepaintTests: XCTestCase {
         XCTAssertEqual(feedSources(visible), [.viewportRepaint])
         XCTAssertEqual(commands(visible), [], "no 2,000-row capture while the peer holds the grid")
         XCTAssertNil(ledger.pendingStage(for: surface))
+        let painted = try XCTUnwrap(ledger.owner(for: surface))
 
         // Any reduce that no longer names the peer releases it; the claim's
         // settlement goes through `noteAuthority`.
@@ -173,6 +174,16 @@ final class RenderLedgerYieldedRepaintTests: XCTestCase {
             commands(reply(&ledger, snapshot: mine, lines: [metadata(pane: 1)])),
             [RenderCommands.deepPrimary(target: WindowId(1), depth: 2_000)]
         )
+        // Output kept scrolling rows into the terminal's history while the
+        // deepening waited; the history replaces them rather than following.
+        let deep = try finishCapture(&ledger, snapshot: mine, columns: 80)
+        let bound = deep.compactMap { effect -> RenderOwner? in
+            guard case .bindSurface(_, let owner) = effect else { return nil }
+            return owner
+        }
+        XCTAssertEqual(bound.count, 1)
+        XCTAssertNotEqual(bound.first, painted, "bound under the painted owner, the platform keeps those rows")
+        XCTAssertEqual(feedSources(deep), [.deepRepaint])
     }
 
     func test_deferredDeepeningIsReleasedByTheNextWireEventToo() throws {

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="agent_platform_integration_check_failed">主机集成检查失败。</string>
+    <string name="agent_platform_integration_shared_unavailable">共享的智能体集成不可用。</string>
+    <string name="agent_platform_integration_probe_failed">主机集成探测失败。</string>
+    <string name="agent_platform_integration_process_state_unverified">无法验证终端的进程状态。</string>
+    <string name="agent_platform_integration_provider_settings_unreadable">无法安全读取提供方设置。</string>
+    <string name="agent_platform_integration_provider_settings_too_large">提供方设置超出了安全安装上限。</string>
+    <string name="agent_platform_integration_install_unconfirmed">无法验证 Agent Center 集成。</string>
+    <string name="agent_platform_integration_install_unconfirmed_code">无法验证 Agent Center 集成：%1$s</string>
+    <string name="agent_platform_integration_installed_shell_changed">集成已安装，但前台 shell 在激活前已更改。</string>
+    <string name="agent_platform_integration_installed_not_enabled">集成已安装，但无法在此处启用：%1$s</string>
+    <string name="agent_platform_integration_provider_settings_changing">安装期间提供方设置发生了变化。请在设置不再变动时重试。</string>
+    <string name="agent_platform_integration_shell_unverified">无法验证当前 shell。</string>
+    <string name="agent_platform_integration_shell_changed">前台 shell 在激活前已更改。</string>
+    <string name="agent_platform_integration_install_not_verified">主机未确认智能体集成已安装。</string>
+    <string name="agent_platform_integration_install_not_current">智能体集成已写入，但主机仍报告其已过时。</string>
+    <string name="agent_platform_integration_newer_installed">此主机上有来自较新版本 Tessera 的较新 Agent Center 集成。请改为更新此应用。</string>
+    <string name="agent_platform_endpoint_agent_runtime_unavailable">智能体运行时不可用</string>
+    <string name="agent_platform_endpoint_terminal_uploads_unavailable">此终端无法上传文件</string>
+    <string name="agent_platform_endpoint_uploads_unavailable">无法上传文件</string>
+    <string name="agent_platform_endpoint_process_occupancy_unavailable">此终端无法获取进程占用情况</string>
+    <string name="agent_platform_endpoint_process_root_unavailable">根进程不可用</string>
+    <string name="agent_platform_endpoint_mosh_process_root_unavailable">mosh 根进程不可用</string>
+    <string name="agent_platform_endpoint_foreground_shell_proof_unavailable">无法证明前台 shell</string>
+    <string name="agent_platform_endpoint_fresh_terminal_evidence_unavailable">无法获取终端的最新状态</string>
+    <string name="agent_platform_endpoint_terminal_capture_unavailable">无法捕获终端画面</string>
+    <string name="agent_platform_endpoint_launch_directory_unproven">启动需要经过验证的 SSH+tmux 窗格目录</string>
+    <string name="agent_platform_endpoint_raw_transport_one_focus">未使用 tmux 时只有一个聚焦的终端</string>
+    <string name="agent_platform_endpoint_raw_prompt_capture_unavailable">未使用 tmux 时尚无法可靠地捕获提示符</string>
+    <string name="agent_platform_endpoint_raw_terminal_route_unavailable">终端直连路由不可用</string>
+    <string name="agent_platform_endpoint_route_proof_rejected">远程服务器未接受路由证明标记</string>
+    <string name="agent_platform_endpoint_spawn_requires_tmux">启动和分支需要 tmux</string>
+    <string name="agent_platform_endpoint_tmux_control_unavailable">tmux 控制不可用</string>
+    <string name="agent_platform_endpoint_tmux_control_route_unavailable">tmux 控制路由不可用</string>
+    <string name="agent_platform_endpoint_remote_data_unavailable">远程数据不可用</string>
+    <string name="agent_platform_endpoint_session_closed">会话已关闭</string>
+</resources>
